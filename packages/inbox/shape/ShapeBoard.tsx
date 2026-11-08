@@ -51,6 +51,7 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       renderThread={renderThread}
       readFirst
       darkContrast
+      stackBadges
       boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}

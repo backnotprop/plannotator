@@ -352,7 +352,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
 export const actionLabel = (action: ComposeAction): string =>
   action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
 
-// ── Launch: start a new session from To (behind `inboxLaunch.enabled`; docs/agent-guides/inbox-launch.md) ──
+// ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
 /** A project the folder menu lists (`InboxComposeLaunch.projects`). */
 export type LaunchProject = InboxComposeLaunch['projects'][number];
@@ -548,8 +548,11 @@ export function launchGroups(input: {
   const linked = input.machines.filter((m) => !m.self && m.state !== 'revoked');
   const theirs = linked.map((m, i) => {
     const asleep = m.state === 'offline';
-    const words = m.launch === false ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
     const read = reads.get(m.id);
+    // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
+    // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
+    const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
+    const words = off ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
     return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
   });
   const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {

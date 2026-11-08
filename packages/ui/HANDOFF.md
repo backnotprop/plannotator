@@ -104,6 +104,7 @@ Pass any subset of these to `configurePlannotatorUI({ ... })`. Anything omitted 
 | `componentTooltips` | `boolean` | Draw ui's own hover text through `components/HostTitle` as ui's `Tooltip` instead of a native `title` (ui 0.53.0) | false: native titles |
 | `digitHexIssueRefs` | `boolean` | Render a digit-only 6/8-digit `#123456` / `#12345678` (word boundary, no leading zero) as an issue ref instead of a hex swatch, only where `InlineMarkdown` can build a ref link (`githubRepo` on a known forge). Also `setDigitHexIssueRefs` / `resetDigitHexIssueRefs` / `getDigitHexIssueRefs` on `components/InlineMarkdown` for tests (#1932) | false: swatches, exactly as before |
 | `richCopy` | `boolean` | The selection toolbar's Copy button (`Viewer`, `HtmlViewer`) copies rich text: one clipboard item, `text/html` plus `text/plain` (#1972). Also `setRichCopyEnabled` / `resetRichCopyEnabled` / `getRichCopyEnabled` on `utils/richCopyPolicy` for tests | false: Copy copies plain text, the toolbar exactly as before |
+| `touchSelectionToolbar` | `boolean` | Where the main pointer is a finger (`(pointer: coarse)`), `AnnotationToolbar` goes 30px below the whole selection (iOS Safari draws its own edit menu above it), stays inside the visible screen with an 8px margin plus the safe-area insets (above the selection only when there is no room below), hides while its selection is scrolled away, and its buttons are 44px targets. Hosts pass the whole selection's rect as `touchAnchorRect`. Also `setTouchSelectionToolbar` / `resetTouchSelectionToolbar` / `getTouchSelectionToolbar` and the pure `placeTouchToolbar` on `utils/touchToolbarPlacement` | false: the toolbar placed and sized exactly as before, on every screen |
 
 ### Interface details worth knowing
 
@@ -2752,6 +2753,18 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
 
+## Reopening a comment draft (unreleased; additive)
+
+Optional seams, so a host can put an unsaved comment back in its composer (the Inbox keeps a comment being written when its file closes, and opens it again when the file does). A host that uses none of them sees no change.
+
+- `ViewerHandle.reopenComment?(annotation, onMissing?) => boolean`: the markdown `Viewer` re-marks the comment's words (or a diagram part, through `diagram/reopen.ts` and `useDiagramComments`' `openAt`, `DiagramComposer`'s `initialText`) and opens its composer with the words. `HtmlViewer` posts the new bridge message `plannotator-bridge-restore-draft { id, anchor?, text }`; the bridge pins the anchor again and its selection carries `restoreId`, or it answers `plannotator-bridge-restore-draft-missing { id }` and `onMissing` runs. Additive to the protocol: an older bridge asset ignores it, so `BRIDGE_PROTOCOL_VERSION` is unchanged.
+- `CodeFileView` (in `CodeFilePopout.tsx`) `reopenComment?: { lineStart, lineEnd, text }` (a comment on lines, opened with its words) and `reopenEdit?: { id, text }` (a saved comment's edit box, with changed words).
+- `AnnotationPanel`'s `reopenEdit?: { id, text }`: a saved comment's edit box, opened with changed words.
+- `ViewerHandle.peekComment?() => Annotation | null`: the comment being written in the viewer's own composer (markdown: a text selection's; `HtmlViewer`: a pin's or a selection's), as the annotation its submit would add, with empty words. It only reads: nothing is added, closed or focused, so a host can call it while the viewer is being taken away (the Inbox reads it in its pane's unmount cleanup).
+- `CodeFileView` `onComposerLines?: (lines: { lineStart, lineEnd, originalCode } | null) => void`: told the lines of the line comment being written as its composer opens, null as it closes.
+- `peekComment` on the markdown `Viewer` also covers its global comment, a code block's comment and a diagram part's (with `diagramAnchor`), read through the new `DiagramViewer` `onComposerAnchor?(anchor | null)` and `DiagramBlock` / `MermaidBlock` / `GraphvizBlock` `onComposerAnchor?(blockId, 'inline' | 'popout', anchor | null)` (read only; absent: nothing changes).
+- `HtmlViewer`: a `restore-draft` that gets no answer within 3 s (a cached older bridge asset ignores the message) runs the host's `onMissing` (not after the viewer unmounts: its waits are cleared then), and a late answer (a selection carrying that `restoreId`) is let go with `cancel-selection`. A selection with no `restoreId` opens as it always has.
+
 ## Shape and links: a slot for a file's action (unreleased; additive)
 
 Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
@@ -2784,6 +2797,17 @@ A new view and two optional `ShapeSurface` props. A host that passes neither pro
 - `shape.css`: the call paths beside the changes are sticky only while they fit in the view (`.shp-chg-flows.fits`, set by `ShapeChanged`).
 - `shape.css` gains the `.shp-chg*` classes only.
 
+## Shape: stack badges (unreleased; needs the core with `ShapeBoard.stack`; additive)
+
+One opt-in `ShapeSurface` prop, one optional field on `ShapeReviewAt` and one optional method on `ShapeSurfaceReview`. A host that passes none of them sees no change, whatever a board holds.
+
+- Core: `ShapeBoard.stack?: ShapeStack` (`{ pulls: ShapeStackPull[]; changes: ShapeStackChange[] }`; a pull is `{ n, title, url?, step? }`, a change `{ part, pr, said, files: { path, additions?, deletions?, lines? }[] }`), checked by `checkShapeBoard` (a part must be a `data-mark` on the Picture or How it works, a PR must be in `pulls`, one change per PR and part). `shapeStackBadges(stack)` (part → PRs in landing order; empty for fewer than two PRs) and `shapeStackHue(stack, n)` (an OKLCH hue fixed by the PR's place in the stack, so a stack that grows never recolours earlier PRs: teal, amber, rose, then one fixed sequence; `shapeStackHues(count)` gives the first `count`). `SHAPE_LIMITS` gains `stackPulls`, `stackChanges`, `stackFiles`.
+- `ShapeSurfaceProps.stackBadges?: boolean` (default off): on a board with two or more PRs, the row of PRs under the claim, a tag per PR on each part it changed, and the tag's card and file popup (`components/shape/ShapeStack.tsx`, `stackBadges.ts`, `stackModel.ts`). Off: no row, no tags, no extra `onBoard` on the Picture.
+- `ShapeReviewAt.narrow?: ShapeReviewNarrow` (`{ part, pr, title?, url?, hue?, files }`): what the card's "Read it in the review" sends with the PR's `step` (or its first file). A host that ignores it lands on the step as before.
+- `ShapeSurfaceReview.patch?(): Promise<string | null>`: the review's whole patch, for a file's lines in the code popup. Absent: the file opens whole through `host.readFile`.
+- `followPainter`: an example's dimming skips any child of the drawing marked `data-shp-overlay` (the badge layer). `scaleOf` is exported.
+- `shape.css` gains the `.shp-stk-*` classes only; a chip or tag takes its colour from `--shp-h` on itself (one lightness and chroma for every hue, so every PR holds the same contrast).
+
 ## Shape: What to know (ui 0.62.0; not additive)
 
 Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.
@@ -2812,6 +2836,10 @@ Plannotator's board reads first now, and What to know replaces Requirements. A h
 **Fixes that reach every host:**
 - `<image href="files/…">` in a drawing now loads through `resolveSrc`. Before, the bare name stayed and the picture was broken.
 - Clicking a part inside an SVG now opens the comment box. Before, it threw and opened nothing.
+
+## Shape: a board's colours hold contrast in every palette (no seam; colours change only where they fell short)
+
+`ShapeDrawn` reads the board's colours as the page resolved them (`readThemeTokenValues` on the `.board`) and runs `shapeContrastFixes` (`components/shape/shapeContrast.ts`, pure): the zone colours `--blue` `--green` `--amber` `--plum` reach 4.5:1 on the paper, the surface and their own `-soft` fill, and `--mark`, `--alert`, `--grey`, `--ink2` on every one of those (the accent on its `--mark-soft` chip too); the ink reaches 4.5:1 on every `-soft` fill; on a dark board a logo's own colour reaches 3:1. A colour that falls short is set inline on the `.board`, made darker (light board) or lighter (dark board) with its hue kept; a `-soft` fill moves away from the ink. Nothing is asked to beat the palette's own ink. A colour that holds is left to `SHAPE_FRAME_CSS`, so a palette that passes draws as before; logos on a light board keep their colours. It runs again when a theme switch (`<html>`'s `class`, `style` or `data-theme`, or the system's dark mode) changes one of the page tokens the frame's colours come from (`--shp-paper`, `--background`, `--foreground`, `--card`, `--border`, `--muted-foreground`, `--primary`, `--destructive`), in the same pass as `darkContrast` (below). A host whose tokens cannot be read gets nothing changed. Guard: `shapeContrast.test.ts`, every file in `themes/`, light and dark.
 
 ## Shape: the board header (ui 0.62.0; not additive)
 
@@ -2858,7 +2886,13 @@ How it runs:
 - Each value starts from the colour the board resolves now and moves in OKLab, only as far as it must. A colour that already holds stays as it is.
 - The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
 - It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
-- With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.
+- With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions. `ShapeDrawn` runs both in one effect, #2721's first, undoes them the other way round, and runs both again together, so neither one's undo can drop or bring back the other's value (`--grey` is set by both).
+
+## Selection toolbar on a touch screen: `touchSelectionToolbar` (unreleased; additive, opt-in, no core change)
+
+- **`configurePlannotatorUI({ touchSelectionToolbar: true })`** (default false; `utils/touchToolbarPlacement`): where the main pointer is a finger (`(pointer: coarse)`, phones and tablets), `AnnotationToolbar` (Viewer, HtmlViewer, the plan diff view) is placed by the pure `placeTouchToolbar` from its measured size. A text selection's toolbar goes centered 30px below the whole selection (clear of the end selection handle and its touch area), because iOS Safari puts its Copy / Look Up menu above a selection and a page cannot turn that menu off. When the selection starts within 60px of the top of the visible screen, iOS has no room above and draws its menu below instead; the toolbar then leaves 52px more, so it sits under iOS's menu and both stay visible. The toolbar stays inside the visible viewport (the visual viewport, as `useViewportEnvironment` reads it) with 8px plus the safe-area insets on each side, flips above only when there is no room below (then 52px higher, over the band where iOS draws its menu, when there is room; else right above the selection), rests at the bottom edge for a selection taller than the screen, and is hidden (`visibility: hidden`) while its selection is scrolled out of sight. A hovered block's toolbar (`top-right`) keeps its place over the block, kept on screen. `closeOnScrollOut` reads the whole selection on this path, and the toolbar's keys are inert while it is hidden. Safe-area insets are read through a probe once per orientation. The toolbar then carries `data-pn-annotation-toolbar-touch` (`below`, `above`, `pinned` or `hidden`), an inline `max-width` (the visible width less margins and insets) and no centering transform; theme.css gives it `width: max-content`, 44px targets and 20px glyphs, and lets the row wrap only when the buttons cannot fit.
+- **`AnnotationToolbar` `touchAnchorRect?: () => ToolbarRect | null`** (new, optional): the whole selection's rect when `element` is only its start. Read only by the touch placement. **`ToolbarState.getAnchorRect`** (new, optional) carries it: the Viewer passes the union of the pending highlight's marks (`unionToolbarRect`), HtmlViewer the frame's rect plus the bridge's selection rect (kept current on `selection-rect`). The anchor element itself is unchanged, so `CommentPopover` and desktop placement are untouched.
+- With a mouse or trackpad nothing changes, and a host that does not opt in sees no change anywhere: no attribute, no inline style, no listener. Plannotator's plan review, annotate, code review and Inbox opt in.
 
 ## Shape: scenes the agent draws (unreleased; needs the core with `./shape-scene`; additive)
 
@@ -2869,3 +2903,17 @@ A board may carry `scenes`; a drawn view plays one where its HTML holds `<div da
 - `ShapeSurface` passes `version.scenes` and `sceneLook="technical"`: a board with scenes plays them in the technical look in every host that shows `ShapeSurface`; a board without scenes is untouched.
 - New export `@plannotator/ui/components/shape/scene/frame` (`setSceneFrame`, `sceneFrame`, `sceneFrameFromHash`): a module seam, null by default. Plannotator's standalone Shape page sets it from its address for `plannotator shape frame`. Another host never needs it.
 - `ShapeDiagram` does not pass `scenes`.
+
+## HtmlViewer: history and storage safe in the sandboxed frame (unreleased; behavior fix, no prop, no core change)
+
+A page that called `history.replaceState` / `pushState` or read `localStorage` / `sessionStorage` while it built itself stopped there and stayed blank in the viewer's frame. The frame runs scripts without `allow-same-origin`, an opaque origin, where these calls throw. `SANDBOX_SHIM_SCRIPT` (`components/html-viewer/sandboxShim.ts`) makes them safe:
+- A bare fragment or an empty URL applies to the page's own address.
+- Any other URL the frame refuses keeps the address, takes only its fragment, and keeps the state object.
+- A refused Storage becomes an in-memory one for that load. Nothing is kept anywhere.
+
+What a host sees:
+- **Not opt-in, and no new prop.** Every host's inline srcdoc gains a second inline `<script>`: the shim, ahead of the page's first script (at the start of `<head>`, or after the doctype when there is no `<head>`). This changes the "byte-for-byte unchanged" promise of the seam rules for the inline path's srcdoc only.
+- **On the `bridgeScriptUrl` path no inline script is added.** A host there may forbid inline scripts. `bridge-script.asset.js` now carries the shim and runs it, so it takes effect at the end of `<head>`. On that path a page's body scripts are covered, but a head script that uses history or storage still throws. The README's description of the URL path (one classic `<script src>`, nothing of it running on the inline path) is still correct.
+- **Never in live mode.** A proxied app runs on its own origin, and the bridge skips the shim there.
+- **The sandbox and CSP are unchanged.**
+- In a srcdoc frame, `pushState` now succeeds and adds entries to the host's session history, as a served page's frame already did.

@@ -670,6 +670,8 @@ export interface InboxPulls {
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  /** Whether this CLI says it's signed in to the host: nothing is asked of a host it isn't. */
+  signedInTo(cli: RefCli, host: string): Promise<boolean>;
   /**
    * Waits for the Others reads in flight, each within its own deadline (at once when none is), so a caller that
    * needs a key Others may hold (an Inbox just restarted) can list again after. Never throws.
@@ -1218,6 +1220,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     find(key) {
       return known.get(key) ?? null;
     },
+    signedInTo: async (cli, host) => (await signedIn(cli)).has(host),
     async othersSettled() {
       await Promise.all([...hosts.values()].map((state) => state.others.pending));
     },

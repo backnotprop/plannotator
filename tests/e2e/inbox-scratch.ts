@@ -24,7 +24,7 @@
  * a spec does not rely on that.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, readInboxEntry, refuseRealHome, stopProvenInboxes, waitGone } from '../helpers/inbox-process';
@@ -36,12 +36,34 @@ const roots = new Map<string, Map<string, InboxEntry>>();
 
 const keyOf = (e: InboxEntry) => `${e.pid}:${e.port}:${e.serverSession}`;
 
-/** A new folder under the OS temp dir, removed (with any Inbox it started) by `removeInboxScratch`. */
+/**
+ * A new folder under the OS temp dir, removed (with any Inbox it started) by `removeInboxScratch`. Its data dir
+ * (`<root>/data`, where nearly every spec points PLANNOTATOR_DATA_DIR) starts with launch off (`launchOff`).
+ */
 export function inboxScratch(prefix: string): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.set(root, new Map());
+  launchOff(join(root, 'data'));
   return root;
 }
+
+/**
+ * Starting agents from New message is on by default since 0.29, and with it on, opening New message (or the Board)
+ * looks `claude` up on the Inbox's PATH and runs `claude --version`: on the runner's PATH that is the stub
+ * (tests/e2e/agent-cli-stubs.ts), whose teardown fails the run, and the login shell is read too. So an e2e world
+ * starts with launch off (`inboxLaunch.enabled: false`, merged into config.json); a spec about launch turns it on
+ * in its own config, with its fakes on a PATH of its own. A spec that writes config.json whole keeps this key.
+ */
+export function launchOff(dataDir: string): void {
+  refuseRealDataDir(dataDir, 'tests/e2e/inbox-scratch.ts launchOff');
+  mkdirSync(dataDir, { recursive: true });
+  const file = join(dataDir, 'config.json');
+  const config = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
+}
+
+/** The config.json key every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. */
+export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false } } as const;
 
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch

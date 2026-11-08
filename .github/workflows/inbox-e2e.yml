@@ -28,6 +28,15 @@ name: Inbox window e2e
 # One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
 # store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
 # creep or a hung window fails the heavy tier before a merge.
+#
+# On a PR, a run whose own change is the same as an earlier run's (a merge of
+# main to pick up a fix or a quarantine after a red run, or a run cancelled
+# half way) leaves out the specs that passed there, at the same blob, and runs
+# the rest on as many shards as they need (the plan job,
+# scripts/ci-e2e-reuse.ts). A pass counts for a day from the run that really
+# ran the spec, and only with the same quarantine entries. The nightly and
+# manual runs, PRs from forks and a PR with the `ci:e2e-all` label (which, like
+# every PR run, also needs `ci:full`) always run every spec.
 
 on:
   # Manual runs on a branch, e.g. a stacked PR whose base is not main.
@@ -90,6 +99,7 @@ on:
       - 'scripts/inbox-sim.ts'
       - 'scripts/inbox-large-store.ts'
       - 'scripts/ci-e2e-shard.ts'
+      - 'scripts/ci-e2e-reuse.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
       - 'apps/vscode-extension/src/guides/webview-csp.ts'
@@ -105,11 +115,13 @@ on:
 permissions:
   contents: read
 
-# One run per PR: a newer push cancels the older run. Adding any other label
-# starts a run that skips every job; it gets a group of its own so it cannot
-# cancel the real one. Nightly and manual runs each get a group of their own.
+# One run per PR: a newer push cancels the older run. Adding `ci:e2e-all` to
+# a PR that has `ci:full` starts a full run in the PR's group (on a PR without
+# `ci:full` it does nothing, as every label does). Adding any other label starts a run
+# that skips every job; it gets a group of its own so it cannot cancel the
+# real one. Nightly and manual runs each get a group of their own.
 concurrency:
-  group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
+  group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && github.event.label.name != 'ci:e2e-all' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
@@ -117,7 +129,7 @@ jobs:
   # the binary from them (a few seconds) with the flags release.yml uses.
   build:
     name: Inbox window (build the apps)
-    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full' || github.event.label.name == 'ci:e2e-all'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -153,8 +165,60 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Which specs this run leaves out and how many shards run the rest
+  # (scripts/ci-e2e-reuse.ts). Full history without blobs, for the PR's merge
+  # base; actions: read, for the earlier runs' small reuse artifacts. Any
+  # failure here gives a full run, never a red one.
+  plan:
+    name: Inbox window (plan the shards)
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full' || github.event.label.name == 'ci:e2e-all'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      count: ${{ steps.plan.outputs.count }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Plan the shards (leave out specs that passed in an earlier run of the same change)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: bun run scripts/ci-e2e-reuse.ts plan
+
+      - name: Keep the plan for the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-plan
+          path: .local/e2e-plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
+      # The key and the specs this run left out, for the PR's next run.
+      - name: Keep the reuse key
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-reuse-${{ github.run_attempt }}
+          path: .local/e2e-plan/reuse.json
+          if-no-files-found: error
+          retention-days: 7
+
   # The specs, split into whole spec files by measured time
-  # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
+  # (scripts/ci-e2e-shard.ts), 16 shards for a full run and fewer when the
+  # plan leaves specs out. Each shard is its own runner with one worker,
   # as the single job was.
   #
   # Each shard runs in the official Playwright image of the pinned version
@@ -172,8 +236,8 @@ jobs:
   # /dev/shm is too small for Chromium, which then crashes at launch or runs
   # the shard out of memory (exit 137). Playwright's Docker docs ask for it.
   inbox-window-e2e:
-    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
-    needs: build
+    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/${{ needs.plan.outputs.count }})
+    needs: [build, plan]
     # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
     # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
     # it moves them without a PR, and deleting it moves them back.
@@ -185,7 +249,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -244,9 +308,16 @@ jobs:
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
 
+      - name: Get the shard plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-plan
+          path: .local/e2e-plan
+
       - name: Run the Inbox window proof (this shard's specs)
         env:
           SHARD: ${{ matrix.shard }}
+          E2E_PLAN: .local/e2e-plan/plan.json
         run: bun run scripts/ci-e2e-shard.ts "$SHARD"
 
       # The update notices need a release-numbered binary (a 0.0.0-dev one has
@@ -265,6 +336,23 @@ jobs:
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
           PLANNOTATOR_INBOX_TEST_BINARY="$PWD/.local/plannotator" bun test packages/server/inbox-devices.test.ts packages/server/inbox-lan.test.ts
 
+      # The spec files every test of which passed here (from the JSON report the
+      # shard step writes), with their blobs: the PR's next run of the same
+      # change leaves them out.
+      - name: Record the specs this shard passed
+        if: always()
+        continue-on-error: true
+        run: bun run scripts/ci-e2e-reuse.ts passed .local/e2e-report/report.json .local/e2e-passed/passed.json
+
+      - name: Keep the passed specs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-passed-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: .local/e2e-passed/passed.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -278,8 +366,8 @@ jobs:
   # passes only when every job above ran and succeeded.
   full-ci:
     name: Full CI (all green)
-    needs: [build, inbox-window-e2e]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
+    needs: [build, plan, inbox-window-e2e]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full' || github.event.label.name == 'ci:e2e-all') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

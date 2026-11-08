@@ -101,7 +101,7 @@ const BUG = [
 const BUG_SVG = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${BUG.map((d) => `<path d="${d}"/>`).join('')}</svg>`;
 
 /** The drawing's scale on screen (its canvas is scaled to fit, and may be mid-resize). */
-function scaleOf(board: HTMLElement) {
+export function scaleOf(board: HTMLElement) {
   const b = board.getBoundingClientRect();
   return { b, k: board.offsetWidth && b.width ? b.width / board.offsetWidth : 1 };
 }
@@ -192,7 +192,8 @@ export class FollowPainter {
     for (const el of this.touched) for (let e: Element | null = el; e && e !== board; e = e.parentElement) keep.add(e);
     const walk = (node: Element) => {
       for (const child of [...node.children]) {
-        if (child === this.layer || this.touched.includes(child) || child.classList.contains('shp-ex-lit')) continue;
+        // Another layer on the drawing (`data-shp-overlay`: the stack badges) dims its own pieces by their parts.
+        if (child === this.layer || child.hasAttribute('data-shp-overlay') || this.touched.includes(child) || child.classList.contains('shp-ex-lit')) continue;
         if (keep.has(child)) walk(child);
         else {
           child.setAttribute('data-ex-dim', '');

@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
@@ -58,7 +59,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -76,6 +77,7 @@ import type {
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
+  InboxNoteAutoAdd,
   InboxNotifyReach,
   InboxProjectRepo,
   InboxWindowPermission,
@@ -472,7 +474,7 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
-  /** Ask AI is on for this reader (PLANNOTATOR_INBOX_ASK_AI). Absent while it is off, for a tailnet guest, and from an older Inbox. */
+  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent for a tailnet guest and from an older Inbox. */
   ask_ai?: true;
   /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
   cswap?: boolean;
@@ -522,7 +524,7 @@ export interface SettingsModel {
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;
-  /** Settings → Agents' launch switch: present only while `inboxLaunch.enabled`. */
+  /** Settings → Agents' "Start agents from New message" switch (`enabled`) and, while on, its launch rows. Absent from an Inbox older than 0.29, which sent it only while on. */
   launch?: InboxLaunchSettings;
   /** The store's folder (Settings → Storage's line). Its sizes are their own read: `inboxApi.storage()`. Absent from an older Inbox. */
   store_dir?: string;
@@ -547,9 +549,12 @@ export interface InboxStorageModel {
   }[];
 }
 
-/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
+/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
 export interface InboxLaunchSettings {
+  /** "Start agents from New message": on unless config.json `inboxLaunch.enabled` is false (off by default on Windows). */
   enabled: boolean;
+  /** Windows: launch has no support there, so Settings → Agents shows no switch (config.json only). */
+  unsupported?: boolean;
   /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
   full_permissions: boolean;
   /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
@@ -571,6 +576,14 @@ export interface InboxLaunchSettings {
  */
 export function tailnetGuest(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined): boolean {
   return settings?.via === 'tailnet' && settings.guest !== false;
+}
+
+/**
+ * Whether this page offers Ask AI: in every Inbox, with no switch (approval "inbox-ask-ai-flow", addendum
+ * 2026-11-07), once the settings say whose page it is; never for a tailnet guest, and never in the tour.
+ */
+export function inboxAskOn(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined, tourOn: boolean): boolean {
+  return settings != null && !tailnetGuest(settings) && !tourOn;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -1099,7 +1112,7 @@ export interface ComposeSessionsModel {
   projects: InboxComposeProject[];
   /** Asked for with `?session=`: whether that session is still there (with the asker grace). */
   session?: { session: string; live: boolean };
-  /** Only while `inboxLaunch.enabled`: the agents To offers to start, and the folder menu's projects. */
+  /** Only while `inboxLaunch.enabled` (on unless false): the agents To offers to start, and the folder menu's projects. */
   launch?: InboxComposeLaunch;
 }
 
@@ -1138,7 +1151,7 @@ export interface StartThreadInput {
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
   /** New review on local changes: what it is of, so its row shows "Curating…" before a review arrives. */
-  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' };
+  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
 }
@@ -1277,6 +1290,8 @@ export const inboxApi = {
   settings: () => get<SettingsModel>(inboxUrl('/settings', 'store=0')),
   /** Settings → Storage's sizes, asked for only while that panel is shown (the server walks every file for them). Given up after STORAGE_READ_MS. */
   storage: () => getWithin<InboxStorageModel>(inboxUrl('/settings/storage'), STORAGE_READ_MS),
+  /** Settings -> Decision data's numbers, asked for only while that section is shown. Leaving aborts it, and the server stops counting. */
+  decisionData: (days: number, signal: AbortSignal) => get<DecisionDataSummary>(inboxUrl('/decision-data', new URLSearchParams({ days: String(days), tz: String(-new Date().getTimezoneOffset()) }).toString()), signal),
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */
@@ -1579,7 +1594,7 @@ export const inboxApi = {
   /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
   startThread: (input: StartThreadInput, machine?: string | null) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
-  // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
+  // Launch (behind `inboxLaunch.enabled`, on unless false): the run line's buttons and Settings → Agents' switches.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
   launchDelete: (launchId: string, machine?: string | null) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`, undefined, machine), {}),
@@ -1590,6 +1605,8 @@ export const inboxApi = {
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
+  /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
+  launchEnabled: (enabled: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { enabled }),
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
@@ -1668,6 +1685,8 @@ export const inboxApi = {
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
+  /** New review's Pull request link: what the pasted link is. */
+  reviewLink: (ref: string, signal?: AbortSignal) => get<InboxReviewLinkAnswer>(inboxUrl(`/reviews/link?ref=${encodeURIComponent(ref)}`), signal),
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
@@ -1825,7 +1844,9 @@ export const inboxApi = {
   /** The note dialog's answer: `add` the ticked agents; `asked` the agents it showed (each asked once); `seen` its band showed the last run's news. */
   answerNotes: (add: InboxNoteAgentId[], asked: InboxNoteAgentId[], seen: boolean) =>
     post<InboxAgentsModel & { results: InboxNoteResult[] }>(inboxUrl('/agents/notes'), { add, asked, seen }),
-  agentsSeen: () => post<InboxAgentsModel>(inboxUrl('/agents/seen'), {}),
+  /** The connect line showed: the report it said (`at`, null for none) and the notes written by themselves it listed; only those are marked said. */
+  agentsSeen: (reportAt: string | null, notes: readonly InboxNoteAutoAdd[]) =>
+    post<InboxAgentsModel>(inboxUrl('/agents/seen'), { report_at: reportAt, notes: notes.map(({ agent, path }) => ({ agent, path })) }),
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
@@ -1991,7 +2012,7 @@ export interface InboxEventHandlers {
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
    */
   onDrafts?: (threadId: string | null) => void;
-  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
+  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;

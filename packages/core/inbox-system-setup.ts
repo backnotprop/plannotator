@@ -66,6 +66,8 @@ export interface SystemSetupProject {
   root: string;
   /** The project's own repo, `host/owner/name`, from its folder's `origin`. */
   repo: string;
+  /** The folder the drawing is written in, `<data dir>/system/<key>/drawing`: Plannotator's folder, never the repo. */
+  drawing: string;
   /** What was chosen before for this project; null when it was never set up. */
   setup: SystemSetup | null;
 }

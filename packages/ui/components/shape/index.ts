@@ -17,6 +17,7 @@ export type {
   ShapeLoaded,
   ShapePanelTab,
   ShapeReviewAt,
+  ShapeReviewNarrow,
   ShapeSessionStatus,
   ShapeSurfaceProps,
   ShapeSurfaceReview,

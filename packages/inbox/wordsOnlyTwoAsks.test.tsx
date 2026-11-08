@@ -296,16 +296,16 @@ test.skipIf(!hasDom)('one session asked twice, the first message folded: the Sen
   await expectWordsOnly(world.waiting, second, 'Later.');
 });
 
-test.skipIf(!hasDom)('one session asked twice: the box cancelled and opened again keeps the default, and the Send is words-only', async () => {
+test.skipIf(!hasDom)('one session asked twice: the box closed and opened again keeps the default, and the Send is words-only', async () => {
   const second = await askAgain(world);
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 2, 'both questions');
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'A first try.');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await settle();
-  // Cancel keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
+  // Closing the box keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
   act(() => button(el, 'Edit draft').click());
   await settle();
   expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('A first try.');

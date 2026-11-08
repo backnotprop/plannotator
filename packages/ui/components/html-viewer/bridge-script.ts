@@ -6,8 +6,10 @@
  * "plannotator-bridge-*" message protocol.
  *
  * This is a string constant — it gets prepended to the iframe's srcdoc.
- * No external dependencies.
+ * Its one import, ./sandboxShim, is a dependency-free string constant as well;
+ * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -291,6 +293,12 @@ export const BRIDGE_SCRIPT = `(function() {
   // may run.
   var LIVE = window.__plannotatorLiveConfig || null;
   if (LIVE && (window === window.parent || window.parent !== window.top)) return;
+  // The sandboxed frame's history and storage, made safe for a page that uses
+  // them as it builds itself (sandboxShim.ts). A no-op when the inline path
+  // already ran it first in <head>.
+  if (!LIVE) {
+${SANDBOX_SHIM_SCRIPT}
+  }
   // The server cannot know which origin form (localhost or 127.0.0.1) the
   // editor tab was opened on, so live outbound messages are posted once per
   // listed editor origin: the browser delivers only the post whose
@@ -473,6 +481,9 @@ export const BRIDGE_SCRIPT = `(function() {
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
   var pendingPinLabel = null; // semantic label captured for the primary target
   var pendingPinPoint = null; // normalized {x,y} click point inside the pinned element's rect
+  // A host's restore-draft in flight: stamped on the one selection it posts, so
+  // the parent opens its composer for that draft and no other selection.
+  var restoreDraftId = null;
   var pendingPinContext = null; // agent-facing element context for the primary target (see buildElementContext)
   var pendingPinViaPinpoint = false; // pinpoint drafts survive scroll-out (see postSelectionRect)
   // Multi-select is ARMED EXPLICITLY by the parent (arm-multi-select), and only
@@ -631,6 +642,7 @@ export const BRIDGE_SCRIPT = `(function() {
       // The quote above was cut to MAX_SELECTION_TEXT: a plain-text copy made
       // from it alone (no answer to rich-copy-request) says so.
       textCut: text.length < fullText.length ? true : undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -888,6 +900,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
     else if (type === PREFIX + 'flash-target') {
       flashMultiTarget(typeof e.data.key === 'string' ? e.data.key : '');
+    }
+
+    else if (type === PREFIX + 'restore-draft') {
+      restoreDraft(e.data);
     }
 
     else if (type === PREFIX + 'step-pin') {
@@ -4206,8 +4222,46 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: pendingPinKey || undefined,
       targetLabel: pendingPinLabel || undefined,
       context: pendingPinContext || undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // A host putting back a comment it kept when its file closed (HtmlViewer
+  // reopenComment): pin the element again by its anchor, else select the
+  // quoted words again (their first match), so the parent sees an ordinary
+  // selection carrying this id. Nothing found: restore-draft-missing.
+  function restoreDraft(data) {
+    var id = typeof data.id === 'string' && data.id.length > 0 && data.id.length <= 64 ? data.id : '';
+    if (!id) return;
+    var done = false;
+    restoreDraftId = id;
+    try {
+      var anchor = data.anchor && typeof data.anchor === 'object' ? data.anchor : null;
+      var el = anchor ? resolveAnchorElement(anchor) : null;
+      if (el) {
+        var point = anchor.point;
+        var clickPoint = null;
+        if (point && typeof point.x === 'number' && typeof point.y === 'number' && isFinite(point.x) && isFinite(point.y)) {
+          var box = el.getBoundingClientRect();
+          clickPoint = { x: box.left + point.x * box.width, y: box.top + point.y * box.height };
+        }
+        done = annotateElement(el, undefined, true, clickPoint) === true;
+      }
+      if (!done && typeof data.text === 'string' && data.text) {
+        var range = findTextRange(data.text, null);
+        if (range) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          done = handleSelection(undefined, null) === true;
+        }
+      }
+    } catch (ex) {
+      done = false;
+    }
+    restoreDraftId = null;
+    if (!done) postToParent({ type: PREFIX + 'restore-draft-missing', id: id });
   }
 
   // The pinned element in the frame's top part, a host's panel over the last

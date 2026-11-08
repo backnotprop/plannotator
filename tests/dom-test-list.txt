@@ -131,7 +131,7 @@ packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
-packages/inbox/attachmentSteppingSave.test.tsx
+packages/inbox/fileCloseKeepsDraft.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
@@ -140,6 +140,7 @@ packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/decisionAsk.test.tsx
+packages/inbox/decisionData.test.tsx
 packages/inbox/composeTrust.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
@@ -154,6 +155,7 @@ packages/inbox/listViewReveal.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
 packages/inbox/letterMarksRows.test.tsx
+packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
@@ -170,6 +172,7 @@ packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/actionChecklist.test.tsx
+packages/inbox/keyboardKeys.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/newMessagePicker.test.tsx
@@ -225,6 +228,7 @@ packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
+packages/inbox/connectLine.test.tsx
 packages/inbox/agentsSettings.test.tsx
 packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
@@ -468,6 +472,8 @@ packages/ui/utils/diffFonts.test.ts
 packages/ui/components/Settings.agentTool.test.tsx
 packages/ui/components/settings/QuickLabelsTab.test.tsx
 packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+packages/ui/components/AnnotationToolbar.touchPlacement.test.tsx
+packages/ui/components/touchAnchorWiring.test.tsx
 packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
 packages/ui/components/PermissionModeSetup.mobile.test.tsx
 packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx
@@ -577,11 +583,16 @@ packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
+packages/ui/components/shape/ShapeSurface.stack.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
+packages/ui/components/Viewer.reopenComment.test.tsx
+packages/ui/components/CodeFilePopout.reopen.test.tsx
+packages/ui/components/AnnotationPanel.reopenEdit.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.reopenComment.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx

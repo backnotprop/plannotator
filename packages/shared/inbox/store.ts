@@ -17,13 +17,18 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
@@ -92,6 +97,7 @@ import {
   type InboxThreadNaming,
   inboxThreadNameKey,
   isInboxNote,
+  inboxPersonAnsweredSince,
   isInboxActionReport,
   inboxActionInDraft,
   inboxAgentName,
@@ -140,6 +146,7 @@ import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotato
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./decision-data";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -427,6 +434,28 @@ export interface InboxDiskUsage {
   dir: string;
   bytes: number;
   projects: InboxProjectUsage[];
+}
+
+/**
+ * Whether a file's last line was torn by a crash, so the next append starts on a fresh line and can't be glued to it.
+ * For a file the store never reads into memory, so it has no `tornFiles` entry; the last byte says, without reading the rest.
+ */
+function endsMidLine(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const { size } = fstatSync(fd);
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** An annotation as stored: without the exporter's `exportLocation`, which only the window sets, on its export copies. */
@@ -2182,7 +2211,7 @@ export class InboxStore {
     const connectionOf = (session: string): InboxDeliveryConnection | null | undefined => {
       if (!presence) return undefined;
       const connection = presence.connection(session);
-      return connection ? { busy: connection.busy, send_now: connection.send_now } : null;
+      return connection ? { busy: connection.busy, send_now: connection.send_now, ...(connection.held ? { held: true } : {}) } : null;
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
@@ -3509,7 +3538,7 @@ export class InboxStore {
     const blobSizes = inboxBlobSizes(this.dir);
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
-    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes();
+    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
@@ -5658,6 +5687,15 @@ export class InboxStore {
     return out;
   }
 
+  /** Bytes Decision data's kept lines take on disk (Settings → Storage). */
+  private decisionLinesBytes(): number {
+    try {
+      return statSync(join(this.dir, DECISION_LINES_FILE)).size;
+    } catch {
+      return 0;
+    }
+  }
+
   /** Bytes the reply drafts take on disk (Settings → Storage). */
   private replyDraftsBytes(): number {
     let total = 0;
@@ -5679,6 +5717,7 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
+    this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.keepSeqFloor();
     for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE]) {
       const path = join(folder, name);
@@ -5709,9 +5748,51 @@ export class InboxStore {
     const project = this.projectsById.get(projectId);
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
+    this.keepDecisionLines((question) => question.project_id === projectId);
     this.keepSeqFloor();
     rmSync(this.projectFolder(project), { recursive: true, force: true });
     this.reload(markups);
+  }
+
+  /**
+   * Settings -> Decision data keeps its numbers when a thread goes (the owner, round 2): one line per question, no
+   * words, written before the delete. A crash in between leaves a line beside a question still stored, which the count
+   * reads once. A line that cannot be written, or a record that cannot be read, costs a number, never the person's
+   * delete: Delete is the way out of a bad thread.
+   */
+  private keepDecisionLines(which: (question: InboxQuestionRecord) => boolean): void {
+    try {
+      const questions = [...this.questions.values()].filter(which);
+      const lines = decisionLinesOf(
+        questions,
+        this.messages,
+        (id) => this.decisionProjectLabel(id),
+        (message) => this.closedByArchive(message),
+      );
+      if (!lines) return;
+      const file = join(this.dir, DECISION_LINES_FILE);
+      appendFileSync(file, `${endsMidLine(file) ? "\n" : ""}${lines}`, { mode: 0o600 });
+    } catch {
+      // See above.
+    }
+  }
+
+  private decisionProjectLabel(id: string): string | null {
+    const project = this.projectsById.get(id);
+    return project ? this.labeled(project).name : null;
+  }
+
+  /** What Decision data counts, from memory: the store's records, not a copy of them. */
+  decisionDataInput(): DecisionDataInput {
+    return {
+      headOf: (id) => (this.projectsById.has(id) ? this.canonicalProjectId(id) : id),
+      labelOf: (id) => this.decisionProjectLabel(id),
+      messages: [...this.messages.values()],
+      byId: this.messages,
+      closedByArchive: (message) => this.closedByArchive(message),
+      reaskListedIds: (threadId) => this.reaskListedIds(threadId),
+      questions: [...this.questions.values()],
+    };
   }
 
   /** The marked-up images the annotations matching `which` name. */
@@ -6686,6 +6767,16 @@ export class InboxStore {
       if (record && record.steps.length > 0) out.push(record);
     }
     return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * The person answered in the thread at or after `since` (a list's last write): a message of theirs, or a 👍 Looks
+   * good still standing on an agent's message (`inboxPersonAnsweredSince`). Read over the stored messages, so a 👍
+   * counts though its note is never listed in the thread. The checklist's waiting rule (the row's `steps_waiting`).
+   */
+  personAnsweredSince(threadId: string, since: string): boolean {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    return inboxPersonAnsweredSince(this.threadMessages(root), since);
   }
 
   /** Every list that holds steps, in threads that still exist (Tidy reads them). */
