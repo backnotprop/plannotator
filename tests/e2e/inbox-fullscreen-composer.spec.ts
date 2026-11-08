@@ -479,6 +479,10 @@ async function pillLayout(page: Page) {
     const chips = q.parentElement!.getBoundingClientRect();
     const link = root.querySelector('[data-fcomp-open-thread]')!.getBoundingClientRect();
     const mic = root.querySelector('[data-voice-mic]')?.getBoundingClientRect() ?? null;
+    // Round 3 (#2846): the mic comes before what rides the Send, Open in thread after it. A neighbour on another row
+    // (the chips stacked above, footFit.ts `stack`) is not in the pill's way.
+    const sameRow = (r: DOMRect) => r.top < box.bottom - 1 && r.bottom > box.top + 1;
+    const overlaps = (r: DOMRect) => sameRow(r) && r.left < box.right - 1 && r.right > box.left + 1;
     return {
       text: q.textContent!.trim(),
       form: q.getAttribute('data-label-form'),
@@ -488,7 +492,8 @@ async function pillLayout(page: Page) {
       right: box.right,
       chipsLeft: chips.left,
       chipsRight: chips.right,
-      next: Math.min(link.left, mic?.left ?? Infinity),
+      next: link.width > 0 && sameRow(link) ? link.left : Infinity,
+      overMic: !!mic && overlaps(mic),
       mic: !!mic,
     };
   });
@@ -549,13 +554,14 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
           await expect
             .poll(async () => {
               const now = await pillLayout(page);
-              return now.lines === 1 && now.right <= now.chipsRight + 1 && now.right <= now.next + 1;
+              return now.lines === 1 && now.right <= now.chipsRight + 1 && now.right <= now.next + 1 && !now.overMic;
             }, { message: where })
             .toBe(true);
           const got = await pillLayout(page);
           expect(got.height, where).toBeLessThanOrEqual(24);
           expect(got.right, `${where}: past the row's end (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.chipsRight + 1);
           expect(got.right, `${where}: over the next button (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.next + 1);
+          expect(got.overMic, `${where}: over the mic (${JSON.stringify(got)})`).toBe(false);
           // Short words only when the long ones do not fit: with the room (no mic, 430) the whole words show.
           if (!withMic && width === 430 && c.name === 'one question') expect(got.text, where).toBe(c.full);
           if (got.form && got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
