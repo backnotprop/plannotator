@@ -522,6 +522,12 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
+   * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
+   * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
+   */
+  inboxFloatDrafts?: boolean;
+  /**
    * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
    * every surface (packages/shared/star-ask.ts reads and writes it, nothing
    * else does). `shownAt`: a surface showed it, so none shows it again.

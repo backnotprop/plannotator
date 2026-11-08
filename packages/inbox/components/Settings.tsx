@@ -92,6 +92,8 @@ export interface SettingsPageProps {
   onToggleSteps?: (next: boolean) => void;
   /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
   onToggleBro?: (next: boolean) => void;
+  /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
+  onToggleFloatDrafts?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -524,6 +526,8 @@ function CapabilitiesSection({
   systemProjects,
   bro,
   onToggleBro,
+  floatDrafts,
+  onToggleFloatDrafts,
   experimental,
   onToggleExperimental,
   experimentalHeading,
@@ -546,6 +550,9 @@ function CapabilitiesSection({
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
   onToggleBro?: (next: boolean) => void;
+  /** Floating reply drafts (approval "inbox-reply-floaters", off by default), null on an Inbox without the switch. */
+  floatDrafts: { on: boolean } | null;
+  onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
@@ -562,6 +569,8 @@ function CapabilitiesSection({
   const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
   // Bro mode sits in the Experimental group (the owner, 2026-11-08), so the group shows for it alone too.
   const broRow = bro && onToggleBro;
+  // Floating reply drafts (the owner, 2026-11-08): off by default, so its switch sits with the features still being tried.
+  const floatRow = floatDrafts && onToggleFloatDrafts;
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
@@ -663,7 +672,7 @@ function CapabilitiesSection({
           </div>
         </section>
       )}
-      {(decisionRow || broRow) && (
+      {(decisionRow || broRow || floatRow) && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
             Experimental
@@ -704,6 +713,19 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
+                </span>
+              </div>
+            )}
+            {floatRow && (
+              <div className="ib-prow" data-settings-float-drafts="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-float-drafts-label">
+                    Float reply drafts
+                  </span>
+                  <span className="ib-desc">Keep an unsent reply in a small window in the corner when you leave its thread.</span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={floatDrafts.on} labelledBy="ib-float-drafts-label" onClick={() => onToggleFloatDrafts(!floatDrafts.on)} />
                 </span>
               </div>
             )}
@@ -998,7 +1020,9 @@ export function SettingsPage(props: SettingsPageProps) {
   if (props.landOnExperimental && !landAsked.current) landing.current = true;
   landAsked.current = props.landOnExperimental === true;
   if (section !== 'capabilities') landing.current = false;
-  const experimentalShown = section === 'capabilities' && ((!!settings?.experimental && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro));
+  const experimentalShown =
+    section === 'capabilities' &&
+    ((!!settings?.experimental && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro) || (!!settings?.float_drafts && !!props.onToggleFloatDrafts));
   useEffect(() => {
     if (!landing.current || !experimentalShown || !experimentalHeading.current) return;
     landing.current = false;
@@ -1015,13 +1039,14 @@ export function SettingsPage(props: SettingsPageProps) {
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
+  const floatDrafts = settings?.float_drafts && props.onToggleFloatDrafts ? settings.float_drafts : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1223,6 +1248,8 @@ export function SettingsPage(props: SettingsPageProps) {
               systemProjects={props.systemProjects}
               bro={bro}
               onToggleBro={props.onToggleBro}
+              floatDrafts={floatDrafts}
+              onToggleFloatDrafts={props.onToggleFloatDrafts}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
