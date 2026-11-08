@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
 import type {
@@ -487,14 +488,8 @@ export interface AllFilesCodeViewProps {
   onAddEditorCommentForFile?: (filePath: string, comment: EditSelectionComment) => void;
 }
 
-/** Where a host's context note sits: its file, side and lines (it draws under `lineEnd`). */
-export interface ContextNoteAnchor {
-  id: string;
-  filePath: string;
-  side: 'old' | 'new';
-  lineStart: number;
-  lineEnd: number;
-}
+/** Where a host's context note sits: its file, side and lines (it draws under `lineEnd`); in its own module. */
+export type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 
 /** A file's context notes as line annotations of their own kind (never `CodeAnnotation`s: no comment chrome, no count). */
 export function projectFileContextNotes(

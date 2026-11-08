@@ -12,7 +12,7 @@
  */
 import { createContext, Fragment, useCallback, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
-import type { ContextNoteAnchor } from '@plannotator/review-editor/components/AllFilesCodeView';
+import type { ContextNoteAnchor } from '@plannotator/review-editor/utils/contextNoteAnchor';
 import { noteTime, staleWords, writerWord, type ContextNote } from './model';
 
 /** What a host does for a note's actions. Absent: that action is not offered. */
