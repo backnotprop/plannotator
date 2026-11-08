@@ -472,6 +472,11 @@ export function MessageBody({
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
     revealed?: string | null;
+    /**
+     * The toolbar offers Delete (approval "inbox-toolbar-delete"). False on a linked machine whose Inbox is too old
+     * to take one: its store refuses the DELETION. Absent: Delete is offered.
+     */
+    deletions?: boolean;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -976,7 +981,7 @@ export function MessageBody({
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
-        textDeletions={comments !== undefined}
+        textDeletions={comments !== undefined && comments.deletions !== false}
         suggestComment={comments?.suggest}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
@@ -6510,6 +6515,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpen: openListAt,
                           openId: commentsList?.at ?? null,
                           revealed: revealedComment,
+                          // Another machine's message (its saves go there): Delete only when its Inbox takes one (an older store refuses it).
+                          deletions: (machineOf(message.id) === null && machineOf(thread.thread_id) === null) || machine?.message_deletions === true,
                         }
                       : undefined
                   }

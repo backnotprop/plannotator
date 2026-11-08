@@ -210,6 +210,11 @@ export interface MachineView {
    * null for this machine, whose own launch block says). Absent from an older Inbox.
    */
   launch?: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words: only then is Delete offered on its messages (an older
+   * Inbox refuses the DELETION). Absent from an older Inbox serving the window; false for a linked one too old.
+   */
+  message_deletions?: boolean;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */

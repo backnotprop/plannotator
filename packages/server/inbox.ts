@@ -1348,6 +1348,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (remote launch): a linked machine may start agents here (1: launch is on; the door takes its Stop, Try again, Trust folder and Delete).
     // 0 while launch is off there: an Inbox new enough says so, an older one has no field ("update Plannotator there").
     launch_from_machines: launch.enabled() ? 1 : 0,
+    // Additive: the store takes a Delete on an agent message's words. A linked machine's window offers Delete on this
+    // Inbox's messages only when it says so; an older one refuses the DELETION (approval "inbox-toolbar-delete").
+    message_deletions: 1,
     // Additive: the page honours --pn-window-controls-width and -height on :root and names their line in
     // --pn-window-controls-center-y (inbox.css, for a desktop host).
     window_controls: 2,
