@@ -1232,11 +1232,19 @@ class ThreadStateModel {
     return this.unsent(t) ? "new" : "quiet";
   }
 
-  /** Bold: a section that waits on the person, except New held only by the person's own words. */
-  unread(t: ModelThread): boolean {
+  /** Waits on the person (what Mark all as read takes): a section that waits, except New held only by the person's own words. */
+  waits(t: ModelThread): boolean {
     const section = this.section(t);
     if (section === "new") return this.unseen(t) > 0 || this.counts(t).picked > 0;
-    return SHWN.includes(section);
+    return SHW.includes(section);
+  }
+
+  /**
+   * Bold: news the person has not seen. Stopped, Holding and Waiting while an agent message is unseen (the owner,
+   * 2026-11-08: a thread read stops being bold and keeps its group); New except when held only by the person's own words.
+   */
+  unread(t: ModelThread): boolean {
+    return this.waits(t) && (this.section(t) === "new" || this.unseen(t) > 0);
   }
 
   /**
@@ -1766,10 +1774,9 @@ function checkThreadState(world: StateWorld): void {
     // An archived thread never counts.
     if (inboxRowArchived(row)) expect(row.unread).toBe(false);
   }
-  // Counts. Both follow from the sections by construction (the
-  // sidebar counts the rows in Stopped, Holding and Waiting; `unread` is
-  // defined from the section), so they guard the counting code more than the
-  // rules.
+  // Counts. The sidebar's follows from the sections by construction (it
+  // counts the rows in Stopped, Holding and Waiting), so it guards the
+  // counting code more than the rules.
   const inSections = (sections: readonly InboxListSection[], ids: readonly InboxSectionId[]) =>
     sections.filter((s) => ids.includes(s.id)).reduce((n, s) => n + s.threads.length, 0);
   const waiting = rows.filter((r) => SHW.includes(r.section)).length;
@@ -1779,12 +1786,13 @@ function checkThreadState(world: StateWorld): void {
   for (const project of store.listProjects()) {
     expect(waitingCount(views.exclude, project.id)).toBe(rows.filter((r) => r.project.id === project.id && SHW.includes(r.section)).length);
   }
-  // Bold is every row in Stopped, Holding, Waiting and New, except one in New only for the person's own words.
-  const unread = rows.filter((r) => r.unread).length;
-  const draftOnly = rows.filter((r) => r.section === "new" && !r.unread).length;
-  for (const r of rows) if (r.section === "new" && !r.unread) expect(r.unseen === 0 && !r.answered_not_sent && inboxHasUnsent(r.unsent)).toBe(true);
-  expect(inSections(views.include, SHWN) - draftOnly).toBe(unread);
-  expect(inSections(views.exclude, SHWN) - draftOnly).toBe(unread);
+  // Bold is news not seen: a row in Stopped, Holding or Waiting with an unseen agent message, and every row in New
+  // except one there only for the person's own words. Never a row in Sent or Quiet.
+  for (const r of rows) {
+    if (SHW.includes(r.section)) expect(r.unread).toBe(r.unseen > 0);
+    if (r.section === "new" && !r.unread) expect(r.unseen === 0 && !r.answered_not_sent && inboxHasUnsent(r.unsent)).toBe(true);
+    if (!SHWN.includes(r.section)) expect(r.unread).toBe(false);
+  }
   // Replay determinism: the store read again from disk gives the same rows and threads.
   expect(windowView(InboxStore.open(world.dir))).toEqual(windowView(store));
 }
@@ -2115,10 +2123,10 @@ function batchStep(world: StateWorld, item: Exclude<BatchItem, { kind: "op" }>, 
     // The model decides which threads the batch takes, by its own rules.
     const threads = modelThreadsOf(world, done!.projectId).filter((t) => !world.model.archived(t));
     if (item.action === "read") {
-      // Every bold row: a row in New only for the person's own unsent words waits on nobody (approval "inbox-reply-drafts"),
+      // Every row that waits on the person: a row in New only for the person's own unsent words waits on nobody (approval "inbox-reply-drafts"),
       // and a thread whose Mark read still stands (unsent work keeps it in New) is not marked again. One that Mark
       // unread took the look back from gets the look back, named apart, so its Undo is Mark unread and not a Move back.
-      const waits = threads.filter((t) => world.model.unread(t) && !world.model.readHolds(t)).map((t) => t.id);
+      const waits = threads.filter((t) => world.model.waits(t) && !world.model.readHolds(t)).map((t) => t.id);
       expect(new Set(done!.read)).toEqual(new Set(waits));
       const looked = threads.filter((t) => world.model.readHolds(t) && world.model.unseen(t) > 0).map((t) => t.id);
       expect(new Set(done!.looked)).toEqual(new Set(looked));

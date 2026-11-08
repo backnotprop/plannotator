@@ -106,6 +106,7 @@ packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
 packages/inbox/projectList.test.tsx
 packages/inbox/rowBadges.test.tsx
+packages/inbox/readWaitingRow.test.tsx
 packages/inbox/rowAgents.test.tsx
 packages/inbox/rowTip.test.tsx
 packages/inbox/softQuietRows.test.tsx
