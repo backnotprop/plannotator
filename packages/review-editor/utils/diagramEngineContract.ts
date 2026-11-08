@@ -40,7 +40,7 @@ export interface DiagramEngineUrls {
 /**
  * The page's modules the engine uses instead of bundling its own copies.
  * `ui:` keys are paths under packages/ui without the extension. Each is
- * React itself or stateful (the theme context, the config store, the
+ * React itself or stateful (the theme context, the comment draft scope, the config store, the
  * identity and math slots); a second copy would split that state. These are
  * exactly the stateful modules the diagram components import directly; what
  * those import in turn (the store's settings, storage, the theme registry)
@@ -56,6 +56,7 @@ export const DIAGRAM_ENGINE_SHARED_MODULES = [
   'ui:config/index',
   'ui:utils/identity',
   'ui:utils/math',
+  'ui:utils/commentDraftScope',
 ] as const;
 
 export type DiagramEngineSharedModule = (typeof DIAGRAM_ENGINE_SHARED_MODULES)[number];

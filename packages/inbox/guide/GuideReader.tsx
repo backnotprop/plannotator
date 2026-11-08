@@ -107,8 +107,11 @@ export const GuideDiff: FC<
     /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
     fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
     fileOpenIn?: (filePath: string) => ReactNode;
+    /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
+    contextNotes?: AllFilesCodeViewProps['contextNotes'];
+    renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -146,6 +149,7 @@ export const GuideDiff: FC<
       onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
       {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
+      {...(contextNotes && renderContextNote ? { contextNotes, renderContextNote } : {})}
     />
   );
 };
@@ -202,6 +206,8 @@ function Reader({
   signComments = false,
   hostDiffControls = false,
   collapseAll,
+  contextNotes,
+  renderContextNote,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
@@ -260,7 +266,7 @@ function Reader({
     }
     setFocusedFile(highlight.path);
     setSelectionFile(highlight.path);
-    setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
+    setPendingSelection({ start: highlight.start, end: highlight.end, side: highlight.side === 'old' ? 'deletions' : 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
@@ -394,9 +400,13 @@ function Reader({
       fileOpenIn?: (filePath: string) => ReactNode;
       flushFiles?: boolean;
       headerKeepsFolder?: boolean;
+      contextNotes?: AllFilesCodeViewProps['contextNotes'];
+      renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
     } => ({
       // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
+      // A host's context notes: only a file that has one gets the seam (the others draw exactly as before).
+      ...(contextNotes && renderContextNote && contextNotes.some((note) => note.filePath === file.path) ? { contextNotes, renderContextNote } : {}),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
@@ -418,7 +428,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
+    [bare, contextNotes, renderContextNote, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).

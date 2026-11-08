@@ -307,7 +307,7 @@ test('a tag in a file comment: the composer offers agents with "Goes to" and the
   const { page } = world;
   await fileCommentTaggingPi(page);
   await shot(page, '4-file-comment-desktop');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const reply = page.getByRole('textbox', { name: /^Reply to/ });
   await reply.fill('See my comment on the design.');

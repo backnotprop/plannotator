@@ -84,7 +84,8 @@ function writeGh(dir: string) {
     '  echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then cat "$dir/gh-pulls.json"; exit 0; fi',
-    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then printf "%040d\\n" "${4##*/}"; exit 0; fi',
+    // The PR read around its patch: head and description as one JSON line (`| tojson`); a plain `.head.sha`, raw.
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) printf \'{"sha":"%040d","body":null}\\n\' "${4##*/}";; *) printf "%040d\\n" "${4##*/}";; esac; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 507 ]; then cat "$dir/big.patch"; exit 0; fi',
     // #503: the forge won't serve it as one document, only file by file.
     'case "$4" in */pulls/503/files*) cat "$dir/files-503.json"; exit 0;; esac',

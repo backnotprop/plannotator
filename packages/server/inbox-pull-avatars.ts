@@ -3,9 +3,9 @@
  * always the author's picture). The window's CSP stays `img-src 'self' data: blob:`: it never loads a remote image
  * itself. The Inbox fetches the picture and serves it from its own origin.
  *
- * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list
- * (`allow`), never a URL or login the page names. A login the last list did not return is refused before anything
- * runs.
+ * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list, or for
+ * a reviewer or commenter the details of such a PR named (`allow`), never a URL or login the page names. A login none
+ * of those returned is refused before anything runs.
  * - https only; at most 3 redirects, each https. The URL's host must be public (as the favicons check it) unless it
  *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own), on
  *   the forge's own port (the avatar URL's when the forge returned one on its name, else 443).
@@ -70,6 +70,21 @@ export interface PullAvatars {
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
+/** The largest a face is drawn, at twice the pixels. */
+const PICTURE_PX = 96;
+
+/**
+ * GitHub's avatar URLs answer the whole upload unless they name a size, and an upload can run past the size cap (a real
+ * one was 527 KB), which left a face as its initial; GraphQL's `avatarUrl(size: 48)` is soft on a 2x screen. So
+ * github.com's picture host and an Enterprise server's `/avatars/` are always asked at `s=96`, whatever size the URL
+ * named; anything else is left as the forge gave it.
+ */
+function sizeForAFace(url: URL): void {
+  const github = url.hostname === "avatars.githubusercontent.com" || url.hostname.startsWith("avatars.") || url.pathname.startsWith("/avatars/");
+  if (!github) return;
+  url.searchParams.delete("size");
+  url.searchParams.set("s", String(PICTURE_PX));
+}
 
 const keyOf = (host: string, login: string) => `${host.toLowerCase()}\n${login.toLowerCase()}`;
 
@@ -202,6 +217,7 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       return { ok: false, miss: "not_https" };
     }
     if (!fetchable(url)) return { ok: false, miss: "not_https" };
+    sizeForAFace(url);
     // The forge's own origin: its name (the list's host, which carries no port) on the port of the avatar URL the forge
     // itself returned when that URL is on its name (a self-managed forge on :8443 serves its avatars there), else 443.
     const named = forgeOrigin(host);

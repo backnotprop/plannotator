@@ -188,6 +188,7 @@ packages/inbox/tailnetOwner.test.tsx
 packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx
+packages/inbox/footLine.test.tsx
 packages/inbox/replyDrafts.test.tsx
 packages/inbox/replyDraftFiles.test.tsx
 packages/inbox/skipNote.test.tsx
@@ -205,6 +206,7 @@ packages/inbox/archived.test.tsx
 packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
+packages/inbox/floaters/floaters.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
@@ -534,6 +536,7 @@ packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
 packages/inbox/listDeltaWindow.test.tsx
 packages/inbox/linkedMachines.test.tsx
+packages/inbox/machineUpdate.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
@@ -552,7 +555,9 @@ packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
+packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
+packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
@@ -564,6 +569,7 @@ packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
+packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/ui/components/shape/scene/ScenePlayer.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
@@ -579,6 +585,7 @@ packages/inbox/shape/ShapeBoard.test.tsx
 packages/inbox/shape/boardFocus.test.ts
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
+packages/ui/components/shape/followPainter.pan.test.ts
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
@@ -607,9 +614,16 @@ packages/ui/components/html-viewer/HtmlViewer.reopenComment.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/ui/components/CommentPopover.card.test.tsx
+packages/ui/components/Viewer.commentDrafts.test.tsx
+packages/inbox/fullViewCommentDot.test.tsx
+packages/ui/components/diagram/DiagramComposer.card.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
 packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx
 packages/inbox/activityChart.test.tsx
 packages/inbox/composeClone.test.tsx
 packages/inbox/projectPlus.test.tsx
+packages/ui/components/shape/litLine.test.ts
+packages/inbox/contextNotes/contextNotes.test.tsx
+packages/inbox/composeLaunchTip.test.tsx

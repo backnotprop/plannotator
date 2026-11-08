@@ -536,3 +536,22 @@ describe.if(hasDom)('a host\'s control beside a file (fileAction)', () => {
     expect(document.querySelector('[data-host-action]')).toBeNull();
   });
 });
+
+// A real agent's board sat in the middle of its view, with a band of nothing under the claim.
+describe.if(hasDom)("Plannotator's board sits under the claim; another host keeps it in the middle", () => {
+  const canvas = { ...PICTURE, width: 800, height: 400 };
+
+  test('with readFirst a fixed canvas sits at the top of its view', async () => {
+    await mount({ picture: canvas });
+    const drawn = document.querySelector('.shp-view .shp-drawn.canvas');
+    expect(drawn).not.toBeNull();
+    expect(drawn!.classList.contains('top')).toBe(true);
+  });
+
+  test('a host without readFirst keeps its canvas in the middle, as before', async () => {
+    await mount({ picture: canvas }, { readFirst: undefined });
+    const drawn = document.querySelector('.shp-view .shp-drawn.canvas');
+    expect(drawn).not.toBeNull();
+    expect(drawn!.classList.contains('top')).toBe(false);
+  });
+});

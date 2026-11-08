@@ -82,7 +82,8 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
   viewed: ReadonlySet<string>;
   commentCount: (path: string) => number;
   onSelect: (path: string) => void;
-  onToggleViewed: (path: string) => void;
+  /** Without it the rows have no Viewed circle (a review where nothing takes the ticks). */
+  onToggleViewed?: (path: string) => void;
   /** In place of the head's file count: the page's Changes | All files switch. */
   head?: ReactNode;
 }) {
@@ -104,7 +105,7 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
         <Tip content={file.path}>
           <button type="button" className="ib-prp-file" data-seen={seen ? '' : undefined} style={{ paddingLeft: pad(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}`} onClick={() => onSelect(file.path)} data-review-file={file.path}>
             {/* The review app's row: [viewed][letter] name [comments], its numbers at the row's end. */}
-            <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />
+            {onToggleViewed && <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />}
             <span className="review-change-letter"><ChangeTypeLetter status={file.status} oldPath={file.oldPath} /></span>
             <span className="ib-prp-fname" data-has-dir={dir ? '' : undefined}>
               {dir && <Cut text={dir} className="ib-prp-dir" />}

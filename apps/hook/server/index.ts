@@ -241,7 +241,7 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
@@ -414,7 +414,7 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
     process.exit(
       await runShapeCommand(args.slice(1), {
         dataDir: getPlannotatorDataDir(),
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        cwd: shapeCommandFolder(process.env),
         env: process.env,
       }),
     );

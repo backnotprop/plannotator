@@ -52,7 +52,8 @@ import {
 } from './api';
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
+import { MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
@@ -130,12 +131,13 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { claimRevealOnce, listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
-import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
+import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -204,6 +206,8 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { useReplyFloaters } from './floaters/useReplyFloaters';
+import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
@@ -213,8 +217,7 @@ import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
 import { useInboxShapes } from './shape/useInboxShapes';
-import { shapeReviewAtOf, writeShapeReviewAt } from './shape/review';
-import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
+import { shapeReviewAtOf, writeShapeReviewAt, type ReviewAt } from './shape/review';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
@@ -237,6 +240,11 @@ configurePlannotatorUI({
   digitHexIssueRefs: true,
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
+  // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css
+  // imports its sheet). Docked, it spans the pane the words are in and never covers the pane's reply bar or box.
+  commentCard: { pane: '.ib-fullview, [data-attachment-pane], section.ib-pane', foot: '.ib-pfoot, .ib-fcomp, [data-file-foot]' },
+  // A comment closed with words keeps them highlighted, with a "Draft" badge that opens it again.
+  visibleCommentDrafts: true,
   // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
@@ -396,9 +404,10 @@ interface Route {
   guide?: string | null;
   /**
    * Where that review opens (a Shape board's place in code, such as a drawn part's `data-code`): `&code=path:line`,
-   * `&step=N` or `&files`. Dropped from the address once the review is there.
+   * `&step=N` or `&files` (a context note's lines on the removed side add `&side=old`). Dropped from the address once
+   * the review is there.
    */
-  guideAt?: ShapeReviewAt | null;
+  guideAt?: ReviewAt | null;
   /**
    * The thread's Artifacts view (`#thread=…&artifacts`, approval "inbox-thread-artifacts"): the grid of every
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
@@ -1022,6 +1031,8 @@ function Inbox() {
   const [restartAgents, setRestartAgents] = useState<InboxRestartAgents>(NO_RESTART_AGENTS);
   /** The update control's dialogs and what they read (GET /api/inbox/update). */
   const [updateDialog, setUpdateDialog] = useState<null | 'update' | 'restart' | 'failed'>(null);
+  /** The update dialog for a linked machine (approval "inbox-machine-update"), and whether Snooze opened it. */
+  const [machineUpdateOpen, setMachineUpdateOpen] = useState<{ id: string; snooze: boolean } | null>(null);
   const [updateDetails, setUpdateDetails] = useState<UpdateDetails | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -2102,6 +2113,8 @@ function Inbox() {
             return;
           }
           readAfterRecord(event);
+          // A floating draft's window reads its thread again (a new message, a hand-off).
+          emitFloaterEvent('record', null);
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
@@ -2110,6 +2123,8 @@ function Inbox() {
         onDrafts: (threadId) => {
           // The open thread's own copy of its draft follows at once (the foot's Send carries those words).
           if (threadId !== null && threadId === routeRef.current.thread) setDraftChanged((n) => n + 1);
+          // A floating draft's window follows, and a draft set aside floats once its save landed.
+          emitFloaterEvent('draft', threadId);
           if (draftsTimer) clearTimeout(draftsTimer);
           draftsTimer = setTimeout(() => void refreshDrafts(), 80);
           if (threadId !== null) listAfterEvents(80);
@@ -2687,6 +2702,20 @@ function Inbox() {
     focusAfterOpen();
   };
   // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
+  // The Launch tip (compose/launchTip.ts): this page spends its claim once, with its own key (a retry after a lost
+  // answer is shown it again); the Inbox keeps it seen for every window and the phone. A plain New message that never
+  // reached the tip (To opened first) leaves it for the next one.
+  const launchTipSpent = useRef(false);
+  const launchTipKey = useRef(`lt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const launchTip = useMemo(
+    () => ({
+      claim: async () => {
+        launchTipSpent.current = true;
+        return (await claimRevealOnce('launch_tip', launchTipKey.current)).show;
+      },
+    }),
+    [],
+  );
   const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
@@ -4617,8 +4646,8 @@ function Inbox() {
   ) : null;
   const firstRun = latest !== null && projects.length === 0;
 
-  // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
-  // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
+  // The one-time "Choose how your list looks" dialog (listIntro.ts): after this load's sound and agent-note dialogs are
+  // decided, never on a load that showed either or the tour, only with five threads or more and only once the Inbox page (the list, a
   // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
   // new message over it (each keeps the claim waiting, unspent); opening another thread, project or machine starts the
   // wait again. It waits while a reply is typed or left open with words or files, or another dialog, an image opened
@@ -5049,6 +5078,20 @@ function Inbox() {
     phone,
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
     replyInThread: (threadId, words) => setAskReply({ threadId, words }),
+  });
+  // Floating reply drafts in the corner, beside this thread's Ask chat (approval "inbox-reply-floaters").
+  const floaters = useReplyFloaters({
+    rows: replyDrafts,
+    rowsRead: drafts !== null,
+    threadId: route.page === 'inbox' ? route.thread : null,
+    phone,
+    off: tourOn || settings?.guest === true,
+    ask: ask.corner,
+    openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
+    openDrafts: () => writeRoute({ page: 'drafts', project: null, thread: null }),
+    refreshDrafts,
+    toast: (next) => showToast(next),
+    dismissToast,
   });
   const reducedMotion = useReducedMotion();
   const [tourState, dispatchTourRaw] = useReducer(tourReducer, TOUR_START);
@@ -5984,6 +6027,7 @@ function Inbox() {
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
         machines={machineViews ?? undefined}
+        onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
         onMachinesChanged={() => {
           inboxApi.machines().then((next) => setMachineViews(next.machines), () => {});
           void refreshList(false);
@@ -6304,6 +6348,11 @@ function Inbox() {
           onRowAction={rowAction}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
+          snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}
+          onSnoozeBlocked={(row) => {
+            const blocked = snoozeBlockedBy(row, machines);
+            if (blocked) setMachineUpdateOpen({ id: blocked.id, snooze: true });
+          }}
           pinned={pinsOn ? pinnedIds : undefined}
           onUnstar={pinsOn ? unstarRow : undefined}
           tidy={{
@@ -6415,6 +6464,10 @@ function Inbox() {
             onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
+            snoozeBlocked={(() => {
+              const blocked = snoozeOn && pageOffersUpdates(settings) ? snoozeBlockedBy({ machine: machineOf(thread.thread_id) ?? undefined }, machines) : null;
+              return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
+            })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
@@ -6489,7 +6542,7 @@ function Inbox() {
             }}
             fullFromSide={fullFromSide(window.history.state)}
             fullExitFile={fullExitFile(window.history.state)}
-            onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
+            onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
             artifacts={route.artifacts === true}
             onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
             links={route.artifacts === true && route.links === true}
@@ -6626,6 +6679,7 @@ function Inbox() {
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
             machines={machines}
             machineCounts={sidebarMachineCounts}
+            onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             onMachine={(machineId) =>
               route.page === 'inbox' && route.project === null && route.machine === machineId
                 ? void refreshInbox(null, route.thread !== null)
@@ -6737,6 +6791,10 @@ function Inbox() {
           }}
         />
       )}
+      {machineUpdateOpen && (() => {
+        const target = machines.linked.find((m) => m.id === machineUpdateOpen.id);
+        return target ? <MachineUpdateDialog machine={target} snooze={machineUpdateOpen.snooze} onClose={() => setMachineUpdateOpen(null)} /> : null;
+      })()}
       {updateDialog === 'update' && update && (
         <UpdateDialog
           details={updateDetails}
@@ -6777,11 +6835,15 @@ function Inbox() {
           awayMachines={machines.away}
           projectNames={projectNames}
           phone={phone}
-          onDone={(look, opened) => {
-            void writeMenuLook(look, opened);
+          onDone={(look) => {
+            void writeListLookOptions(look);
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}
+          onCustomize={() => {
+            setListIntro('shown');
+            go({ page: 'settings', project: null, thread: null, section: 'rows' });
+          }}
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
@@ -7021,6 +7083,7 @@ function Inbox() {
           />
         </div>
       )}
+      {floaters.layer}
       {ask.layer}
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
@@ -7052,6 +7115,7 @@ function Inbox() {
           reviewPulls={compose.review ? reviewPulls : undefined}
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
+          launchTip={!tourOn && !launchTipSpent.current && launchTipDue(settings) ? launchTip : null}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);

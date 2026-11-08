@@ -497,7 +497,7 @@ test('desktop: nothing changed: pen on, the reply card open, the selection bridg
       await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
       await expect(card(page)).toHaveCount(0);
       await frame(page).locator('#p2').click();
-      await expect(page.getByPlaceholder('Add a comment...')).toBeVisible();
+      await expect(page.locator('[data-comment-popover]').getByPlaceholder('Comment…')).toBeVisible();
       await expect(card(page)).toHaveCount(0);
     },
     { viewport: { width: 1440, height: 900 } },

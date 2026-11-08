@@ -16,7 +16,7 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhRequestedReviewers, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree } from "./pr-gitlab";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
@@ -155,6 +155,17 @@ export async function fetchPRContext(
   ref: PRRef,
 ): Promise<PRContext> {
   return getPRProvider(ref).fetchContext(runtimeFor(runtime, ref), ref);
+}
+
+/**
+ * The context with who is asked to review. GitLab's context has them already; GitHub's take a read of their own, which
+ * the code review app does not need (it never draws them), so its context stays one read shorter.
+ */
+export async function fetchPRContextWithReviewers(runtime: PRRuntime, ref: PRRef): Promise<PRContext> {
+  if (ref.platform !== "github") return fetchPRContext(runtime, ref);
+  const scoped = runtimeFor(runtime, ref);
+  const [context, requestedReviewers] = await Promise.all([getPRProvider(ref).fetchContext(scoped, ref), fetchGhRequestedReviewers(scoped, ref)]);
+  return { ...context, requestedReviewers };
 }
 
 export async function fetchPRFileContent(

@@ -944,6 +944,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           onRefOpen={(n) => void openRef(n)}
           onRefPeek={readFirst ? onRefPeek : undefined}
           pan={readFirst}
+          top={readFirst}
           resolveSrc={assetUrl}
           darkContrast={darkContrast}
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
@@ -1210,6 +1211,8 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               submitLabel="Change it"
               askAILabel="Ask"
               extraAction={showMeAction(target.boxPart ?? shapeBoxPart(target))}
+              // The board's own footer order (Ask, Change it, Show me), never a host's comment card.
+              allowCard={false}
               initialText={target.retry?.text}
               errorText={target.retry?.error}
               onSubmit={(text) => {
@@ -1249,6 +1252,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               submitLabel="Change it"
               askAILabel="Ask"
               extraAction={showMeAction({ name: 'The whole board' })}
+              allowCard={false}
               initialText={general.retry?.text}
               errorText={general.retry?.error}
               onSubmit={(text) => {

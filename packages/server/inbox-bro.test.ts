@@ -70,7 +70,7 @@ async function world(options: WorldOptions = {}) {
       inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - (options.firstUseDays ?? 3) * DAY).toISOString(), snoozedAt: new Date(Date.now() - 3 * DAY).toISOString() },
       // The update-day dialogs (sound, list options, voice) come first in the line: settled here (a fresh install's marks).
       inboxSound: { dialogShownFor: options.version ?? "0.30.0" },
-      inboxListIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      inboxListIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString(), version: 2 },
       inboxVoiceIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
       ...options.config,
     }),

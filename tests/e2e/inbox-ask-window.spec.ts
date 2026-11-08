@@ -221,7 +221,9 @@ test('the icon opens the thread’s chat, and a question gets its answer from th
   expect({ width: rect.width, height: rect.height, right: 1440 - rect.x - rect.width, bottom: 900 - rect.y - rect.height }).toEqual({ width: 420, height: 560, right: 16, bottom: 16 });
 
   await expect(chip()).toContainText('Push retry budget');
-  await expect(chip().locator('.ib-mk svg')).toHaveCount(1);
+  // Ask's sparkle and "Ask AI · <thread>" (approval "inbox-reply-floaters"), not the agent's mark.
+  await expect(chip().locator('[data-ask-sparkle]')).toHaveCount(1);
+  await expect(chip()).toContainText('Ask AI · ');
 
   await box().fill(QUESTION);
   await box().press('Enter');

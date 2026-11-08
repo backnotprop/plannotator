@@ -57,6 +57,7 @@ import { reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { askRiskPlaces, placesWord, riskPlaceCount } from '../contextNotes/model';
 import { RiskFilter } from './RiskFilter';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { RiskRulesDialog } from './RiskRulesDialog';
@@ -460,6 +461,20 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               {riskLevelWord[judged.level]} risk
             </span>{' '}
             <span dir="auto">{judged.why}</span>
+            {/* A high judgment's places (context notes): the diff opens at the first one. */}
+            {riskPlaceCount(judged) > 0 && (
+              <button
+                type="button"
+                className="ib-ctxn-places"
+                data-pulls-risk-places={riskPlaceCount(judged)}
+                onClick={() => {
+                  askRiskPlaces(judged.key);
+                  props.onReview(stack.id, judged.key, 'layer');
+                }}
+              >
+                See the {placesWord(riskPlaceCount(judged))}
+              </button>
+            )}
           </p>
         )}
         {link && <ThreadLine link={link} ended={ended} mentioned={mentioned} now={now} />}

@@ -358,9 +358,10 @@ describe.if(hasDom)('the empty second line folds only when nothing shows on it',
   const looks: [string, () => InboxRowsOption[], string[], string[]][] = [
     // The owner's own look (rows-bold-1357.png): the defaults, the agents and the project on line 1.
     ['the defaults', () => [], NARROW_PROJECT_FIRST, PHONE_PROJECT_FIRST],
-    // Detailed's names in their pill: a phone's line 2 is the pill.
-    ['Detailed', preset('detailed'), NARROW_PROJECT_FIRST, ['ib-m1 +time', 'ib-key ib-rowkey', 'ib-m3']],
-    ['Minimal (compact, agents off)', preset('minimal'), ['ib-l1 +time', 'ib-l3'], ['ib-m1 +time', 'ib-m3']],
+    // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b): a phone's line 2 is the name.
+    ['Detailed', preset('detailed'), NARROW_PROJECT_FIRST, PHONE_PROJECT_FIRST],
+    // Minimal is the two-line row (name first, no preview): line 2 holds the row's end, so it never folds.
+    ['Minimal (two lines)', preset('minimal'), ['ib-l1 +time', 'ib-l2 ib-l2-lead'], ['ib-m1 +time', 'ib-m1 ib-m1-lead']],
     ['name first', () => ['titleFirst'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
     ['name first, agents off', () => ['titleFirst', 'hideAgents'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
     ['name first, project off', () => ['titleFirst', 'hideProject'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],

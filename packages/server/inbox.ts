@@ -40,6 +40,7 @@
  */
 
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -247,6 +248,7 @@ import {
   type RevealLoads,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
+import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -262,7 +264,7 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
+import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
 import { inboxPullRefOfKey, type InboxPull } from "@plannotator/core/inbox-types";
@@ -411,7 +413,7 @@ export interface InboxServerOptions {
    */
   updates?: Pick<
     InboxUpdatesOptions,
-    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
+    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion" | "home"
   >;
   /**
    * The window: the built app (`apps/hook/dist/inbox.html`, which the binary
@@ -1092,6 +1094,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: () => {
       for (const listener of statusListeners) listener();
     },
+    onRestartWanted: () => requestRestart(),
   });
 
   // Each project's git `origin` (#1840), for the window's `#123` links:
@@ -1345,6 +1348,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (linked machines, inbox-machines.ts): this Inbox's stable id and the link protocol it speaks.
     inbox_id: machines.selfId,
     machine_links: 1,
+    // Additive: this Inbox's door takes `update` (a linked machine can update it), whether the install script owns
+    // this copy, and a linked machine's Update that ended with no error and no new binary.
+    machine_update: 1,
+    self_update: updates.selfUpdates(),
+    update_no_change: updates.noChange(),
     // Additive (remote launch): a linked machine may start agents here (1: launch is on; the door takes its Stop, Try again, Trust folder and Delete).
     // 0 while launch is off there: an Inbox new enough says so, an older one has no field ("update Plannotator there").
     launch_from_machines: launch.enabled() ? 1 : 0,
@@ -2273,17 +2281,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
 
   /**
-   * The one-time list options dialog (approval "inbox-list-options-intro"): `due` while it waits for a page on this
-   * computer to claim it. Decided at the first release start that knows it, like the sound dialog: someone who used an
-   * Inbox before gets it due; a fresh install is marked shown and never sees it (the tour shows today's list).
+   * The one-time "Choose how your list looks" dialog: `due` while it waits for a page on this computer to claim it.
+   * Decided at the first release start of each version (inbox-list-intro.ts): version 2, the three looks (approval
+   * "inbox-rows-dialog"), is due once for everyone, fresh installs and those who saw version 1 included. The page
+   * waits for a list of five threads or more.
    */
-  const listIntroState = () => {
-    const saved = loadConfig().inboxListIntro;
-    return { due: typeof saved?.dueAt === "string" && saved.dueAt !== "" && !saved.shownAt };
-  };
-  if (normalizeStableVersion(version) !== null && loadConfig().inboxListIntro === undefined) {
-    const at = new Date().toISOString();
-    saveConfig({ inboxListIntro: usedBefore ? { dueAt: at } : { shownAt: at } });
+  const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  const listIntroMinThreads = INBOX_REVEALS.find((entry) => entry.id === "list_intro")?.minThreads ?? 0;
+  /** Due, with the threads the dialog waits for: what holds the dialogs after it back. */
+  const listIntroWaits = () => listIntroState().due && store.threadIds().length >= listIntroMinThreads;
+  if (normalizeStableVersion(version) !== null) {
+    const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
+    if (next) saveConfig({ inboxListIntro: next });
   }
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
@@ -2621,6 +2630,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reveals = config.inboxReveals;
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
+    // Version 1 of the list dialog, kept under `before` when version 2 became due (inbox-list-intro.ts).
     const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, undecided!() && !lineOfferSaved(id as RevealId)?.shownAt]));
     const open: RevealState["open"] = {
       // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
@@ -2637,7 +2647,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
-      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
+      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
       afterShowLoad: revealAfterShowLoad(reveals?.shownLoad, pageLoads, load),
@@ -2741,6 +2751,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saveConfig({ inboxReveals: { ...revealStamp(saved, at, { spaced: false, load }), ...(shownFor ? { agentNote: { shownFor } } : {}) } });
   };
   /**
+   * The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): the owner's, while Launch is on and no
+   * agent was ever started here, until it was shown once. Outside the line: its claim stamps only
+   * `inboxReveals.launch_tip`, never the line's day or spacing, and it waits for neither.
+   */
+  /** An agent was started from this Inbox: kept in `inboxReveals.launch_tip.launchedAt`, so deleting that thread never brings the tip back. */
+  const keepLaunchedOnce = () => {
+    const kept = launchTipLaunched(loadConfig().inboxReveals?.launch_tip, new Date().toISOString());
+    if (kept) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, launch_tip: kept } });
+  };
+  const launchTipState = (owner: boolean): LaunchTipState => {
+    const launched = store.launchedRoots().length > 0;
+    // One started before this Inbox kept the mark (an upgrade): kept now, while its thread is still here.
+    if (launched) keepLaunchedOnce();
+    return { owner, launched, saved: loadConfig().inboxReveals?.launch_tip };
+  };
+  // Each new launched root (this computer's Send, or a linked machine's start here) keeps the mark at once.
+  const unsubscribeLaunchTip = store.subscribe((line) => {
+    if (line.kind === "message" && line.record.launch !== undefined && line.record.thread_id === line.record.id) keepLaunchedOnce();
+  });
+  const claimLaunchTip = (owner: boolean, key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = launchTipClaim(launchTipState(owner), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, launch_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every New message.
+    return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -2755,6 +2793,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
       setup: via === "local" && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
+      // The Launch tip (outside the line): compose may claim it at the first plain New message.
+      launch_tip: launchTipDue(launchTipState(owner)),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -3005,7 +3045,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `restart_claude_code` (additive): the sidebar's "Reload Claude Code N" follows the sessions as they restart.
         const onStatus = () =>
           send(
-            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing() })}\n\n`,
+            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
           );
         statusListeners.add(onStatus);
         // An Inbox window (not the phone's door): counted while its stream is open, with what it reported.
@@ -3799,6 +3839,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   (uploadSweep as { unref?: () => void }).unref?.();
 
   let stopRequested = false;
+  /** Stop and start again on the binary on disk: the window's Restart, or a linked machine's Update once its install is in. False: this Inbox cannot. */
+  const requestRestart = (): boolean => {
+    if (!options.onRestartRequested) return false;
+    if (!stopRequested) {
+      stopRequested = true;
+      setTimeout(() => {
+        stop();
+        options.onRestartRequested?.();
+      }, 50);
+    }
+    return true;
+  };
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
   // The device door: always made (linked machines use it with Phones off); with Phones off it serves machines only,
@@ -3832,9 +3884,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     usedBefore,
     decidesIntro: normalizeStableVersion(version) !== null,
     computerName: () => phones?.machineDoor.computerName() ?? "this computer",
-    // It goes last: the sound and list options dialogs first, whatever keeps them waiting; and the line's day, load and
+    // It goes last: the sound dialog first, and the list dialog while it can show (due, and the five threads it waits
+    // for: below that it is due but no page shows it, so it never holds voice back); and the line's day, load and
     // spacing (shared/inbox/reveals.ts).
-    otherDialogDue: (load) => soundState().dialog_due || listIntroState().due || !lineFree("spaced", load),
+    otherDialogDue: (load) => soundState().dialog_due || listIntroWaits() || !lineFree("spaced", load),
     lineStamp: (at, load) => lineStamp(at, true, load),
     json,
     readBody,
@@ -4240,7 +4293,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ serverSession, ...pullRisk.answer() });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -4266,6 +4319,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               "cross-origin-resource-policy": "same-origin",
             },
           });
+        }
+        // Reviewers, checks, labels and comments beside the diff, from the forge's own answer. The pictures of the people
+        // it names join the avatar route's allow-list, and stay while the PR is on the list.
+        if (path === "/api/inbox/pulls/details") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          try {
+            const answer = await pulls.details(key);
+            const host = pulls.find(key)?.host;
+            if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
+            return json({ serverSession, ...answer });
+          } catch (cause) {
+            if (cause instanceof InboxPullsError) {
+              const held = cause.code === "pull_details_held" && cause.retryAt ? { retry_at: cause.retryAt } : {};
+              return json({ error: cause.message, code: cause.code, ...held }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_details_held" ? 429 : 502);
+            }
+            throw cause;
+          }
         }
         // The rail's All files: the PR's repository at a head this Inbox read for it, and one file of it, answered as the
         // review app's `/api/repo-files` and `/api/repo-file` (its tree and file view read them unchanged). Read only.
@@ -4582,15 +4653,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (!options.onRestartRequested) {
+        if (!requestRestart()) {
           return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
-        }
-        if (!stopRequested) {
-          stopRequested = true;
-          setTimeout(() => {
-            stop();
-            options.onRestartRequested?.();
-          }, 50);
         }
         return json({ ok: true, restarting: true });
       }
@@ -4911,8 +4975,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -4926,6 +4990,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.answer === "not_now") {
           revealNotNow(owner);
           return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Launch tip: outside the line, its own stamp only (packages/shared/inbox/launch-tip.ts).
+        if (id === "launch_tip") {
+          return json({ show: claimLaunchTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -5340,7 +5408,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // A project's letter-mark picture (approval "inbox-letter-marks"; inbox-project-pictures.ts). GET: the picture
       // in order (the one set with Set picture…, then the repo's logo and the GitHub owner's picture when Settings →
-      // Rows has them on, read from config.json `inboxRows`, never from the request), or a 404 and the window draws
+      // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
+      // GitHub is never turned on by the request: `pictureSources`), or a 404 and the window draws
       // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
       // guards as every window write. Window only: not on the phone's door, and never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
@@ -5354,10 +5423,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
             return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
           }
-          const rows = rowsState().rows ?? [];
           const picture = await projectPictures.get(
             { id: project.id, root: project.root },
-            { logo: rows.includes("repoLogo"), github: rows.includes("githubPictures"), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
+            { ...pictureSources(rowsState().rows ?? [], url.searchParams), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
           );
           if (!picture) {
             const miss = json({ error: "No picture for this project.", code: "no_picture" }, 404);
@@ -5888,6 +5956,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      machineUpdate: {
+        read: () => updates.machineRead(),
+        start: () => updates.machineStart(),
+      },
     });
     phones = devices;
     machines = createInboxMachines({
@@ -5900,6 +5972,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
       isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+      ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });
     if (phonesOn) {
@@ -5997,6 +6070,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(autoSendWatch);
     unsubscribeWaits();
     launch.stop();
+    unsubscribeLaunchTip();
     unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
