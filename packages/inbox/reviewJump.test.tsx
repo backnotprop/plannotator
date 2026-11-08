@@ -128,6 +128,20 @@ test.skipIf(!hasDom)('in All files the menu lists the files with their counts an
   expect(picked).toEqual(['src/a.test.ts']);
 });
 
+test.skipIf(!hasDom)('with no Viewed ticks to give (a guide, or Code review off): All files lists the files with no tick and no "files viewed" count', async () => {
+  await open({ mode: 'files', current: 0, files: FILES.map((file) => ({ ...file, viewed: false })), viewedTicks: false });
+  const menu = document.querySelector<HTMLElement>('[data-review-jump-menu]')!;
+  expect(menu.querySelectorAll('[data-review-jump-row]').length).toBe(2);
+  expect(menu.querySelector('[data-done]') === null).toBe(true);
+  expect(menu.querySelector('[data-review-progress]') === null).toBe(true);
+  // The chapters keep their count: Reviewed ticks are every guide's.
+  act(() => root?.unmount());
+  host?.remove();
+  document.body.innerHTML = '';
+  await open({ viewedTicks: false });
+  expect(document.querySelector('[data-review-progress]')?.textContent).toBe('1 of 2 chapters reviewed');
+});
+
 test.skipIf(!hasDom)("Escape in the menu closes the menu and is marked used: the window's own rung, back to the thread, leaves the review open", async () => {
   await open();
   const menu = document.querySelector<HTMLElement>('[data-review-jump-menu]')!;

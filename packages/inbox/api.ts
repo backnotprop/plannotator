@@ -232,7 +232,8 @@ export interface OutboxView {
   machine: string;
   /** The door route, as `messages/msg_…/reply`. */
   route: string;
-  state: 'queued' | 'sending' | 'delivered' | 'refused' | 'parked' | 'dropped';
+  /** `cancelled`: taken back before it ever left (Cancel on a held launch); never sent. */
+  state: 'queued' | 'sending' | 'delivered' | 'refused' | 'parked' | 'dropped' | 'cancelled';
   queued_at: string;
   settled_at: string | null;
   status: number | null;
@@ -986,6 +987,8 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
         rememberMachine(idsIn(entry.answer), machine);
         return entry.answer as T;
       }
+      // Taken back with Cancel: a Send retried with its key never sends it after all.
+      if (entry.state === 'cancelled') throw new InboxApiError(409, 'outbox_cancelled', `Cancelled. It was never sent to ${held.machine?.name ?? 'the other machine'}.`);
       const why = entry.answer && typeof entry.answer === 'object' ? (entry.answer as { error?: unknown }).error : null;
       throw new InboxApiError(409, 'not_delivered', typeof why === 'string' && why ? why : `Not delivered to ${held.machine?.name ?? 'the other machine'}.`);
     }
@@ -1573,12 +1576,12 @@ export const inboxApi = {
   startThread: (input: StartThreadInput) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
-  launchStop: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`), {}),
+  launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
-  launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
-  launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  launchDelete: (launchId: string, machine?: string | null) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`, undefined, machine), {}),
+  launchRetry: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`, undefined, machine), {}),
   /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
-  launchTrust: (launchId: string, warning: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`), { warning }),
+  launchTrust: (launchId: string, warning: string | null, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`, undefined, machine), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
@@ -1794,6 +1797,8 @@ export const inboxApi = {
   /** Writes held for other machines, and notices about ones that did not land. */
   outbox: () => get<{ waiting: OutboxView[]; notices: OutboxView[] }>(inboxUrl('/outbox')),
   dismissOutbox: (key: string) => post<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}/dismiss`), {}),
+  /** Take back a held write that never left (a launch waiting for a machine that is asleep): it is never sent. */
+  cancelOutbox: (key: string) => post<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}/cancel`), {}),
   pairPhone: () => post<PairingOffer>(inboxUrl('/pairing'), {}),
   pairingOffer: () => get<{ offer: PairingOfferView | null }>(inboxUrl('/pairing')),
   /** `fresh`: skip the answer the Inbox keeps a few seconds (Check again, after a switch). */
