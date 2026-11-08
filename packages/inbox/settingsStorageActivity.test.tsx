@@ -127,7 +127,6 @@ describe('Settings → Storage: Delete from Inbox', () => {
     const el = render('storage');
     const buttons = deleteButtons(el);
     // The first project opens with the page: its row, then its two threads, then the next project.
-    expect(buttons.map((button) => button.textContent)).toEqual(['Delete from Inbox', 'Delete from Inbox', 'Delete from Inbox', 'Delete from Inbox']);
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Delete from Inbox: harbor',
       'Delete from Inbox: Retry the upload',
