@@ -561,6 +561,14 @@ button.ib-mut { border-radius: 6px; }
 .ib-projrow[data-menu] .ib-proj:not(.ib-on) { background: var(--ib-side-menu); color: var(--foreground); }
 .ib-projrow[data-menu] .ib-pmore { color: var(--foreground); }
 /* Shown only because the list shows it (nothing of it is listed): it leaves when the person goes elsewhere. */
+/* "+" beside ⋯ (approval "launch-create-clone", F1-F2): a new session in this project, shown with ⋯ (hover, keyboard
+   focus, the menu open), the count giving way to both. */
+.pn-inbox .ib-pplus { position: absolute; right: 29px; top: 3px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r7-s, 6px); color: var(--muted-foreground); opacity: 0; }
+.ib-pplus .ib-ic { width: 16px; height: 16px; stroke-width: 2.2; }
+.pn-inbox .ib-pplus:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 90%, transparent)); color: var(--foreground); }
+.pn-inbox .ib-pplus:focus-visible { outline-offset: 0; }
+.ib-projrow:hover .ib-pplus, .ib-projrow:has(:focus-visible) .ib-pplus, .ib-projrow[data-menu] .ib-pplus { opacity: 1; }
+.ib-projrow[data-plus]:hover .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) .ib-proj, .ib-projrow[data-plus][data-menu] .ib-proj { padding-right: 58px; }
 .ib-projrow[data-held] .ib-proj { color: var(--muted-foreground); }
 .ib-projrow[data-held] .ib-name { opacity: 0.7; }
 /* Rename… in the project menu: the row's name as a field, in the row's own place and size, with the window's
@@ -3599,6 +3607,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
   .pn-inbox .ib-pmore { opacity: 1; top: 0; right: 0; width: 44px; height: 44px; border-radius: 8px; }
   .ib-pmore .ib-ic { width: 20px; height: 20px; }
+  /* F6: "+" always shown too, its own 44 px target before ⋯. */
+  .ib-projrow[data-plus] > .ib-proj, .ib-projrow[data-plus]:hover > .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) > .ib-proj, .ib-projrow[data-plus][data-menu] > .ib-proj { padding-right: 90px; }
+  .pn-inbox .ib-pplus { opacity: 1; top: 0; right: 44px; width: 44px; height: 44px; border-radius: 8px; }
+  .ib-pplus .ib-ic { width: 20px; height: 20px; }
   /* Pinned rows on a phone: 44 px, ⋯ always shown (a 44 px target after the state), the state always visible. */
   .ib-pin { height: 44px; font-size: var(--ib-fs-15, 15px); flex: none; }
   .ib-pinrow > .ib-pin, .ib-pinrow:hover > .ib-pin, .ib-pinrow:has(:focus-visible) > .ib-pin, .ib-pinrow[data-menu] > .ib-pin { padding-right: 46px; }

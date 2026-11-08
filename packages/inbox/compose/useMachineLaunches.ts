@@ -10,6 +10,11 @@ import type { MachineLaunchRead } from './model';
 const kept = new Map<string, MachineLaunchRead>();
 
 /** Tests only: forget every machine's read. */
+/** Each linked machine's last launch read (New message reads them): for "+" on its project rows, without reading again. */
+export function machineLaunchesKept(): ReadonlyMap<string, MachineLaunchRead> {
+  return kept;
+}
+
 export function resetMachineLaunchesForTests(): void {
   kept.clear();
 }
