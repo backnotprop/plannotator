@@ -9,31 +9,46 @@
  * code), the row losing the rule that gives it height (Pierre's grid collapses
  * an annotation row in a fixed-height pane, so the open card covers the next
  * lines), a fold that will not close or reopen, one bubble per comment instead
- * of per line, or the opt-in leaking into other hosts.
+ * of per line, keyboard focus dropped to the page when a fold closes or its last
+ * comment goes, a click in a fold opening a new comment on the line above, the
+ * code shifting when the first comment comes, an easing that lags an edit, or
+ * the opt-in leaking into other hosts.
  *
  * Pierre's `File` is replaced by a stub that draws each line annotation through
- * the view's `renderAnnotation` and keeps the CSS it was given.
+ * the view's `renderAnnotation` and keeps the props it was given, so a line
+ * click or a range is reported the way Pierre reports one.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { CodeAnnotation } from '../types';
+import type { CodeFileAnnotationInput } from './CodeFilePopout';
 
 const hasDom = typeof document !== 'undefined';
 
 interface StubFileProps {
   lineAnnotations?: { lineNumber: number; metadata?: unknown }[];
   renderAnnotation?: (annotation: { lineNumber: number; metadata?: unknown }) => React.ReactNode;
-  options?: { unsafeCSS?: string };
+  options?: {
+    unsafeCSS?: string;
+    onLineClick?: (props: { lineNumber: number; lineElement: HTMLElement; event: Event }) => void;
+    onLineSelectionEnd?: (range: { start: number; end: number } | null) => void;
+  };
 }
 
-let lastCss = '';
+let lastProps: StubFileProps = {};
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 mock.module('@pierre/diffs/react', () => ({
   ...realPierreDiffsReact,
-  File: function StubFile({ lineAnnotations = [], renderAnnotation, options }: StubFileProps) {
-    lastCss = options?.unsafeCSS ?? '';
-    return <div>{lineAnnotations.map((a, i) => <div key={i} data-row={a.lineNumber}>{renderAnnotation?.(a)}</div>)}</div>;
+  File: function StubFile(props: StubFileProps) {
+    lastProps = props;
+    const { lineAnnotations = [], renderAnnotation } = props;
+    return (
+      <div>
+        <div data-stub-line="7">const a = 1;</div>
+        {lineAnnotations.map((a, i) => <div key={i} data-row={a.lineNumber}>{renderAnnotation?.(a)}</div>)}
+      </div>
+    );
   },
 }));
 
@@ -47,7 +62,8 @@ afterEach(async () => {
   root = null;
   host?.remove();
   host = null;
-  lastCss = '';
+  lastProps = {};
+  if (hasDom) document.body.replaceChildren();
 });
 
 afterAll(() => {
@@ -90,10 +106,24 @@ async function view(props: ViewProps): Promise<(next: ViewProps) => Promise<void
 const bubble = (line: number) => host!.querySelector<HTMLButtonElement>(`[data-code-comment-bubble="${line}"]`);
 const reveal = (line: number) => host!.querySelector<HTMLElement>(`[data-code-comment-fold="${line}"] [data-code-comment-reveal]`)!;
 const isOpen = (line: number) => bubble(line)?.getAttribute('aria-expanded') === 'true' && reveal(line).hasAttribute('data-open');
+const fileArea = () => host!.firstElementChild as HTMLElement;
+const composer = () => document.querySelector('[data-comment-popover]');
+const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 const click = async (el: HTMLElement | null) => {
   if (!el) throw new Error('nothing to click');
   await act(async () => el.click());
 };
+const cardButton = (id: string, title: string) =>
+  host!.querySelector<HTMLButtonElement>(`[data-code-annotation-id="${id}"] button[title="${title}"]`);
+
+/** Pierre reporting a line click from a click on `target` (its listener reads the event while it is dispatched). */
+async function lineClickFrom(target: HTMLElement, lineNumber: number) {
+  await act(async () => {
+    const listener = (event: Event) => lastProps.options!.onLineClick!({ lineNumber, lineElement: target, event });
+    target.addEventListener('click', listener, { once: true });
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+  });
+}
 
 describe.if(hasDom)('CodeFileView comment folds', () => {
   test('a host that passes nothing keeps every comment open under its line, with no bubble or row rule', async () => {
@@ -101,7 +131,7 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     expect(host!.querySelector('[data-code-comment-bubble]')).toBeNull();
     expect(host!.querySelectorAll('[data-code-annotation-id]').length).toBe(3);
     expect(host!.querySelectorAll('[data-row]').length).toBe(3);
-    expect(lastCss).not.toContain('max-content');
+    expect(lastProps.options?.unsafeCSS ?? '').not.toContain('max-content');
   });
 
   test('one bubble per line, with a count, on the last line of a range; all closed at first', async () => {
@@ -116,8 +146,17 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     expect(reveal(42).hasAttribute('inert')).toBe(true);
     expect(reveal(42).getAttribute('aria-hidden')).toBe('true');
     expect(reveal(42).style.height).toBe('0px');
+    expect(bubble(42)!.getAttribute('aria-controls')).toBe(reveal(42).id);
     // The row is kept as tall as its fold, so an open card never covers the next lines.
-    expect(lastCss).toMatch(/\[data-line-annotation\]\s*\{[^}]*height:\s*max-content/);
+    expect(lastProps.options!.unsafeCSS).toMatch(/\[data-line-annotation\]\s*\{[^}]*height:\s*max-content/);
+  });
+
+  test('a file that takes comments has the bubble\'s gutter before its first comment, so the code never shifts', async () => {
+    const redraw = await view({ annotations: [], commentMarkers: 'bubble', onAddAnnotation: () => {} });
+    const before = lastProps.options!.unsafeCSS;
+    expect(before).toMatch(/\[data-column-number\]\s*\{\s*padding-left/);
+    await redraw({ annotations: [A], commentMarkers: 'bubble', onAddAnnotation: () => {} });
+    expect(lastProps.options!.unsafeCSS).toBe(before);
   });
 
   test('the bubble opens and closes its fold; the card\'s Hide closes it too', async () => {
@@ -134,25 +173,80 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     expect(isOpen(42)).toBe(false);
   });
 
+  test('Hide and a delete leave keyboard focus on a bubble or the file, never on the page', async () => {
+    const deleted: string[] = [];
+    const props = (annotations: CodeAnnotation[]): ViewProps => ({
+      annotations,
+      commentMarkers: 'bubble',
+      onDeleteAnnotation: (id) => deleted.push(id),
+    });
+    const redraw = await view(props([A, B, RANGE]));
+    await click(bubble(42));
+    const hide = host!.querySelector<HTMLButtonElement>('[data-code-comment-fold="42"] [data-code-comment-hide]')!;
+    hide.focus();
+    await click(hide);
+    expect(isOpen(42)).toBe(false);
+    expect(document.activeElement).toBe(bubble(42));
+
+    // One of two comments: the bubble stays, focus goes to it.
+    await click(bubble(42));
+    await click(cardButton('b', 'Delete comment'));
+    expect(deleted).toEqual(['b']);
+    expect(document.activeElement).toBe(bubble(42));
+    await redraw(props([A, RANGE]));
+
+    // The line's last comment: its bubble goes too, focus moves to the next bubble.
+    await click(cardButton('a', 'Delete comment'));
+    await redraw(props([RANGE]));
+    expect(document.activeElement).toBe(bubble(52));
+
+    // The file's last comment: focus stays in the file.
+    await click(bubble(52));
+    await click(cardButton('r', 'Delete comment'));
+    await redraw(props([]));
+    expect(document.activeElement).toBe(fileArea());
+    expect(deleted).toEqual(['b', 'a', 'r']);
+  });
+
+  test('a click or a press inside a fold never opens a new comment on the line above', async () => {
+    await view({ annotations: [A], commentMarkers: 'bubble', onAddAnnotation: () => {} });
+    await click(bubble(42));
+    const card = host!.querySelector<HTMLElement>('[data-code-annotation-id="a"]')!;
+
+    await lineClickFrom(card, 42);
+    expect(composer()).toBeNull();
+    await act(async () => {
+      card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+      lastProps.options!.onLineSelectionEnd!({ start: 42, end: 42 });
+    });
+    expect(composer()).toBeNull();
+
+    // A line's own click still opens the composer.
+    const line = host!.querySelector<HTMLElement>('[data-stub-line]')!;
+    await act(async () => { line.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true })); });
+    await lineClickFrom(line, 7);
+    expect(composer()).not.toBeNull();
+  });
+
   test('edit and delete stay on the open card', async () => {
     const edits: string[] = [];
     const deletes: string[] = [];
     await view({
-      annotations: [A],
+      annotations: [A, B],
       commentMarkers: 'bubble',
       onEditAnnotation: (id) => edits.push(id),
       onDeleteAnnotation: (id) => deletes.push(id),
     });
     await click(bubble(42));
-    const card = host!.querySelector<HTMLElement>('[data-code-annotation-id="a"]')!;
-    await click(card.querySelector<HTMLButtonElement>('button[title="Delete comment"]'));
+    await click(cardButton('a', 'Delete comment'));
     expect(deletes).toEqual(['a']);
-    await click(card.querySelector<HTMLButtonElement>('button[title="Edit comment"]'));
+    await click(cardButton('a', 'Edit comment'));
+    const card = host!.querySelector<HTMLElement>('[data-code-annotation-id="a"]')!;
     await click([...card.querySelectorAll('button')].find((b) => b.textContent === 'Save') ?? null);
     expect(edits).toEqual(['a']);
   });
 
-  test('choosing a comment opens its fold; folding it away lets go of it', async () => {
+  test('choosing a comment opens its fold; folding it away lets go of it once closed', async () => {
     const chosen: (string | null)[] = [];
     const redraw = await view({ annotations: [A, RANGE], commentMarkers: 'bubble', onSelectAnnotation: (id) => chosen.push(id) });
     await redraw({ annotations: [A, RANGE], commentMarkers: 'bubble', selectedAnnotationId: 'r', onSelectAnnotation: (id) => chosen.push(id) });
@@ -160,25 +254,62 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     expect(isOpen(42)).toBe(false);
     await click(bubble(52));
     expect(isOpen(52)).toBe(false);
-    // Let go once the fold has closed (the host's redraw would cut the motion short).
-    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+    await wait(300);
     expect(chosen).toEqual([null]);
   });
 
-  test('a comment saved while the file is open shows where it landed', async () => {
-    const redraw = await view({ annotations: [A], commentMarkers: 'bubble' });
+  test('a view gone before its fold closed never lets go of the comment afterwards', async () => {
+    const chosen: (string | null)[] = [];
+    await view({ annotations: [RANGE], commentMarkers: 'bubble', selectedAnnotationId: 'r', onSelectAnnotation: (id) => chosen.push(id) });
+    await click(bubble(52));
+    await act(async () => root!.unmount());
+    root = null;
+    await wait(300);
+    expect(chosen).toEqual([]);
+  });
+
+  test('a comment saved here shows where it landed; comments loaded later stay folded', async () => {
+    const added: CodeFileAnnotationInput[] = [];
+    const props = (annotations: CodeAnnotation[]): ViewProps => ({
+      annotations,
+      commentMarkers: 'bubble',
+      onAddAnnotation: (a) => added.push(a),
+    });
+    // The host's records arrive after the first draw: they stay folded.
+    const redraw = await view(props([]));
+    await redraw(props([A]));
     expect(isOpen(42)).toBe(false);
-    await redraw({ annotations: [A, RANGE], commentMarkers: 'bubble' });
+
+    // The pointer over the file is where the composer opens (the file area remembers it).
+    await act(async () => {
+      fileArea().dispatchEvent(new PointerEvent('pointermove', { clientX: 100, clientY: 200, bubbles: true }));
+    });
+    await act(async () => { lastProps.options!.onLineSelectionEnd!({ start: 50, end: 52 }); });
+    const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(area, RANGE.text);
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(added.map((a) => [a.lineStart, a.lineEnd])).toEqual([[50, 52]]);
+    await redraw(props([A, RANGE]));
     expect(isOpen(52)).toBe(true);
     expect(isOpen(42)).toBe(false);
   });
 
-  test('the fold moves with an ease-out, and not at all under reduced motion', async () => {
-    const frame = () => act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+  test('the fold eases out only while it opens or closes, and not at all under reduced motion', async () => {
     await view({ annotations: [A], commentMarkers: 'bubble' });
-    await frame();
-    expect(reveal(42).style.transition).toContain('cubic-bezier(0.23, 1, 0.32, 1)');
+    await wait(40);
+    await click(bubble(42));
+    expect(reveal(42).style.transition).toContain('height');
     expect(reveal(42).style.transition).not.toMatch(/ease-in|linear/);
+    // Open and still: the height follows the card at once, so an edit never lags behind a clip.
+    await wait(400);
+    expect(isOpen(42)).toBe(true);
+    expect(reveal(42).style.transition).toBe('none');
     await act(async () => root!.unmount());
     root = null;
     host!.remove();
@@ -192,7 +323,7 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     })) as typeof window.matchMedia;
     try {
       await view({ annotations: [A], commentMarkers: 'bubble' });
-      await frame();
+      await wait(40);
       await click(bubble(42));
       expect(isOpen(42)).toBe(true);
       expect(reveal(42).style.transition).toBe('none');

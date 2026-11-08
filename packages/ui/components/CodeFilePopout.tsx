@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useId, useLayoutEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import { File, type LineAnnotation } from '@pierre/diffs/react';
 import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps } from '@pierre/diffs';
 import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
@@ -320,7 +320,7 @@ const CodeInlineAnnotation: React.FC<{
         </div>
       ) : (
         annotation.text && (
-          <div className={`mt-1.5 whitespace-pre-wrap text-foreground/90 ${plain ? '' : 'border-l-2 border-primary/50 pl-2'}`}>
+          <div className={`mt-1.5 whitespace-pre-wrap text-foreground/90 ${plain ? '[overflow-wrap:anywhere]' : 'border-l-2 border-primary/50 pl-2'}`}>
             {annotation.text}
           </div>
         )
@@ -401,15 +401,32 @@ const CodeCommentFold: React.FC<{
   onSelect?: (id: string | null) => void;
   onEdit?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDelete?: (id: string) => void;
+  /** Before the line's last comment goes (the fold goes with it): where keyboard focus lands instead. */
+  onLastDelete?: (line: number) => void;
   plain: boolean;
-}> = ({ line, annotations, store, onToggle, selectedAnnotationId, onSelect, onEdit, onDelete, plain }) => {
+}> = ({ line, annotations, store, onToggle, selectedAnnotationId, onSelect, onEdit, onDelete, onLastDelete, plain }) => {
   const open = useSyncExternalStore(store.subscribe, () => store.isOpen(line), () => store.isOpen(line));
   const innerRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLButtonElement>(null);
+  const revealId = useId();
   const [height, setHeight] = useState(0);
   // No motion on the first frame: a fold that mounts open (a comment chosen in
   // the panel, a link to it) is simply there.
   const [animate, setAnimate] = useState(false);
   const reducedMotion = usePrefersReducedMotion();
+  // The height eases only while the fold opens or closes; open and still, it follows the card at once (an edit's
+  // textarea growing never lags behind a clip).
+  const [moving, setMoving] = useState(false);
+  const [lastOpen, setLastOpen] = useState(open);
+  if (open !== lastOpen) {
+    setLastOpen(open);
+    setMoving(true);
+  }
+  useEffect(() => {
+    if (!moving) return;
+    const timer = setTimeout(() => setMoving(false), FOLD_MS + 60);
+    return () => clearTimeout(timer);
+  }, [moving, open]);
   useLayoutEffect(() => {
     const inner = innerRef.current;
     if (!inner) return;
@@ -428,19 +445,36 @@ const CodeCommentFold: React.FC<{
     ? lineLabel(annotations[0].lineStart, annotations[0].lineEnd)
     : `line ${line}`;
   const toggle = () => onToggle(line);
+  // Hide and a delete sit in the part that folds away (inert once closed): keyboard focus goes to the bubble, not to
+  // the page.
+  const hide = () => {
+    toggle();
+    bubbleRef.current?.focus({ preventScroll: true });
+  };
+  const remove = onDelete
+    ? (id: string) => {
+        if (annotations.length > 1) bubbleRef.current?.focus({ preventScroll: true });
+        else onLastDelete?.(line);
+        onDelete(id);
+      }
+    : undefined;
   return (
     <div className="relative" data-code-comment-fold={line}>
       <button
+        ref={bubbleRef}
         type="button"
         data-code-comment-bubble={line}
         aria-expanded={open}
-        aria-label={`${open ? 'Hide' : 'Show'} ${count === 1 ? 'the comment' : `${count} comments`} on ${where}`}
+        aria-controls={revealId}
+        aria-label={`${count === 1 ? 'Comment' : `${count} comments`} on ${where}`}
         title={open ? 'Hide comment' : count === 1 ? 'Show comment' : `Show ${count} comments`}
         onClick={(e) => {
           e.stopPropagation();
           toggle();
         }}
-        className={`absolute z-[5] flex items-center justify-center gap-0.5 rounded-md px-1 font-sans text-[length:var(--ib-fs-10,10px)] font-semibold tabular-nums leading-none transition-colors duration-150 ${
+        // A phone's finger needs 44 px: the drawing keeps its size and an invisible 44 × 44 area takes the tap, inside
+        // the gutter's room left of the numbers (FOLD_GUTTER_CSS), so a number's tap still chooses its line.
+        className={`absolute z-[5] flex items-center justify-center gap-0.5 rounded-md px-1 font-sans text-[length:var(--ib-fs-10,10px)] font-semibold tabular-nums leading-none transition-colors duration-150 before:absolute before:content-[''] [@media(pointer:coarse)]:before:-inset-y-[13px] [@media(pointer:coarse)]:before:-left-1 [@media(pointer:coarse)]:before:-right-5 ${
           open
             ? 'bg-primary text-primary-foreground'
             : 'bg-primary/15 text-primary hover:bg-primary/25'
@@ -459,12 +493,16 @@ const CodeCommentFold: React.FC<{
         {count > 1 && <span>{count}</span>}
       </button>
       <div
+        id={revealId}
         data-code-comment-reveal=""
         data-open={open ? '' : undefined}
         aria-hidden={open ? undefined : true}
         inert={open ? undefined : true}
         className="overflow-clip"
-        style={{ height: open ? height : 0, opacity: open ? 1 : 0, transition: animate && !reducedMotion ? FOLD_TRANSITION : 'none' }}
+        style={{ height: open ? height : 0, opacity: open ? 1 : 0, transition: moving && animate && !reducedMotion ? FOLD_TRANSITION : 'none' }}
+        onTransitionEnd={(e) => {
+          if (e.target === e.currentTarget && e.propertyName === 'height') setMoving(false);
+        }}
       >
         <div ref={innerRef} className="flow-root">
           {annotations.map((annotation, index) => (
@@ -474,11 +512,11 @@ const CodeCommentFold: React.FC<{
               isSelected={selectedAnnotationId === annotation.id}
               onSelect={onSelect}
               onEdit={onEdit}
-              onDelete={onDelete}
+              onDelete={remove}
               plain={plain}
               inFold
               // One Hide per fold, on its first card.
-              onHide={index === 0 ? toggle : undefined}
+              onHide={index === 0 ? hide : undefined}
             />
           ))}
         </div>
@@ -492,13 +530,17 @@ const CodeCommentFold: React.FC<{
  * fixed height Pierre's grid gives an annotation row no height of its own (the
  * card then covers the next lines); `height: max-content` keeps the row exactly
  * as tall as its fold. The row paints above the gutter (a grid item's z-index
- * makes its own layer) so the bubble can sit there, and the line numbers make room for it.
+ * makes its own layer) so the bubble can sit there, and the line numbers make
+ * room for it (and for its 44 px tap area on a phone) whenever the file can
+ * have comments, so the code never shifts when the first comment comes or the
+ * last one goes.
  */
 const FOLD_ROW_CSS = `
     [data-line-annotation] { height: max-content; z-index: 4; }
 `;
 const FOLD_GUTTER_CSS = `
     [data-column-number] { padding-left: calc(2ch + 20px); }
+    @media (pointer: coarse) { [data-column-number] { padding-left: calc(2ch + 30px); } }
 `;
 
 export interface CodeFileViewProps {
@@ -649,17 +691,16 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (lines.every((l) => prev.has(l))) return;
     foldStore.set(new Set([...prev, ...lines]));
   }, [foldStore]);
-  useEffect(() => foldStore.set(new Set()), [filepath, foldStore]);
-  // A comment saved while the file is open shows where it landed: its fold opens. The ones there on arrival stay folded.
-  const seenAnnotationIdsRef = useRef<Set<string> | null>(null);
+  // Letting go of a folded comment waits for the fold to close; a file switch or unmount cancels it.
+  const deselectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDeselect = useCallback(() => {
+    if (deselectTimerRef.current != null) clearTimeout(deselectTimerRef.current);
+    deselectTimerRef.current = null;
+  }, []);
   useEffect(() => {
-    if (!folds) return;
-    const seen = seenAnnotationIdsRef.current;
-    seenAnnotationIdsRef.current = new Set(annotations.map((ann) => ann.id));
-    if (!seen) return;
-    const added = annotations.filter((ann) => !seen.has(ann.id) && (ann.scope ?? 'line') === 'line');
-    if (added.length > 0) openFold(added.map((ann) => ann.lineEnd));
-  }, [annotations, folds, openFold]);
+    foldStore.set(new Set());
+    return cancelDeselect;
+  }, [filepath, foldStore, cancelDeselect]);
   const selectedFoldLine = folds ? selectedCodeAnnotation?.lineEnd : undefined;
   useEffect(() => {
     if (selectedFoldLine != null) openFold([selectedFoldLine]);
@@ -675,7 +716,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
       // Folding a chosen comment away lets go of it, so its lines lose the mark: after the fold has closed, since
       // the host's redraw redraws Pierre's rows.
       if (selectedFoldLineRef.current === foldLine) {
-        setTimeout(() => {
+        cancelDeselect();
+        deselectTimerRef.current = setTimeout(() => {
+          deselectTimerRef.current = null;
           if (selectedFoldLineRef.current === foldLine && !foldStore.isOpen(foldLine)) onSelectAnnotationRef.current?.(null);
         }, FOLD_MS);
       }
@@ -683,7 +726,25 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
       next.add(foldLine);
     }
     foldStore.set(next);
-  }, [foldStore]);
+  }, [foldStore, cancelDeselect]);
+  // A line's last comment takes its fold and bubble with it: once it is gone, keyboard focus (left on the page by
+  // then) moves to the nearest other bubble, or to the file. A delete still in flight, or refused, moves nothing.
+  const focusAfterDeleteRef = useRef<number | null>(null);
+  const focusAfterLastDelete = useCallback((foldLine: number) => {
+    focusAfterDeleteRef.current = foldLine;
+  }, []);
+  useLayoutEffect(() => {
+    const foldLine = focusAfterDeleteRef.current;
+    const area = fileAreaRef.current;
+    if (foldLine == null || !area) return;
+    if (area.querySelector(`[data-code-comment-bubble="${foldLine}"]`)) return;
+    focusAfterDeleteRef.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const bubbles = [...area.querySelectorAll<HTMLElement>('[data-code-comment-bubble]')];
+    const next = bubbles.find((el) => Number(el.getAttribute('data-code-comment-bubble')) > foldLine) ?? bubbles[bubbles.length - 1];
+    (next ?? area).focus({ preventScroll: true });
+  }, [lineAnnotations]);
 
   // The line a host jumped to stays marked until a comment or a selection
   // takes the mark (or the next jump moves it).
@@ -814,6 +875,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (folds) {
       return (
         <CodeCommentFold
+          // Pierre keys its rows by position: a line's own key keeps one line's fold from inheriting another's
+          // state when a line above loses its last comment.
+          key={annotation.lineNumber}
           line={annotation.lineNumber}
           annotations={group}
           store={foldStore}
@@ -822,6 +886,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           onSelect={onSelectAnnotation}
           onEdit={onEditAnnotation}
           onDelete={onDeleteAnnotation}
+          onLastDelete={focusAfterLastDelete}
           plain={commentCard === 'plain'}
         />
       );
@@ -836,7 +901,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
         plain={commentCard === 'plain'}
       />
     );
-  }, [commentCard, folds, foldStore, onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId, toggleFold]);
+  }, [commentCard, folds, foldStore, focusAfterLastDelete, onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId, toggleFold]);
 
   const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
     return (
@@ -909,7 +974,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   }, [onAddAnnotation, openCommentForRange]);
 
   const themeCss = folds
-    ? `${pierreTheme.css}${FOLD_ROW_CSS}${lineAnnotations.length > 0 ? FOLD_GUTTER_CSS : ''}`
+    ? `${pierreTheme.css}${FOLD_ROW_CSS}${onAddAnnotation || lineAnnotations.length > 0 ? FOLD_GUTTER_CSS : ''}`
     : pierreTheme.css;
 
   return (
@@ -920,6 +985,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
         onPointerMove={(e) => {
           lastPointerRectRef.current = new DOMRect(e.clientX, e.clientY, 0, 0);
         }}
+        // Where focus lands when the last comment's fold goes (programmatic only, never a Tab stop).
+        tabIndex={folds ? -1 : undefined}
+        style={folds ? { outline: 'none' } : undefined}
         onPointerDownCapture={folds ? (e) => {
           pointerInFoldRef.current = isInFold(e.nativeEvent);
         } : undefined}
@@ -967,6 +1035,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           // The words typed for these lines survive a close (Escape, X) and come back when they are chosen again.
           draftKey={pendingComment.draftKey}
           onSubmit={(text, images) => {
+            // The comment just saved shows where it landed: its line's fold opens (the ones there before stay as
+            // they were).
+            if (folds) openFold([pendingComment.range.end]);
             onAddAnnotation({
               filePath: filepath,
               lineStart: pendingComment.range.start,
