@@ -52,7 +52,7 @@
  *
  * Ask AI: a poll answer can say a question waits on this session, and only
  * then does this link start a client on the session's Ask AI bridge
- * (`startAskClient`; the Inbox's setting off means none ever waits).
+ * (`startAskClient`).
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
@@ -65,8 +65,11 @@ import {
   inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
+  INBOX_HELD_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
@@ -712,7 +715,7 @@ export async function discoverInboxTools(host: Host, dataDir: string): Promise<I
       return tools
     }
   }
-  const remembered = parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null))
+  const remembered = inboxToolsWithoutBro(parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null)))
   return remembered.length > 0 ? remembered : INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool }))
 }
 
@@ -850,6 +853,8 @@ export class InboxLink {
   private appendOk: boolean | null = null
   /** What the Inbox was last told about Send now (`send_now` on the poll and the state events). */
   private lastSendNow: boolean | null = null
+  /** What the Inbox was last told about `heldForInput` (`held` on the poll and the state events): its "Stopped" line. */
+  private lastHeld = false
   /** Send now could not go into the running turn (the engine refused the row): these wait for idle, as before. */
   private noSteer = new Set<string>()
   /** The engine refused a row once (an engine without `$.session.append`): stop offering Send now. */
@@ -1029,7 +1034,9 @@ export class InboxLink {
       return { deny: `The Plannotator Inbox refused the call: ${message}` }
     }
     const result = inboxToolResultText(answer.result)
-    return result.isError ? { deny: result.text } : { text: result.text }
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    const text = inboxResultWithNote(result.text, call.note)
+    return result.isError ? { deny: text } : { text }
   }
 
   private get registryPath(): string {
@@ -1088,13 +1095,17 @@ export class InboxLink {
     const now = await this.host.now()
     // Whether a Send now reply could go in right now: never while this session's own Ask question holds it.
     const sendNow = await this.sendNowNow()
-    if (busy !== this.busy || sendNow !== this.lastSendNow) {
+    const held = this.heldForInput
+    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
       this.busy = busy
       this.lastSendNow = sendNow
-      // A turn started or ended: the Inbox's live sessions say so (step 8), and whether Send now can go in.
-      if (known && this.leader) void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow })
+      this.lastHeld = held
+      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in, and
+      // whether Claude Code holds this session's replies until the person types (the window's "Stopped").
+      if (known && this.leader)
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1260,6 +1271,8 @@ export class InboxLink {
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+      // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
+      ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,

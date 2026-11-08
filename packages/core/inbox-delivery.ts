@@ -43,7 +43,9 @@ export type InboxDeliveryState = "delivered" | "undelivered" | "saved" | "queued
  * pressed), `working` (queued: its session is in a turn), `idle` (sending:
  * the session is idle, the turn goes now), `away` (queued: its session does
  * not poll now), `next_turn` (queued: the Inbox does not know the session's
- * state), `ack_pending` (a 👍 inside its Undo window).
+ * state), `ack_pending` (a 👍 inside its Undo window), `stopped` (queued:
+ * Claude Code refused it after the person stopped that session, and holds it
+ * until they type there; #2780, approval "inbox-stopped-reply").
  */
 export type InboxDeliveryReason =
   | "delivered"
@@ -56,7 +58,8 @@ export type InboxDeliveryReason =
   | "idle"
   | "away"
   | "next_turn"
-  | "ack_pending";
+  | "ack_pending"
+  | "stopped";
 
 /** How the session the item goes to is connected now: the fields the rule reads. */
 export interface InboxDeliveryConnection {
@@ -64,6 +67,8 @@ export interface InboxDeliveryConnection {
   busy: boolean | null;
   /** Its connection can deliver into a running turn. */
   send_now: boolean;
+  /** Claude Code refused a reply and holds the session's replies until the person types there (`held`). Absent: no. */
+  held?: boolean;
 }
 
 export interface InboxDeliveryInput {
@@ -139,6 +144,9 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   const connection = input.connection;
   // Its session does not poll now: it waits for the session to come back, whatever was pressed before.
   if (connection === null) return { state: "queued", reason: "away", ...no };
+  // Claude Code holds this session's replies until the person types there (they stopped it): nothing goes in
+  // before that, Send now included, so the line says so instead of Queued or Sending.
+  if (connection?.held === true) return { state: "queued", reason: "stopped", ...no };
   // Pressed, and the session can take it now. While it cannot (its own Ask this session question holds
   // it), the item waits for the turn to end: it reads as queued.
   if (input.sendingNow && !(connection?.busy === true && !connection.send_now)) return { state: "sending", reason: "sending_now", ...no, ...auto };

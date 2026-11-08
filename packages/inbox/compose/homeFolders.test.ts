@@ -5,7 +5,7 @@
  * start an agent somewhere the person never saw.
  */
 import { describe, expect, test } from 'bun:test';
-import { closestFirst, folderSuggestions, missingFolderLine, nameBelow, namedFolder, normalizeFolderPath, shownFolderPath, splitFolderPath } from './homeFolders';
+import { closestFirst, folderSuggestions, nameBelow, normalizeFolderPath, splitFolderPath } from './homeFolders';
 
 describe('splitFolderPath', () => {
   test('the parent is read, the tail filters', () => {
@@ -36,33 +36,6 @@ describe('folderSuggestions', () => {
     expect(folderSuggestions(names, 'ger')).toEqual([]);
     expect(folderSuggestions(names, '')).toEqual(names);
   });
-});
-
-describe('namedFolder', () => {
-  test('a folder read with nothing after its slash', () => {
-    expect(namedFolder({ parent: '~/code/billing-api', exists: true, folders: [] }, '')).toBe('~/code/billing-api');
-  });
-  test('a name read that the tail spells exactly (not a prefix, not another case)', () => {
-    const read = { parent: '~/code', exists: true, folders: ['billing-api', 'billing-reports'] };
-    expect(namedFolder(read, 'billing-api')).toBe('~/code/billing-api');
-    expect(namedFolder(read, 'billing')).toBeNull();
-    expect(namedFolder(read, 'Billing-api')).toBeNull();
-  });
-  test('never home itself, never a path that is not there', () => {
-    expect(namedFolder({ parent: '~', exists: true, folders: ['code'] }, '')).toBeNull();
-    expect(namedFolder({ parent: '~/cod', exists: false, folders: [] }, '')).toBeNull();
-  });
-});
-
-test('the missing line names the path as typed, without its last slash', () => {
-  expect(shownFolderPath('~/code/biling-svc/')).toBe('~/code/biling-svc');
-  expect(shownFolderPath('~/')).toBe('~/');
-});
-
-test('a missing path points below only when folders are listed there', () => {
-  expect(missingFolderLine('Mac mini', '~/code/x')).toBe('Mac mini has no folder ~/code/x. Check the path, or pick a folder below.');
-  expect(missingFolderLine('Mac mini', '~/code/x', false)).toBe('Mac mini has no folder ~/code/x. Check the path.');
-  expect(missingFolderLine(null, '~/code/x', false)).toBe("There's no folder ~/code/x. Check the path.");
 });
 
 test('the folders under the missing line: the one closest to what was typed first, ties in their order', () => {

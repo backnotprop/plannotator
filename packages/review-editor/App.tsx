@@ -296,8 +296,10 @@ import {
 declare const __APP_VERSION__: string;
 
 // Plannotator's own code review: the selection toolbar's Copy copies rich
-// text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// text, and on a touch screen the toolbar sits below the selection (clear of
+// iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {

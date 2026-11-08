@@ -174,10 +174,9 @@ const REVIEW_GUIDE = {
 function board(patch: string) {
   return {
     title: 'Back off between retries',
-    claim: 'Built. The loop now waits [^1].',
+    claim: 'Built. The loop now waits [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
     views: {
       picture: { html: '<svg viewBox="0 0 700 240" width="700" height="240"><g data-step="1" data-mark="loop" data-code="src/ledger.ts#L1" data-ref="1"><rect class="ink" x="40" y="70" width="260" height="90" rx="12"/><text x="170" y="120" text-anchor="middle">The retry loop</text></g><g data-step="2" data-mark="gone" data-ref="3"><rect class="acc-fill" x="400" y="70" width="260" height="90" rx="12"/><text x="530" y="120" text-anchor="middle" class="t-acc">A file that is gone</text></g></svg>', width: 700, height: 240 },
-      know: 'The loop waits 0.5 s, 2 s, then 8 s [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
       code: {
         stage: 'after',
         guide: { title: 'Back off between retries', intent: 'Wait before retrying, in `src/retry.ts:3`.', sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }] }] },
@@ -471,21 +470,20 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
       await expect(popout).toBeVisible();
 
-      // What to know: resting on a code span shows its code, with Open. One that is not a file shows nothing.
+      // The board's claim: resting on a code span shows its code, with Open. One that is not a file shows nothing.
       await page.reload();
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-      await expect(page.locator('.shp-view.v-know.drawn')).toBeVisible(); // its fade in has finished, for the picture
-      const knowWindow = await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'));
-      await expect(knowWindow).toContainText('export const ledger');
-      await knowWindow.locator('[data-open-in-caret]').click();
-      const knowMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
-      await expect(knowMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
-      await shot(page, `13-board-know-code-span-${colorScheme}`);
-      const knowCount = launched().length;
-      await knowMenu.locator('[data-open-in-item="reveal"]').click();
-      await expect.poll(() => launched().length).toBe(knowCount + 1);
+      await expect(page.locator('.shp-view.v-picture.drawn')).toBeVisible(); // its fade in has finished, for the picture
+      const claimWindow = await codeWindowOf(page, page.locator('.shp-claim [data-code-hover="src/ledger.ts"]'));
+      await expect(claimWindow).toContainText('export const ledger');
+      await claimWindow.locator('[data-open-in-caret]').click();
+      const claimMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
+      await expect(claimMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `13-board-claim-code-span-${colorScheme}`);
+      const claimCount = launched().length;
+      await claimMenu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(claimCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/ledger.ts')));
-      await noCodeWindow(page, page.locator('.shp-know [data-code-hover="react.js"]'));
+      await noCodeWindow(page, page.locator('.shp-claim [data-code-hover="react.js"]'));
       // The board's Chat tab is the thread: its messages' words too.
       await page.locator('.shp-tbtn.chat').click();
       await page.locator('.shp-tabs [role="tab"]', { hasText: 'Thread' }).click();
@@ -495,12 +493,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
       await page.getByRole('button', { name: 'Close panel' }).click();
       // The number beside it is still the number.
-      await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
-      // Commenting (the crosshair, in Annotate's place), the words are only words: nothing shows, and a click picks them.
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+      await expect(page.locator('.shp-claim [data-ref="1"]').first()).toBeVisible();
+      // Commenting (the crosshair, in Annotate's place), the claim's words are only words: nothing shows.
+      await page.locator('.shp-tbtn', { hasText: 'Shape' }).first().click();
       await page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true }).click();
-      await expect(page.locator('.shp-know [data-code-hover]')).toHaveCount(0);
-      await noCodeWindow(page, page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }));
+      await expect(page.locator('.shp-claim [data-code-hover]')).toHaveCount(0);
+      await noCodeWindow(page, page.locator('.shp-claim code', { hasText: 'src/ledger.ts:1' }));
 
       // The review's own words: its intent names a file.
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
@@ -958,8 +956,7 @@ test('an agent in a linked worktree: its message, review and board open the work
 
     // The board's and the review's own words start in the worktree too. (With the panel open, a click on the board only closes the panel.)
     await page.reload();
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-    await (await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'))).locator('[data-open-in-caret]').click();
+    await (await codeWindowOf(page, page.locator('.shp-claim [data-code-hover="src/ledger.ts"]'))).locator('[data-open-in-caret]').click();
     expect(await pick('src/ledger.ts')).toBe(revealed(inTree('src/ledger.ts')));
     await page.goto(`${world.url}#thread=${world.treeReviewThread}`);
     await page.getByRole('button', { name: 'Start review' }).first().click();
@@ -1011,8 +1008,8 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-    await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
+    await page.locator('.shp-sidep .shp-icon-btn').click();
+    await expect(page.locator('.shp-claim code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
     await expect(page.locator('[data-code-hover]')).toHaveCount(0);
     // A guide opens as a plain guide with Code review off, and its words stay words.
     await page.goto(`${world.url}#thread=${world.reviewThread}`);

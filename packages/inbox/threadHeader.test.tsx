@@ -262,7 +262,9 @@ test.skipIf(!hasDom)('tooltips: the read button says its words, with E for Mark 
   expect(document.querySelector('[data-shortcut-hint="inbox-thread.markRead"] kbd')?.textContent).toBe('E');
   expect(markRead.getAttribute('aria-keyshortcuts')).toBe('E');
   unhover(markRead.closest('[data-tip-wrap]') ?? markRead);
-  expect(await tooltipOf(head().querySelector('[data-thread-snooze]')!)).toBe('Snooze');
+  // The clock: Snooze, with H (approval "inbox-keyboard-keys-2026-11-07") from the registry, named for a screen reader too.
+  expect(await tooltipOf(head().querySelector('[data-thread-snooze]')!)).toBe('SnoozeH');
+  expect(head().querySelector('[data-thread-snooze]')!.getAttribute('aria-keyshortcuts')).toBe('H');
   act(() => root!.unmount());
   host!.remove();
   await render(OPENED);

@@ -17,13 +17,18 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
@@ -64,7 +69,9 @@ import {
   INBOX_AUTO_SEND_ACK_NOTES,
   INBOX_RECORD_VERSION,
   type InboxAck,
+  type InboxReaction,
   type InboxAddressee,
+  type InboxLaunchClone,
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
@@ -92,6 +99,7 @@ import {
   type InboxThreadNaming,
   inboxThreadNameKey,
   isInboxNote,
+  inboxPersonAnsweredSince,
   isInboxActionReport,
   inboxActionInDraft,
   inboxAgentName,
@@ -114,6 +122,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
+import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -140,6 +149,7 @@ import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotato
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./decision-data";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -180,6 +190,7 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
   inboxHashtags,
   inboxInitiativeBareName,
@@ -429,6 +440,28 @@ export interface InboxDiskUsage {
   projects: InboxProjectUsage[];
 }
 
+/**
+ * Whether a file's last line was torn by a crash, so the next append starts on a fresh line and can't be glued to it.
+ * For a file the store never reads into memory, so it has no `tornFiles` entry; the last byte says, without reading the rest.
+ */
+function endsMidLine(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const { size } = fstatSync(fd);
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** An annotation as stored: without the exporter's `exportLocation`, which only the window sets, on its export copies. */
 function withoutExportLocation(annotation: Record<string, unknown>): Record<string, unknown> {
   if (!("exportLocation" in annotation)) return annotation;
@@ -478,6 +511,11 @@ function lastNonNote(messages: readonly InboxMessage[]): InboxMessage | undefine
 /** The note that carries a 👍 Looks good to the agent (`ack_of`): never listed in a thread, the ack on its message says it. */
 function isAckNote(message: InboxMessage): boolean {
   return message.author.kind === "person" && typeof message.ack_of === "string" && message.ack_of !== "";
+}
+
+/** Two tray reactions are the same emoji with the same name (null is 👍 Looks good). */
+function sameReaction(a: InboxReaction | null, b: InboxReaction | null): boolean {
+  return (a?.emoji ?? null) === (b?.emoji ?? null) && (a?.label ?? "") === (b?.label ?? "");
 }
 
 /**
@@ -1950,6 +1988,38 @@ export class InboxStore {
     return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
   }
 
+  /**
+   * Settings → Activity: every thread's messages counted by hour over `[fromMs, toMs)`, for one project (its
+   * combined projects too) or all of them (`inboxActivity`, ./activity.ts). Reads the in-memory log only: each
+   * thread's message times, its name only when it has a message in the span. Writes and logs nothing.
+   */
+  activity(span: { fromMs: number; toMs: number; projectId: string | null }): InboxActivityModel {
+    const store = this;
+    function* sources(): Iterable<InboxActivitySource> {
+      for (const [threadId, members] of store.threadMembers) {
+        const root = store.messages.get(threadId);
+        if (!root || root.thread_id !== threadId) continue;
+        // Messages are in seq order, so the last one written is the newest: a thread quiet since before the span
+        // is passed over without reading the rest.
+        const lastId = members[members.length - 1];
+        const lastAt = lastId ? Date.parse(store.messages.get(lastId)?.created_at ?? "") : NaN;
+        if (!(lastAt >= span.fromMs)) continue;
+        const times: number[] = [];
+        for (const id of members) {
+          const at = Date.parse(store.messages.get(id)?.created_at ?? "");
+          if (Number.isFinite(at)) times.push(at);
+        }
+        yield {
+          thread_id: threadId,
+          project_id: root.project_id,
+          name: () => store.threadShortName(threadId) ?? store.threadSubject(threadId),
+          times,
+        };
+      }
+    }
+    return inboxActivity(sources(), { ...span, inProject: span.projectId === null ? undefined : (projectId) => this.sameProject(projectId, span.projectId!) });
+  }
+
   /** One row of the list: the thread's summary, its project label and its section. */
   listRow(threadId: string): InboxListRow | null {
     const summary = this.threadSummary(threadId);
@@ -2182,7 +2252,7 @@ export class InboxStore {
     const connectionOf = (session: string): InboxDeliveryConnection | null | undefined => {
       if (!presence) return undefined;
       const connection = presence.connection(session);
-      return connection ? { busy: connection.busy, send_now: connection.send_now } : null;
+      return connection ? { busy: connection.busy, send_now: connection.send_now, ...(connection.held ? { held: true } : {}) } : null;
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
@@ -2584,8 +2654,9 @@ export class InboxStore {
         const at = this.stamp();
         // Move back withdraws a 👍 standing on this Mark read too, so the agent never sees a 👍
         // on a thread the person moved back to the top.
+        // A delivered one stays: the agent has it, and the message takes no second one.
         for (const message of members) {
-          if (message.author.kind === "agent" && message.ack && root.person_read_seq != null && message.ack.read_seq === root.person_read_seq) {
+          if (message.author.kind === "agent" && message.ack && root.person_read_seq != null && message.ack.read_seq === root.person_read_seq && this.ackDeliveredAt(message.ack) === null) {
             this.appendMessage({ ...message, ack: null }, at);
           }
         }
@@ -2798,8 +2869,19 @@ export class InboxStore {
    * thread's latest agent message (a newer one arrived), while a question in
    * the thread is open or picked, and on an archived thread. No write when
    * nothing changes.
+   *
+   * `reaction` (approval "inbox-reaction-tray"): the emoji the person picked
+   * in the 👍's tray, kept on the ack; undefined keeps an ack's reaction as it
+   * is, null makes it 👍 Looks good again. Picking another emoji on a message
+   * already marked, inside its Undo window, changes only the emoji: the ack
+   * and its window stay, and the note carries the one it has when the window
+   * closes. Once sent it never changes (owner, 2026-11-07: "Reaction should go
+   * away after sending and only come back when I can send a new one"): another
+   * emoji after the window closed is `409 ack_sent`, and so is taking back one
+   * that was delivered (Move back leaves a delivered one standing too). The
+   * message takes no second one; the agent's next message takes a new one.
    */
-  ackMessage(messageId: string, on: boolean): { message: InboxMessageWire; thread: InboxListRow } {
+  ackMessage(messageId: string, on: boolean, reaction?: InboxReaction | null): { message: InboxMessageWire; thread: InboxListRow } {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const threadId = message.thread_id;
@@ -2839,11 +2921,21 @@ export class InboxStore {
           settled_seq: null,
           settled_at: null,
           seen_at: null,
+          ...(reaction ? { reaction } : {}),
         };
         this.appendMessage({ ...this.messages.get(messageId)!, ack }, at);
+      } else if (reaction !== undefined && !sameReaction(message.ack.reaction ?? null, reaction)) {
+        // Sent (its Undo window closed): a reaction never changes after that (owner, 2026-11-07).
+        if (message.ack.settled_seq != null) throw new InboxError("ack_sent", "This reaction was sent already; it can't be changed.");
+        // Another emoji on a message already marked, inside its Undo window: only the emoji changes.
+        const at = this.stamp();
+        const { reaction: _was, ...rest } = message.ack;
+        this.appendMessage({ ...message, ack: reaction ? { ...rest, reaction } : rest }, at);
       }
     } else if (message.ack) {
       const ack = message.ack;
+      // Delivered (its note reached the session, or an agent read it): it stays, so the message never takes a second one.
+      if (this.ackDeliveredAt(ack) !== null) throw new InboxError("ack_sent", "This reaction was sent already; it can't be taken back.");
       const at = this.stamp();
       this.appendMessage({ ...message, ack: null }, at);
       const current = this.messages.get(threadId)!;
@@ -2860,7 +2952,8 @@ export class InboxStore {
    * are sent to the agent (amended 2026-10-16: "send looks good through"):
    * first the ack's line with `settled_seq` (the seq of that line) and
    * `note_id`, then the note it names, a person's reply to the message whose
-   * body is `inboxAckLine` (`ack_of`), delivered like any reply (the wake).
+   * body is `inboxAckLine` (`ack_of`; with the tray reaction the ack has now,
+   * also kept as `ack_reaction`), delivered like any reply (the wake).
    * The note's line is the one a held
    * bridge poll wakes on. From then on agents see it in read_thread too.
    * `ackMessage`'s conditions are checked again here: when the person wrote
@@ -2894,11 +2987,12 @@ export class InboxStore {
         reply_to: message.id,
         author: { kind: "person" },
         subject: null,
-        body: inboxAckLine(message.id),
+        body: inboxAckLine(message.id, ack.reaction),
         created_at: noteAt,
         resolved_at: null,
         idempotency_key: null,
         ack_of: message.id,
+        ...(ack.reaction ? { ack_reaction: ack.reaction } : {}),
       };
       this.appendMessage(note, noteAt);
       out.push(settled);
@@ -3257,8 +3351,9 @@ export class InboxStore {
 
   /**
    * A thread as an agent reads it (read_thread): an ack shows only once it
-   * settled, as `{ label, at }`; one still inside its Undo window (or taken
-   * back) is not there.
+   * settled, as `{ label, at, reaction }` (`reaction` always, 👍 Looks good
+   * for an ack without a tray emoji); one still inside its Undo window (or taken back) is not
+   * there.
    */
   agentThread(threadId: string, caller: string | null = null): InboxThread | null {
     const thread = this.thread(threadId);
@@ -3271,7 +3366,7 @@ export class InboxStore {
         if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
         if (message.ack !== undefined) {
           const { ack, ...rest } = out;
-          out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at } : null } as InboxMessageWire;
+          out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at, reaction: ack.reaction ?? { emoji: "👍", label: INBOX_ACK_LABEL } } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
         // the reader, that it was tagged. Delivery state is the person's view, not the agent's.
@@ -3509,7 +3604,7 @@ export class InboxStore {
     const blobSizes = inboxBlobSizes(this.dir);
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
-    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes();
+    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
@@ -5658,6 +5753,15 @@ export class InboxStore {
     return out;
   }
 
+  /** Bytes Decision data's kept lines take on disk (Settings → Storage). */
+  private decisionLinesBytes(): number {
+    try {
+      return statSync(join(this.dir, DECISION_LINES_FILE)).size;
+    } catch {
+      return 0;
+    }
+  }
+
   /** Bytes the reply drafts take on disk (Settings → Storage). */
   private replyDraftsBytes(): number {
     let total = 0;
@@ -5679,6 +5783,7 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
+    this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.keepSeqFloor();
     for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE]) {
       const path = join(folder, name);
@@ -5709,9 +5814,51 @@ export class InboxStore {
     const project = this.projectsById.get(projectId);
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
+    this.keepDecisionLines((question) => question.project_id === projectId);
     this.keepSeqFloor();
     rmSync(this.projectFolder(project), { recursive: true, force: true });
     this.reload(markups);
+  }
+
+  /**
+   * Settings -> Decision data keeps its numbers when a thread goes (the owner, round 2): one line per question, no
+   * words, written before the delete. A crash in between leaves a line beside a question still stored, which the count
+   * reads once. A line that cannot be written, or a record that cannot be read, costs a number, never the person's
+   * delete: Delete is the way out of a bad thread.
+   */
+  private keepDecisionLines(which: (question: InboxQuestionRecord) => boolean): void {
+    try {
+      const questions = [...this.questions.values()].filter(which);
+      const lines = decisionLinesOf(
+        questions,
+        this.messages,
+        (id) => this.decisionProjectLabel(id),
+        (message) => this.closedByArchive(message),
+      );
+      if (!lines) return;
+      const file = join(this.dir, DECISION_LINES_FILE);
+      appendFileSync(file, `${endsMidLine(file) ? "\n" : ""}${lines}`, { mode: 0o600 });
+    } catch {
+      // See above.
+    }
+  }
+
+  private decisionProjectLabel(id: string): string | null {
+    const project = this.projectsById.get(id);
+    return project ? this.labeled(project).name : null;
+  }
+
+  /** What Decision data counts, from memory: the store's records, not a copy of them. */
+  decisionDataInput(): DecisionDataInput {
+    return {
+      headOf: (id) => (this.projectsById.has(id) ? this.canonicalProjectId(id) : id),
+      labelOf: (id) => this.decisionProjectLabel(id),
+      messages: [...this.messages.values()],
+      byId: this.messages,
+      closedByArchive: (message) => this.closedByArchive(message),
+      reaskListedIds: (threadId) => this.reaskListedIds(threadId),
+      questions: [...this.questions.values()],
+    };
   }
 
   /** The marked-up images the annotations matching `which` name. */
@@ -6566,12 +6713,17 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string },
+    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    // A clone's folder: a new identity when the Inbox made it again, or none (`null`) once it is gone or no longer
+    // the Inbox's, so a later Cancel never removes a folder made at that path since.
+    const { made_folder: _madeFolder, made_inode: _madeInode, ...unmade } = message.launch;
     const next: InboxMessage =
-      "to" in outcome
+      "clone" in outcome
+        ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
+        : "to" in outcome
         ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
         : "error" in outcome
           ? { ...message, launch: { ...message.launch, error: outcome.error } }
@@ -6686,6 +6838,16 @@ export class InboxStore {
       if (record && record.steps.length > 0) out.push(record);
     }
     return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * The person answered in the thread at or after `since` (a list's last write): a message of theirs, or a 👍 Looks
+   * good still standing on an agent's message (`inboxPersonAnsweredSince`). Read over the stored messages, so a 👍
+   * counts though its note is never listed in the thread. The checklist's waiting rule (the row's `steps_waiting`).
+   */
+  personAnsweredSince(threadId: string, since: string): boolean {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    return inboxPersonAnsweredSince(this.threadMessages(root), since);
   }
 
   /** Every list that holds steps, in threads that still exist (Tidy reads them). */

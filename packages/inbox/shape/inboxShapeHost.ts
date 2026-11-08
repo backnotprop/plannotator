@@ -5,7 +5,7 @@
  * - Ask: to the session that drew the board, through the thread's Ask (the
  *   Inbox's "Ask this session", inbox-ask-live.ts), streamed into the board
  *   and stored as the answer. When no session can answer (it ended, or the
- *   Inbox's Ask is off), the question is stored and waits: the agent answers it
+ *   Inbox is an older one with Ask off), the question is stored and waits: the agent answers it
  *   with `plannotator shape answer` when it next reads its notes.
  * - Change it: stored; it waits until the agent's `shape read --notes` picks
  *   it up, and the event feed clears "waits for the agent" then. With
@@ -123,7 +123,7 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
       return answer ? { text: answer, provider: posted.provider_id } : null;
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'ask_busy') onBusy?.();
-      // The Ask is off in this Inbox (404), or the session went away mid-answer: the question waits instead.
+      // An older Inbox with Ask off (404), or the session went away mid-answer: the question waits instead.
       return null;
     }
   };

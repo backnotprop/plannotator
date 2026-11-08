@@ -55,7 +55,7 @@ async function world() {
   mkdirSync(dataDir, { recursive: true });
   // The Inbox reads config.json through the env: this test's own, so the switches are the person's file.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, phones: false, askAi: false, binaryPath: null, askTimes: { connectWaitMs: 0 } });
+  const server = await startInboxServer({ dataDir, phones: false, binaryPath: null, askTimes: { connectWaitMs: 0 } });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const client = new Client({ name: "inbox-show-me-shape-test", version: "1.0.0" });
@@ -354,17 +354,20 @@ describe("which board a Show me made (other work on the thread's boards is never
   });
 });
 
-describe("off, the default", () => {
-  test("no Show me, no Ask, no boards: nothing read or kept", async () => {
+describe("Code review off", () => {
+  test("no Show me and no boards, while Ask itself stays on", async () => {
     const w = await world();
     await w.setCodeReview(true);
     const review = await w.sendReview();
     const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
     expect((await w.showMe(review.thread_id, "turn-0001", target, review.guide.title)).status).toBe(200);
     expect((await w.setCodeReview(false)).status).toBe(200);
-    expect((await json(await w.fromWindow("/api/inbox/settings"))).ask_ai).toBeUndefined();
-    // Ask is off with Code review (the env var unset): its routes are the unknown route.
-    expect((await w.showMe(review.thread_id, "turn-0002", target, review.guide.title)).status).toBe(404);
+    // Ask has no switch: it stays on with Code review off, and only Show me is refused.
+    expect((await json(await w.fromWindow("/api/inbox/settings"))).ask_ai).toBe(true);
+    const refused = await w.showMe(review.thread_id, "turn-0002", target, review.guide.title);
+    expect(refused.status).toBe(409);
+    expect((await json(refused)).code).toBe("code_review_off");
+    expect((await w.turnsOf(review.thread_id)).map((turn: { id: string }) => turn.id)).toEqual(["turn-0001"]);
     expect((await w.fromWindow("/api/shapes")).status).toBe(404);
   });
 });

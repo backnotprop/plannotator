@@ -22,7 +22,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { inboxPullMove, inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
-import { INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewPatchSize, inboxReviewStartOf, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
+import { inboxReviewLinkOf, INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewPatchSize, inboxReviewStartOf, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
 
 function pr(fields: Partial<InboxPull> & { number: number }): InboxPull {
   const repo = "northwind/billing-svc";
@@ -469,5 +469,34 @@ describe("New review on local changes", () => {
     const patch = ["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1,2 +1,2 @@", " same", "-old", "+new", "--- looks like a header", "diff --git a/new b/new", "new file mode 100644", "--- /dev/null", "+++ b/new", "@@ -0,0 +1 @@", "+only"].join("\n");
     expect(inboxReviewPatchSize(patch)).toEqual({ files: 2, additions: 2, deletions: 2 });
     expect(inboxReviewPatchSize("")).toEqual({ files: 0, additions: 0, deletions: 0 });
+  });
+});
+
+describe("a pull request link", () => {
+  test("a web address or owner/repo#123 is that PR, on its own host; the rest of the address doesn't matter", () => {
+    const of = (text: string) => inboxReviewLinkOf(text) as { url: string; ref: { key: string; platform: string } };
+    expect(of("  northwind/payments#231 ")).toMatchObject({ url: "https://github.com/northwind/payments/pull/231", ref: { key: "github.com/northwind/payments#231", platform: "github" } });
+    expect(of("https://github.com/northwind/payments/pull/231/files?diff=split").url).toBe("https://github.com/northwind/payments/pull/231");
+    expect(of("https://gitlab.example.com/group/sub/app/-/merge_requests/9").ref).toMatchObject({ key: "gitlab.example.com/group/sub/app#9:pull", platform: "gitlab" });
+    expect(of("https://ghe.corp.example/o/r/pull/4").ref.key).toBe("ghe.corp.example/o/r#4");
+  });
+
+  test("Bitbucket and hosts it can't read say so; anything else isn't a link", () => {
+    // The key is the list's own, so a listed PR is found whatever its capitals; and what reads as a flag isn't a link.
+    const of = (text: string) => inboxReviewLinkOf(text) as { ref: { key: string } };
+    expect(of("https://gitlab.com/Northwind/Ledger/-/merge_requests/61").ref.key).toBe("gitlab.com/northwind/ledger#61:pull");
+    expect(of("Acme/Caps#8").ref.key).toBe(of("acme/caps#8").ref.key);
+    for (const text of ["https://--hostname/o/r/pull/1", "https://github.com/-o/r/pull/1", "https://github.com/o/-r/pull/1", "-o/r#1"]) expect(inboxReviewLinkOf(text)).toBeNull();
+    expect(inboxReviewLinkOf("https://bitbucket.org/acme/mobile/pull-requests/88")).toEqual({ unsupported: "bitbucket" });
+    expect(inboxReviewLinkOf("https://dev.azure.com/o/p/_git/r/pullrequest/5")).toEqual({ unsupported: "host" });
+    for (const text of ["", "retries", "https://github.com/northwind/payments", "file:///etc/pull/1", "o/r#x"]) expect(inboxReviewLinkOf(text)).toBeNull();
+  });
+
+  test("a Send's link start keeps the PR named by its own address, whatever else it says", () => {
+    const where = { host: "pi", project_id: "p", at: "2026-11-05T10:00:00.000Z" };
+    const start = inboxReviewStartOf({ kind: "link", url: "https://github.com/northwind/payments/pull/231", title: "Idempotent refunds", mine: true, ask: "custom", key: "github.com/other/repo#1", number: 1 }, where);
+    expect(start).toMatchObject({ kind: "link", ask: "custom", pull: { key: "github.com/northwind/payments#231", number: 231, title: "Idempotent refunds", mine: true } });
+    expect(inboxReviewStartOf({ kind: "link", url: "https://example.com/not-a-pull" }, where)).toBeNull();
+    expect(inboxReviewStartOf({ kind: "link" }, where)).toBeNull();
   });
 });

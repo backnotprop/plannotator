@@ -409,16 +409,17 @@ test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the re
 }, 90_000);
 
 test.skipIf(!hasDom)('the agent note never opens over the tour: it waits for the entry screen to go, then opens (approval "inbox-one-time-dialogs")', async () => {
-  // This computer has Codex connected with no note, never asked: the note dialog has someone to ask about.
+  // This computer has Qwen Code connected with no note, never asked: the note dialog has someone to ask about
+  // (Codex's note is written by itself, inbox-agent-note-auto).
   const agents = {
     agents: [
       {
-        id: 'codex',
-        label: 'Codex',
+        id: 'qwen',
+        label: 'Qwen Code',
         detected: true,
         reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
         reminder: null,
-        note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
+        note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
       },
     ],
     last_report: null,
