@@ -148,7 +148,8 @@ export function parseShapeCommand(argv: readonly string[]): { ok: true; command:
 
 export interface ShapeCommandDeps {
   dataDir: string;
-  cwd: string;
+  /** The folder the command runs in (`shapeCommandFolder`); null when it is gone and the shell named none. */
+  cwd: string | null;
   env: Record<string, string | undefined>;
   /** Writes one output; a rejected promise means it did not reach the reader (read --notes then marks nothing). */
   stdout?: (text: string) => void | Promise<void>;
@@ -166,6 +167,20 @@ async function defaultProjectRoot(folder: string) {
   // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
   const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
   return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
+}
+
+/**
+ * The folder a shape command runs in: `PLANNOTATOR_CWD`, else the process's own. When that folder was
+ * deleted, `process.cwd()` throws; then the shell's `PWD` (the path it had), so the command still runs
+ * and falls back to the session's folder. Null with neither.
+ */
+export function shapeCommandFolder(env: Record<string, string | undefined>, cwd: () => string = () => process.cwd()): string | null {
+  if (env.PLANNOTATOR_CWD) return env.PLANNOTATOR_CWD;
+  try {
+    return cwd();
+  } catch {
+    return env.PWD && isAbsolute(env.PWD) ? env.PWD : null;
+  }
 }
 
 /** A folder by its realpath, or as written when it cannot be read. */
@@ -202,13 +217,16 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
   // a board made from a scratch or PR folder is filed there, so its file links open that folder's files.
   // The session's own folder is used only when the shell's folder gives no project (gone, unreadable,
   // the home folder or `/`).
-  const sessionFolder = inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, deps.cwd);
+  const cwd = deps.cwd;
+  /** A path as the agent wrote it, from the folder the command runs in; null when that is gone and the path is relative. */
+  const fromHere = (path: string) => (isAbsolute(path) ? path : cwd ? resolve(cwd, path) : null);
+  const sessionFolder = inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, cwd ?? "");
   const home = deps.home === undefined ? inboxProjectRootHome() : deps.home;
-  const folders = c.project
-    ? [isAbsolute(c.project) ? c.project : resolve(deps.cwd, c.project)]
-    : [...new Set([...(isHomeOrRootFolder(realFolder(deps.cwd), home) ? [] : [deps.cwd]), sessionFolder, deps.cwd])];
+  const folders = (
+    c.project ? [fromHere(c.project)] : [...new Set([...(cwd && !isHomeOrRootFolder(realFolder(cwd), home) ? [cwd] : []), sessionFolder, cwd])]
+  ).filter((f): f is string => !!f);
   /** Why the last `projectOf` found no project, as the one line `update` refuses with. */
-  let projectProblem = `${folders[0]} is not a folder`;
+  let projectProblem = folders.length ? `${folders[0]} is not a folder` : "the folder this command runs in is gone";
   const projectOf = async (): Promise<ShapeProject | null> => {
     const rootOf = deps.projectRootOf ?? defaultProjectRoot;
     let first: string | null = null;
@@ -258,7 +276,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
   };
 
   if (c.op === "update") {
-    const path = isAbsolute(c.file!) ? c.file! : resolve(deps.cwd, c.file!);
+    const path = fromHere(c.file!);
+    if (!path) return refuse("invalid", `the folder this command runs in is gone: pass --file as an absolute path.`);
     let board: unknown;
     try {
       board = JSON.parse(readFileSync(path, "utf8"));

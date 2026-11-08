@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { createShapeStore } from "@plannotator/shared/shape/store";
-import { runShapeCommand } from "./shape-command";
+import { runShapeCommand, shapeCommandFolder } from "./shape-command";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -92,5 +92,54 @@ describe("which folder a board is filed under", () => {
     const w = setup();
     expect(await w.write(w.home, "--project", w.scratch)).toBe(w.scratch);
     expect(await w.write(w.scratch, "--project", w.session)).toBe(w.session);
+  });
+});
+
+/**
+ * The real CLI's folder (`shapeCommandFolder`, what index.ts passes). A deleted folder makes `process.cwd()`
+ * throw, which killed the command with a stack trace before it could fall back to the session's folder.
+ */
+describe("the folder the CLI runs in, when it was deleted", () => {
+  const gone = () => {
+    throw Object.assign(new Error("ENOENT: no such file or directory, uv_cwd"), { code: "ENOENT" });
+  };
+
+  test("the shell's PWD stands in for a folder that is gone, and nothing throws", () => {
+    expect(shapeCommandFolder({ PWD: "/work/pr-scratch" }, gone)).toBe("/work/pr-scratch");
+    expect(shapeCommandFolder({}, gone)).toBeNull();
+    expect(shapeCommandFolder({ PWD: "relative" }, gone)).toBeNull();
+    expect(shapeCommandFolder({ PLANNOTATOR_CWD: "/named", PWD: "/work" }, gone)).toBe("/named");
+    expect(shapeCommandFolder({ PWD: "/work" }, () => "/here")).toBe("/here");
+  });
+
+  test("with no folder at all, a board still goes to the session's folder, and a relative --file is refused in one line", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-gone-")));
+    roots.push(root);
+    const session = join(root, "session-repo");
+    mkdirSync(session);
+    const file = join(root, "board.json");
+    writeFileSync(file, JSON.stringify({ title: "Kettle", claim: "Built.", views: { picture: { html: '<p data-mark="p">One</p>' } } }));
+    const dataDir = join(root, "data");
+    const run = async (...argv: string[]) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await runShapeCommand(["update", ...argv], {
+        dataDir,
+        cwd: null,
+        home: join(root, "home"),
+        env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_abc", PLANNOTATOR_SESSION_PROJECT: `claude-code:ses_abc:${session}` },
+        stdout: (t) => void out.push(t),
+        stderr: (t) => void err.push(t),
+        projectRootOf: async (folder) => ({ root: folder, name: basename(folder) }),
+      });
+      return { code, out, err };
+    };
+    const made = await run("--file", file);
+    expect(made.err).toEqual([]);
+    expect(made.code).toBe(0);
+    expect(createShapeStore({ dataDir }).get((JSON.parse(made.out.join("\n")) as { id: string }).id)!.project.root).toBe(session);
+    const relative = await run("--file", "board.json");
+    expect(relative.code).toBe(1);
+    expect(relative.err).toEqual(["invalid: the folder this command runs in is gone: pass --file as an absolute path."]);
   });
 });

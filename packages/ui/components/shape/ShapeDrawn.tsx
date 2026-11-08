@@ -468,12 +468,17 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     if (!frame || !track || !pan) return;
     const fit = frame.querySelector<HTMLElement>('.shp-drawn-fit');
     const update = () => {
-      const { scrollLeft, scrollWidth, clientWidth } = frame;
+      // Every read first, then the writes: one layout per scroll event.
+      const { scrollLeft, scrollWidth, clientWidth, clientHeight } = frame;
+      const below = fit ? fit.offsetTop + fit.offsetHeight : 0;
       const more = scrollWidth - clientWidth;
+      // Only a drawing that is wider than its frame pans: one that fits shows no track.
+      track.hidden = more <= 1;
       frame.style.setProperty('--shp-fl', scrollLeft > 1 ? `${PAN_FADE}px` : '0px');
       frame.style.setProperty('--shp-fr', scrollLeft < more - 1 ? `${PAN_FADE}px` : '0px');
       track.style.left = `${scrollLeft + (clientWidth - PAN_TRACK) / 2}px`;
-      track.style.top = `${(fit ? fit.offsetTop + fit.offsetHeight : 0) + 12}px`;
+      // 12 px under the drawing, or less where the frame ends sooner: the track never makes the frame scroll down.
+      track.style.top = `${Math.max(below, Math.min(below + 12, clientHeight - 4))}px`;
       const thumb = track.firstElementChild as HTMLElement | null;
       if (thumb && scrollWidth) {
         thumb.style.width = `${(clientWidth / scrollWidth) * 100}%`;

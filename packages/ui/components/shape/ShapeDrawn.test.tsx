@@ -335,6 +335,12 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       expect(parseFloat((track.firstElementChild as HTMLElement).style.left)).toBeCloseTo((200 / 770) * 100, 3);
       scrollTo(410);
       expect(fades()).toEqual(['28px', '0px']);
+      expect(track.hidden).toBe(false);
+      // A drawing that fits its frame does not pan: no track, no fade.
+      Object.defineProperty(frame, 'scrollWidth', { configurable: true, get: () => 360 });
+      scrollTo(0);
+      expect(track.hidden).toBe(true);
+      expect(fades()).toEqual(['0px', '0px']);
       act(() => root!.unmount());
       root = null;
       container!.remove();

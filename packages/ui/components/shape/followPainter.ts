@@ -118,12 +118,17 @@ export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: read
     const reach = { left: t.left - 260, right: t.right + 260, top: t.top - 70, bottom: t.bottom + 70 };
     const h = hard.filter((w) => meets(w, reach));
     const s = soft.filter((w) => meets(w, reach));
+    const count = (r: Box, list: readonly Box[]) => {
+      let n = 0;
+      for (const w of list) if (meets(r, w)) n++;
+      return n;
+    };
     for (const m of NEAR) {
       const base = (Math.abs(m.dx) + 2.5 * Math.abs(m.dy)) / 4 + spot * 8;
       if (base >= bestCost) break;
       const r = moved(t, m.dx, m.dy);
       if (!fits(r) || !near(r)) continue;
-      const cost = base + 1000 * h.filter((w) => meets(r, w)).length + 30 * s.filter((w) => meets(r, w)).length;
+      const cost = base + 1000 * count(r, h) + 30 * count(r, s);
       if (cost < bestCost) {
         best = { spot, dx: m.dx, dy: m.dy };
         bestCost = cost;
@@ -265,29 +270,34 @@ export class FollowPainter {
     return step === null ? 'on' : i < step ? 'on' : i === step ? 'now' : 'later';
   }
 
-  /** Puts the rings and the values on their parts, in the drawing's coordinates, counter-scaled to read the same. */
-  place() {
+  /**
+   * Puts the rings and the values on their parts, in the drawing's coordinates, counter-scaled to read the same.
+   * `quick`: while the drawing only scales (the card's room animation, every frame), just the counter-scale:
+   * everything sits in the drawing's own coordinates, so nothing else moves until a full place when it lands.
+   */
+  place(options: { quick?: boolean } = {}) {
     const { b, k } = scaleOf(this.board);
     if (!k) return;
+    this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
+    if (options.quick) return;
     // What shows of the drawing: its frame, which clips 24 px outside itself, within the view it scrolls in.
     const host = (this.board.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
     const box = host?.closest?.('.shp-view');
     const frame = host?.closest?.('.shp-drawn');
     const v = box && box.clientWidth ? box.getBoundingClientRect() : null;
     const f = frame ? frame.getBoundingClientRect() : null;
-    // A frame that scrolls (a wide drawing panning on a phone) clips each tag to the drawing's own box.
-    const pans = !!frame && typeof getComputedStyle === 'function' && getComputedStyle(frame).overflowX !== 'visible';
-    const fitBox = pans ? frame!.querySelector('.shp-drawn-fit')?.getBoundingClientRect() : null;
+    // A panning drawing (a wide one on a phone) scrolls inside its frame, and the drawing's own box clips:
+    // each tag stays inside that box, the whole drawing, not the slice that shows now, so it pans with its part.
+    const fitBox = frame?.classList.contains('pan') ? frame.querySelector('.shp-drawn-fit')?.getBoundingClientRect() : null;
     const view = v
       ? fitBox
-        ? { left: Math.max(v.left, f!.left, fitBox.left), right: Math.min(v.right, f!.right, fitBox.right), top: Math.max(v.top, fitBox.top), bottom: Math.min(v.bottom, fitBox.bottom) }
-        : { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity), top: Math.max(v.top, f ? f.top - FRAME_BLEED : -Infinity), bottom: Infinity }
+        ? { left: fitBox.left, right: fitBox.right, top: fitBox.top, bottom: fitBox.bottom }
+        : { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity), top: f ? f.top - FRAME_BLEED : -Infinity, bottom: Infinity }
       : null;
     const words = view ? this.wordsOf().map((w) => grow(w, 3)) : [];
     const parts = view ? this.partsOf() : [];
     const lines = view ? this.linesOf() : [];
     const placed: Box[] = [];
-    this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
     for (const { el, mark } of this.rings.values()) {
