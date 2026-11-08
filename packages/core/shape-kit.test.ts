@@ -18,7 +18,7 @@ const drawing = () =>
   dots(900, 500) +
   pick('all', 10, 10, 120, 40, 'All paths', { of: ['a', 'b'], checked: true }) +
   pick('a', 140, 10, 120, 40, 'Path <A>') +
-  on(['a'], part('p-a', 1, box(20, 80, 200, 80), text(40, 120, 'A & B'), arrow([[220, 120], [400, 120]], { tone: 'soft', dash: true }))) +
+  on(['a'], part('p-a', 1, box(20, 80, 200, 80), text(40, 120, 'A & B'), arrow([[220, 120], [400, 120]], { tone: 'soft', dash: true }), arrow([[220, 140], [300, 140], [300, 180]], { tone: 'soft' }))) +
   on(['b'], part('p-b', 2, line([[20, 200], [400, 200]], { tone: 'accent' }), cross(30, 240), tag(50, 240, 'New'))) +
   part('p-c', 3, card(420, 80, 300, 200), tile('claude', 440, 100), tile('codex', 500, 100), mark('github', 560, 100), sticky(440, 180, 200, 80, ['Words']), pic(620, 100, 80, 60, 'files/a.png', { dark: 'files/b.png', alt: 'Shot' }), pin(1, 720, 80));
 
@@ -62,6 +62,21 @@ describe('the kit', () => {
     const names = /\((.+)\)/.exec(said)![1]!.split(', ');
     expect(names).toContain('codex');
     for (const name of names) expect(tile(name, 0, 0)).toContain('<g class="obj">');
+  });
+
+  // Boards draw only in Sharp (approval "shape-board-sharp-only"): what only the drawing can carry is the elbow and
+  // the arrowhead's shape. What regresses: a rounded elbow or an open chevron coming back, a line drawn twice, or a
+  // path a person follows lighting its line but not its filled head.
+  test('a line turns square at its elbows; an arrow ends in one small closed head the board fills', () => {
+    const tags = (html: string) => [...html.matchAll(/<path\b[^>]*>/g)].map((m) => m[0]);
+    const elbow = tags(arrow([[0, 0], [100, 0], [100, 80]], { tone: 'soft' }));
+    expect(elbow).toHaveLength(2);
+    expect(elbow[0]).toContain('d="M0 0L100 0L100 80"');
+    expect(elbow[0]).not.toContain('Q');
+    expect(elbow[1]).toMatch(/class="shp-head grey"/);
+    expect(elbow[1]).toMatch(/d="M[^"]+L100 80L[^"]+Z"/);
+    expect(tags(line([[0, 0], [50, 0], [50, 50]]))).toHaveLength(1);
+    expect(followCss(['a'])).toContain('.on-a path.shp-head.grey { fill: var(--mark); }');
   });
 
   test('words are escaped in every helper that takes them', () => {
