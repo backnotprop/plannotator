@@ -1741,6 +1741,13 @@ function Inbox() {
   const cardsNowRef = useRef(cards);
   cardsNowRef.current = cards;
   const stepsShownOn = settings?.steps?.on === true;
+  // The switch turning (here or in another window): the rows' amber pause (`steps_waiting`) comes or goes with it.
+  const stepsListOn = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!settings) return;
+    if (stepsListOn.current !== null && stepsListOn.current !== stepsShownOn) void refreshList(false);
+    stepsListOn.current = stepsShownOn;
+  }, [settings, stepsShownOn, refreshList]);
   const stepsBoardOn = useRef<boolean | null>(null);
   useEffect(() => {
     if (!onBoard) {
@@ -2027,9 +2034,12 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread read.
+          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a thread read.
+          // The list is read again (one read for a pause's events): a row wears the still amber pause while a step
+          // waits on the person (approval "inbox-checklist-spinners-2026-11-07", `steps_waiting`).
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
+            listAfterEvents(120);
             return;
           }
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`

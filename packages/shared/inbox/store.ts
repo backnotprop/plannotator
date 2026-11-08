@@ -97,6 +97,7 @@ import {
   type InboxThreadNaming,
   inboxThreadNameKey,
   isInboxNote,
+  inboxPersonAnsweredSince,
   isInboxActionReport,
   inboxActionInDraft,
   inboxAgentName,
@@ -6766,6 +6767,16 @@ export class InboxStore {
       if (record && record.steps.length > 0) out.push(record);
     }
     return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * The person answered in the thread at or after `since` (a list's last write): a message of theirs, or a 👍 Looks
+   * good still standing on an agent's message (`inboxPersonAnsweredSince`). Read over the stored messages, so a 👍
+   * counts though its note is never listed in the thread. The checklist's waiting rule (the row's `steps_waiting`).
+   */
+  personAnsweredSince(threadId: string, since: string): boolean {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    return inboxPersonAnsweredSince(this.threadMessages(root), since);
   }
 
   /** Every list that holds steps, in threads that still exist (Tidy reads them). */

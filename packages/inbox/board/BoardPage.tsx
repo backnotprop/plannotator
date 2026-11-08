@@ -70,8 +70,8 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
-import { cardStepLists, presenceClass, stepsCount, stepsDoneWords } from '../steps/model';
-import { StepsPie } from '../steps/StepsMarks';
+import { cardStepLists, stepsWaitWords } from '../steps/model';
+import { StepGlyph } from '../steps/StepsMarks';
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
@@ -981,10 +981,12 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  // The checklist's mark (approval "inbox-thread-steps", part 4): the pie alone, no count; the opened card has the number.
-  const plan = stepsOf(card)[0] ?? null;
-  const planCount = plan ? stepsCount(plan) : null;
-  const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
+  // The checklist's mark (approval "inbox-checklist-spinners-2026-11-07"): the lane card stays still, with nothing
+  // while the agent works and the still amber pause only while a list waits on the person; the opened card has the rest.
+  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has answered since the list
+  // (a reply or a 👍), nor once its session has ended, so the card and the list row always agree; the words come from
+  // the first list that still waits by that rule (`stepsWaitWords`: never an ended session's), as the mark does.
+  const planWords = stepsWaitWords(stepsOf(card).filter((list) => rowOf(list.thread_id)?.steps_waiting));
   const cardProject = projectOfCard(card);
   const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
@@ -999,10 +1001,10 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
-      {plan && planCount && planWords && (
+      {planWords && (
         <Tip content={planWords}>
-          <span className={`ib-bc-plan ${presenceClass(plan.presence)}`} data-card-steps={planCount.text}>
-            <StepsPie done={planCount.done} total={planCount.total} size={13} />
+          <span className="ib-strow ib-bc-plan" data-card-steps="waiting">
+            <StepGlyph status="waiting" size={13} />
           </span>
         </Tip>
       )}

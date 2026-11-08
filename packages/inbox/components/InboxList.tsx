@@ -15,6 +15,7 @@ import { RowAgents, RowAgentTiles } from './RowAgents';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
+import { StepGlyph } from '../steps/StepsMarks';
 import { starPopping } from '../starPop';
 import { notePressPointer, pressRow } from '../starPress';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
@@ -382,6 +383,20 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       {!filtered && <RowProjectMark row={row} />}
       {!filtered && <ClipText className="ib-p" text={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
+      <StepsWaitMark row={row} />
+    </span>
+  );
+}
+
+/**
+ * The checklist on a row (approval "inbox-checklist-spinners-2026-11-07", the calm row): the row never moves. Nothing
+ * while an agent works on a step; only the still amber pause, after the project, while a step waits on the person.
+ */
+function StepsWaitMark({ row }: { row: InboxListRow }) {
+  if (!row.steps_waiting) return null;
+  return (
+    <span className="ib-strow" role="img" aria-label="Checklist: waiting on you" title="Checklist: waiting on you" data-row-steps-waiting="">
+      <StepGlyph status="waiting" size={12} />
     </span>
   );
 }
@@ -410,6 +425,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
           </span>
         ))}
       <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
+      <StepsWaitMark row={row} />
     </span>
   );
 }
