@@ -2,11 +2,12 @@
  * The floating box over a file in full screen, on a phone (the owner's iPhone: "the floating box has mobile responsive
  * issues"), proved against the compiled binary on WebKit and Chromium, with a 1920 × 1080 image and an HTML page:
  *
- *  - The foot is one row at 320, 360 and 390, the mic on: the "N comments" pill is one line inside its pill, the open
+ *  - The foot is one row at 360 and 390, the mic on: the "N comments" pill is one line inside its pill, the open
  *    questions chip beside it, nothing past the box. The mic used to take half the row's free room at every width,
- *    so this broke up to 430.
+ *    so this broke up to 430. At 320 round 3's row (Send's word, the 44 px clip) does not fit: the chips take their own
+ *    row over the clip, the mic and the link, and every press stays 44 px (the owner's call, train C: tap size first).
  *  - What yields is decided: the questions' words, then the comment count's word (its name stays whole), then "Open in
- *    thread" becomes "Thread". Only at text sizes the row cannot hold do the chips take their own row.
+ *    thread" becomes "Thread". Only at text sizes the row cannot hold, or under 360 px, do the chips take their own row.
  *  - Every control in the box is 44 px to press, measured by hit test: the controls keep their size, an overlay
  *    takes the press.
  *  - A long agent's name is cut on one line, in the header and in "Sent to …".
@@ -192,7 +193,8 @@ for (const phone of PHONES) {
     });
 
     for (const [width, height] of [[320, 568], [360, 640], [390, 844]] as const) {
-      test(`${width} px, an image and a page: the foot is one row with the questions chip, every press 44 px`, async () => {
+      const oneRow = width >= 360;
+      test(`${width} px, an image and a page: the foot is ${oneRow ? 'one row' : 'the chips over the clip, the mic and the link'} with the questions chip, every press 44 px`, async () => {
         await page.setViewportSize({ width, height });
         for (const t of [seeded.two, seeded.twelve]) {
           for (const file of ['shot.png', 'page.html']) {
@@ -207,7 +209,13 @@ for (const phone of PHONES) {
             const where = `${width} px, ${file}, ${t === seeded.two ? 2 : 12} comments`;
             await expect(card(page).locator('[data-fcomp-questions]'), where).toBeVisible();
             await expect(card(page).locator('[data-voice-mic]'), where).toBeVisible();
-            await expect.poll(() => footProblems(page), { message: where }).toEqual([]);
+            await expect.poll(() => footProblems(page, oneRow), { message: where }).toEqual([]);
+            if (!oneRow) {
+              // Under 360 px the chips take a row of their own, above the clip and the link (footFit.ts `stack`).
+              const [chip, clip, link] = await Promise.all(['[data-fcomp-comments]', '.ib-fcomp-clip', '[data-fcomp-open-thread]'].map(async (sel) => (await card(page).locator(sel).boundingBox())!));
+              expect(chip!.y + chip!.height, where).toBeLessThanOrEqual(clip!.y + 1);
+              expect(chip!.y + chip!.height, where).toBeLessThanOrEqual(link!.y + 1);
+            }
             expect(await shortTargets(page, [...FOOT_TARGETS, '.ib-vnote .ib-dtlink']), where).toEqual([]);
             expect(await shortTargets(page, file === 'shot.png' ? TOP_TARGETS : ['[data-fcomp-minimize]', '[data-fcomp-send]']), where).toEqual([]);
             // The pill's name is whole, however little of it shows; and the row chooses that over the link's words.
@@ -231,8 +239,8 @@ for (const phone of PHONES) {
       await expect(card(page).locator('[data-fcomp-comments] .ib-fcomp-w')).not.toHaveCSS('clip', 'auto');
     });
 
-    test('320 px, questions that arrive with the card open: the row fits them', async () => {
-      await page.setViewportSize({ width: 320, height: 568 });
+    test('360 px, questions that arrive with the card open: the row fits them', async () => {
+      await page.setViewportSize({ width: 360, height: 640 });
       const t = await seed(short, 2, false);
       await page.goto('about:blank');
       await page.goto(fileUrl(t, 'shot.png'));
@@ -244,8 +252,8 @@ for (const phone of PHONES) {
       await expect.poll(() => footProblems(page)).toEqual([]);
     });
 
-    test('what yields: at 320 the pill is its icon and number, at 390 its words come back beside the bare count', async () => {
-      await page.setViewportSize({ width: 320, height: 568 });
+    test('what yields: at 360 the pill is its icon and number, at 390 its words come back beside the bare count', async () => {
+      await page.setViewportSize({ width: 360, height: 640 });
       await page.goto('about:blank');
       await page.goto(fileUrl(seeded.twelve, 'shot.png'));
       await card(page).waitFor();
