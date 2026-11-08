@@ -150,6 +150,18 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(host!.querySelector('[data-pr-button]')).toBeNull();
   });
 
+  test("the ⋯ menu's Add a pull request on a thread with none opens the card on its Add field", async () => {
+    let done = 0;
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} adding onAddingDone={() => (done += 1)} />);
+    await settle();
+    const card = popover()!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector('.ib-prpop-empty')!.textContent).toBe('No pull requests on this thread.');
+    expect(document.activeElement).toBe(card.querySelector('[data-pr-add-input]'));
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(done).toBe(1);
+  });
+
   test('the button shows the PR in play with the count; its card lists the stack base first, then Related, with states', async () => {
     const base = pull('northwind/billing-svc#430', 'merged', 'main', 'model');
     const related = pull('northwind/web-app#1309', 'closed', 'main', 'flag');

@@ -476,7 +476,8 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
     onAddingDone?.();
     if (restoreFocus) button.current?.focus({ preventScroll: true });
   };
-  if (!shown && !open) return null;
+  // No PRs: no button, unless the ⋯ menu asked to add one (the card opens on it, at the button's place).
+  if (!shown && !open && !adding) return null;
   const headline = answer ? pullHeadline(answer) : null;
   const words = shown ? pullsMarkWords(shown, headline?.label ?? labelOfKey(shown.headline.key)) : 'Pull requests';
   return (
