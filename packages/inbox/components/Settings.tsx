@@ -83,7 +83,7 @@ export interface SettingsPageProps {
   onToggleCodeReview?: (next: boolean) => void;
   /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
   onToggleShape?: (next: boolean) => void;
-  /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on. Absent: no row. */
+  /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on; in 0.29 also only while System is on (SYSTEM_SETTINGS_ROW_VISIBLE). Absent: no row. */
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
   systemProjects?: SystemProjectRow[] | null;
@@ -463,6 +463,14 @@ function GeneralSection({
 }
 
 /**
+ * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
+ * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). False: the
+ * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. Set it
+ * to true when System is announced.
+ */
+export const SYSTEM_SETTINGS_ROW_VISIBLE = false;
+
+/**
  * Capabilities (the owner, 2026-10-27): the switches that turn a whole
  * feature on or off, moved out of General. First the main ones, today the
  * Board (config.json `inboxBoard`, POST /api/inbox/settings `{ board: { on } }`),
@@ -511,7 +519,11 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const codeReviewRow = codeReview && onToggleCodeReview;
   const shapeRow = shape && onToggleShape;
-  const systemRow = system && onToggleSystem && codeReview?.on === true;
+  // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
+  // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
+  const [systemRowSeen, setSystemRowSeen] = useState(false);
+  if (system?.on === true && codeReview?.on === true && !systemRowSeen) setSystemRowSeen(true);
+  const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
   return (
     <>
       {(boardRow || stepsRow || codeReviewRow || shapeRow) && (

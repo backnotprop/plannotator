@@ -1,8 +1,9 @@
 /**
  * System in Settings and Reviews (approval "system-inbox", screens 1, 3, 4a and 4b), the server calls stubbed.
  * What regresses:
- *  - Settings: the System switch shown while Code review is off, or missing under it while on; its click not asking
- *    to flip it; the projects listed while System is off; a project's Set up not opening its setup;
+ *  - Settings: the System switch shown while Code review is off, or missing under it while on; shown while System is
+ *    unset or off (hidden in 0.29), or dropped right after it is turned off here; its click not asking to flip it;
+ *    the projects listed while System is off; a project's Set up not opening its setup;
  *  - Reviews: anything of System in the head while System does not show (today's Reviews unchanged); the menu listing
  *    a project with no drawing, or not saying none is drawn; a pick not opening the drawing; "Set up a project" not
  *    opening setup; the open project not named on the button;
@@ -25,7 +26,7 @@ import type { PullsPageProps, PullsSystem } from '../pulls/PullsPage';
 import type { SystemPaneProps } from './SystemPane';
 
 const hasDom = typeof document !== 'undefined';
-const { SettingsPage } = (hasDom ? await import('../components/Settings') : {}) as typeof import('../components/Settings');
+const { SettingsPage, SYSTEM_SETTINGS_ROW_VISIBLE } = (hasDom ? await import('../components/Settings') : {}) as typeof import('../components/Settings');
 const { PullsPage } = (hasDom ? await import('../pulls/PullsPage') : {}) as typeof import('../pulls/PullsPage');
 const { SystemPane } = (hasDom ? await import('./SystemPane') : {}) as typeof import('./SystemPane');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
@@ -149,22 +150,35 @@ describe('Settings → Capabilities → System', () => {
   };
   const labels = () => $$('[data-settings-capabilities] .ib-prow').map((row) => row.querySelector('.ib-l')?.textContent);
 
-  test.if(hasDom)('shown only while Code review is on, right under it; off by default asks to turn on', () => {
+  test.if(hasDom)('hidden in 0.29 (approval "system-inbox", 2026-11-08): no row while System is unset or off', () => {
+    expect(SYSTEM_SETTINGS_ROW_VISIBLE).toBe(false);
+    // Unset (an Inbox that sends no `system`) and off: Code review's row, and nothing of System.
+    draw({ code_review: { on: true } }, []);
+    expect(labels()).toEqual(['Board', 'Code review']);
+    expect($('[data-settings-system]')).toBeNull();
+    draw({ code_review: { on: true }, system: { on: false } }, []);
+    expect(labels()).toEqual(['Board', 'Code review']);
+    expect($('[data-settings-system]')).toBeNull();
+    expect($('[data-settings-system-projects]')).toBeNull();
+  });
+
+  test.if(hasDom)('on through config.json: shown right under Code review, and turning it off keeps the row', () => {
     const toggles: boolean[] = [];
+    // Code review off: no row, even with System on.
     draw({ code_review: { on: false }, system: { on: true } }, toggles);
     expect($('[data-settings-system]')).toBeNull();
-    act(() => root?.unmount());
-    host?.remove();
-    root = null;
-    draw({ code_review: { on: true }, system: { on: false } }, toggles);
+    draw({ code_review: { on: true }, system: { on: true } }, toggles);
     expect(labels()).toEqual(['Board', 'Code review', 'System']);
     const sw = $('[data-settings-system] button[role="switch"]')!;
-    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(sw.getAttribute('aria-checked')).toBe('true');
     expect(document.getElementById(sw.getAttribute('aria-labelledby')!)?.textContent).toBe('System');
-    // Off: no projects listed.
-    expect($('[data-settings-system-projects]')).toBeNull();
     act(() => sw.click());
-    expect(toggles).toEqual([true]);
+    expect(toggles).toEqual([false]);
+    // Saved off: the row stays while Capabilities is open (no projects listed), so it can be turned back on.
+    draw({ code_review: { on: true }, system: { on: false } }, toggles);
+    expect(labels()).toEqual(['Board', 'Code review', 'System']);
+    expect($('[data-settings-system] button[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+    expect($('[data-settings-system-projects]')).toBeNull();
   });
 
   test.if(hasDom)('on: each project with its drawing in words, and Set up opens its setup', async () => {
