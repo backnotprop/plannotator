@@ -155,4 +155,13 @@ describe("what a typed path is: folder, locked, file, missing", () => {
     expect(() => makeHomeFolder(join(h, "code", "nope"), "x")).toThrow();
     expect(existsSync(join(h, "code", "nope"))).toBe(false);
   });
+
+  test("makeHomeFolder never starts in a link swapped in after the checks: it leads out of home or into a hidden folder", () => {
+    // The checks saw ~/code/swapped missing; by mkdir a link to a hidden folder (or out of home) stands there.
+    mkdirSync(join(h, ".ssh"), { recursive: true });
+    symlinkSync(join(h, ".ssh"), join(h, "code", "swapped"));
+    expect(() => makeHomeFolder(join(h, "code"), "swapped")).toThrow();
+    symlinkSync(states, join(h, "code", "swapped-out"));
+    expect(() => makeHomeFolder(join(h, "code"), "swapped-out")).toThrow();
+  });
 });

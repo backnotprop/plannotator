@@ -128,7 +128,8 @@ export function FolderMenu({
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
   // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
-  const typedPath = looksLikePath(query) ? cleanPastedPath(query) : null;
+  // The paste was cleaned once already (its escapes read): what the filter holds keeps its backslashes now.
+  const typedPath = looksLikePath(query) ? cleanPastedPath(query, null, { unescape: false }) : null;
   // Where "Another folder…" opened the browser from: a path in the filter, else the path kept for that machine.
   const [openAt, setOpenAt] = useState<string | null>(null);
   // Its machine left the menu (unlinked): back to the list.

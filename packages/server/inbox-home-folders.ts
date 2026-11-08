@@ -248,7 +248,10 @@ export function makeHomeFolder(parent: string, name: string): { real: string; ma
     if ((error as NodeJS.ErrnoException).code !== "EEXIST" || !isDir(path)) throw error;
     made = false;
   }
+  // Checked again now it is there: a real folder right in `parent` (a real path), never a link swapped in since the
+  // checks that leads out of home or into a hidden folder.
   const real = realpathSync(path);
+  if (lstatSync(path).isSymbolicLink() || real !== join(realpathSync(parent), name)) throw new Error(`${path} is not a folder in ${parent}`);
   const stat = statSync(real);
   return { real, made, inode: `${stat.dev}:${stat.ino}` };
 }
