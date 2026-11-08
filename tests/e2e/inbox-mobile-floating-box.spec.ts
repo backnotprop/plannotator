@@ -368,6 +368,10 @@ for (const phone of PHONES) {
         await page.goto(fileUrl(t, 'shot.png'));
         await card(page).waitFor();
         await page.locator('[data-fcomp-mode="reply"]').tap();
+        // The comment count comes with the file's model, after the card: at 320 px the "12" chip is what stacks the
+        // chips (round 3), so both cards are measured once their chips are in, or the foot's rows differ, not the field.
+        await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('12 comments');
+        await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
         await page.waitForTimeout(250);
         return (await card(page).boundingBox())!.height;
       };
