@@ -1,7 +1,8 @@
 /**
  * send_message on questions an agent wrote in a shape that may not ask what
  * it meant. An `id:` label before the question line (an agent whose history
- * was compacted put `id: sd-approach` first) is dropped by the parser, so
+ * was compacted put `id: sd-approach` first) is no mistake: the parser reads
+ * the next line as the question and shows the label as context under it, so
  * the person sees the real question and the agent gets no advice. A
  * pick-one block with no choices gets a line saying how to send it again in
  * place of this one. Advice only: the message is sent.

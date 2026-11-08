@@ -110,7 +110,8 @@ export interface InboxQuestionToCheck {
  * send result says so; the send goes through): a `:::question` or
  * `:::question-multi` block with no choices, which the person answers in
  * words. (An `id:` label before the question line is no mistake: the parser
- * drops it, see "Id label" in `./question-block`.) Pure; never throws.
+ * reads the next line as the question and shows the label as context, see
+ * "Id label" in `./question-block`.) Pure; never throws.
  */
 export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] {
   return questionBlocksOf(markdown).flatMap(({ key, parsed }, index) =>

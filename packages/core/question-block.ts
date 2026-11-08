@@ -35,13 +35,15 @@
  * - Id label: before the prompt, a short lower-case `id:` or `key:` line
  *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
  *   token with no spaces, not ending in `?`) is the asker's own label for
- *   the question, as agents write it: it is dropped, never the prompt, never
- *   context, and the line after it is the prompt. The key is still hashed
- *   from the label line, as it was before the label was dropped (it was the
- *   prompt then): the store keeps each question's key from the send, while
- *   the window computes it again from the body, so a question stored with a
- *   leading label keeps its picks, answers and supersedes. The value itself
- *   is never the key. A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   the question, as agents write it: it is never the prompt (the line
+ *   after it is), but nothing the asker wrote is hidden: it shows as the
+ *   first context line, the small line under the question. The key is still
+ *   hashed from the label line, as it was when the label was the prompt:
+ *   the store keeps each question's key from the send, while the window
+ *   computes it again from the body, so a question stored with a leading
+ *   label keeps its picks, answers and supersedes. The value itself is never
+ *   the key. A label with nothing after it to ask stays the prompt (and is
+ *   not context too). A capitalised or spaced line (`ID: x`, `Deploy: should
  *   we…?`) is the prompt as before, and an `id:` line after the prompt is
  *   context.
  * - Context: every other prose line (before or after the choices). A
@@ -295,7 +297,7 @@ const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KE
 const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
 // An asker's own label for the question before the prompt (`id: sd-approach`):
 // a lower-case `id` or `key`, optionally after a short `name_` / `name-`,
-// a colon, one token with no spaces that does not end in `?`. Dropped.
+// a colon, one token with no spaces that does not end in `?`. Shown as context.
 const ID_LABEL_RE = /^\s*(?:[a-z][a-z0-9]{0,15}[_-])?(?:id|key)\s*:\s*\S{0,79}[^\s?]\s*$/;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
@@ -865,6 +867,7 @@ export const parseQuestionBlock = (
   // stored question keeps its key (and its picks, answers and supersedes).
   let keyText: string | undefined;
   let keyTextLine = -1;
+  let keyTextContext = -1;
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
@@ -978,13 +981,16 @@ export const parseQuestionBlock = (
       openBullet = null;
       continue;
     }
-    // The asker's own label before the prompt (`id: sd-approach`): dropped
-    // from what shows, but the first one stays the key's text (see `keyText`).
+    // The asker's own label before the prompt (`id: sd-approach`): never the
+    // prompt, but it still shows, as the first context line, and the first
+    // one stays the key's text (see `keyText`).
     if (!prompt && ID_LABEL_RE.test(line)) {
       if (keyText === undefined) {
         keyText = line.trim().replace(/^#{1,6}\s+/, '');
         keyTextLine = i;
+        keyTextContext = contextLines.length;
       }
+      pushContext(line.trimEnd());
       continue;
     }
     if (!prompt) {
@@ -1111,10 +1117,12 @@ export const parseQuestionBlock = (
     pushContext(line.trimEnd());
   }
 
-  // A label and nothing to ask: the label is the prompt, as before it was read.
+  // A label and nothing to ask: the label is the prompt, as before it was
+  // read, and leaves the context.
   if (!prompt && keyText !== undefined) {
     prompt = keyText;
     promptLine = keyTextLine;
+    dropContext.add(keyTextContext);
   }
   if (!prompt) return null;
 
