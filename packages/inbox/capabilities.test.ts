@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'code_review' | 'shape'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'code_review' | 'shape' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -39,11 +39,23 @@ describe('event: capabilities', () => {
     expect(hear(JSON.stringify({ board: { on: false }, steps: { on: true } }), settings).settings.board).toEqual({ on: false });
   });
 
+  test('Bro mode turned on in another window: this window takes it, every other switch as it was', () => {
+    const { settings, reread } = hear(JSON.stringify({ bro: { on: true } }), { ...OFF, bro: { on: false } });
+    expect(reread).toBe(false);
+    expect(settings).toEqual({ ...OFF, bro: { on: true } });
+  });
+
   test('a frame without the Board leaves it; a malformed Board value is not applied', () => {
     const on = { ...OFF, board: { on: true } };
     expect(hear(JSON.stringify({ steps: { on: false } }), on).settings).toEqual({ ...on, steps: { on: false } });
     expect(hear(JSON.stringify({ board: { on: 'yes' }, steps: { on: true } }), OFF).settings.board).toEqual({ on: false });
     // Nothing named (an empty frame): the window reads the settings again.
     expect(hear('{}', OFF).reread).toBe(true);
+  });
+
+  test('System turned on in another window: this window takes it (the Reviews System button shows)', () => {
+    const { settings } = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, code_review: { on: true }, system: { on: true } }), { ...OFF, system: { on: false } });
+    expect(settings.system).toEqual({ on: true });
+    expect(hear(JSON.stringify({ board: { on: false }, system: { on: 'yes' } }), { ...OFF, system: { on: false } }).settings.system).toEqual({ on: false });
   });
 });

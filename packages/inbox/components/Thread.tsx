@@ -16,7 +16,7 @@ import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
@@ -38,6 +38,8 @@ import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
+import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
+import { threadLinks } from '../threadLinks';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
@@ -73,11 +75,12 @@ import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainIte
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
+import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { pickComposerMode } from '../fullScreenComposer';
-import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi } from '../reuse';
+import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -144,6 +147,8 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
+import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
+import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -1052,6 +1057,10 @@ export interface ThreadPaneProps {
    * The meta line under the subject names it, or says it is away since when.
    */
   machine?: MachineView | null;
+  /** This thread's files, for New message opened over it; null when it has none to offer and when it goes. */
+  onThreadFiles?: (files: readonly InboxAttachmentState[] | null) => void;
+  /** An archived thread's reuse button: New message with this file. Absent: an archived thread offers no button. */
+  onNewMessageWith?: (source: ReuseSource) => void;
   /**
    * Writes held for that machine about this thread (machines.ts `threadOutbox`): the person's words still on their
    * way ("Sending to MacBook…", "Will send when MacBook is back"), or a write that did not land, with Dismiss.
@@ -1137,9 +1146,12 @@ export interface ThreadPaneProps {
   /**
    * 👍 Looks good on the agent's latest message (`on`), or take it back:
    * silent, nothing is sent; the thread is marked read. `agent` names the
-   * agent for the toast. Absent: no Looks good button.
+   * agent for the toast. Absent: no Looks good button. `reaction`: the emoji
+   * picked in the 👍's tray (null: 👍 Looks good; taking back, the one taken
+   * back), approval "inbox-reaction-tray". `was`: set only when the message
+   * already had the mark (the reaction it had; null: 👍), so only the emoji changes.
    */
-  onAck?: (messageId: string, on: boolean, agent: string) => void;
+  onAck?: (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => void;
   /**
    * An action item's Done or Can't do it (`mark`) into the reply draft, or
    * taking it back (`null`), approval "inbox-action-items-in-reply": the window
@@ -1252,6 +1264,10 @@ export interface ThreadPaneProps {
   artifacts?: boolean;
   /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
   onArtifacts?: (open: boolean) => void;
+  /** The Artifacts view shows the thread's links (`#thread=…&artifacts&links`): its other side, never a second view. */
+  links?: boolean;
+  /** Move between the view's two sides. */
+  onLinks?: (on: boolean) => void;
   /**
    * Decision mode (experimental, thread only): "Decide these N" at the top of
    * the open-questions list, which opens the dialog scoped to this thread.
@@ -1411,8 +1427,11 @@ export function AckPill({
   agent,
   wakes = false,
   connection,
+  messageId,
 }: {
   ack: NonNullable<InboxMessageWire['ack']>;
+  /** The message it marks: where a reaction's emoji lands (ReactionTray.tsx `flyReaction`). */
+  messageId?: string;
   agent: string;
   wakes?: boolean;
   /** How the agent's session is connected now (the sessions route's `asker.connection`); undefined while unknown. */
@@ -1421,10 +1440,17 @@ export function AckPill({
   // The wait on a busy session is written in whole minutes: its own clock, while the 👍 waits.
   const now = useMinuteClock(!ack.delivered_at && !!ack.note_id);
   const line = ackPillLine(ack, agent, wakes, whenTime, connection, now);
+  // The emoji picked in the 👍's tray (approval "inbox-reaction-tray"): its name, or the emoji alone.
+  const reaction = ack.reaction ?? null;
+  // Only the line a reaction was just sent to fades in; an old one is simply there when the thread opens.
+  const [fresh] = useState(() => !!messageId && justReacted(messageId));
   return (
-    <p className="ib-ackpill" data-ack-pill={line.state}>
-      <span className="ib-ackchip">
-        <span aria-hidden="true">👍</span> {ack.label}
+    <p className="ib-ackpill" data-ack-pill={line.state} data-ack-for={messageId} data-ack-fresh={fresh ? '' : undefined}>
+      <span className="ib-ackchip" data-bare={reaction && !reaction.label ? '' : undefined}>
+        <span className="ib-ackemoji" aria-hidden="true">
+          {reaction?.emoji ?? '👍'}
+        </span>
+        {reaction ? reaction.label ? ` ${reaction.label}` : <span className="ib-sr">{reactionSpeech(reaction)}</span> : ` ${ack.label}`}
       </span>
       <Tip content={line.state === 'delivered' && ack.delivered_at ? `You marked it ${fullTime(ack.at)}; delivered ${fullTime(ack.delivered_at)}` : fullTime(ack.at)}>
         <span className="ib-ackwhen">{line.text}</span>
@@ -1492,7 +1518,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1519,6 +1545,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setLaunchError(cause instanceof InboxApiError ? cause.message : 'That did not work; try again.');
     }
   };
+  // A failed clone's Change the URL (E5): New message with the URL in the folder menu's filter and the same words.
+  const changeCloneUrl = launched
+    ? (url: string) => {
+        const detail: ComposeCloneRequest = { url, agent: launched.agent, machine: machine?.id ?? null, folder: runLine?.clone?.folder_shown ?? null, body: root.body };
+        window.dispatchEvent(new CustomEvent(COMPOSE_CLONE_EVENT, { detail }));
+      }
+    : undefined;
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
   // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
@@ -1564,7 +1597,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const questionWaits = agentMessages.some((m) => [...(m.questions ?? []), ...(m.actions ?? [])].some((q) => q.state === 'open' || q.state === 'picked'));
   // Nor once the person wrote back after it (their reply is the answer; its Sent / Delivered line stays).
   const personWroteLast = lastNonNote(thread.messages)?.author.kind === 'person';
-  const ackOffered = onAck !== undefined && ackTarget !== null && !archived && !questionWaits && !personWroteLast;
+  // Nor once it was sent (its Undo window closed): the reaction stays shown under the message with no button, and the
+  // agent's next message takes a new one (owner, 2026-11-07, approval "inbox-reaction-tray"; the store refuses a change).
+  const ackSent = ackTarget?.ack?.settled_seq != null;
+  const ackOffered = onAck !== undefined && ackTarget !== null && !archived && !questionWaits && !personWroteLast && !ackSent;
   const ackOn = ackTarget?.ack != null;
 
   // Action items: Done / Can't do it into the reply draft, or taken back, through the window or, without it, straight to the server.
@@ -2252,7 +2288,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const filesRevision = useRef(thread);
   if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged);
-  const attachments: InboxAttachmentState[] = files?.attachments ?? [];
+  const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
   /** Every file the viewer opens: the attached files and the images in the text. */
@@ -2660,9 +2696,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
   const artifactsOn = artifactsRoute;
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
-  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length > 0) || artifactsOn);
+  // The thread's web links (threadLinks.ts). With none, nothing here changes: the same button, the same view.
+  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo), [thread.messages, thread.project.repo]);
+  /** Links and no artifacts: the button opens on them, its count theirs. */
+  const linksOnly = linkList.count > 0 && files !== null && artifactList.length === 0;
+  const linksOn = artifactsOn && linkList.count > 0 && (linksRoute || linksOnly);
+  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length + linkList.count > 0) || artifactsOn);
   const artifactsButtonRef = useRef<HTMLButtonElement>(null);
   const artifactsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const linksHeadingRef = useRef<HTMLHeadingElement>(null);
   const artifactsBodyRef = useRef<HTMLDivElement>(null);
   /** The tile last opened from the grid: focus comes back to it when its file or guide closes. */
   const artifactOpened = useRef<string | null>(null);
@@ -2909,7 +2951,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (artifactsWas.current === artifactsOn) return;
     artifactsWas.current = artifactsOn;
     if (artifactsOn) {
-      artifactsHeadingRef.current?.focus({ preventScroll: true });
+      (linksOn ? linksHeadingRef : artifactsHeadingRef).current?.focus({ preventScroll: true });
       return;
     }
     if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
@@ -3799,6 +3841,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
   const draftKept = !box.open && (replyDraft.draft !== null || replyDraft.conflict !== null);
+  // On a phone, holding Reply opens the reaction tray (owner, 2026-11-07, approval "inbox-reaction-tray"); a tap still replies.
+  const [trayRequest, setTrayRequest] = useState(0);
+  const replyHold = useHoldPress(phone && ackOffered && !waiting && !draftKept, () => setTrayRequest((n) => n + 1));
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
@@ -5657,7 +5702,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -5680,6 +5725,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return () => observer.disconnect();
   }, []);
 
+  // The view's header: in the phone's bar, in a row below the bar elsewhere. Nothing until the thread's files
+  // are known: before that "Links" would stand alone and then turn into the toggle.
+  const viewSwitch = files !== null && (
+    <ThreadViewSwitch links={linkList.count} artifacts={artifactList.length} linksOn={linksOn} onLinks={(on) => onLinks?.(on)} />
+  );
+
   // The copy menus (CopyMenus.tsx): the header's ⋯ and each open message's.
   const copyHost: CopyMenuHost = {
     thread,
@@ -5693,6 +5744,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reuseToggle = useRef<ReuseApi['toggle']>(() => {});
   reuseToggle.current = (f, version) => {
     const source = sourceOf(f, version ?? readableVersion(f), attachmentImageUrl);
+    if (resolved) {
+      onNewMessageWith?.(source);
+      return;
+    }
     if (boxRef.current.open && replyFiles.holding(source.sha256)) {
       replyFiles.removeHolding(source.sha256);
       announce(`${source.name} taken out of your reply`);
@@ -5711,18 +5766,25 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256, f.upload?.shown_sha256])
     .filter(Boolean)
     .join();
-  const reuseOffered = !resolved && newMessage?.kind !== 'compose' && replyFiles.canReuse;
+  const reuseOffered = newMessage?.kind !== 'compose' && replyFiles.canReuse && (!resolved || Boolean(onNewMessageWith));
   const reuseApi = useMemo<ReuseApi | null>(
     () =>
       reuseOffered
         ? {
+            target: resolved ? 'new' : 'reply',
             fileOf: (id) => allFiles.find((f) => f.id === id),
-            isAdded: (f, version) => box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
+            isAdded: (f, version) => !resolved && box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
             toggle: (f, version) => reuseToggle.current(f, version),
           }
         : null,
-    [reuseOffered, allFiles, box.open, reuseHeld],
+    [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
+  // New message opened over this thread offers its files. Another machine's thread: not this Inbox's to offer.
+  const offerFiles = files && replyFiles.canReuse ? allFiles : null;
+  useEffect(() => {
+    onThreadFiles?.(offerFiles);
+    return () => onThreadFiles?.(null);
+  }, [offerFiles, onThreadFiles]);
   return (
     <ReuseContext.Provider value={reuseApi}>
     <>
@@ -5754,14 +5816,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <Icon name="chevL" size={18} />
               <span className="ib-pback-l">Thread</span>
             </button>
-            <span className="ib-art-ph-title" aria-hidden="true">
-              Artifacts
-            </span>
-            {artifactList.length > 0 && (
-              <span className="ib-art-ph-n" aria-hidden="true">
-                {artifactList.length}
-              </span>
-            )}
+            {viewSwitch}
           </>
         ) : phone ? (
           <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-phone-back="">
@@ -5842,12 +5897,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </Tip>
             )}
             {artifactsButton && (
-              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
+              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
                   ref={artifactsButtonRef}
                   type="button"
                   className="ib-iconbtn ib-artbtn"
-                  aria-label={`Artifacts, ${artifactList.length}`}
+                  aria-label={linksOnly ? `Links, ${linkList.count}` : `Artifacts, ${artifactList.length}`}
                   aria-keyshortcuts={artifactsKeys}
                   aria-pressed={artifactsOn}
                   onClick={() => onArtifacts?.(!artifactsOn)}
@@ -5855,7 +5910,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 >
                   <Icon name="artifacts" size={17} />
                   <span className="ib-artbtn-n" aria-hidden="true">
-                    {artifactList.length}
+                    {linksOnly ? linkList.count : artifactList.length}
                   </span>
                 </button>
               </Tip>
@@ -6173,7 +6228,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />
                 </div>,
               );
             }
@@ -6480,7 +6535,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}
                 {isAgent && message.ack && (
-                  <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} />
+                  <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} messageId={message.id} />
                 )}
                 {message === lastAgent && liveMessage(lastAgent) && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
@@ -6499,7 +6554,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     ))}
                   </ul>
                 )}
-                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />}
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />}
                 {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
@@ -6620,8 +6675,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
+      {artifactsOn && !phone && <ArtifactsBar onBack={() => onArtifacts?.(false)}>{viewSwitch}</ArtifactsBar>}
+      {linksOn && (
+        <div className="ib-pbody ib-artbody">
+          <ThreadLinksView ref={linksHeadingRef} links={linkList} />
+        </div>
+      )}
       {artifactsOn && (
-        <div className="ib-pbody ib-artbody" ref={artifactsBodyRef}>
+        <div className="ib-pbody ib-artbody" ref={artifactsBodyRef} hidden={linksOn}>
           <ArtifactsView
             ref={artifactsHeadingRef}
             artifacts={files === null ? null : artifactList}
@@ -6634,7 +6695,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               onOpenGuide(artifact.messageId);
             }}
             onOpenAs={phone || fileStacked ? undefined : (artifact, view) => openFromMessage(artifact.attachment, view, () => (artifactOpened.current = artifactKey(artifact)))}
-            onBack={phone ? undefined : () => onArtifacts?.(false)}
             openIn={openIn}
             phone={phone}
           />
@@ -6911,9 +6971,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <button
                 type="button"
                 className="ib-btn"
-                onClick={() => openBox()}
+                {...replyHold.props}
+                onClick={() => {
+                  if (replyHold.swallowClick()) return;
+                  openBox();
+                }}
                 data-edit-draft={waiting || draftKept ? '' : undefined}
                 data-reply-button=""
+                data-reply-hold={'onPointerDown' in replyHold.props ? '' : undefined}
+                data-holding={replyHold.holding ? '' : undefined}
                 // Its name starts with what it shows (WCAG 2.5.3): "Draft 2: 1 pick, 1 comment. Edit draft".
                 aria-label={phone && (waiting || draftKept) ? `Draft${draftCount > 0 ? ` ${formatCount(draftCount)}` : ''}: ${draftWords}. Edit draft` : undefined}
                 aria-describedby={waiting || draftKept ? footStatusIds : undefined}
@@ -6971,21 +7037,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
                   Before the checklist: the actions first, the status after. */}
+              {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
               {ackOffered && !waiting && !draftKept && (
-                <Tip
-                  content={
-                    ackOn
-                      ? 'Take back Looks good'
-                      : `Tells ${agentName(ackTarget!.author)} you read it and need nothing more. Moves to Quiet until it writes again.`
-                  }
-                >
-                  <button type="button" className="ib-btn ib-ack" data-ack="" aria-pressed={ackOn} onClick={() => onAck!(ackTarget!.id, !ackOn, agentName(ackTarget!.author))}>
-                    <span className="ib-ack-emoji" aria-hidden="true">
-                      👍
-                    </span>
-                    Looks good
-                  </button>
-                </Tip>
+                <ReactionTray
+                  messageId={ackTarget!.id}
+                  agent={agentName(ackTarget!.author)}
+                  on={ackOn}
+                  current={ackTarget!.ack?.reaction ?? null}
+                  phone={phone}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  openRequest={trayRequest}
+                />
               )}
               {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
               {showAskerNote && (

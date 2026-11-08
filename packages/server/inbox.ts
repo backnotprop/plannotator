@@ -80,6 +80,13 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  isInboxReactionEmoji,
+  parseInboxReaction,
+  parseInboxSavedReactions,
+  parseInboxReactionChange,
+  applyInboxReactionChange,
+  INBOX_SAVED_REACTIONS_MAX,
+  type InboxReaction,
   inboxRowsList,
   inboxRowsRead,
   inboxRowsSaved,
@@ -178,13 +185,14 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
+import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -252,6 +260,7 @@ import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAge
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
@@ -277,7 +286,7 @@ import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
-import { shapeAgentName } from "@plannotator/shared/shape/routes";
+import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
@@ -494,6 +503,8 @@ export interface InboxServerOptions {
   cardFavicons?: CardFaviconOptions;
   /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
   pullAvatars?: Partial<PullAvatarOptions>;
+  /** Tests: the risk agent and the CLIs found (inbox-pull-risk.ts): a scripted answer, never a real agent. */
+  pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">;
   /** Tests: how a project's GitHub picture is fetched (inbox-project-pictures.ts): a scripted fetch, never the network. */
   projectPictures?: Partial<ProjectPictureOptions>;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -669,6 +680,7 @@ const ERROR_STATUS: Record<string, number> = {
   ack_not_allowed: 422,
   ack_stale: 409,
   ack_after_reply: 409,
+  ack_sent: 409,
   question_open: 409,
   idempotency_key_reused: 409,
   // Action items (approval "inbox-next-actions"): a Done already sent (no Undo), an action item no longer open, an agent's `done` that names no open action item.
@@ -714,6 +726,8 @@ const ERROR_STATUS: Record<string, number> = {
   session_not_live: 409,
   // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
   folder_missing: 422,
+  // Create a folder: the folder can't be made there (no permission, a file has the name, a folder that can't be opened).
+  folder_unavailable: 422,
   // A new scratch folder could not be made (the root can't be written, or every name is taken).
   scratch_unavailable: 422,
   agent_unavailable: 409,
@@ -1049,6 +1063,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
+  /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
+  const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1106,6 +1122,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), ...options.pullRisk });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
@@ -1300,6 +1318,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
         stepsOn,
+        // Bro mode: send_message's `body` field carries the line only while the person has it on.
+        broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
@@ -1491,6 +1511,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
     };
+  };
+
+  /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
+  const activitySpanOf = (url: URL): { fromMs: number; toMs: number } => {
+    const fromMs = Date.parse(url.searchParams.get("from") ?? "");
+    const toMs = Date.parse(url.searchParams.get("to") ?? "");
+    if (!Number.isFinite(fromMs)) throw new InboxError("validation_error", "from: an ISO time.", { field: "from" });
+    if (!Number.isFinite(toMs) || toMs <= fromMs) throw new InboxError("validation_error", "to: an ISO time after from.", { field: "to" });
+    if (toMs - fromMs > INBOX_ACTIVITY_MAX_DAYS * 86_400_000) throw new InboxError("validation_error", `to: at most ${INBOX_ACTIVITY_MAX_DAYS} days after from.`, { field: "to" });
+    return { fromMs, toMs };
   };
 
   const projectFilterOf = (url: URL): string | null => {
@@ -2058,6 +2088,61 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The reaction tray's saved emoji (config.json `inboxReactions`, approval
+   * "inbox-reaction-tray"): up to INBOX_SAVED_REACTIONS_MAX emoji, each with
+   * the person's name for it (optional), in the order saved. Lenient on read
+   * (an entry that is not one is dropped), strict on write (a `422`).
+   *
+   * A window sends one change (`reaction_change`: add, name, change or remove
+   * an emoji), applied here to the list as it is now, so two windows (a
+   * laptop and a phone) never write over each other's emoji. `reactions`
+   * replaces the whole list. `inboxReactionsRev` counts the saves; every
+   * answer and `event: reactions` carries it, so a window takes a list only
+   * when it is newer than the last it took.
+   */
+  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxReactionsRev;
+    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
+  const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
+
+  /** The list `body` asks for (`reactions`, else `reaction_change` on the list now), or a `422`. */
+  const reactionsWanted = (body: { reactions?: unknown; reaction_change?: unknown }): InboxReaction[] => {
+    if (body.reactions !== undefined) {
+      const input = body.reactions;
+      const list = parseInboxSavedReactions(input);
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      }
+      return list;
+    }
+    const change = parseInboxReactionChange(body.reaction_change);
+    if (!change) {
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+    }
+    const list = applyInboxReactionChange(reactionsState().reactions, change);
+    if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
+    return list;
+  };
+
+  const saveReactions = (body: { reactions?: unknown; reaction_change?: unknown }, validateOnly = false): { reactions: InboxReaction[]; rev: number } => {
+    const list = reactionsWanted(body);
+    const before = reactionsState();
+    if (validateOnly) return before;
+    // Nothing to change (a name for an emoji another window took out): no write, no event.
+    if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
+    const rev = before.rev + 1;
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+    const saved = reactionsState();
+    if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
+      throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    }
+    for (const listener of reactionsListeners) listener(list, rev);
+    return saved;
+  };
+
+  /**
    * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
    * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
    * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
@@ -2384,6 +2469,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): on only when the person turned it on (config.json `inboxBro`). Off or
+   * unset: agent text is byte-equal to what it was before. Not held by `heldSwitch`: the owner offers it to everyone.
+   */
+  const broOn = () => loadConfig().inboxBro === true;
+  const saveBro = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "bro: { on: boolean }.", { field: "bro" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: broOn() };
+    const was = broOn();
+    saveConfig({ inboxBro: on });
+    if ((loadConfig().inboxBro === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== broOn()) for (const listener of capabilityListeners) listener();
+    return { on: broOn() };
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -2393,10 +2496,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
   /**
    * System (approval "system-inbox"): a drawing of each project, shown only while Code review is on. The one
-   * reading every System route and the settings answer use. Settings → Capabilities' switch is step B1; until it
-   * lands, only config.json `inboxSystem` turns it on.
+   * reading every System route and the settings answer use. `systemSwitchOn` is the person's switch alone
+   * (Settings → Capabilities → System, config.json `inboxSystem`), which Settings shows only while Code review is on.
    */
-  const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
+  const system = systemSwitch({
+    codeReviewOn,
+    saved: () => loadConfig().inboxSystem === true,
+    fixed: options.system,
+    save: (on) => saveConfig({ inboxSystem: on }),
+    // Every window follows at once (its Settings switch, the Reviews System button).
+    changed: () => {
+      for (const listener of capabilityListeners) listener();
+    },
+  });
+  const systemOn = system.on;
+  /** The switch's state for the window: present only while Code review is on (the row shows only then). */
+  const systemWire = system.wire;
+  /** The open PRs' files by head commit, for "Open PRs that change this" (read again only for a PR that moved). */
+  const systemFiles = systemFilesCache();
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2444,6 +2561,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
+  /** Bro mode's offer, while config.json `inboxBro` is unset (the person never decided). */
+  const broUndecided = () => loadConfig().inboxBro === undefined;
   /**
    * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
    * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
@@ -2471,6 +2590,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     code_review: codeReviewUndecided,
     board: boardUndecided,
     steps: stepsUndecided,
+    // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
+    bro: broUndecided,
     star: starUndecided,
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
@@ -2743,6 +2864,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { display_name: displayNameState() }),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. `reactions_rev` counts the saves. */
+    ...reactionsWire(reactionsState()),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
     ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. Also `diff_options.diff_style`. */
@@ -2757,11 +2880,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { launch: launch.settingsState() }),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
+    /** Bro mode (config.json `inboxBro`): off unless the person turned it on. */
+    bro: { on: broOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
-    /** System (config.json `inboxSystem`, only while Code review is on): absent while off. */
-    ...(systemOn() ? { system: { on: true } } : {}),
+    /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
+    ...systemWire(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2913,6 +3038,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
+        if (windowId) reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
         // opens no second connection (sharedEvents.ts holds every tab to one). Only while boards are on, and only for the
@@ -2930,7 +3058,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         syncShapes();
         const onCapabilities = (changed?: "code_review" | "shape") => {
           syncShapes();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -2970,6 +3098,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
+          reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
           stopShapes = null;
@@ -3175,8 +3304,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
-      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line.
-      ...(reply.ack_of ? { ack_of: reply.ack_of } : {}),
+      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
+      // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
+      ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -3613,12 +3743,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     codeReviewOn,
+    boardsOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
       shapes.store
         .list({ state: "all" })
         .filter((shape) => shape.thread === threadId)
         .map((shape) => ({ id: shape.id, versions: shapes.store.versionStamps(shape.id) })),
+    // A Show me's box picture: in the board's own folder, as a box note's picture is.
+    keepPicture: async (board, picture) => ((await unlockedShape(shapes.store, board)) ? shapes.store.keepShowMePicture(board, picture) : null),
     // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
     reviewOf: (messageId) => {
       const message = store.message(messageId);
@@ -4054,6 +4187,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, cursor: store.cursor(), decisions });
       }
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
+      // Settings → Activity: each thread's messages by hour over `from`..`to` (ISO times; the window sends its local
+      // midnight so hours line up with its clock), one project (`project=prj_…`, its combined ones too) or all.
+      // Thread names go only into this answer: nothing is written or logged.
+      if (path === "/api/inbox/activity") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const span = activitySpanOf(url);
+        return json(perfPhase("activity", () => store.activity({ ...span, projectId: projectFilterOf(url) })));
+      }
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
       if (tidied) return tidied;
@@ -4075,6 +4219,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
+      // PR risk ranking (inbox-pull-risk.ts): the rules, the agent and the judgments; the same guards as the list, so a
+      // guest or a web page can neither read the rules nor change them. Inbox-only (Bun).
+      if (path === "/api/inbox/pulls/risk" || path === "/api/inbox/pulls/risk/models") {
+        if (req.method !== "GET" && !(req.method === "POST" && path === "/api/inbox/pulls/risk")) return json({ error: "Use GET or POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/pulls/risk/models") {
+          const provider = url.searchParams.get("provider") ?? "";
+          if (!pullRisk.answer().agents.some((agent) => agent.id === provider)) throw new InboxError("validation_error", "provider: an agent from the list.", { field: "provider" });
+          return json({ serverSession, ...(await pullRisk.models(provider)) });
+        }
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          pullRisk.save(body);
+        }
+        return json({ serverSession, ...pullRisk.answer() });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -4144,6 +4309,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list.
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
+        pullRisk.assess(listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
@@ -4170,6 +4336,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
+        pullRisk.assess(listed.pulls);
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
@@ -4233,6 +4400,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ownerOrLocal: (request) => ownerOrLocal(request, via),
           systemOn,
           readBody,
+          json,
+        });
+      }
+      // System's reads (inbox-system.ts): the projects with their drawing's state, one project's drawing, and the open
+      // PRs whose files touch it (the pulls list's own read and cached patches). Same guards as the setup route.
+      if ((SYSTEM_READ_PATHS as readonly string[]).includes(path)) {
+        return await systemReadRoute(req, path, {
+          dataDir,
+          repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)),
+          store,
+          serverSession,
+          ownerOrLocal: (request) => ownerOrLocal(request, via),
+          systemOn,
+          listPulls: async () => (await pulls.list((await pullProjects()).wanted)).pulls,
+          patchOf: async (key: string) => (await pulls.diff(key, "layer")).patch,
+          filesCache: systemFiles,
           json,
         });
       }
@@ -4540,6 +4723,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.reactions === undefined &&
+          body.reaction_change === undefined &&
           body.rows === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
@@ -4548,23 +4733,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.prompts === undefined &&
           body.board === undefined &&
           body.steps === undefined &&
+          body.bro === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
+          body.system === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, reaction_change, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
         if (body.board !== undefined && !owner) return localOnly();
         // Steps too (the steps tool, the wake and compaction lines): the owner's to change.
         if (body.steps !== undefined && !owner) return localOnly();
+        // Bro mode too (a line in what every agent here reads): the owner's to change.
+        if (body.bro !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
         if (body.shape !== undefined && !owner) return localOnly();
+        // System too (the drawings, and from B9 the jobs that keep them current); a malformed value throws here.
+        if (system.check(body, owner) === "local_only") return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -4599,6 +4790,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        const reactionsChange = body.reactions !== undefined || body.reaction_change !== undefined;
+        if (reactionsChange) saveReactions(body, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
         const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
         if (diffOptionsChange) saveDiffOptions(body, true);
@@ -4606,6 +4799,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
+        if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
@@ -4621,17 +4815,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
+        const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
+        const systemAnswer = system.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -5094,7 +5291,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.ack !== undefined && typeof body.ack !== "boolean") throw new InboxError("validation_error", "ack: must be a boolean.", { field: "ack" });
         const on = body.ack !== false;
-        const result = store.ackMessage(ackMatch[1]!, on);
+        // The tray's emoji (approval "inbox-reaction-tray"): the agent gets the one the window closes on; after that it never changes (`409 ack_sent`).
+        let reaction: InboxReaction | null | undefined;
+        if (body.reaction !== undefined && body.reaction !== null) {
+          const emoji = (body.reaction as { emoji?: unknown } | null)?.emoji;
+          if (!isInboxReactionEmoji(emoji)) throw new InboxError("validation_error", "reaction: { emoji: one emoji, label?: string }.", { field: "reaction" });
+          reaction = parseInboxReaction(body.reaction);
+        } else if (body.reaction === null) reaction = null;
+        const result = store.ackMessage(ackMatch[1]!, on, on ? reaction : undefined);
         if (on) scheduleAckSettle();
         return json(result);
       }
@@ -5801,6 +6005,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
     ask.stop();
+    // No judgment written after stop, and no agent left running.
+    pullRisk.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

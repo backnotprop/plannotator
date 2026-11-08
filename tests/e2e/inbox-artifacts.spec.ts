@@ -123,6 +123,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+    PLANNOTATOR_INBOX_NOTES: '0',
+    PLANNOTATOR_TEST_SANDBOX: '1',
+    NO_ANON_PING: '1',
     NO_BROWSER,
     PLANNOTATOR_BROWSER: NO_BROWSER,
   };
@@ -266,7 +270,7 @@ test('Artifacts swaps the messages for a grid, newest message first, with the ad
   await expect(page.locator('[data-artifacts-view] h2')).toBeFocused();
   await expect(page.locator('section.ib-pane > .ib-pbody:not(.ib-artbody)')).toBeHidden();
   await expect(page.locator('section.ib-pane > .ib-pfoot')).toBeHidden();
-  await expect(page.locator('[data-artifacts-summary]')).toHaveText('11 from 5 messages · newest first');
+  await expect(page.locator('[data-artifacts-switch-one]')).toHaveText('Artifacts11');
   await expect(tiles()).toHaveCount(11);
   const names = await tiles().evaluateAll((all) => all.map((t) => (t.getAttribute('aria-label') ?? '').replace(/^Download /, '').split(',')[0]));
   expect(names).toEqual([
@@ -336,7 +340,7 @@ test('Escape, the pressed button and Back to the thread return to the messages, 
   const page = world.page;
   await page.reload();
   await expect(tiles()).toHaveCount(11);
-  await page.locator('[data-artifacts-view] h2').click();
+  await page.locator('[data-artifacts-view] h2').focus();
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}$`));
   await expect(page.locator('[data-artifacts-view]')).toHaveCount(0);

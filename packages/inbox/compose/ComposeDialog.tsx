@@ -29,10 +29,12 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAttachmentState, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
+import type { ReuseSource } from '../reuse';
+import { ThreadFilesStrip } from './ThreadFilesStrip';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
@@ -77,6 +79,9 @@ import {
   type ThreadNameState,
   type ComposeTarget,
   type ComposeStart,
+  type ComposeClone,
+  type ComposeCloneRequest,
+  cloneOfUrl,
   launchGroups,
   type LaunchHistory,
   type MachineLaunchProject,
@@ -113,8 +118,17 @@ export interface ComposeRequest {
   pulls?: InboxDraft['pulls'] | null;
   /** The thread's name as compose opens (Launch an agent: `pullHandoffThreadName`), as if the person had typed it. */
   threadName?: string;
+  /** Files already in the Inbox this message starts with (an archived thread's reuse button). */
+  reuse?: readonly ReuseSource[];
   /** New review: the box's rows above To (`reviewBox.ts`), filled in with a PR from its own page. */
   review?: ReviewBoxRequest | null;
+  /** A failed clone's Change the URL (E5): To the same agent and machine, the folder menu open with the URL in its filter. */
+  clone?: ComposeCloneRequest | null;
+  /**
+   * "+" on a project row (approval "launch-create-clone", F3, F5, F7): To reads "New <agent> session in <project>", the
+   * agent the person started last when that machine has it (`agent`), else its first; the cursor is in the message.
+   */
+  start?: { projectId: string; machine: string | null; agent: string | null } | null;
 }
 
 export interface ComposeSent {
@@ -157,6 +171,8 @@ export interface ComposeHeld {
   asleep: boolean;
   /** "Claude Code". */
   agentName: string;
+  /** What that machine does before the agent starts: "clones acme/billing-api", "makes pricing-page" (E9). */
+  first?: string;
   draftId: string | null;
   /** What was written, kept so Cancel can put it back in Drafts (the one it was sent from is gone here). */
   words: { body: string; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true };
@@ -172,6 +188,8 @@ export interface ComposeTransport {
 export interface ComposeDialogProps {
   request: ComposeRequest;
   phone: boolean;
+  /** The files of the thread behind the dialog, offered one click each. Absent or null: no row. */
+  threadFiles?: readonly InboxAttachmentState[] | null;
   /** The project the person is looking at: the list's filter, or the open thread's. */
   current: { id: string | null; root: string | null; name: string | null } | null;
   /** The session the person last sent to: listed first in the picker while it is live; never put in To by itself. */
@@ -282,14 +300,52 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
     onPasted: (names) => say(attachedAnnouncement(names)),
+    onAlready: (name) => say(`${name} is already in this message`),
     onPutBack: () => say('The pasted text is back in your message.'),
     text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
+  const reuseStarted = useRef(false);
+  useEffect(() => {
+    if (reuseStarted.current) return;
+    reuseStarted.current = true;
+    for (const source of request.reuse ?? []) files.addExisting(source);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
-  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project.
-  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string } } | null>(null);
+  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project; `create`: the Send
+  // makes it (Create a folder); `clone`: the Send clones a repo into it first (Clone from a git URL). A draft's own
+  // folder pick comes back with it (D9), checked again below.
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string; create?: boolean; clone?: ComposeClone } } | null>(() => {
+    if (request.start) return { agent: request.start.agent ?? '', projectId: request.start.projectId, machine: request.start.machine };
+    const again = request.clone ? cloneOfUrl(request.clone.url) : null;
+    if (request.clone && again) {
+      const path = request.clone.folder ?? `~/${again.slug.split('/').pop()}`;
+      return { agent: request.clone.agent, projectId: `folder:${path}`, machine: request.clone.machine, folder: { path, name: path.split('/').pop() ?? path, clone: again } };
+    }
+    const kept = request.draft?.start;
+    const clone = kept?.clone ? cloneOfUrl(kept.clone.url, kept.clone.branch) : null;
+    return kept
+      ? { agent: kept.agent, projectId: `folder:${kept.folder}`, machine: kept.machine, folder: { path: kept.folder, name: kept.name, ...(kept.create ? { create: true } : {}), ...(clone ? { clone } : {}) } }
+      : null;
+  });
+  // A reopened draft's new folder that is there by now is no longer made or cloned (D9): one read, when the draft opens.
+  useEffect(() => {
+    const kept = request.draft?.start;
+    if (!kept?.create && !kept?.clone) return;
+    const read = new AbortController();
+    inboxApi.homeFolders(kept.folder, kept.machine, read.signal).then(
+      (answer) => {
+        if (answer.exists) setStartPick((pick) => (pick?.folder?.path === kept.folder && (pick.folder.create || pick.folder.clone) ? { ...pick, folder: { path: kept.folder, name: kept.name } } : pick));
+      },
+      () => {},
+    );
+    return () => read.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The folder browser's path per machine, kept while compose is open (D2).
+  const keptPaths = useRef(new Map<string, string>());
   // A typed folder has no project id, so no sessions read can look at its files (Trust and start is not offered for it).
   const trustPick = startPick && !startPick.folder ? startPick : null;
   const { model, load: loadHere } = useComposeSessions(true, transport?.sessions, trustPick && !trustPick.machine ? { agent: trustPick.agent, project: trustPick.projectId } : null);
@@ -352,7 +408,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const agent = block?.agents.find((a) => a.agent === startPick.agent);
     // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
     if (agent && startPick.folder && !pulls && !box) {
-      return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, machine: startPick.machine };
+      return {
+        agent: agent.agent,
+        name: agent.name,
+        project: folderProject(startPick.folder.path, startPick.folder.name),
+        folder: startPick.folder.path,
+        ...(startPick.folder.create ? { create: true as const } : {}),
+        ...(startPick.folder.clone ? { clone: startPick.folder.clone } : {}),
+        machine: startPick.machine,
+      };
     }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
     if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && ((!pulls && !box) || linkScratch)) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
@@ -360,12 +424,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
+  // "+" on a project row: an agent that machine doesn't have (or none started yet) becomes its first, once its block is read.
+  useEffect(() => {
+    if (!request.start || !startPick || startPick.folder) return;
+    const block = blockOf(startPick.machine);
+    if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent)) return;
+    setStartPick({ ...startPick, agent: block.agents[0]!.agent });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.start, startPick, model?.launch, there.reads]);
   // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
   const startMachine = start?.machine ? (there.machines.find((m) => m.id === start.machine) ?? null) : null;
   const startMachineName = start?.machine ? (startMachine?.name ?? machineGroups.groups.find((g) => g.machine === start.machine)?.name ?? null) : null;
   const startHome = start?.machine ? (there.reads.get(start.machine)?.home ?? null) : home;
   const startAsleep = !!startMachine && startMachine.state === 'offline';
-  const [folderMenu, setFolderMenu] = useState(false);
+  const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
@@ -653,7 +725,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
         to: start
           ? {
               launch: {
-                ...(start.scratch ? { agent: start.agent, scratch: true as const } : start.folder ? { agent: start.agent, folder: start.folder } : { agent: start.agent, project_id: start.project.id }),
+                ...(start.scratch
+                  ? { agent: start.agent, scratch: true as const }
+                  : start.folder
+                    ? {
+                        agent: start.agent,
+                        folder: start.folder,
+                        ...(start.create ? { create: true as const } : {}),
+                        ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
+                      }
+                    : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
               },
@@ -698,6 +779,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           machineName: cause.machine?.name ?? startMachineName ?? 'the other machine',
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
           agentName: start.name,
+          // E9: what that machine does first when it's back.
+          ...(start.clone ? { first: `clones ${start.clone.slug}` } : start.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
         });
@@ -753,7 +836,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
       const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
       const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
+      const keptStart =
+        start?.folder && !target
+          ? {
+              agent: start.agent,
+              machine: start.machine,
+              folder: start.folder,
+              name: start.project.name,
+              ...(start.create ? { create: true as const } : {}),
+              ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
+            }
+          : null;
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
@@ -871,6 +966,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       last: g.last,
       notice: g.notice,
       asleep: g.asleep,
+      cloneInto: blockOf(g.machine)?.clone?.into ? tildePath(blockOf(g.machine)!.clone!.into, g.home) : null,
       scratch:
         g.scratch && folder && start
           ? { folder: tildePath(folder, g.home), root: tildePath(g.scratch.root, g.home), trusted: agentThere?.scratch_trusted !== false || !!agentThere.untrusted?.[SCRATCH_PICK], agentName: start.name }
@@ -961,12 +1057,18 @@ export function ComposeDialog(props: ComposeDialogProps) {
             aria-haspopup="listbox"
             aria-expanded={folderMenu}
             data-compose-folder-machine={start.machine ?? undefined}
-            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
+            data-compose-folder-new={start.create ? '' : undefined}
+            data-compose-folder-clone={start.clone ? start.clone.slug : undefined}
+            aria-label={`Start in: ${start.project.name}, ${start.create ? `a new folder at ${start.folder}, made when you send` : start.clone ? `${start.folder}, cloned from ${start.clone.host}/${start.clone.slug} when you send` : tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
             onClick={() => {
               setPicker(false);
               setFolderMenu((open) => !open);
             }}
           >
+            {/* A13: a folder the Send makes carries the new-folder mark until then. */}
+            {start.create && <Icon name="folderPlus" size={15} />}
+            {/* C13: a clone carries the git mark until the Send clones it. */}
+            {start.clone && <Icon name="gitBranch" size={15} />}
             {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
             {/* Another machine's project names its machine, as the list's rows do ("billing-svc · Mac mini"). */}
             {startMachineName && (
@@ -1159,17 +1261,36 @@ export function ComposeDialog(props: ComposeDialogProps) {
           onFolder={
             pulls || box
               ? undefined
-              : (folder, name, machine) => {
+              : (folder, name, machine, create) => {
                   // A folder that is one of that machine's projects already is that project (its trust facts and all).
                   const machineHome = machine ? (there.reads.get(machine)?.home ?? null) : home;
-                  const known = blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
-                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name } });
+                  const known = create ? undefined : blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
+                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name, ...(create ? { create: true } : {}) } });
                   setFolderMenu(false);
                   setError(null);
+                  if (create) say(`Starts in ${name}, a new folder made when you send.`);
                   textRef.current?.focus();
                 }
           }
+          onClone={
+            pulls || box
+              ? undefined
+              : (pick) => {
+                  const clone: ComposeClone = { url: pick.url, host: pick.repo.host, slug: pick.repo.slug, ...(pick.repo.branch ? { branch: pick.repo.branch } : {}) };
+                  setStartPick({ agent: start.agent, projectId: `folder:${pick.folder}`, machine: pick.machine, folder: { path: pick.folder, name: pick.name, clone } });
+                  setFolderMenu(false);
+                  setError(null);
+                  const on = pick.machine ? (machineGroups.groups.find((g) => g.machine === pick.machine)?.name ?? null) : null;
+                  say(`Starts in ${pick.name}${on ? ` on ${on}` : ''}, cloned when you send.`);
+                  textRef.current?.focus();
+                }
+          }
+          agentName={start.name}
+          cloneInto={model?.launch?.clone?.into ? tildePath(model.launch.clone.into, home) : null}
+          initialQuery={start.clone?.url ?? ''}
+          clonePicked={start.clone && start.folder ? { folder: start.folder, machine: start.machine } : null}
           folderPicked={start.folder ? { folder: start.folder, machine: start.machine } : null}
+          kept={keptPaths.current}
           onScratch={(machine) => {
             setStartPick({ agent: start.agent, projectId: SCRATCH_PICK, machine });
             setFolderMenu(false);
@@ -1301,6 +1422,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             }}
           />
         </div>
+        {takesFiles && <ThreadFilesStrip threadFiles={props.threadFiles} files={files} />}
         <ComposeFileTiles
           files={files.files}
           onRemove={(key) => {

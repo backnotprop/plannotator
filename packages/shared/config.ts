@@ -412,6 +412,16 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * The Inbox reaction tray's saved emoji (approval "inbox-reaction-tray"):
+   * up to 5, each with the person's name for it (optional), in the order
+   * saved. Unset: none saved. Written by the tray's + through POST
+   * /api/inbox/settings `{ reactions }`; an entry that is not an emoji is
+   * dropped on read.
+   */
+  inboxReactions?: { emoji: string; label?: string }[];
+  /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
+  inboxReactionsRev?: number;
+  /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
    * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮
@@ -494,6 +504,13 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): something the person turns on, off by default. On: send_message's
+   * `body` field carries the owner's line, so agents write to the Inbox in plain words. Off or unset: agent text as
+   * before. Unset is also "not decided", the only state the one-time offer opens in. Written by Settings →
+   * Capabilities and the offer (`POST /api/inbox/settings` `{ bro: { on } }`), read on every request.
+   */
+  inboxBro?: boolean;
+  /**
    * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
    * every surface (packages/shared/star-ask.ts reads and writes it, nothing
    * else does). `shownAt`: a surface showed it, so none shows it again.
@@ -524,6 +541,14 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4),
+   * under Code review: the person's "no slop zone rules" and the agent that judges
+   * each new pull request against them. Empty or unset `rules`: nothing runs.
+   * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
+   * The rules are the person's own words: never logged, never sent in telemetry.
+   */
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
@@ -546,7 +571,8 @@ export interface PlannotatorConfig {
    * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
-   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * `steps.shownAt`: the Checklist reveal was claimed. `bro.shownAt`: the Bro
+   * mode offer was claimed. `key` beside any of them:
    * the claiming page's own key, so that page's retry after a lost answer is
    * shown it again (any other key is not). The schedule (approval
    * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
@@ -564,11 +590,13 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; board?: string; steps?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
+    bro?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };

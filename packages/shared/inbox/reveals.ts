@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "bro" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -98,7 +98,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
-  // Bro mode (#2693) goes here: { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true }.
+  // Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use (`revealHeavyUse`:
+  // 10 or more threads read in 7 days, on 2 or more days), never on day 0 or 1 (2 days' tenure). Opt-in, as the Board:
+  // the claim only stamps it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
+  { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true },
   // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the
   // dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },

@@ -52,6 +52,7 @@ import {
   inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -192,7 +193,7 @@ export async function discoverInboxTools(
   } catch {
     remembered = null;
   }
-  const tools = parseInboxToolList(remembered);
+  const tools = inboxToolsWithoutBro(parseInboxToolList(remembered));
   return tools.length > 0 ? tools : null;
 }
 

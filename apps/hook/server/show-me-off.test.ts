@@ -93,7 +93,9 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
  * ("A stack of PRs", approval "stack-show-me" q-c24e5d2c, after its clean-room test), which names no code review,
  * re-pinned on merging main's later Shape text.
  */
-const SHAPE_TEXT_SHA256 = { "shape --help": "33ee9875a84ad5fa576cd217d4a201356646c147eef5081e8847cb235d3790f5", "/shape skill": "4f7d426b670be1cb5c4a0e5a53a0d61d96e7eb33bc688c93b560497903694d39" };
+// #2703 (approvals shape-know-removed, shape-whats-changed-removed): Shape stops asking agents for views.know and views.changed.
+// Re-pinned in merge train B for the stack paragraph and #2703's removals together.
+const SHAPE_TEXT_SHA256 = { "shape --help": "ce2ee98da4eebc163bb184abb8dc6c32f43e2d0ea5407a0a2030395faa0df196", "/shape skill": "2d311dca120c01f3e9c6dbe6d360bdde401f3b8c857b6ef3f2455748a72e39f9" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");

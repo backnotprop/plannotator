@@ -444,6 +444,33 @@ export const INBOX_ATTACHMENTS_PICTURES_LINE =
   'Screenshots and pictures go in the body instead (`![alt](path)`); attach what the person should open or click through.'
 
 /**
+ * Bro mode's line (approval "bro-mode", 2026-11-05; the owner's own words, and only the owner changes them). While the
+ * person has Bro mode on (config.json `inboxBro`) it goes in send_message's `body` field and nowhere else; off, the
+ * field is what it was before.
+ */
+export const INBOX_BRO_LINE =
+  "Don't use jargon and speak coherently. State things more simply and concisely, like one human talking to another. Don't drop important details, especially if the user asks for them."
+
+/** A `body` description with the line, right after its first words. */
+export function inboxBodyWithBro(description: string): string {
+  return description.replace('The message, markdown.', `The message, markdown. ${INBOX_BRO_LINE}`)
+}
+
+/**
+ * A remembered tool list as it reads with Bro mode off: only a running Inbox can say the switch is on, and a list kept
+ * from one that had it on must not outlive the person turning it off.
+ */
+export function inboxToolsWithoutBro(tools: InboxToolInfo[]): InboxToolInfo[] {
+  return tools.map((tool) => {
+    const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined
+    const body = properties?.body
+    if (typeof body?.description !== 'string' || !body.description.includes(INBOX_BRO_LINE)) return tool
+    const description = body.description.replace(` ${INBOX_BRO_LINE}`, '')
+    return { ...tool, inputSchema: { ...tool.inputSchema, properties: { ...properties, body: { ...body, description } } } }
+  })
+}
+
+/**
  * The agent tool's own words for the fields whose Inbox description is long
  * (the MCP server's are written for a raw MCP client, which has no other
  * guide): every Pi and OpenCode request carries the tool whole, so these keep
@@ -649,7 +676,9 @@ export function inboxAgentTool(
       }
       // The agent tool's own short words where the Inbox's are long; the rest is the Inbox's.
       const own = INBOX_AGENT_FIELD_DESCRIPTIONS[tool.name]?.[name]
-      properties[name] = { ...schema, description: (own ?? (typeof schema.description === 'string' ? schema.description : '')).trim() }
+      const served = typeof schema.description === 'string' ? schema.description : ''
+      // The running Inbox says Bro mode is on by carrying the line in the field these words stand in for.
+      properties[name] = { ...schema, description: (own === undefined ? served : served.includes(INBOX_BRO_LINE) ? inboxBodyWithBro(own) : own).trim() }
     }
   }
   for (const [name, users] of usedBy) {
@@ -1122,6 +1151,13 @@ export interface InboxReplyCommand {
    */
   ack_of?: string
   /**
+   * With `ack_of`: the emoji the person reacted with from the 👍's tray
+   * (approval "inbox-reaction-tray"), the one they ended on when the Undo
+   * window closed, with their name for it when it has one. The wake is
+   * `inboxAckLine` with it. Absent for 👍 Looks good.
+   */
+  ack_reaction?: { emoji: string; label?: string }
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -1537,12 +1573,34 @@ export function inboxRedirectedLine(asker: string, id: string): string {
 }
 
 /**
- * The whole of a 👍 Looks good wake under its first line, and the body of
- * the note the Inbox stores for it: the person read the message and needs
- * nothing more.
+ * The person's reaction as a wake and read_thread say it (approval
+ * "inbox-reaction-tray", addendum 2026-11-07T12:20Z: every reaction, 👍
+ * included, is one quick label): one short emoji (pictographic, a flag or a
+ * keycap) with no spaces or controls, and its name with controls made spaces
+ * and invisible format characters taken out (the joiner emoji use stays), at
+ * most 24 characters ('' when it has none). 👍 Looks good when there is no
+ * reaction (an ack from before the tray, an older Inbox), when it is not one,
+ * or for 👍 with no name.
  */
-export function inboxAckLine(messageId: string): string {
-  return `The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`
+export function inboxAckReaction(value: unknown): { emoji: string; label: string } {
+  const thumbs = { emoji: '👍', label: 'Looks good' }
+  if (!value || typeof value !== 'object') return thumbs
+  const { emoji, label } = value as { emoji?: unknown; label?: unknown }
+  if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 16 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(emoji) || /[\s\p{Cc}\p{Cf}]/u.test(emoji.replace(/[\u200d\ufe0f\u{e0020}-\u{e007f}]/gu, ''))) return thumbs
+  const text = typeof label === 'string' ? label.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/(?!\u200d)\p{Cf}/gu, '').replace(/\s+/g, ' ').trim() : ''
+  const name = [...text].slice(0, 24).join('').trim()
+  if (!name && emoji === '👍') return thumbs
+  return { emoji, label: name }
+}
+
+/**
+ * The whole of a reaction's wake under its first line, and the body of the
+ * note the Inbox stores for it: the reaction the person ended on when the
+ * Undo window closed (`inboxAckReaction`), with its name when it has one.
+ */
+export function inboxAckLine(messageId: string, reaction?: unknown): string {
+  const picked = inboxAckReaction(reaction)
+  return `The person reacted ${picked.emoji}${picked.label ? ` ${picked.label}` : ''} to your message (${messageId}).`
 }
 
 /**
@@ -1677,6 +1735,7 @@ export function inboxWakeText(
     continues_thread?: boolean
     name_thread?: boolean
     ack_of?: string
+    ack_reaction?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -1699,7 +1758,7 @@ export function inboxWakeText(
   if (typeof command.ack_of === 'string' && command.ack_of !== '') {
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
-    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of)}${thread ? `\n\n[thread ${thread}]` : ''}`
+    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
   const steps = wakeSteps(command.steps)

@@ -28,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, launchOff, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -118,6 +118,9 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
+  // A world folder of its own (not inboxScratch's), so launch goes off here: with it on, every window reads the launch
+  // block, which runs `claude --version` on this PATH (the stub's teardown fails the run).
+  launchOff(dataDir);
   // An Inbox that ran before on an older version: this run is an update.
   if (options.updatedFrom) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));

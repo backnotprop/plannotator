@@ -1,7 +1,9 @@
 /**
- * A board's review (approval "shape-whats-changed"): with no Code tab on Plannotator's board, What's changed's
- * Guided review and Full review, its guide-step links and the board's `file:line` links open the review's own guided
- * review, the way its thread does (`#thread=…&guide=<message>`), at that step, file or line.
+ * A board's review: with no Code tab on Plannotator's board, a place in code the board opens (a drawn part's
+ * `data-code`) opens the review's own guided review, the way its thread does (`#thread=…&guide=<message>`), at that
+ * file and line. (What's changed, which also showed the review's facts, buttons and step links, is gone: approval
+ * "shape-whats-changed-removed". `label`, `files`, `additions`, `deletions` and `steps` are still filled in; nothing
+ * draws them now.)
  *
  * The review is the newest message in the board's thread that carries a review (`guide.review`). A board with no
  * thread, or a thread with no review, has none: its links open the file in the board's own viewer, as before.
@@ -114,7 +116,7 @@ export function shapeReviewFiles(messageId: string, read: (messageId: string) =>
 }
 
 /**
- * The board's review: the facts What's changed shows, and `open`, which goes to the review there. A file the
+ * The board's review: its facts (drawn by nothing now), and `open`, which goes to the review there. A file the
  * review does not change, or a step it does not have, answers false: the board shows the file in its own viewer.
  */
 export function shapeReview(message: InboxMessageWire, go: (messageId: string, at: ShapeReviewAt | null) => void, read: (messageId: string) => Promise<{ snapshot: unknown }>): ShapeSurfaceReview {

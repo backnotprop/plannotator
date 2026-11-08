@@ -392,11 +392,23 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
     await select(page, TAIL, 7, 9);
     const g = await geometry(page);
     const box = clearOfLines(g);
-    const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
     expect(box.top, 'below the last line').toBeGreaterThan(g.bottom);
+    const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
     // It starts inside the file's box and may reach past it (the box now keeps room under its last line, so it
-    // need not): every word is still there to press.
+    // need not).
     expect(box.top, 'starts inside the file').toBeLessThan(shell.y + shell.height);
+    // No box around it cuts it off (the file's card included), and every word is still there to press.
+    const clippedBy = await bar(page).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if (s.overflowY === 'visible' && s.overflowX === 'visible') continue;
+        const q = p.getBoundingClientRect();
+        if (r.bottom > q.bottom + 0.5 || r.top < q.top - 0.5) return p.className || p.tagName;
+      }
+      return null;
+    });
+    expect(clippedBy, 'clipped by').toBeNull();
     for (const word of ['comment', 'ask', 'show-me']) {
       const button = bar(page).locator(`[data-selection-action="${word}"]`);
       const b = (await button.boundingBox())!;
@@ -438,12 +450,13 @@ test('the bottom of the viewport: above the first selected line, not on them, in
   for (const style of ['split', 'unified'] as const) {
     await page.setViewportSize(size);
     await setStyle(page, style);
-    await line(page, LONG, 25).scrollIntoViewIfNeeded();
-    // The last selected line is the last on screen.
-    await line(page, LONG, 27).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
+    await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
+    await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
+    await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
-    await lineAtBottom(page, LONG, 27);
-    await select(page, LONG, 25, 27);
+    await lineAtBottom(page, NEXT, 5);
+    await select(page, NEXT, 3, 5);
     const g = await geometry(page);
     const box = clearOfLines(g);
     expect(g.viewport.height - g.bottom, 'no room for it below').toBeLessThan(42);
