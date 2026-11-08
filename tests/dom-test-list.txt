@@ -91,6 +91,7 @@ packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
 packages/inbox/reask.test.tsx
 packages/inbox/openQuestions.test.tsx
+packages/inbox/threadPulls/ThreadPulls.test.tsx
 packages/inbox/threadSteps.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx

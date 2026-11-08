@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
+import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
@@ -50,6 +51,8 @@ export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
 // Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
 export * from "./inbox-reviews";
+// A thread's PRs (approval "inbox-pr-binding"), the same way.
+export * from "./inbox-thread-pulls";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -1673,6 +1676,13 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Absent otherwise, and from an older Inbox.
    */
   steps_waiting?: true;
+  /**
+   * The thread's PRs (approval "inbox-pr-binding"): how many, and the one the
+   * row's mark shows with its last known state. Only on this Inbox's own rows
+   * of the list model the window reads; absent when the thread has none, and
+   * from an older Inbox.
+   */
+  pulls?: InboxThreadPullsSummary;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1886,10 +1896,11 @@ export interface InboxThread {
 /**
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
- * initiative (approval "board-initiatives"). A reader that does not know a
- * kind skips its lines.
+ * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
+ * thread (approval "inbox-pr-binding"). A reader that does not know a kind
+ * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -1899,7 +1910,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord }
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
-  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative };
+  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
+  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -2863,10 +2875,19 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * relaying another agent's report): about +270 bytes on `body`, about +70
  * tokens, estimated, not measured on Pi; 2.6%, inside the 5%, so the
  * constants stay.
+ * A thread's PRs (approval "inbox-pr-binding": the `thread_pulls` action, its
+ * `add` and `remove` fields, send_message's `pulls`, "its PRs" in read_thread's
+ * `thread_id`; no line in the description, which stays 1,938 characters):
+ * +932 bytes for the action and the field, measured on Pi's request shape from
+ * a scratch Inbox's tools/list, with and without them. The entry measured the
+ * same way, with Pi's wrapper: 11,293 bytes (tokens +255 at the entry's ratio,
+ * plus the supersedes example's 13, so 3,058). Board on: 13,268 bytes, 3,634
+ * tokens the same way. Measured before the ref rule above landed with it (about
+ * +270 bytes more, 2.4%), inside the 5%, so the constants stay.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
+const INBOX_TOOL_COST_NOW = { bytes: 11293, tokens: 3058 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13268, tokens: 3634 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

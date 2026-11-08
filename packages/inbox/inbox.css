@@ -6665,6 +6665,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
 .ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
 @media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
+/* A count over an icon's corner (components/CountBadge.tsx): the PRs button's count, 13 px across, 9.5 px bold, the quiet
+   text colour on the page's ground. --cnt-x / --cnt-y: how far its centre sits past the icon's top-right corner, half
+   pixels so its edges land on whole ones (13 across). The digits sit in the middle both ways: tabular figures, a line
+   as tall as the badge, no baseline shift, and edges on whole pixels ("9+" a fixed 17 px, not its text's 16.28). */
+.ib-cnt-host { position: relative; --cnt-s: 13px; --cnt-f: 9.5px; --cnt-x: 1.5px; --cnt-y: 2.5px; }
+.ib-cnt { position: absolute; top: calc(var(--cnt-y) - var(--cnt-s) / 2); right: calc(0px - var(--cnt-x) - var(--cnt-s) / 2); min-width: var(--cnt-s); height: var(--cnt-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: var(--cnt-f); font-weight: 700; line-height: var(--cnt-s); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center; vertical-align: top; background: var(--muted-foreground); color: var(--background); pointer-events: none; }
+.ib-cnt-host:has(> .ib-cnt) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); }
+.ib-cnt[data-wide] { width: calc(var(--cnt-s) + 4px); padding: 0; }
+/* A wide count's cut: a second circle 4 px to the left, kept where both leave the glyph (the pill and its gap). */
+.ib-cnt-host:has(> .ib-cnt[data-wide]) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); -webkit-mask-composite: source-in; mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); mask-composite: intersect; }
+@media (forced-colors: active) { .ib-cnt { background: CanvasText; color: Canvas; forced-color-adjust: none; } }
 /* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Done's. */
 .ib-pmi .ib-lane-dot { margin: 0 3.5px; }
 
@@ -10946,3 +10957,70 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-wall-cap-sub { font-size: var(--ib-fs-11, 11px); }
   .pn-inbox .ib-apin-wall.ib-apin-on { width: 22px; height: 22px; top: 4px; left: 4px; }
 @media print { .pn-inbox .ib-apin { display: none; } }
+/* A thread's PRs (approval "inbox-pr-binding", 2026-11-08; ThreadPulls.tsx). The mark: the state icon of the PR in
+   play, in the forge's colours; several put a grey count over its top-right corner (CountBadge, `.ib-cnt`). */
+.ib-prc { display: inline-flex; flex: none; }
+/* The count is the shared CountBadge (.ib-cnt, below), at its own size on the row and on the button: at 11 px a row's
+   8.5 px digits sat half a pixel high (measured at 1x and 2x); at 13 px they are centred both ways. */
+.ib-prc .ib-refmark { display: block; }
+.ib-prc[data-state="draft"] .ib-refmark { color: var(--ib-ref-neutral); }
+/* The row's mark: room for the count past the icon's edge, and line 3 must not clip it. */
+.ib-prmark { display: inline-flex; align-items: center; flex: none; position: relative; cursor: default; }
+.ib-prmark[data-pr-n]:not([data-pr-n="1"]) .ib-prc { margin-right: 6px; }
+.ib-row .ib-cw .ib-prmark { margin-left: 8px; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) { overflow: visible; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) > .ib-pv { overflow: hidden; }
+@media (pointer: coarse) { .ib-prmark::before { content: ''; position: absolute; inset: -14px -10px; } }
+/* The thread's button, left of Artifacts, at its icon's size. */
+.pn-inbox .ib-iconbtn.ib-prbtn { flex: none; }
+.ib-prbtn .ib-prc:has(.ib-cnt) { margin-right: 3px; }
+.pn-inbox .ib-iconbtn.ib-prbtn[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+/* The card: the hover card's surface; a phone's bottom sheet. */
+.ib-prpop-sheet { left: 0; right: 0; bottom: 0; top: auto; border-radius: 12px 12px 0 0; max-height: 78dvh; padding-bottom: env(safe-area-inset-bottom); }
+.ib-prpop-scrim { position: fixed; inset: 0; z-index: 119; background: rgb(0 0 0 / 0.3); }
+.ib-prpop-grab { margin: 8px auto 0; width: 36px; height: 4px; flex: none; border-radius: 999px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+.ib-prpop-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 6px; font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-repo { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prpop-n { flex: none; }
+.ib-prpop-group + .ib-prpop-group { border-top: 1px solid var(--border); }
+.ib-prpop-gh { padding: 8px 14px 0; font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-rows { list-style: none; margin: 0; padding: 0 0 6px; }
+.ib-prpop-row { display: flex; align-items: flex-start; position: relative; }
+.ib-prpop-row + .ib-prpop-row { border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-prpop-stack .ib-prpop-row + .ib-prpop-row { border-top: 0; }
+.ib-prpop-link { display: flex; flex: 1; min-width: 0; gap: 10px; padding: 9px 4px 9px 14px; color: inherit; text-decoration: none; border-radius: 6px; }
+.ib-prpop-link:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-prpop-link:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -2px; }
+.ib-prpop-ic { flex: none; padding-top: 2px; position: relative; align-self: stretch; }
+/* A stack: a hairline joins the layers' icons, base first. */
+.ib-prpop-stack .ib-prpop-row:not(:last-child) .ib-prpop-ic::after { content: ''; position: absolute; left: 7.5px; top: 21px; bottom: -19px; width: 1px; background: var(--border); }
+.ib-prpop-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ib-prpop-t { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--foreground); overflow-wrap: anywhere; }
+.ib-prpop-num { font-weight: 400; color: var(--muted-foreground); }
+.ib-prpop-sub { font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-st-open { color: var(--ib-ref-open); }
+.ib-prpop-st-merged { color: var(--ib-ref-merged); }
+.ib-prpop-st-closed { color: var(--ib-ref-closed); }
+.ib-prpop-bad { color: var(--ib-ref-closed); }
+.ib-prpop-foot { padding: 0 14px 8px; font-size: 11px; color: var(--muted-foreground); }
+/* Remove: quiet until the row is hovered or the button has focus (always there on a touch screen). */
+.ib-prpop-rm { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 7px 8px 0 0; border-radius: 6px; color: var(--muted-foreground); opacity: 0; }
+.ib-prpop-row:hover .ib-prpop-rm, .ib-prpop-rm:focus-visible { opacity: 1; }
+.ib-prpop-rm:hover { background: var(--muted); color: var(--foreground); }
+@media (pointer: coarse) { .ib-prpop-rm { opacity: 1; width: 44px; height: 44px; margin: 0 4px 0 0; } }
+.ib-prpop-empty { padding: 14px; font-size: 12.5px; color: var(--muted-foreground); }
+/* The person's edit: add a PR by its ref or link; Undo after a removal. */
+.ib-prpop-edit { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid var(--border); }
+.ib-prpop-add { display: flex; gap: 6px; }
+.ib-prpop-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: 12.5px; }
+.ib-prpop-input:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -1px; }
+.ib-prpop-input[aria-invalid] { border-color: var(--ib-ref-closed); }
+.ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; font-weight: 550; color: var(--foreground); background: var(--muted); }
+.ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
+.ib-prpop-tbtn:disabled { opacity: 0.5; }
+.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+.ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
+.ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
+.ib-prpop-err { font-size: 12px; line-height: 1.4; color: var(--ib-ref-closed); }
+.ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: 13px; align-self: flex-end; }
+@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: 16px; } }

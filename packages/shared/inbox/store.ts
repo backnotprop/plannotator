@@ -192,6 +192,14 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import {
+  INBOX_THREAD_PULLS_MAX,
+  isInboxThreadPullRecord,
+  type InboxThreadPull,
+  type InboxThreadPullActor,
+  type InboxThreadPullRef,
+  type InboxThreadPullState,
+} from "@plannotator/core/inbox-types";
 import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
   inboxHashtags,
@@ -216,6 +224,7 @@ import {
   INBOX_PROJECTS_DIR,
   SEQ_FLOOR_FILE,
   STEPS_FILE,
+  PULLS_FILE,
   InboxError,
   inboxDir,
   MESSAGES_FILE,
@@ -632,6 +641,28 @@ function legacySeqFloor(path: string): number {
  * agent sessions, which the store does not hold: the server passes its live
  * sessions (packages/server/inbox-sessions.ts). Both answer from memory.
  */
+/** One add or remove of a PR on a thread (approval "inbox-pr-binding"): the store's PR event log, from the lines. */
+export interface InboxThreadPullEvent {
+  seq: number;
+  at: string;
+  op: "add" | "remove";
+  /** The PR's key. */
+  pull: string;
+  by: InboxThreadPullActor;
+}
+
+/** What `changeThreadPulls` did, and the thread's list after it. */
+export interface InboxThreadPullsChange {
+  thread_id: string;
+  added: InboxThreadPull[];
+  /** Asked to add, already on the thread: nothing written. */
+  already: InboxThreadPull[];
+  removed: InboxThreadPull[];
+  /** Asked to remove, not on the thread: not an error. */
+  missing: InboxThreadPullRef[];
+  pulls: InboxThreadPull[];
+}
+
 export interface InboxDeliveryPresence {
   /** How a session is connected now (no grace), or null when it does not poll. */
   connection(session: string): InboxDeliveryConnection | null;
@@ -847,6 +878,12 @@ export class InboxStore {
   private readonly stepsIdOf = new Map<string, string>();
   /** Each thread's steps record ids (a thread's read never scans every list). */
   private readonly stepsIdsByThread = new Map<string, Set<string>>();
+  /** Each thread's PRs (approval "inbox-pr-binding"): the current record per (thread, PR), by id. */
+  private readonly pullsById = new Map<string, InboxThreadPull>();
+  /** Each thread's PR record ids. */
+  private readonly pullIdsByThread = new Map<string, Set<string>>();
+  /** Each thread's PR event log, oldest first: one entry per add or remove line (a state line is no event). */
+  private readonly pullEvents = new Map<string, InboxThreadPullEvent[]>();
   /** The Board's initiatives, by id, deleted ones too (approval "board-initiatives"). Read by the Board only. */
   private readonly initiativesById = new Map<string, InboxInitiative>();
   /**
@@ -932,7 +969,7 @@ export class InboxStore {
       // left on disk and never applied, but its seqs still count, so a seq is
       // never handed out twice.
       this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) this.readLines(join(folder, name), lines);
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) this.readLines(join(folder, name), lines);
     }
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
@@ -1072,6 +1109,10 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "thread_pull":
+        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
+        if (isInboxThreadPullRecord(line.record)) this.applyThreadPull(line.record, line.seq);
         break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
@@ -3717,7 +3758,7 @@ export class InboxStore {
         perThread.set(threadId, threadBytes);
       }
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) {
         let text: string;
         try {
           text = readFileSync(join(folder, name), "utf8");
@@ -3736,7 +3777,7 @@ export class InboxStore {
               ? line.record.id
               : line.kind === "question" || line.kind === "annotation"
                 ? line.record.message_id
-                : line.kind === "steps"
+                : line.kind === "steps" || line.kind === "thread_pull"
                   ? line.record.thread_id
                   : null;
           const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
@@ -5880,7 +5921,7 @@ export class InboxStore {
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.keepSeqFloor();
-    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE]) {
+    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE, PULLS_FILE]) {
       const path = join(folder, name);
       let text: string;
       try {
@@ -5895,6 +5936,7 @@ export class InboxStore {
         if (line.kind === "question") return !messageIds.has(line.record.message_id);
         if (line.kind === "annotation") return line.record.thread_id !== threadId;
         if (line.kind === "steps") return line.record.thread_id !== threadId;
+        if (line.kind === "thread_pull") return line.record.thread_id !== threadId;
         return true;
       });
       const temp = `${path}.${process.pid}.tmp`;
@@ -5997,6 +6039,9 @@ export class InboxStore {
     this.stepsById.clear();
     this.stepsIdOf.clear();
     this.stepsIdsByThread.clear();
+    this.pullsById.clear();
+    this.pullIdsByThread.clear();
+    this.pullEvents.clear();
     this.initiativesById.clear();
     this.tagThreads.clear();
     this.tornFiles.clear();
@@ -6998,6 +7043,241 @@ export class InboxStore {
       // Best effort: the line is written; only a downgrade would read the floor.
     }
     return { record, changed: true };
+  }
+
+  // ─────────────────────────── a thread's PRs ───────────────────────────
+  //
+  // Approval "inbox-pr-binding" (2026-11-08). One record per (thread, PR) in
+  // its project's pulls.jsonl (kind `thread_pull`), on the store's one seq: a
+  // full snapshot per change, the last line per id current. The lines are the
+  // event log: an add (no `removed_at`), a remove (`removed_by`,
+  // `removed_at`), a re-add (a new line without them), and the reader's state
+  // change. Silent: nothing that routes, lists unread or notifies reads it.
+  // Who may change it is the server's to check; the store keeps what it is told.
+
+  private applyThreadPull(record: InboxThreadPull, seq: number): void {
+    const prev = this.pullsById.get(record.id);
+    this.pullsById.set(record.id, record);
+    let ids = this.pullIdsByThread.get(record.thread_id);
+    if (!ids) this.pullIdsByThread.set(record.thread_id, (ids = new Set()));
+    ids.add(record.id);
+    const live = record.removed_at === undefined;
+    const wasLive = prev ? prev.removed_at === undefined : false;
+    // A state line changes neither: it is no event.
+    if (prev && live === wasLive && (!live || prev.added_at === record.added_at)) return;
+    let events = this.pullEvents.get(record.thread_id);
+    if (!events) this.pullEvents.set(record.thread_id, (events = []));
+    events.push(
+      live
+        ? { seq, at: record.added_at, op: "add", pull: record.pull, by: record.added_by }
+        : { seq, at: record.removed_at!, op: "remove", pull: record.pull, by: record.removed_by! },
+    );
+  }
+
+  /** The thread a thread or message id names, or thread_not_found. */
+  private pullThreadRoot(threadId: string): InboxMessage {
+    const message = this.messages.get(typeof threadId === "string" ? threadId.trim() : "");
+    const root = message ? this.messages.get(message.thread_id) : undefined;
+    if (!root) throw new InboxError("thread_not_found", `No thread or message ${threadId}.`, { field: "thread_id" });
+    return root;
+  }
+
+  /** The thread's PRs now (removed ones left out), in the order they were added. */
+  threadPulls(threadId: string): InboxThreadPull[] {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const out: InboxThreadPull[] = [];
+    for (const id of this.pullIdsByThread.get(root) ?? []) {
+      const record = this.pullsById.get(id);
+      if (record && record.removed_at === undefined) out.push(record);
+    }
+    // Stable: PRs added in one call (one time) keep the order they were named in (the set's first-add order).
+    return out.sort((a, b) => a.added_at.localeCompare(b.added_at));
+  }
+
+  /** The thread's PRs removed at or after `since` and not back on it, the latest removal first. */
+  threadPullsRemoved(threadId: string, since: string): InboxThreadPull[] {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const out: InboxThreadPull[] = [];
+    for (const id of this.pullIdsByThread.get(root) ?? []) {
+      const record = this.pullsById.get(id);
+      if (record?.removed_at !== undefined && record.removed_at >= since) out.push(record);
+    }
+    return out.sort((a, b) => b.removed_at!.localeCompare(a.removed_at!) || a.id.localeCompare(b.id));
+  }
+
+  /** Every PR on a thread that still exists (the state reader picks from them). */
+  allThreadPulls(): InboxThreadPull[] {
+    const out: InboxThreadPull[] = [];
+    for (const record of this.pullsById.values()) {
+      if (record.removed_at === undefined && this.messages.get(record.thread_id)?.thread_id === record.thread_id) out.push(record);
+    }
+    return out;
+  }
+
+  /** The thread's PR event log, oldest first. */
+  threadPullEvents(threadId: string): readonly InboxThreadPullEvent[] {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    return this.pullEvents.get(root) ?? [];
+  }
+
+  /**
+   * What the person changed in the thread's PRs after `since` (an ISO time),
+   * net: a PR they added that is on the thread now and was not before, and
+   * one they removed that was on it before and is not now. An add and a
+   * remove that cancel out, or a change an agent undid since, say nothing.
+   */
+  personPullChangesSince(threadId: string, since: string): { added: InboxThreadPull[]; removed: InboxThreadPull[] } {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const events = this.threadPullEvents(root);
+    const touched = new Set(events.filter((e) => e.by.kind === "person" && e.at > since).map((e) => e.pull));
+    const added: InboxThreadPull[] = [];
+    const removed: InboxThreadPull[] = [];
+    for (const key of touched) {
+      const before = events.filter((e) => e.pull === key && e.at <= since).at(-1);
+      const was = before?.op === "add";
+      const record = this.pullsById.get(`${root}:${key}`);
+      const now = !!record && record.removed_at === undefined;
+      if (!record || was === now) continue;
+      (now ? added : removed).push(record);
+    }
+    return { added, removed };
+  }
+
+  /**
+   * Add and remove PRs on a thread, adds first: one line per PR that changes,
+   * `by` the person or an agent session. A PR already on the thread is not
+   * added again, and one not on it is not removed (`missing`, not an error).
+   * `remove: "all"` takes off every PR that was on the thread before this
+   * call. Past INBOX_THREAD_PULLS_MAX PRs on the thread nothing is written
+   * (validation_error). A PR removed and added again is a new line with the
+   * new `added_by`; it keeps its last known state.
+   */
+  changeThreadPulls(input: { thread_id: string; add?: readonly InboxThreadPullRef[]; remove?: readonly InboxThreadPullRef[] | "all"; by: InboxThreadPullActor }): InboxThreadPullsChange {
+    const root = this.pullThreadRoot(input.thread_id);
+    if (input.by.kind === "agent" && !input.by.session.trim()) {
+      throw new InboxError("validation_error", "agent_session: a thread's PRs are changed by an agent session (the connection fills it).", { field: "agent_session" });
+    }
+    const before = this.threadPulls(root.id);
+    const liveKeys = new Set(before.map((pull) => pull.pull));
+    const toAdd: InboxThreadPullRef[] = [];
+    const already: InboxThreadPull[] = [];
+    for (const ref of input.add ?? []) {
+      if (toAdd.some((r) => r.key === ref.key)) continue;
+      const live = before.find((pull) => pull.pull === ref.key);
+      if (live) already.push(live);
+      else toAdd.push(ref);
+    }
+    const toRemove: InboxThreadPull[] = [];
+    const missing: InboxThreadPullRef[] = [];
+    if (input.remove === "all") toRemove.push(...before);
+    else {
+      for (const ref of input.remove ?? []) {
+        const live = before.find((pull) => pull.pull === ref.key);
+        if (live) {
+          if (!toRemove.includes(live)) toRemove.push(live);
+        } else if (!toAdd.some((r) => r.key === ref.key)) missing.push(ref);
+        else {
+          // Added and removed in one call: neither is written.
+          toAdd.splice(toAdd.findIndex((r) => r.key === ref.key), 1);
+        }
+      }
+    }
+    const after = liveKeys.size + toAdd.length - toRemove.length;
+    if (after > INBOX_THREAD_PULLS_MAX) {
+      throw new InboxError(
+        "validation_error",
+        `pulls: a thread holds at most ${INBOX_THREAD_PULLS_MAX} PRs (this would make ${after}); remove some first. Nothing was changed.`,
+        { field: "add" },
+      );
+    }
+    const project = this.projectsById.get(root.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
+    const file = join(this.projectFolder(project), PULLS_FILE);
+    const at = this.now().toISOString();
+    const by: InboxThreadPullActor = input.by.kind === "agent" ? { ...input.by, session: input.by.session.trim() } : { kind: "person" };
+    const added: InboxThreadPull[] = [];
+    for (const ref of toAdd) {
+      const id = `${root.id}:${ref.key}`;
+      const prev = this.pullsById.get(id);
+      const record: InboxThreadPull = {
+        id,
+        project_id: root.project_id,
+        thread_id: root.id,
+        pull: ref.key,
+        url: ref.url,
+        added_by: by,
+        added_at: at,
+        state: prev?.state ?? "unknown",
+        title: prev?.title ?? null,
+        base: prev?.base ?? null,
+        head: prev?.head ?? null,
+        read_at: prev?.read_at ?? null,
+      };
+      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id, record });
+      added.push(record);
+    }
+    const removed: InboxThreadPull[] = [];
+    for (const pull of toRemove) {
+      const record: InboxThreadPull = { ...pull, removed_by: by, removed_at: at };
+      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
+      removed.push(record);
+    }
+    if (added.length > 0 || removed.length > 0) {
+      // An older Inbox never reads pulls.jsonl: the floor keeps it from handing out these seqs again.
+      try {
+        this.keepSeqFloor();
+      } catch {
+        // Best effort: the lines are written; only a downgrade would read the floor.
+      }
+    }
+    return { thread_id: root.id, added, already, removed, missing, pulls: this.threadPulls(root.id) };
+  }
+
+  /**
+   * The reader's answer for a PR on a thread: one line only when its state,
+   * title or branches changed (a quiet PR writes nothing). Null when the PR
+   * is not on the thread (removed meanwhile), or nothing changed.
+   */
+  setThreadPullState(threadId: string, key: string, read: { state: InboxThreadPullState; title: string | null; base: string | null; head: string | null }): InboxThreadPull | null {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const prev = this.pullsById.get(`${root}:${key}`);
+    if (!prev || prev.removed_at !== undefined) return null;
+    if (read.state === "unknown") return null;
+    const title = read.title ?? prev.title;
+    const base = read.base ?? prev.base;
+    const head = read.head ?? prev.head;
+    if (prev.state === read.state && prev.title === title && prev.base === base && prev.head === head) return null;
+    const project = this.projectsById.get(prev.project_id);
+    if (!project) return null;
+    const at = this.now().toISOString();
+    const record: InboxThreadPull = { ...prev, state: read.state, title, base, head, read_at: at };
+    this.write(join(this.projectFolder(project), PULLS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
+    try {
+      this.keepSeqFloor();
+    } catch {
+      // Best effort, as above.
+    }
+    return record;
+  }
+
+  /**
+   * Whether an agent session is in a thread, for changing its PRs: it wrote
+   * there, it owns the thread now, a message of the person's goes to it (a
+   * thread addressed to it, a reply it owns, a tag), or the person added it.
+   */
+  isThreadMember(threadId: string, session: string | null): boolean {
+    if (!session) return false;
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    if (!this.messages.get(root)) return false;
+    for (const message of this.threadMessages(root)) {
+      if (message.author.kind === "agent") {
+        if (message.author.session === session) return true;
+        continue;
+      }
+      if (this.isFor(message, session)) return true;
+    }
+    if (this.threadOwner(root)?.session === session) return true;
+    return this.addedSessions(root).some((tag) => tag.session === session);
   }
 
   // ─────────────────────────── the Board's cards ───────────────────────────

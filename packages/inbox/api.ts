@@ -80,6 +80,7 @@ import type {
   InboxCardRef,
   InboxCardWire,
   InboxStepsWire,
+  InboxThreadPullsAnswer,
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
@@ -1014,6 +1015,16 @@ export type OpenInFileScope = { thread: string; message?: string; from?: 'root' 
 /** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
+/** A thread's PRs answer as the window uses it: anything missing reads as none. */
+function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
+  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
+  return {
+    pulls: Array.isArray(value.pulls) ? value.pulls : [],
+    groups: Array.isArray(value.groups) ? value.groups : [],
+    removed: Array.isArray(value.removed) ? value.removed : [],
+  };
+}
+
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
@@ -1431,6 +1442,23 @@ export const inboxApi = {
       throw cause;
     }
   },
+  /**
+   * A thread's PRs (approval "inbox-pr-binding"): the live list with stack groups and state, and what was removed
+   * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
+   * threads answers 404: both read as none.
+   */
+  threadPulls: async (threadId: string): Promise<InboxThreadPullsAnswer> => {
+    if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
+    try {
+      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`)));
+    } catch (cause) {
+      if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
+      throw cause;
+    }
+  },
+  /** The person adds or removes a thread's PRs (the popover). `remove: ['all']` takes off every one. */
+  changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
+    threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
@@ -2071,7 +2099,9 @@ export type InboxEvent =
   /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
   | { seq: number; kind: 'steps'; id: string; thread_id: string }
   /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
-  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative };
+  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative }
+  /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
+  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
@@ -2333,7 +2363,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
           // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
           // neither rings nor makes the open thread read again.
-          if ((data.record as { kind?: unknown } | undefined)?.kind === 'steps') return;
+          // A linked machine's thread PRs line (approval "inbox-pr-binding"): the same, its threads show none here.
+          const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
+          if (machineKind === 'steps' || machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
         }
