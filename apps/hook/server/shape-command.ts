@@ -12,16 +12,17 @@
  *
  * It reads and writes the Shape store under the data dir directly; no server
  * is needed (the Shapes server and page are a later step). The session: inside
- * an agent host session the shape is that session's, and in its project,
- * exactly as the card command decides (inbox-mcp-shim.ts).
+ * an agent host session the shape is that session's. Its project is the
+ * folder the command runs in (or `--project`); the session's own folder
+ * (inbox-mcp-shim.ts) only when that folder gives none.
  *
  * stdout: JSON for update and read (and every command with --json), a line
  * of text otherwise. A refusal goes to stderr as `<code>: <message>` and exits
  * 1; bad usage exits 2.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
+import { inboxProjectRootHome, isHomeOrRootFolder, resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
 import { expandBoardStamps } from "@plannotator/shared/shape/stamps";
 import { fetchShapeWebPictures } from "@plannotator/shared/shape/web-pictures";
@@ -154,6 +155,8 @@ export interface ShapeCommandDeps {
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
   projectRootOf?: (folder: string) => Promise<ShapeProject>;
+  /** This user's home folder (a realpath; null: none), never a project of its own here. Tests pass a stand-in. */
+  home?: string | null;
   /** How `shape update` fetches the board's web pictures. Tests pass a stand-in. */
   fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
@@ -163,6 +166,15 @@ async function defaultProjectRoot(folder: string) {
   // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
   const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
   return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
+}
+
+/** A folder by its realpath, or as written when it cannot be read. */
+function realFolder(folder: string): string {
+  try {
+    return realpathSync(folder);
+  } catch {
+    return folder;
+  }
 }
 
 /** Write to stdout and settle once the text is flushed (or the pipe is closed). */
@@ -186,33 +198,41 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
   const host = inboxHostSessionFromEnv(deps.env);
   const session: ShapeSession | null = host ? { host: host.host, id: host.session } : null;
 
-  const folder = (() => {
-    if (c.project) return isAbsolute(c.project) ? c.project : resolve(deps.cwd, c.project);
-    return inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, deps.cwd);
-  })();
+  // The folder the command runs in is the project, as the help says ("run it from the project's folder"):
+  // a board made from a scratch or PR folder is filed there, so its file links open that folder's files.
+  // The session's own folder is used only when the shell's folder gives no project (gone, unreadable,
+  // the home folder or `/`).
+  const sessionFolder = inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, deps.cwd);
+  const home = deps.home === undefined ? inboxProjectRootHome() : deps.home;
+  const folders = c.project
+    ? [isAbsolute(c.project) ? c.project : resolve(deps.cwd, c.project)]
+    : [...new Set([...(isHomeOrRootFolder(realFolder(deps.cwd), home) ? [] : [deps.cwd]), sessionFolder, deps.cwd])];
   /** Why the last `projectOf` found no project, as the one line `update` refuses with. */
-  let projectProblem = `${folder} is not a folder`;
-  const projectOf = async () => {
-    try {
-      if (!statSync(folder).isDirectory()) throw new Error();
-    } catch {
-      projectProblem = `${folder} is not a folder`;
-      return null;
-    }
+  let projectProblem = `${folders[0]} is not a folder`;
+  const projectOf = async (): Promise<ShapeProject | null> => {
     const rootOf = deps.projectRootOf ?? defaultProjectRoot;
-    let project: ShapeProject;
-    try {
-      project = await rootOf(folder);
-    } catch (error) {
-      // An unreadable folder (or `/`): a line like every other refusal, not a stack trace.
-      const why = (error instanceof Error ? error.message : String(error)).replace(/^project_path:\s*/, "").replace(/\.$/, "");
-      projectProblem = `could not use ${folder} as the project: ${why}`;
-      return null;
+    let first: string | null = null;
+    for (const at of folders) {
+      let isFolder = false;
+      try {
+        isFolder = statSync(at).isDirectory();
+      } catch {
+        // gone
+      }
+      if (!isFolder) {
+        first ??= `${at} is not a folder`;
+        continue;
+      }
+      try {
+        return await rootOf(at);
+      } catch (error) {
+        // An unreadable folder (or `/`): a line like every other refusal, not a stack trace.
+        const why = (error instanceof Error ? error.message : String(error)).replace(/^project_path:\s*/, "").replace(/\.$/, "");
+        first ??= `could not use ${at} as the project: ${why}`;
+      }
     }
-    if (c.project || folder === deps.cwd) return project;
-    // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
-    const here = await rootOf(deps.cwd).catch(() => null);
-    return here?.root === project.root ? here : project;
+    projectProblem = first ?? projectProblem;
+    return null;
   };
 
   /** Output where a closed pipe changes nothing: the reader is gone either way. */

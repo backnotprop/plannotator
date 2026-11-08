@@ -104,9 +104,10 @@ describe("shape update", () => {
     expect(projectOf(back).worktree).toBeUndefined();
     await write(tree, main, "--id", made, "--base", "1");
     expect(projectOf(made).worktree).toBeUndefined();
-    // A `cd` out of the project: the session's project, in its own checkout.
+    // A `cd` to a folder of its own (a scratch or PR folder): that folder is the project, as the help says.
     const away = await write(tree, other);
-    expect(projectOf(away)).toMatchObject({ root: main, worktree: tree });
+    expect(projectOf(away)).toMatchObject({ root: other });
+    expect(projectOf(away).worktree).toBeUndefined();
     // `--project` says which, wherever the shell is.
     await write(main, tree, "--id", started, "--base", "2", "--project", main);
     expect(projectOf(started).worktree).toBeUndefined();
