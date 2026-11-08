@@ -114,7 +114,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
-import { inboxUsage, type InboxUsageSource } from "./usage";
+import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -181,7 +181,7 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
-import type { InboxUsageModel } from "@plannotator/core/inbox-types";
+import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
   inboxHashtags,
   inboxInitiativeBareName,
@@ -1953,13 +1953,13 @@ export class InboxStore {
   }
 
   /**
-   * Settings → Usage: every thread's messages counted by hour over `[fromMs, toMs)`, for one project (its
-   * combined projects too) or all of them (`inboxUsage`, ./usage.ts). Reads the in-memory log only: each
+   * Settings → Activity: every thread's messages counted by hour over `[fromMs, toMs)`, for one project (its
+   * combined projects too) or all of them (`inboxActivity`, ./activity.ts). Reads the in-memory log only: each
    * thread's message times, its name only when it has a message in the span. Writes and logs nothing.
    */
-  usage(span: { fromMs: number; toMs: number; projectId: string | null }): InboxUsageModel {
+  activity(span: { fromMs: number; toMs: number; projectId: string | null }): InboxActivityModel {
     const store = this;
-    function* sources(): Iterable<InboxUsageSource> {
+    function* sources(): Iterable<InboxActivitySource> {
       for (const [threadId, members] of store.threadMembers) {
         const root = store.messages.get(threadId);
         if (!root || root.thread_id !== threadId) continue;
@@ -1981,7 +1981,7 @@ export class InboxStore {
         };
       }
     }
-    return inboxUsage(sources(), { ...span, inProject: span.projectId === null ? undefined : (projectId) => this.sameProject(projectId, span.projectId!) });
+    return inboxActivity(sources(), { ...span, inProject: span.projectId === null ? undefined : (projectId) => this.sameProject(projectId, span.projectId!) });
   }
 
   /** One row of the list: the thread's summary, its project label and its section. */

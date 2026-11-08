@@ -581,4 +581,4 @@ packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
-packages/inbox/usageChart.test.tsx
+packages/inbox/activityChart.test.tsx

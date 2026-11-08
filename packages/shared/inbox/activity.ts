@@ -1,14 +1,14 @@
 /**
- * Settings → Usage's read (`GET /api/inbox/usage`): each thread's messages
+ * Settings → Activity's read (`GET /api/inbox/activity`): each thread's messages
  * counted by hour over a span. Pure: the store hands it each thread's message
  * times, and nothing here writes or logs (thread names stay in the answer).
  */
-import type { InboxUsageModel, InboxUsageThread } from "@plannotator/core/inbox-types";
+import type { InboxActivityModel, InboxActivityThread } from "@plannotator/core/inbox-types";
 
-export const INBOX_USAGE_HOUR_MS = 3_600_000;
+export const INBOX_ACTIVITY_HOUR_MS = 3_600_000;
 
 /** One thread as the store sees it. */
-export interface InboxUsageSource {
+export interface InboxActivitySource {
   thread_id: string;
   project_id: string;
   /** Read only for a thread that has a message in the span. */
@@ -17,7 +17,7 @@ export interface InboxUsageSource {
   times: readonly number[];
 }
 
-export interface InboxUsageSpan {
+export interface InboxActivitySpan {
   fromMs: number;
   toMs: number;
   /** Null: every project. */
@@ -32,10 +32,10 @@ export interface InboxUsageSpan {
  * Threads with no message in the span are left out; the rest keep the order
  * they began in (first message, then id).
  */
-export function inboxUsage(threads: Iterable<InboxUsageSource>, span: InboxUsageSpan): InboxUsageModel {
+export function inboxActivity(threads: Iterable<InboxActivitySource>, span: InboxActivitySpan): InboxActivityModel {
   const { fromMs, toMs, projectId } = span;
-  const hourCount = Math.max(0, Math.ceil((toMs - fromMs) / INBOX_USAGE_HOUR_MS));
-  const rows: { start: number; row: InboxUsageThread }[] = [];
+  const hourCount = Math.max(0, Math.ceil((toMs - fromMs) / INBOX_ACTIVITY_HOUR_MS));
+  const rows: { start: number; row: InboxActivityThread }[] = [];
   for (const thread of threads) {
     const { times } = thread;
     if (times.length === 0) continue;
@@ -50,7 +50,7 @@ export function inboxUsage(threads: Iterable<InboxUsageSource>, span: InboxUsage
     const counts = new Map<number, number>();
     for (const t of times) {
       if (t < fromMs || t >= toMs) continue;
-      const hour = Math.floor((t - fromMs) / INBOX_USAGE_HOUR_MS);
+      const hour = Math.floor((t - fromMs) / INBOX_ACTIVITY_HOUR_MS);
       counts.set(hour, (counts.get(hour) ?? 0) + 1);
     }
     if (counts.size === 0) continue;

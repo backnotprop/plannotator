@@ -1,16 +1,16 @@
 /**
- * Settings → Usage's ink: the theme's accent, pulled toward the theme's text
+ * Settings → Activity's ink: the theme's accent, pulled toward the theme's text
  * colour only as far as it takes for the faintest mark to stay visible on the
  * chart's surface. Most palettes keep the accent as it is; one whose accent
  * sits close to its card (a pale accent on a light card, a dim one on a dark
  * card) gets just enough of its text colour mixed in. Every colour is still a
- * theme token: this only picks the mix shares (`--ib-use-ink`, `--ib-use-strand`).
+ * theme token: this only picks the mix shares (`--ib-act-ink`, `--ib-act-strand`).
  */
 
 /** The dimmest mark against its surface, at least (the dataviz floor for the step nearest the surface). */
-export const USAGE_MIN_CONTRAST = 2;
+export const ACTIVITY_MIN_CONTRAST = 2;
 /** The strand is a faint guide, not data: just visible. */
-export const USAGE_STRAND_CONTRAST = 1.3;
+export const ACTIVITY_STRAND_CONTRAST = 1.3;
 
 export type Rgb = readonly [number, number, number];
 
@@ -37,7 +37,7 @@ export function over(fg: Rgb, bg: Rgb, alpha: number): Rgb {
 const INK_SHARES = [100, 85, 70, 55, 40, 25, 0];
 const STRAND_SHARES = [34, 45, 60, 80, 100];
 
-export interface UsageInk {
+export interface ActivityInk {
   /** The accent's share in the ink (the rest is the text colour). */
   ink: number;
   /** The ink's share in the strand (the rest is the surface). */
@@ -48,12 +48,12 @@ export interface UsageInk {
  * The first shares that pass, given a reader of what a share draws: `measure(ink, strand)` answers the faintest
  * mark of each look, the strand, and the surface, as RGB. Falls back to the last share (all text colour).
  */
-export function pickUsageInk(measure: (ink: number, strand: number) => { faintest: Rgb[]; strand: Rgb; ground: Rgb } | null): UsageInk | null {
+export function pickActivityInk(measure: (ink: number, strand: number) => { faintest: Rgb[]; strand: Rgb; ground: Rgb } | null): ActivityInk | null {
   let ink = INK_SHARES[INK_SHARES.length - 1]!;
   for (const share of INK_SHARES) {
     const read = measure(share, STRAND_SHARES[0]!);
     if (!read) return null;
-    if (read.faintest.every((mark) => contrast(mark, read.ground) >= USAGE_MIN_CONTRAST)) {
+    if (read.faintest.every((mark) => contrast(mark, read.ground) >= ACTIVITY_MIN_CONTRAST)) {
       ink = share;
       break;
     }
@@ -62,7 +62,7 @@ export function pickUsageInk(measure: (ink: number, strand: number) => { faintes
   for (const share of STRAND_SHARES) {
     const read = measure(ink, share);
     if (!read) return null;
-    if (contrast(read.strand, read.ground) >= USAGE_STRAND_CONTRAST) {
+    if (contrast(read.strand, read.ground) >= ACTIVITY_STRAND_CONTRAST) {
       strand = share;
       break;
     }
@@ -71,8 +71,8 @@ export function pickUsageInk(measure: (ink: number, strand: number) => { faintes
 }
 
 /** The CSS for a pick, set on the chart's section. */
-export function usageInkStyle(ink: UsageInk): Record<string, string> {
-  return { '--ib-use-ink': ink.ink === 100 ? 'var(--primary)' : `color-mix(in oklab, var(--primary) ${ink.ink}%, var(--foreground))`, '--ib-use-strand': `${ink.strand}%` };
+export function activityInkStyle(ink: ActivityInk): Record<string, string> {
+  return { '--ib-act-ink': ink.ink === 100 ? 'var(--primary)' : `color-mix(in oklab, var(--primary) ${ink.ink}%, var(--foreground))`, '--ib-act-strand': `${ink.strand}%` };
 }
 
 /**
@@ -80,7 +80,7 @@ export function usageInkStyle(ink: UsageInk): Record<string, string> {
  * the CSS stays the one source of the ramp) and a 1 px canvas that turns any CSS colour into RGB. Null where
  * the page cannot say (no canvas, a test DOM): the CSS defaults stand.
  */
-export function fitUsageInk(section: HTMLElement, look: 'blend' | 'dots'): UsageInk | null {
+export function fitActivityInk(section: HTMLElement, look: 'blend' | 'dots'): ActivityInk | null {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
   const ctx = canvas.getContext?.('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null | undefined;
@@ -106,16 +106,16 @@ export function fitUsageInk(section: HTMLElement, look: 'blend' | 'dots'): Usage
     svg.appendChild(el);
     return el;
   };
-  const t0 = probe('ib-usage-t0');
-  const s0 = probe('ib-usage-s0');
-  const strand = probe('ib-usage-strand');
+  const t0 = probe('ib-activity-t0');
+  const s0 = probe('ib-activity-s0');
+  const strand = probe('ib-activity-strand');
   const ground = document.createElement('span');
-  ground.style.cssText = 'position:absolute;width:0;height:0;background:var(--ib-use-ground);transition:none';
+  ground.style.cssText = 'position:absolute;width:0;height:0;background:var(--ib-act-ground);transition:none';
   section.append(svg, ground);
-  const before = { ink: section.style.getPropertyValue('--ib-use-ink'), strand: section.style.getPropertyValue('--ib-use-strand') };
+  const before = { ink: section.style.getPropertyValue('--ib-act-ink'), strand: section.style.getPropertyValue('--ib-act-strand') };
   try {
-    return pickUsageInk((ink, share) => {
-      for (const [name, value] of Object.entries(usageInkStyle({ ink, strand: share }))) section.style.setProperty(name, value);
+    return pickActivityInk((ink, share) => {
+      for (const [name, value] of Object.entries(activityInkStyle({ ink, strand: share }))) section.style.setProperty(name, value);
       const bg = rgb(getComputedStyle(ground).backgroundColor);
       const blob = rgb(getComputedStyle(t0).fill);
       const dot = rgb(getComputedStyle(s0).fill);
@@ -126,8 +126,8 @@ export function fitUsageInk(section: HTMLElement, look: 'blend' | 'dots'): Usage
       return { faintest: [look === 'blend' ? over(blob, bg, Number.isFinite(alpha) ? alpha : 1) : dot], strand: line, ground: bg };
     });
   } finally {
-    section.style.setProperty('--ib-use-ink', before.ink);
-    section.style.setProperty('--ib-use-strand', before.strand);
+    section.style.setProperty('--ib-act-ink', before.ink);
+    section.style.setProperty('--ib-act-strand', before.strand);
     svg.remove();
     ground.remove();
   }

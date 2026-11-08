@@ -1,47 +1,56 @@
 /**
- * Settings → Usage's chart, the pure half (components/UsageChart.tsx draws it):
- * the span, the layout that fits the width, the SVG paths, hit testing and
- * the arrow-key moves. One row per thread in the order threads began, one
- * column per hour; a mark for each hour with messages.
+ * Settings → Activity's chart, the pure half (components/ActivityChart.tsx
+ * draws it): the span, the layout for each size, the SVG paths and hit
+ * testing. One row per thread in the order threads began, one column per
+ * hour; a mark for each hour with messages.
+ *
+ * Two sizes (the owner, 2026-11-08: "a slimmer preview and click to expand
+ * fullscreen"). The preview, in Settings, packs the range into its width and
+ * its rows into thin lines, one dense picture with no scrolling sideways; the
+ * full screen (a lightbox) gives each hour the screen's width and taller rows,
+ * with hover and click. Mouse and touch only: the chart takes no keys.
  *
  * Two looks. "blend" (the default): the mark's size follows the hour's count,
- * neighbouring hours flow into one soft translucent shape (`usageJoin`), its
+ * neighbouring hours flow into one soft translucent shape (`activityJoin`), its
  * opacity a subtle step by the run's busiest hour, and a faint strand runs
- * along the thread between its first and last hour on screen. "dots" (dev only, `?usage-look=dots`): same-size
- * dots that never touch, the count in colour (five steps of the accent).
+ * along the thread between its first and last hour on screen. "dots" (dev
+ * only, `?activity-look=dots`): same-size dots that never touch, the count in
+ * colour (five steps of the accent).
  */
-import type { InboxUsageModel } from '@plannotator/core/inbox-types';
+import type { InboxActivityModel } from '@plannotator/core/inbox-types';
 
 export const HOUR_MS = 3_600_000;
 /** The range control's choices, in days. */
-export const USAGE_RANGES = [1, 3, 7, 14, 30] as const;
-export type UsageRange = (typeof USAGE_RANGES)[number];
-export type UsageLook = 'blend' | 'dots';
+export const ACTIVITY_RANGES = [1, 3, 7, 14, 30] as const;
+export type ActivityRange = (typeof ACTIVITY_RANGES)[number];
+export type ActivityLook = 'blend' | 'dots';
 
-export const USAGE_RANGE_LABEL: Record<UsageRange, string> = { 1: 'Today', 3: '3 days', 7: 'Week', 14: '2 weeks', 30: '30 days' };
+export const ACTIVITY_RANGE_LABEL: Record<ActivityRange, string> = { 1: 'Today', 3: '3 days', 7: 'Week', 14: '2 weeks', 30: '30 days' };
 
-/** The day labels' band above the rows, px. */
-export const USAGE_TOP = 34;
+export type ActivitySize = 'preview' | 'full';
+
+/** The day labels' band above the rows, px, for each size. */
+export const ACTIVITY_TOP: Record<ActivitySize, number> = { preview: 22, full: 34 };
 
 /** The count steps the key and the dots look use: 1 · 2 · 3–4 · 5–9 · 10+. */
-export const USAGE_STEPS = [1, 2, 3, 5, 10] as const;
-export function usageStep(count: number): number {
+export const ACTIVITY_STEPS = [1, 2, 3, 5, 10] as const;
+export function activityStep(count: number): number {
   return count >= 10 ? 4 : count >= 5 ? 3 : count >= 3 ? 2 : count >= 2 ? 1 : 0;
 }
 
 /** The look to draw: "dots" only when the page's address asks for it (dev comparison), never a setting. */
-export function usageLookOf(search: string): UsageLook {
-  return new URLSearchParams(search).get('usage-look') === 'dots' ? 'dots' : 'blend';
+export function activityLookOf(search: string): ActivityLook {
+  return new URLSearchParams(search).get('activity-look') === 'dots' ? 'dots' : 'blend';
 }
 
 /** `[from, to)`: local midnight `days - 1` days ago to the coming midnight, so hours and days line up with this clock. */
-export function usageSpan(days: number, now: Date): { from: Date; to: Date } {
+export function activitySpan(days: number, now: Date): { from: Date; to: Date } {
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
   const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   return { from, to };
 }
 
-export interface UsageDay {
+export interface ActivityDay {
   /** The column (hour) the day starts at. */
   col: number;
   /** Hours in the day (23 or 25 across a clock change). */
@@ -50,8 +59,8 @@ export interface UsageDay {
 }
 
 /** Each local day in `[from, to)` and the columns it covers. */
-export function usageDays(from: Date, to: Date): UsageDay[] {
-  const days: UsageDay[] = [];
+export function activityDays(from: Date, to: Date): ActivityDay[] {
+  const days: ActivityDay[] = [];
   for (let day = new Date(from); day < to; ) {
     const next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
     days.push({ col: Math.round((day.getTime() - from.getTime()) / HOUR_MS), hours: Math.round((next.getTime() - day.getTime()) / HOUR_MS), date: day });
@@ -60,63 +69,70 @@ export function usageDays(from: Date, to: Date): UsageDay[] {
   return days;
 }
 
-/** Narrowest hour column before the chart scrolls sideways, and the width the default range wants, px. */
-const MIN_CELL: Record<UsageLook, number> = { blend: 3, dots: 5 };
-const WANT_CELL: Record<UsageLook, number> = { blend: 4, dots: 6 };
-
-/** The widest range whose hours still get a comfortable column at this width: the default before the person picks one. */
-export function defaultUsageRange(width: number, look: UsageLook): UsageRange {
-  let best: UsageRange = USAGE_RANGES[0];
-  for (const days of USAGE_RANGES) if (width / (days * 24) >= WANT_CELL[look]) best = days;
-  return best;
+/** The range before the person picks one: a week, fewer days on a phone. */
+export function defaultActivityRange(phone: boolean): ActivityRange {
+  return phone ? 3 : 7;
 }
 
-export interface UsageLayout {
-  look: UsageLook;
+/** The preview's rows share at most this height (px) while each keeps PREVIEW_PITCH_MIN; past that it grows. */
+export const PREVIEW_HEIGHT = 480;
+const PREVIEW_PITCH: readonly [number, number] = [2, 5];
+const FULL_PITCH: readonly [number, number] = [5, 9];
+/** The full screen's narrowest hour before it scrolls sideways; the preview never scrolls. */
+const FULL_MIN_CELL = 1.5;
+/** The preview draws strands only on rows this tall: thinner, they would stripe the picture. */
+const STRAND_PITCH = 4;
+
+const clamp = (value: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, value));
+
+export interface ActivityLayout {
+  look: ActivityLook;
+  size: ActivitySize;
   cols: number;
   /** One hour's width. */
   cell: number;
   /** One row's height. */
   pitch: number;
+  /** The day labels' band. */
+  top: number;
   width: number;
   height: number;
-  /** Whether the hours are wider than the space (the chart scrolls sideways, opened at the latest hour). */
+  /** Whether the hours are wider than the space (full screen only: it scrolls sideways, opened at the latest hour). */
   scrolls: boolean;
   /** The smallest and largest mark radius. */
   rMin: number;
   rMax: number;
+  strands: boolean;
 }
 
 /**
- * Fit `cols` hours into `width`: every column gets an equal share, never under MIN_CELL (then it scrolls).
- * Rows: blend's row leaves room for its biggest blob plus a 3 px gap so rows never touch; dots are square cells.
+ * Fit `cols` hours and `rows` threads. Every column gets an equal share of the width (full screen: never under
+ * FULL_MIN_CELL, then it scrolls). Rows share `height` (the preview: PREVIEW_HEIGHT) within the size's bounds.
+ * A row's biggest mark leaves a gap of a fifth of the row (at least 0.75 px) to the next, so rows never touch.
  */
-export function usageLayout(width: number, cols: number, rows: number, look: UsageLook): UsageLayout {
+export function activityLayout(width: number, cols: number, rows: number, look: ActivityLook, size: ActivitySize = 'full', height = PREVIEW_HEIGHT): ActivityLayout {
   const fit = width / Math.max(1, cols);
-  const cell = Math.max(MIN_CELL[look], fit);
-  let pitch: number;
-  let rMin: number;
-  let rMax: number;
-  if (look === 'blend') {
-    pitch = Math.round(Math.min(16, Math.max(11, cell * 2.2)));
-    rMin = 1.75;
-    rMax = (pitch - 3) / 2;
-  } else {
-    pitch = Math.round(Math.min(10, Math.max(MIN_CELL.dots, cell)));
-    // 70% of the tighter spacing, so dots never touch.
-    rMin = rMax = 0.35 * Math.min(cell, pitch);
+  const cell = size === 'full' ? Math.max(FULL_MIN_CELL, fit) : fit;
+  const top = ACTIVITY_TOP[size];
+  const pitch = Math.round(clamp((size === 'full' ? height - top : PREVIEW_HEIGHT) / Math.max(1, rows), size === 'full' ? FULL_PITCH : PREVIEW_PITCH) * 4) / 4;
+  const gap = Math.max(0.75, pitch * 0.2);
+  let rMax = (pitch - gap) / 2;
+  let rMin = Math.min(rMax, Math.max(0.6, pitch * 0.2));
+  if (look === 'dots') {
+    // Same-size dots, 70% of the tighter spacing, so they never touch.
+    rMin = rMax = Math.min(rMax, 0.35 * Math.min(cell, pitch));
   }
   const w = Math.max(width, Math.ceil(cols * cell));
-  return { look, cols, cell, pitch, width: w, height: USAGE_TOP + rows * pitch + 4, scrolls: cell > fit + 0.01, rMin, rMax };
+  return { look, size, cols, cell, pitch, top, width: w, height: top + rows * pitch + 2, scrolls: cell > fit + 0.01, rMin, rMax, strands: look === 'blend' && pitch >= STRAND_PITCH };
 }
 
 /** A mark's radius: blend's area grows with the count, to a cap at 10+; dots are all one size. */
-export function usageRadius(count: number, layout: Pick<UsageLayout, 'rMin' | 'rMax'>): number {
+export function activityRadius(count: number, layout: Pick<ActivityLayout, 'rMin' | 'rMax'>): number {
   const t = Math.sqrt((Math.min(Math.max(count, 1), 10) - 1) / 9);
   return layout.rMin + (layout.rMax - layout.rMin) * t;
 }
 
-export interface UsageRow {
+export interface ActivityRow {
   id: string;
   name: string | null;
   projectId: string;
@@ -129,7 +145,7 @@ export interface UsageRow {
   counts: number[];
 }
 
-export function usageRows(model: InboxUsageModel): UsageRow[] {
+export function activityRows(model: InboxActivityModel): ActivityRow[] {
   return model.threads.map((thread) => {
     const hours: number[] = [];
     const counts: number[] = [];
@@ -143,8 +159,8 @@ export function usageRows(model: InboxUsageModel): UsageRow[] {
 
 const fmt = (n: number) => String(Math.round(n * 100) / 100);
 
-export const usageX = (layout: UsageLayout, hour: number) => (hour + 0.5) * layout.cell;
-export const usageY = (layout: UsageLayout, row: number) => USAGE_TOP + (row + 0.5) * layout.pitch;
+export const activityX = (layout: ActivityLayout, hour: number) => (hour + 0.5) * layout.cell;
+export const activityY = (layout: ActivityLayout, row: number) => layout.top + (row + 0.5) * layout.pitch;
 
 /** A circle as a subpath, drawn left → bottom → right → top (one winding for every subpath, so nonzero fills overlaps). */
 function circle(x: number, y: number, r: number): string {
@@ -158,7 +174,7 @@ function circle(x: number, y: number, r: number): string {
  * big one rather than pointing like an arrow. Marks far apart get no join (the strand carries the thread).
  * Null when there is no join, or one mark holds the other.
  */
-export function usageJoin(x1: number, r1: number, x2: number, r2: number, y: number, v = 0.7, handle = 2.4): string | null {
+export function activityJoin(x1: number, r1: number, x2: number, r2: number, y: number, v = 0.7, handle = 2.4): string | null {
   const d = x2 - x1;
   if (d <= Math.abs(r1 - r2) || d <= 0 || d > (r1 + r2) * 1.6) return null;
   const overlap = d < r1 + r2;
@@ -185,11 +201,11 @@ export function usageJoin(x1: number, r1: number, x2: number, r2: number, y: num
 }
 
 /** Blend's three opacity tiers, by a run's busiest hour: 1–2, 3–9, 10+ messages. */
-export function usageTier(peak: number): number {
+export function activityTier(peak: number): number {
   return peak >= 10 ? 2 : peak >= 3 ? 1 : 0;
 }
 
-export interface UsagePaths {
+export interface ActivityPaths {
   /** Blend: the faint line along each thread, first to last hour on screen. */
   strands: string;
   /**
@@ -206,18 +222,18 @@ export interface UsagePaths {
 }
 
 /** Every mark in a handful of paths: the whole chart is a few SVG nodes however many threads there are. */
-export function usagePaths(rows: readonly UsageRow[], layout: UsageLayout, days: readonly UsageDay[]): UsagePaths {
+export function activityPaths(rows: readonly ActivityRow[], layout: ActivityLayout, days: readonly ActivityDay[]): ActivityPaths {
   const strands: string[] = [];
   const tiers: string[][] = [[], [], []];
   const steps: string[][] = [[], [], [], [], []];
   let marks = 0;
   rows.forEach((row, i) => {
-    const y = usageY(layout, i);
-    if (layout.look === 'blend' && row.hours.length > 1) strands.push(`M${fmt(usageX(layout, row.hours[0]!))} ${fmt(y)}H${fmt(usageX(layout, row.hours[row.hours.length - 1]!))}`);
+    const y = activityY(layout, i);
+    if (layout.strands && row.hours.length > 1) strands.push(`M${fmt(activityX(layout, row.hours[0]!))} ${fmt(y)}H${fmt(activityX(layout, row.hours[row.hours.length - 1]!))}`);
     if (layout.look === 'dots') {
       for (let k = 0; k < row.hours.length; k++) {
         marks++;
-        steps[usageStep(row.counts[k]!)]!.push(circle(usageX(layout, row.hours[k]!), y, layout.rMin));
+        steps[activityStep(row.counts[k]!)]!.push(circle(activityX(layout, row.hours[k]!), y, layout.rMin));
       }
       return;
     }
@@ -230,16 +246,16 @@ export function usagePaths(rows: readonly UsageRow[], layout: UsageLayout, days:
       for (let j = k; j <= end; j++) {
         const count = row.counts[j]!;
         peak = Math.max(peak, count);
-        const x = usageX(layout, row.hours[j]!);
-        const r = usageRadius(count, layout);
+        const x = activityX(layout, row.hours[j]!);
+        const r = activityRadius(count, layout);
         shape.push(circle(x, y, r));
         if (j < end) {
-          const join = usageJoin(x, r, usageX(layout, row.hours[j + 1]!), usageRadius(row.counts[j + 1]!, layout), y);
+          const join = activityJoin(x, r, activityX(layout, row.hours[j + 1]!), activityRadius(row.counts[j + 1]!, layout), y);
           if (join) shape.push(join);
         }
         marks++;
       }
-      tiers[usageTier(peak)]!.push(shape.join(''));
+      tiers[activityTier(peak)]!.push(shape.join(''));
       k = end + 1;
     }
   });
@@ -251,7 +267,7 @@ export function usagePaths(rows: readonly UsageRow[], layout: UsageLayout, days:
 }
 
 /** A mark: its row and its index in that row's hours. */
-export interface UsageAt {
+export interface ActivityAt {
   row: number;
   k: number;
 }
@@ -273,53 +289,18 @@ function nearest(hours: readonly number[], hour: number): number {
  * The mark under the pointer at (x, y) in chart space: the row under it, then that row's nearest hour if it is
  * within a few px (a mark is easier to hit than to see). Null over the labels, past the rows, or between marks.
  */
-export function usageHit(rows: readonly UsageRow[], layout: UsageLayout, x: number, y: number): UsageAt | null {
-  if (y < USAGE_TOP) return null;
-  const row = Math.floor((y - USAGE_TOP) / layout.pitch);
+export function activityHit(rows: readonly ActivityRow[], layout: ActivityLayout, x: number, y: number): ActivityAt | null {
+  if (y < layout.top) return null;
+  const row = Math.floor((y - layout.top) / layout.pitch);
   const hours = rows[row]?.hours;
   if (!hours || hours.length === 0) return null;
   const k = nearest(hours, x / layout.cell - 0.5);
-  const reach = Math.max(layout.cell * 0.75, 7);
-  return Math.abs(usageX(layout, hours[k]!) - x) <= reach ? { row, k } : null;
-}
-
-/**
- * The arrow keys inside the chart (a focused-widget pattern, no global shortcut): ← → step through a row's
- * hours, ↑ ↓ go to the row above or below at its nearest hour, Home / End to the row's first or last hour.
- * Null for any other key.
- */
-export function usageMove(rows: readonly UsageRow[], at: UsageAt, key: string): UsageAt | null {
-  const row = rows[at.row];
-  if (!row) return null;
-  switch (key) {
-    case 'ArrowLeft':
-      return { row: at.row, k: Math.max(0, at.k - 1) };
-    case 'ArrowRight':
-      return { row: at.row, k: Math.min(row.hours.length - 1, at.k + 1) };
-    case 'Home':
-      return { row: at.row, k: 0 };
-    case 'End':
-      return { row: at.row, k: row.hours.length - 1 };
-    case 'ArrowUp':
-    case 'ArrowDown': {
-      const next = at.row + (key === 'ArrowUp' ? -1 : 1);
-      const target = rows[next];
-      if (!target || target.hours.length === 0) return at;
-      return { row: next, k: nearest(target.hours, row.hours[at.k]!) };
-    }
-    default:
-      return null;
-  }
-}
-
-/** Where the keyboard starts: the newest thread's latest hour. */
-export function usageStart(rows: readonly UsageRow[]): UsageAt | null {
-  for (let row = rows.length - 1; row >= 0; row--) if (rows[row]!.hours.length > 0) return { row, k: rows[row]!.hours.length - 1 };
-  return null;
+  const reach = Math.max(layout.cell * 0.75, 6);
+  return Math.abs(activityX(layout, hours[k]!) - x) <= reach ? { row, k } : null;
 }
 
 /** The thread's messages on the local day that holds `hour`. */
-export function usageDayCount(row: UsageRow, hour: number, days: readonly UsageDay[]): { day: UsageDay | null; count: number } {
+export function activityDayCount(row: ActivityRow, hour: number, days: readonly ActivityDay[]): { day: ActivityDay | null; count: number } {
   const day = days.find((d) => hour >= d.col && hour < d.col + d.hours) ?? null;
   if (!day) return { day, count: 0 };
   let count = 0;

@@ -3022,13 +3022,13 @@ export type InboxVoiceFailure = (typeof INBOX_VOICE_FAILURES)[number];
 export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;
 
 /**
- * `GET /api/inbox/usage` (Settings → Usage): each thread's messages counted by
+ * `GET /api/inbox/activity` (Settings → Activity): each thread's messages counted by
  * hour over `[from, to)`. One entry per thread with a message in that span, in
  * the order the threads began. `hours` is flat pairs `[hour, count, …]`, the
  * hour counted from `from` (so an hour boundary is wherever `from` is: the
  * window sends its own local midnight). Read from this Inbox's store only.
  */
-export interface InboxUsageThread {
+export interface InboxActivityThread {
   thread_id: string;
   /** The thread's name, else its subject, else null. */
   name: string | null;
@@ -3042,15 +3042,15 @@ export interface InboxUsageThread {
   hours: number[];
 }
 
-export interface InboxUsageModel {
+export interface InboxActivityModel {
   from: string;
   to: string;
   /** The hours the span holds (`ceil((to - from) / 1 h)`). */
   hour_count: number;
   /** The project asked for (combined projects count as one), or null for every project. */
   project_id: string | null;
-  threads: InboxUsageThread[];
+  threads: InboxActivityThread[];
 }
 
-/** The longest span `GET /api/inbox/usage` answers. */
-export const INBOX_USAGE_MAX_DAYS = 400;
+/** The longest span `GET /api/inbox/activity` answers. */
+export const INBOX_ACTIVITY_MAX_DAYS = 400;

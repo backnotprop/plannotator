@@ -76,7 +76,7 @@ import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
-import { UsageChart } from './components/UsageChart';
+import { ActivityChart } from './components/ActivityChart';
 import { AccountsProvider, useAccounts } from './useAccounts';
 import { InitiativeTagsContext, type InitiativeTags } from './hashtags';
 import { SidebarShell } from './shell/SidebarShell';
@@ -4280,8 +4280,8 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
-  /** Settings → Usage reads this Inbox's own store: its own projects only (not a linked machine's). */
-  const usageProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
+  /** Settings → Activity reads this Inbox's own store: its own projects only (not a linked machine's). */
+  const activityProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
   // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
   const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
   useEffect(() => {
@@ -5692,9 +5692,9 @@ function Inbox() {
         onReadStore={readStore}
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
-        usage={
-          <UsageChart
-            projects={usageProjects}
+        activity={
+          <ActivityChart
+            projects={activityProjects}
             names={projectNames}
             project={routeOf(settingsReturn.current).project ?? null}
             phone={phone}

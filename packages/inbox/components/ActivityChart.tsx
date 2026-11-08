@@ -1,0 +1,482 @@
+/**
+ * Settings → Activity: this Inbox's threads hour by hour (activityChart.ts has
+ * the pure half). One row per thread in the order threads began, a mark for
+ * each hour with messages, the day labels on top. Self-contained, so moving it
+ * out of Settings is one render elsewhere: give it the projects, the project
+ * to start on and what opening a thread does.
+ *
+ * Two sizes (the owner, 2026-11-08: "a slimmer preview and click to expand
+ * fullscreen … like a light box"). Settings shows a slim preview: the range
+ * packed into the width, the rows as thin lines, one picture with no
+ * scrolling sideways. A click on it (or Expand) opens the full screen in the
+ * window's modal (`Modal`, Updates.tsx: Escape, × or a click on the backdrop
+ * closes it), with the range, the project, the full-size chart, hover and
+ * click to open a thread (on touch, a first tap shows the tooltip and a
+ * second opens). Mouse and touch only: the chart takes no keys (the owner,
+ * 2026-11-08: "No keys, mouse and touch only").
+ *
+ * Drawn as one SVG with a handful of paths whatever the thread count (every
+ * mark of a kind in one path) plus one hit test on the pointer, so hundreds of
+ * threads and thousands of hours stay a few nodes. Colours are the theme's:
+ * the accent mixed toward the page's surface (inbox.css, `.ib-activity`).
+ */
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react';
+import type { InboxActivityModel } from '@plannotator/core/inbox-types';
+import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { inboxApi, type ProjectFolder } from '../api';
+import { fitActivityInk, activityInkStyle, type ActivityInk } from '../activityInk';
+import { ProjectFilter } from '../board/ProjectFilter';
+import { Icon } from '../icons';
+import { Modal } from './Updates';
+import {
+  HOUR_MS,
+  ACTIVITY_RANGES,
+  ACTIVITY_RANGE_LABEL,
+  ACTIVITY_STEPS,
+  defaultActivityRange,
+  activityDayCount,
+  activityDays,
+  activityHit,
+  activityLayout,
+  activityLookOf,
+  activityPaths,
+  activityRadius,
+  activityRows,
+  activitySpan,
+  activityTier,
+  activityX,
+  activityY,
+  type ActivityAt,
+  type ActivityDay,
+  type ActivityLook,
+  type ActivityRange,
+  type ActivityRow,
+  type ActivitySize,
+} from '../activityChart';
+
+export interface ActivityChartProps {
+  /** Projects the filter offers (this Inbox's own). */
+  projects: readonly ProjectFolder[];
+  /** Names as the person reads them. */
+  names: ReadonlyMap<string, string>;
+  /** The project to start on (the list's filter when Settings opened), or null for every project. */
+  project: string | null;
+  phone: boolean;
+  /** Read again when this changes (the store's cursor), a moment later so a burst of messages is one read. */
+  refreshKey?: number | null;
+  onOpenThread: (threadId: string, projectId: string | null) => void;
+  /** Tests: the clock. */
+  now?: () => Date;
+  /** Tests and dev comparison: the look (else `?activity-look=dots` in the address, else blend). */
+  look?: ActivityLook;
+}
+
+const REFRESH_AFTER_MS = 1500;
+
+const hourLabel = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric' });
+const dateLabel = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+const rangeWords = (range: ActivityRange) => (range === 1 ? 'today' : range === 7 ? 'this week' : `in the last ${range} days`);
+
+interface TipFacts {
+  name: string;
+  hour: string;
+  count: number;
+  dayCount: number;
+  started: string;
+  last: string;
+  total: number;
+}
+
+function factsOf(row: ActivityRow, k: number, fromMs: number, days: readonly ActivityDay[]): TipFacts {
+  const hour = row.hours[k]!;
+  const start = fromMs + hour * HOUR_MS;
+  return {
+    name: row.name?.trim() || 'Untitled thread',
+    hour: `${hourLabel(start)}–${hourLabel(start + HOUR_MS)}, ${dateLabel(start)}`,
+    count: row.counts[k]!,
+    dayCount: activityDayCount(row, hour, days).count,
+    started: dateLabel(row.startedAt),
+    last: dateLabel(row.lastAt),
+    total: row.total,
+  };
+}
+
+/** The width (and height) an element has, kept as it changes. */
+function useBox<T extends HTMLElement>(): [React.RefObject<T | null>, { width: number; height: number }] {
+  const ref = useRef<T>(null);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setBox((was) => (was.width === Math.floor(el.clientWidth) && was.height === Math.floor(el.clientHeight) ? was : { width: Math.floor(el.clientWidth), height: Math.floor(el.clientHeight) }));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, box];
+}
+
+interface PlotProps {
+  size: ActivitySize;
+  rows: readonly ActivityRow[];
+  days: readonly ActivityDay[];
+  model: InboxActivityModel;
+  look: ActivityLook;
+  width: number;
+  /** Full screen: the height the rows may share. */
+  height?: number;
+  /** Full screen: open a thread from a mark. */
+  onOpen?: (row: ActivityRow) => void;
+}
+
+/** The chart at one size: the day labels and one SVG. Full screen adds the hover band, ring, tooltip and click. */
+function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: PlotProps) {
+  const from = Date.parse(model.from);
+  const layout = useMemo(() => activityLayout(width, model.hour_count, rows.length, look, size, height), [width, model.hour_count, rows.length, look, size, height]);
+  const started = useRef(0);
+  const paths = useMemo(() => {
+    started.current = performance.now();
+    return activityPaths(rows, layout, days);
+  }, [rows, layout, days]);
+  const plot = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const svg = useRef<SVGSVGElement>(null);
+  const tip = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{ at: ActivityAt; x: number; y: number } | null>(null);
+  /** A tap showed this mark's tooltip; tapping it again opens the thread. */
+  const pinned = useRef<ActivityAt | null>(null);
+  const pointerKind = useRef<string>('mouse');
+  const interactive = size === 'full' && !!onOpen;
+
+  // Render time (paths + commit), for the perf note and the real-size check: `data-activity-render-ms`.
+  useLayoutEffect(() => {
+    if (plot.current) plot.current.dataset.activityRenderMs = (performance.now() - started.current).toFixed(1);
+  }, [paths]);
+
+  // A chart wider than the space opens at the latest hour.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && layout.scrolls) el.scrollLeft = el.scrollWidth;
+  }, [layout.scrolls, layout.width, model]);
+
+  useEffect(() => {
+    setHover(null);
+    pinned.current = null;
+  }, [rows]);
+
+  const facts = hover && rows[hover.at.row] ? factsOf(rows[hover.at.row]!, hover.at.k, from, days) : null;
+
+  // The tooltip beside the pointer, kept inside the window.
+  useLayoutEffect(() => {
+    const el = tip.current;
+    if (!el || !hover) return;
+    const b = el.getBoundingClientRect();
+    let left = hover.x + 14;
+    let top = hover.y + 14;
+    if (left + b.width > window.innerWidth - 8) left = hover.x - b.width - 14;
+    if (left < 8) left = 8;
+    if (top + b.height > window.innerHeight - 8) top = hover.y - b.height - 14;
+    if (top < 8) top = 8;
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+  });
+
+  const hit = (clientX: number, clientY: number): ActivityAt | null => {
+    if (!svg.current) return null;
+    const rect = svg.current.getBoundingClientRect();
+    return activityHit(rows, layout, clientX - rect.left, clientY - rect.top);
+  };
+
+  const onMove = (event: PointerEvent<SVGSVGElement>) => {
+    pointerKind.current = event.pointerType;
+    if (event.pointerType !== 'mouse' && event.type === 'pointermove') return;
+    const at = hit(event.clientX, event.clientY);
+    setHover(at ? { at, x: event.clientX, y: event.clientY } : null);
+  };
+
+  const onClick = (event: MouseEvent<SVGSVGElement>) => {
+    const at = hit(event.clientX, event.clientY);
+    if (!at) {
+      pinned.current = null;
+      setHover(null);
+      return;
+    }
+    // On a touch screen the first tap shows the tooltip; a second tap on the same mark opens it.
+    if (pointerKind.current !== 'mouse') {
+      const was = pinned.current;
+      if (!was || was.row !== at.row || was.k !== at.k) {
+        pinned.current = at;
+        setHover({ at, x: event.clientX, y: event.clientY });
+        return;
+      }
+    }
+    onOpen?.(rows[at.row]!);
+  };
+
+  const shown = hover?.at ?? null;
+  const ring = shown && rows[shown.row] ? { x: activityX(layout, rows[shown.row]!.hours[shown.k]!), y: activityY(layout, shown.row), r: (look === 'blend' ? activityRadius(rows[shown.row]!.counts[shown.k]!, layout) : layout.rMin) + 2.5 } : null;
+
+  return (
+    <div className="ib-activity-plot" ref={plot} data-size={size}>
+      <div className="ib-activity-scroll" ref={scroller} data-scrolls={layout.scrolls ? '' : undefined} onScroll={() => setHover(null)}>
+        <div className="ib-activity-days" style={{ width: layout.width, height: layout.top, marginBottom: -layout.top }} aria-hidden="true">
+          {days.map((day, i) => {
+            // A narrow day (2 weeks or more on a small screen, 30 days anywhere): the weekday's letter and the day's
+            // number, the month only on the first day and on the 1st.
+            const narrow = day.hours * layout.cell < (size === 'preview' ? 76 : 64);
+            const withMonth = !narrow || i === 0 || day.date.getDate() === 1;
+            return (
+              <span key={day.col} className="ib-activity-day" style={{ left: day.col * layout.cell, width: day.hours * layout.cell }} data-narrow={narrow ? '' : undefined}>
+                <span className="ib-activity-wd">{day.date.toLocaleDateString(undefined, { weekday: narrow ? 'narrow' : 'short' })}</span>
+                <span className="ib-activity-dt">{day.date.toLocaleDateString(undefined, withMonth ? { month: 'short', day: 'numeric' } : { day: 'numeric' })}</span>
+              </span>
+            );
+          })}
+        </div>
+        <svg
+          ref={svg}
+          className="ib-activity-svg"
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          aria-hidden="true"
+          data-marks={paths.marks}
+          {...(interactive
+            ? {
+                onPointerMove: onMove,
+                onPointerDown: onMove,
+                onPointerLeave: (event: PointerEvent<SVGSVGElement>) => event.pointerType === 'mouse' && setHover(null),
+                onClick,
+                style: { cursor: hover ? 'pointer' : undefined },
+              }
+            : {})}
+        >
+          <path className="ib-activity-dline" d={paths.days} />
+          {shown && <rect className="ib-activity-band" x={0} y={layout.top + shown.row * layout.pitch} width={layout.width} height={layout.pitch} rx={3} />}
+          {look === 'blend' ? (
+            <>
+              <path className="ib-activity-strand" d={paths.strands} />
+              {paths.tiers.map((d, i) => (
+                <path key={i} className={`ib-activity-t${i}`} d={d} />
+              ))}
+            </>
+          ) : (
+            paths.steps.map((d, i) => <path key={i} className={`ib-activity-s${i}`} d={d} />)
+          )}
+          {ring && <circle className="ib-activity-ring" cx={ring.x} cy={ring.y} r={ring.r} data-activity-ring="" />}
+        </svg>
+      </div>
+      {facts && (
+        <div className="ib-activity-tip" ref={tip} role="tooltip" data-activity-tip="">
+          <div className="ib-activity-tip-n" dir="auto">
+            {facts.name}
+          </div>
+          <div className="ib-activity-tip-v">
+            <b>{plural(facts.count, 'message')}</b> {facts.hour}
+          </div>
+          <div className="ib-activity-tip-v">
+            <b>{plural(facts.dayCount, 'message')}</b> that day
+          </div>
+          <div className="ib-activity-tip-m">
+            Started {facts.started}, last message {facts.last}, {plural(facts.total, 'message')} in all
+          </div>
+          {pointerKind.current !== 'mouse' && <div className="ib-activity-tip-m">Tap again to open</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityKey({ look }: { look: ActivityLook }) {
+  return (
+    <div className="ib-activity-key" aria-hidden="true">
+      <span>1</span>
+      <svg width={ACTIVITY_STEPS.length * 14} height={14} viewBox={`0 0 ${ACTIVITY_STEPS.length * 14} 14`}>
+        {ACTIVITY_STEPS.map((count, i) =>
+          look === 'blend' ? (
+            <circle key={count} className={`ib-activity-t${activityTier(count)}`} cx={7 + i * 14} cy={7} r={activityRadius(count, { rMin: 1.5, rMax: 5.5 })} />
+          ) : (
+            <circle key={count} className={`ib-activity-s${i}`} cx={7 + i * 14} cy={7} r={3} />
+          ),
+        )}
+      </svg>
+      <span>10+ messages an hour</span>
+    </div>
+  );
+}
+
+export function ActivityChart({ projects, names, project: startProject, phone, refreshKey = null, onOpenThread, now = () => new Date(), look: lookProp }: ActivityChartProps) {
+  const look = useMemo<ActivityLook>(() => lookProp ?? activityLookOf(typeof location === 'undefined' ? '' : location.search), [lookProp]);
+  const [project, setProject] = useState<string | null>(startProject);
+  const [range, setRange] = useState<ActivityRange>(() => defaultActivityRange(phone));
+  const [model, setModel] = useState<InboxActivityModel | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reads, setReads] = useState(0);
+  const [open, setOpen] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const [previewBox, previewSize] = useBox<HTMLDivElement>();
+  const { colorTheme, resolvedMode } = useTheme();
+  const [ink, setInk] = useState<ActivityInk | null>(null);
+
+  // The ink for this palette (activityInk.ts), read again when the palette or its mode changes, after the theme's
+  // classes are on the page (the provider applies them after this component's effects).
+  useEffect(() => {
+    const el = section.current;
+    if (!el || typeof requestAnimationFrame === 'undefined') return;
+    const frame = requestAnimationFrame(() => setInk(fitActivityInk(el, look)));
+    return () => cancelAnimationFrame(frame);
+  }, [colorTheme, resolvedMode, look]);
+
+  // A live change reads again a moment later (a burst of messages is one read).
+  const firstKey = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKey === firstKey.current) return;
+    const timer = setTimeout(() => setReads((n) => n + 1), REFRESH_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    let live = true;
+    const { from, to } = activitySpan(range, now());
+    inboxApi.activity(from, to, project).then(
+      (next) => {
+        if (!live) return;
+        setModel(next);
+        setError(null);
+      },
+      (err: unknown) => {
+        if (live) setError(err instanceof Error ? err.message : String(err));
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // `now` is a clock, not an input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, project, reads]);
+
+  const rows = useMemo(() => (model ? activityRows(model) : []), [model]);
+  const days = useMemo(() => (model ? activityDays(new Date(model.from), new Date(model.to)) : []), [model]);
+  const total = useMemo(() => rows.reduce((sum, row) => sum + row.counts.reduce((a, b) => a + b, 0), 0), [rows]);
+  const where = project ? (names.get(project) ?? 'this project') : 'every project';
+  const summary = model ? `${plural(rows.length, 'thread')}, ${plural(total, 'message')} ${rangeWords(range)}` : '';
+  const inkStyle = ink ? (activityInkStyle(ink) as CSSProperties) : undefined;
+
+  const empty = model && rows.length === 0 && (
+    <p className="ib-activity-note" data-activity-empty="">
+      No messages in {where} {rangeWords(range)}.
+    </p>
+  );
+  const failed = error && (
+    <p className="ib-activity-note" role="alert">
+      Activity could not be read. {error}{' '}
+      <button type="button" className="ib-lnk" onClick={() => setReads((n) => n + 1)}>
+        Try again
+      </button>
+    </p>
+  );
+
+  return (
+    <section ref={section} className="ib-sgroup ib-activity" data-activity="" data-activity-look={look} aria-label="Activity" style={inkStyle} data-activity-ink={ink?.ink}>
+      <div className="ib-activity-bar">
+        <span className="ib-activity-sum" data-activity-summary="">
+          {summary && (project ? `${where}: ${summary}` : summary)}
+        </span>
+        <button type="button" className="ib-btn ib-activity-expand" data-activity-expand="" onClick={() => setOpen(true)} disabled={!model || rows.length === 0}>
+          <Icon name="expand" size={14} />
+          Expand
+        </button>
+      </div>
+      <div className="ib-activity-box" ref={previewBox}>
+        {failed ||
+          empty ||
+          (model && previewSize.width > 0 ? (
+            // The whole preview opens the full screen; Expand above is the same, for a keyboard or a screen reader.
+            <div className="ib-activity-preview" data-activity-preview="" onClick={() => setOpen(true)} title="Open full screen">
+              <ActivityPlot size="preview" rows={rows} days={days} model={model} look={look} width={previewSize.width} />
+            </div>
+          ) : (
+            <div className="ib-activity-wait" aria-busy="true" />
+          ))}
+      </div>
+      {model && rows.length > 0 && <ActivityKey look={look} />}
+      {open && model && (
+        <ActivityFull
+          onClose={() => setOpen(false)}
+          inkStyle={inkStyle}
+          look={look}
+          phone={phone}
+          range={range}
+          onRange={setRange}
+          project={project}
+          onProject={setProject}
+          projects={projects}
+          names={names}
+          model={model}
+          rows={rows}
+          days={days}
+          summary={summary}
+          note={failed || empty || null}
+          onOpen={(row) => {
+            setOpen(false);
+            onOpenThread(row.id, project);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+interface FullProps {
+  onClose: () => void;
+  inkStyle: CSSProperties | undefined;
+  look: ActivityLook;
+  phone: boolean;
+  range: ActivityRange;
+  onRange: (range: ActivityRange) => void;
+  project: string | null;
+  onProject: (project: string | null) => void;
+  projects: readonly ProjectFolder[];
+  names: ReadonlyMap<string, string>;
+  model: InboxActivityModel;
+  rows: readonly ActivityRow[];
+  days: readonly ActivityDay[];
+  summary: string;
+  note: React.ReactNode;
+  onOpen: (row: ActivityRow) => void;
+}
+
+/** The full screen: the window's modal, sized to the window, with the range, the project and the full chart. */
+function ActivityFull({ onClose, inkStyle, look, phone, range, onRange, project, onProject, projects, names, model, rows, days, summary, note, onOpen }: FullProps) {
+  const [body, size] = useBox<HTMLDivElement>();
+  return (
+    <Modal labelledBy="ib-activity-title" onClose={onClose} testId="activity" ownKeys initialFocus="[data-activity-close]" className="ib-activity-lb">
+      <div className="ib-activity ib-activity-full" style={inkStyle} data-activity-look={look}>
+        <div className="ib-activity-lbhead">
+          <h2 id="ib-activity-title">Activity</h2>
+          <span className="ib-seg" role="radiogroup" aria-label="Range">
+            {ACTIVITY_RANGES.filter((days) => !phone || days <= 7).map((days) => (
+              <label key={days} className="ib-seg-o" data-on={range === days ? '' : undefined}>
+                <input type="radio" name="ib-activity-range" value={days} checked={range === days} onChange={() => onRange(days)} />
+                {ACTIVITY_RANGE_LABEL[days]}
+              </label>
+            ))}
+          </span>
+          {projects.length > 1 && <ProjectFilter projects={projects} names={names} value={project} phone={phone} onChange={onProject} />}
+          <span className="ib-activity-sum">{summary}</span>
+          <button type="button" className="ib-btn ib-ghost ib-icon ib-activity-close" aria-label="Close" data-activity-close="" onClick={onClose}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+        <div className="ib-activity-lbbody" ref={body}>
+          {note ??
+            (size.width > 0 && <ActivityPlot size="full" rows={rows} days={days} model={model} look={look} width={size.width} height={size.height} onOpen={onOpen} />)}
+        </div>
+        {rows.length > 0 && <ActivityKey look={look} />}
+      </div>
+    </Modal>
+  );
+}

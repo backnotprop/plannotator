@@ -1,11 +1,11 @@
 /**
- * Settings → Usage's ink (usageInk.ts). What regresses: a palette whose accent
+ * Settings → Activity's ink (activityInk.ts). What regresses: a palette whose accent
  * sits close to its card draws marks nobody can see (the pick stops before the
  * faintest mark reaches 2:1), or a palette with a good accent loses it (the
  * pick mixes in text colour it did not need).
  */
 import { expect, test } from 'bun:test';
-import { contrast, over, pickUsageInk, usageInkStyle, type Rgb } from './usageInk';
+import { contrast, over, pickActivityInk, activityInkStyle, type Rgb } from './activityInk';
 
 const CARD: Rgb = [255, 255, 255];
 const TEXT: Rgb = [20, 20, 20];
@@ -19,13 +19,13 @@ const measure = (accent: Rgb) => (ink: number, strand: number) => {
 };
 
 test('a strong accent is kept as it is', () => {
-  const pick = pickUsageInk(measure([90, 60, 220]))!;
+  const pick = pickActivityInk(measure([90, 60, 220]))!;
   expect(pick.ink).toBe(100);
-  expect(usageInkStyle(pick)['--ib-use-ink']).toBe('var(--primary)');
+  expect(activityInkStyle(pick)['--ib-act-ink']).toBe('var(--primary)');
 });
 
 test('a pale accent takes just enough text colour for its faintest mark to reach 2:1, and its strand 1.3:1', () => {
-  const pick = pickUsageInk(measure(PALE))!;
+  const pick = pickActivityInk(measure(PALE))!;
   expect(pick.ink).toBeLessThan(100);
   const read = measure(PALE)(pick.ink, pick.strand);
   expect(contrast(read.faintest[0]!, CARD)).toBeGreaterThanOrEqual(2);
@@ -37,5 +37,5 @@ test('a pale accent takes just enough text colour for its faintest mark to reach
 });
 
 test('a page that cannot read colours keeps the CSS defaults', () => {
-  expect(pickUsageInk(() => null)).toBeNull();
+  expect(pickActivityInk(() => null)).toBeNull();
 });

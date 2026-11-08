@@ -58,7 +58,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxUsageModel } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -1272,11 +1272,11 @@ export const inboxApi = {
   settings: () => get<SettingsModel>(inboxUrl('/settings', 'store=0')),
   /** Settings → Storage's sizes, asked for only while that panel is shown (the server walks every file for them). Given up after STORAGE_READ_MS. */
   storage: () => getWithin<InboxStorageModel>(inboxUrl('/settings/storage'), STORAGE_READ_MS),
-  /** Settings → Usage: each thread's messages by hour over `[from, to)` (this Inbox's store only), one project or all. */
-  usage: (from: Date, to: Date, project: string | null) => {
+  /** Settings → Activity: each thread's messages by hour over `[from, to)` (this Inbox's store only), one project or all. */
+  activity: (from: Date, to: Date, project: string | null) => {
     const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
     if (project) query.set('project', project);
-    return get<InboxUsageModel>(inboxUrl('/usage', query.toString()));
+    return get<InboxActivityModel>(inboxUrl('/activity', query.toString()));
   },
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),

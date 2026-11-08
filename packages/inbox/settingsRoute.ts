@@ -9,11 +9,12 @@
  * an Experimental group ("Experimental just needs to be within
  * Capabilities"). `#settings/experimental`, Experimental's own page for a
  * while, reads as Capabilities landing on that group, so an old link works.
- * Usage (the owner, 2026-11-07) is the Inbox's threads hour by hour, first of
- * "your data" (components/UsageChart.tsx).
+ * Activity (the owner, 2026-11-07; named so on 2026-11-08, since the sidebar's
+ * Usage is Claude account limits) is the Inbox's threads hour by hour, first of
+ * "your data" (components/ActivityChart.tsx).
  */
 
-export const SETTINGS_SECTIONS = ['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'usage', 'archived', 'storage', 'decision-data', 'about'] as const;
+export const SETTINGS_SECTIONS = ['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'decision-data', 'about'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
@@ -30,7 +31,7 @@ export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   'decision-data': 'Decision data',
   about: 'About',
   capabilities: 'Capabilities',
-  usage: 'Usage',
+  activity: 'Activity',
 };
 
 export interface SettingsAddress {
