@@ -15,7 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import type { MachineView, ProjectFolder } from './api';
-import { lastLaunchAgent, newSessionTip } from './compose/model';
+import { lastLaunchAgent, newSessionTip, projectCanStart, projectPlusOn } from './compose/model';
 
 const hasDom = typeof document !== 'undefined';
 const { ProjectRow } = (hasDom ? await import('./components/ProjectRow') : {}) as typeof import('./components/ProjectRow');
@@ -102,6 +102,21 @@ test('the tip names the project, its machine when it is another, and that it wai
   ];
   expect(lastLaunchAgent(rows)).toBe('claude-code');
   expect(lastLaunchAgent([])).toBeNull();
+});
+
+test('"+" shows only while launch is on and never on a tailnet guest\'s page; a row shows it only where it can start something', () => {
+  expect(projectPlusOn(true, false)).toBe(true);
+  expect(projectPlusOn(true, true)).toBe(false);
+  expect(projectPlusOn(false, false)).toBe(false);
+  expect(projectPlusOn(undefined, false)).toBe(false);
+  const bill = { id: 'prj_bill', root: '/Users/me/code/billing-svc' };
+  // Not read yet, or an asleep machine never read: shown (it starts when that machine is back, F4).
+  expect(projectCanStart(bill, null)).toBe(true);
+  expect(projectCanStart(bill, HERE)).toBe(true);
+  // No agent to start there, launch off there, or the folder gone (a failed clone's project): no "+".
+  expect(projectCanStart(bill, { ...HERE, agents: [] })).toBe(false);
+  expect(projectCanStart(bill, null, false)).toBe(false);
+  expect(projectCanStart(bill, { ...HERE, projects: [{ id: 'prj_bill', name: 'billing-svc', root: bill.root, exists: false }] })).toBe(false);
 });
 
 const SITE = { id: 'prj_bill', name: 'billing-svc', root: '/Users/me/code/billing-svc' } as unknown as ProjectFolder;

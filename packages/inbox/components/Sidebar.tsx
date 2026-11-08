@@ -93,6 +93,8 @@ export interface SidebarProps {
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
   onProjectNewSession?: (projectId: string, machine: string | null) => void;
+  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there). Absent: every row's can. */
+  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined) => boolean;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
@@ -613,6 +615,7 @@ export function Sidebar(props: SidebarProps) {
                       ? (() => {
                           const machine = project.machine && project.machine !== props.machines?.self ? project.machine : null;
                           const machineView = machine ? props.machines?.linked.find((m) => m.id === machine) : undefined;
+                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch)) return undefined;
                           const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, machineView?.state === 'offline');
                           return {
                             tip,

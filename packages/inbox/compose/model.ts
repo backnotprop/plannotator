@@ -554,6 +554,25 @@ export function newSessionTip(name: string, machineName: string | null, asleep: 
   return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
 }
 
+/** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
+export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boolean): boolean {
+  return launchEnabled === true && !guestPage;
+}
+
+/**
+ * "+" on one project row: hidden where it can't start anything, so a press never opens New message with an empty To
+ * or a folder to pick again. That machine's launch block (this computer's, or a linked machine's last read): no
+ * agent to start there, or the project's folder isn't there any more. A linked machine with launch off (`launch:
+ * false`) has none either. Not read yet, or asleep: shown (F4: it starts when the machine is back).
+ */
+export function projectCanStart(project: { id: string; root: string }, block: InboxComposeLaunch | null | undefined, machineLaunch?: boolean | null): boolean {
+  if (machineLaunch === false) return false;
+  if (!block) return true;
+  if (block.agents.length === 0) return false;
+  const known = block.projects.find((p) => p.id === project.id) ?? block.projects.find((p) => p.root === project.root);
+  return known?.exists !== false;
+}
+
 export function launchHistory(rows: readonly { machine?: string; project: { id: string }; created_at: string; run?: unknown }[]): Map<string, { at: string; project: string }> {
   const out = new Map<string, { at: string; project: string }>();
   for (const row of rows) {

@@ -179,11 +179,12 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxComposeLaunch, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
@@ -5547,6 +5548,29 @@ function Inbox() {
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
   const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
+  // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
+  // when the projects change; never on a timer.
+  const plusOn = projectPlusOn(settings?.launch?.enabled, guestPage);
+  const [plusHere, setPlusHere] = useState<InboxComposeLaunch | null>(null);
+  const projectCount = projects.length;
+  useEffect(() => {
+    if (!plusOn) return;
+    let live = true;
+    const read = () => {
+      if (document.visibilityState === 'hidden') return;
+      inboxApi.composeSessions(null, null).then(
+        (got) => live && setPlusHere(got.launch ?? null),
+        () => {},
+      );
+    };
+    read();
+    document.addEventListener('visibilitychange', read);
+    return () => {
+      live = false;
+      document.removeEventListener('visibilitychange', read);
+    };
+  }, [plusOn, projectCount]);
   const composeLaunched = useMemo(() => launchHistory(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   // The project compose treats as current: the list's filter, else the open thread's.
   const composeCurrent = (() => {
@@ -6306,11 +6330,9 @@ function Inbox() {
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
-            onProjectNewSession={
-              settings?.launch?.enabled && !guestPage
-                ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } })
-                : undefined
-            }
+            onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}
+            // Hidden on a row that can't start anything: no agent on that machine, launch off there, or its folder gone.
+            projectCanStart={(project, machine, machineLaunch) => projectCanStart(project, machine ? machineLaunchesKept().get(machine)?.launch : plusHere, machineLaunch)}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
