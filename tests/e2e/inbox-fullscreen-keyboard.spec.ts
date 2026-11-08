@@ -31,7 +31,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -87,9 +87,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   // Decision mode (an experiment) and the Board (off by default) on, and the Board's first-visit dialog already seen, in this Inbox's own config.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ experimental: { decisionMode: true }, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true }, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
   // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-fullscreen-keyboard: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
@@ -296,8 +296,8 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await card.getByRole('textbox', { name: 'Comment on checkout.png' }).fill(`Crop the header (${tag})`);
       await card.locator('.ib-csave').click();
       await page.goto(`${world.url}#thread=${world.threadId}`);
-      // A phone's reply box: its foot's one line, then (with questions too) the sheet's Review comments.
-      const line = page.locator('section.ib-pane .ib-rfoot [data-foot-summary]');
+      // A phone's reply box: its summary line over the row, then (with questions too) the sheet's Review comments.
+      const line = page.locator('section.ib-pane .ib-rbox [data-reply-line] [data-foot-summary]');
       if (!(await line.isVisible())) await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /Reply|Edit draft/ }).first().click();
       await line.click();
       if ((await line.getAttribute('data-foot-summary')) === 'sheet')

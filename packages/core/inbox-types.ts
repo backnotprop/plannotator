@@ -316,6 +316,33 @@ export function isInboxNote(message: {
 }
 
 /**
+ * The person answered in a thread at or after `since` (an ISO time, a checklist's last write): a message of theirs
+ * (the Inbox's own notes read past), or a 👍 Looks good still standing on an agent's message (its `ack.at`). The
+ * checklist's waiting rule (approval "inbox-checklist-spinners-2026-11-07": the amber pause "only while the thread
+ * waits on the person") reads it, on the server (the row's `steps_waiting`) and in the window (the foot's button),
+ * so the two agree. `messages` may be the store's or the wire's (a 👍 rides its agent message on both).
+ */
+export function inboxPersonAnsweredSince(
+  messages: readonly {
+    author: { kind: string };
+    created_at: string;
+    ack?: { at: string } | null;
+    set_aside?: readonly string[] | null;
+    reopened?: readonly string[] | null;
+    ack_of?: string | null;
+    tidy?: InboxTidyMark | null;
+  }[],
+  since: string,
+): boolean {
+  const after = Date.parse(since) || 0;
+  return messages.some(
+    (message) =>
+      (message.author.kind === "person" && !isInboxNote(message) && Date.parse(message.created_at) >= after) ||
+      (message.author.kind === "agent" && message.ack != null && Date.parse(message.ack.at) >= after),
+  );
+}
+
+/**
  * The reply the Inbox writes for the person's Done / Can't do it on an action item
  * (`action_report`, approval "inbox-next-actions"), once its Undo window
  * passed. It is the person's reply for delivery (Sent, the wake, Send now),
@@ -324,6 +351,44 @@ export function isInboxNote(message: {
  */
 export function isInboxActionReport(message: { author: { kind: string }; action_report?: readonly string[] | null }): boolean {
   return message.author.kind === "person" && (message.action_report?.length ?? 0) > 0;
+}
+
+/** A group in Settings -> Decision data's Who asks tables: an agent or a project. */
+export interface DecisionGroup {
+  id: string;
+  label: string;
+  /** The agent's host, for its mark. Agents only. */
+  host?: string;
+  answered: number;
+  skipped: number;
+  set_aside: number;
+  replaced: number;
+  offered: number;
+  taken: number;
+  median_wait_ms: number | null;
+}
+
+/** One of Decision data's trend lines: the last 30 days against the 30 before. */
+export type DecisionTrend =
+  | { key: "recommendations" | "skips"; direction: "up" | "down"; now: number; was: number }
+  | { key: "waits"; direction: "up" | "down"; now_ms: number; was_ms: number };
+
+/** `GET /api/inbox/decision-data`. */
+export interface DecisionDataSummary {
+  range: { since: number | null; until: number; earliest: number | null };
+  counts: { answered: number; skipped: number; set_aside: number; replaced: number };
+  settled_in_words: number;
+  waiting: number;
+  days: { day: string; answered: number; skipped: number; own_words: number }[];
+  pace: { fast: { offered: number; taken: number }; slow: { offered: number; taken: number } };
+  stopped_wait: { n: number; median_ms: number | null };
+  recommendation: { offered: number; taken: number };
+  projects: DecisionGroup[];
+  agents: DecisionGroup[];
+  history: { asked: number; answered: number; earliest: number | null };
+  trends: DecisionTrend[];
+  rate_min: number;
+  median_min: number;
 }
 
 /** The markers around what an agent receives with a question asked from Decision data, each on its own line. */
@@ -1545,6 +1610,14 @@ export interface InboxListRow extends InboxThreadSummary {
    * since: the row's small clock. Only on the list model, like `snoozed`.
    */
   snooze_back?: string | null;
+  /**
+   * A checklist in this thread has a step waiting on the person (approval
+   * "inbox-checklist-spinners-2026-11-07", the calm row): the row's still
+   * amber pause. Only while the person's Checklist switch is on, and only on
+   * the list model the window and the phone read, never on anything an agent
+   * reads. Absent otherwise, and from an older Inbox.
+   */
+  steps_waiting?: true;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1965,6 +2038,16 @@ export const INBOX_ROWS_OPTIONS = [
   "markDot",
   "repoLogo",
   "githubPictures",
+  // A notes-list look (the owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by
+  // default. `timeBelow`: Time position "Under the preview", the time on a line of its own at the left, under the
+  // preview, on three-line and phone rows. `dividers`: a hairline between rows. `statusMark`: one mark at the row's
+  // end, waiting on you or done, in place of the open counts (their words stay its name and tooltip).
+  "timeBelow",
+  "dividers",
+  "statusMark",
+  // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
+  // every thread name in bold, read or not.
+  "boldNames",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
@@ -2143,6 +2226,21 @@ export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "ge
 export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor"];
 
 /**
+ * The agents whose note is written by itself, without asking (approval
+ * "inbox-agent-note-auto", which superseded the one-time dialog): only agents
+ * proven to load the file where Plannotator writes it (their own code, source
+ * and docs, plus a live check). Qwen Code is not proven (likely only): its note
+ * is still offered, and Cursor's is copied by hand.
+ */
+export const INBOX_NOTE_AUTO_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+
+/** A note Plannotator wrote by itself that the window has not said yet. `path` is shown with `~`. */
+export interface InboxNoteAutoAdd {
+  agent: InboxNoteAgentId;
+  path: string;
+}
+
+/**
  * Where an agent's note would go and how it stands:
  *  - absent: no note; `create` says whether adding it creates the file.
  *  - added: the note Plannotator wrote is there, untouched.
@@ -2319,6 +2417,8 @@ export interface InboxAgentsModel {
   notes_asked?: InboxNoteAgentId[];
   /** The exact block a note writes, markers included. */
   note_text: string;
+  /** Notes Plannotator wrote by itself that the window has not said yet (one quiet line; POST /api/inbox/agents/seen clears it). Absent from older Inboxes. */
+  notes_auto?: InboxNoteAutoAdd[];
   /** A switch's refusal, after POST /api/inbox/agents. */
   error?: string | null;
   /**
@@ -2567,6 +2667,9 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * 11,456 is older than this action.
  * Both landed together (snooze_thread above, 11,779 bytes, plus the +444 of initiatives above): 12,223 bytes,
  * tokens +142, so 3,366; the board-switch test checks the bytes within 5%.
+ * The `supersedes` field's example (`e.g. ["msg_…/q-…"]`, after a session's
+ * unquoted ids broke its calls): +48 bytes measured from the entry, about +13
+ * tokens, Board on or off; inside the 5%, so the constants stay.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
@@ -2825,7 +2928,7 @@ export type InboxLaunchNotReady = "missing" | "too_old" | "plugin_off" | "tool_o
 
 /**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
- * `inboxLaunch.enabled`): the agents To offers to start (only those
+ * `inboxLaunch.enabled`, on unless false): the agents To offers to start (only those
  * available: no grey rows), and the projects the folder menu lists, the most
  * recently active first, each with whether its folder is still there.
  */

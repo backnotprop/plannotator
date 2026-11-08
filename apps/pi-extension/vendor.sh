@@ -156,6 +156,9 @@ done
 # command composes into the proxy-served bridge body for live app sessions.
 printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
   | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
+# bridge-script.ts imports the sandbox shim (a dependency-free string constant too).
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/sandboxShim.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/sandboxShim.ts" > "generated/sandboxShim.ts"
 
 # Vendor the moved AI context types and the model catalog from core into generated/ai/.
 for f in ai-context model-catalog; do

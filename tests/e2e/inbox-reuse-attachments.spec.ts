@@ -144,7 +144,15 @@ const preview = (p: Page, name: string) => p.locator(`[data-gallery-image][data-
 const tile = (p: Page, name: string) => p.locator(`.ib-attachments:not(.ib-hatts-tiles) .ib-att-t[data-attachment-name="${name}"]`).first();
 const button = (p: Page, surface: string, name: string) => p.locator(`[data-reuse-surface="${surface}"][data-reuse][aria-label*="${name}"]`).first();
 const replyTiles = (p: Page) => p.locator('[data-reply-files] [data-compose-file]');
-const sendReply = (p: Page) => p.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Send' }).first().click();
+const sendReply = (p: Page) => p.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
+/**
+ * The thread's draft on the Inbox holds the box's file. A computer saves without a word (approval "inbox-reply-box",
+ * T6: no "Saved" under the box), so the draft itself is read.
+ */
+const draftSaved = (threadId: string, url = studio.url) =>
+  expect
+    .poll(async () => ((await (await fetch(`${url}/api/inbox/threads/${threadId}/draft`)).json()) as { draft: { files?: unknown[] } | null }).draft?.files?.length ?? 0, { timeout: 10_000 })
+    .toBeGreaterThan(0);
 
 /** Where every element of the pane's attachments and text is. */
 const boxes = (p: Page) =>
@@ -287,7 +295,7 @@ test('a draft keeps it through a reload, with its check', async () => {
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await expect(page.locator('section.ib-pane').getByText(/Saved/).first()).toBeVisible({ timeout: 10_000 });
+  await draftSaved(thread_id);
   await page.reload();
   await expect(replyTiles(page)).toHaveCount(1, { timeout: 10_000 });
   await expect(button(page, 'tile', REF_A)).toHaveAttribute('data-reuse-state', 'added');
@@ -700,8 +708,8 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  // The draft has saved it, once the foot says so.
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  // The draft has saved it.
+  await draftSaved(thread_id);
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await tile(page, REF_A).hover();
@@ -741,7 +749,7 @@ test('a big changed file, listed by its stat after a reload: the check stays, an
   await tile(page, name).hover();
   await button(page, 'tile', name).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await draftSaved(big.thread_id);
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await tile(page, name).hover();
@@ -766,7 +774,7 @@ test('the draft already holds those bytes under another name: one tile, and the 
   await button(page, 'tile', name).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await page.unroute(reuse);
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await draftSaved(big.thread_id);
   await big.listedByStat();
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
@@ -810,7 +818,7 @@ test('the reply box closed with its draft: adding those bytes again opens the bo
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await page.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('section.ib-pane .ib-rbox [data-reply-close]').click();
   await expect(replyTiles(page)).toHaveCount(0);
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();

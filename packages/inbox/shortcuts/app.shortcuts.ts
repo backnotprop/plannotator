@@ -7,19 +7,23 @@ import { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
  * `?` is matched by its character (`event.key`), so it is Shift+/ on a US
  * keyboard and Shift+, on a French one.
  */
-export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goSettings' | 'toggleSidebar' | 'leavePage';
+export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goPulls' | 'goDrafts' | 'goSettings' | 'compose' | 'toggleSidebar' | 'leavePage';
 
 export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORTCUT_EXTRAS) {
   const goTo: Partial<Record<InboxAppAction, ShortcutDefinition>> = extras.goTo
     ? {
         goInbox: { description: 'Go to the Inbox', bindings: ['G I'], section: 'Everywhere', hint: 'Focus lands on the first row, or the open thread’s row.', preventDefault: true, displayOrder: 2 },
         goBoard: { description: 'Go to the Board', bindings: ['G B'], section: 'Everywhere', hint: 'When the Board is on.', preventDefault: true, displayOrder: 3 },
+        // G P and G D (approval "inbox-keyboard-keys-2026-11-07", item 5): each only while its sidebar row shows.
+        goPulls: { description: 'Go to Reviews (pull requests)', bindings: ['G P'], section: 'Everywhere', hint: 'When Code review is on.', preventDefault: true, displayOrder: 3.1 },
+        goDrafts: { description: 'Go to Drafts', bindings: ['G D'], section: 'Everywhere', hint: 'When you have drafts.', preventDefault: true, displayOrder: 3.2 },
         goSettings: { description: 'Go to Settings', bindings: ['G S'], section: 'Everywhere', preventDefault: true, displayOrder: 4 },
       }
     : {};
   return defineShortcutScope({
     id: 'inbox-app',
     title: 'Everywhere',
+    lettersByCode: true,
     shortcuts: {
       openMap: {
         description: 'Keyboard shortcuts',
@@ -30,6 +34,15 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
         displayOrder: 1,
       },
       ...goTo,
+      compose: {
+        // App.tsx: the sidebar pencil's path (approval "inbox-keyboard-keys-2026-11-07", item 4; Gmail's and Linear's C).
+        description: 'New message',
+        bindings: ['C'],
+        section: 'Everywhere',
+        hint: 'Opens a new message to an agent.',
+        preventDefault: true,
+        displayOrder: 4.5,
+      },
       toggleSidebar: {
         // Wired in shell/sidebar.tsx (the sidebar primitive's own listener, unchanged); listed here for the map.
         description: 'Show or hide the sidebar',

@@ -7,7 +7,7 @@ import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
 
 export interface InboxAskOptions {
-  /** `ask_ai` in the settings, and not the tour: while false nothing is read and nothing shows. */
+  /** The settings are read, this is not a tailnet guest's page, and not the tour: while false nothing is read and nothing shows. */
   on: boolean;
   /** Settings → Capabilities → Code review: a code span in an answer shows its code, as in a message. */
   codeReview: boolean;

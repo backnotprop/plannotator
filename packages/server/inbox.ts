@@ -108,7 +108,6 @@ import {
   parseUpdateCheckEnv,
   resolveAutoUpdate,
   resolveUpdateCheck,
-  resolveInboxAskAi,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -127,6 +126,7 @@ import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/share
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
+import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
@@ -184,7 +184,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -254,12 +254,13 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
-import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
-import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
+import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
+import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
+import { inboxPullRefOfKey, type InboxPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
-import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
+import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
@@ -294,7 +295,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, INBOX_NOTE_BLOCK, inboxNotesDisabled, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -451,11 +452,6 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
-  /**
-   * Ask AI (inbox-ask.ts). Default: `resolveInboxAskAi` (PLANNOTATOR_INBOX_ASK_AI,
-   * else off). Off, its routes answer the unknown-route 404.
-   */
-  askAi?: boolean;
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
@@ -1034,8 +1030,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
-  // Read once per start: Ask AI stays hidden until the owner has used it.
-  const askOn = options.askAi ?? resolveInboxAskAi();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -1201,6 +1195,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
    * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
    */
+  /** The PRs New review's links read, by key: what Start review takes for whose it is. */
+  const linkReads = new Map<string, InboxPull>();
+  /** One PR no list holds, from a host this computer's CLI is signed in to; nothing is asked of any other host. */
+  const readUnlistedPull = async (ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>>): Promise<InboxPull | null> => {
+    if (!(await pulls.signedInTo(ref.platform === "gitlab" ? "glab" : "gh", ref.host))) return null;
+    const login = lastReviewsRead?.listed.hosts.find((host) => host.host === ref.host)?.login ?? null;
+    return readInboxReviewLink(options.refRunner, { ref }, login);
+  };
+
   const findPulls = async (keys: readonly string[], wanted: InboxPullRepo[]): Promise<void> => {
     if (keys.every((key) => pulls.find(key))) return;
     await pulls.list(wanted, { refresh: false });
@@ -1396,6 +1399,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * A checklist still waits on the person (the row's `steps_waiting`): a waiting step, its session not ended, and
+   * the person has not answered in the thread since the list was last written: no message of theirs and no 👍 Looks
+   * good (`store.personAnsweredSince`, which reads the stored messages, 👍 included).
+   */
+  const inboxStepsWaitOnPerson = (list: Parameters<typeof stepsListWaitsOnPerson>[0], now: number): boolean =>
+    stepsListWaitsOnPerson(list, live, now, (threadId, since) => store.personAnsweredSince(threadId, since));
+  /** A row without `steps_waiting` (a linked machine's: this window never shows that machine's checklists). */
+  const withoutStepsWaiting = (row: InboxListRow): InboxListRow => {
+    if (!("steps_waiting" in row)) return row;
+    const { steps_waiting: _dropped, ...rest } = row;
+    return rest;
+  };
+
+  /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
@@ -1417,13 +1434,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Applied after the launch decoration, so a launched row keeps its run word and section under a snooze.
     const now = new Date();
     const byThread = snoozesById();
+    // `steps_waiting` (additive, approval "inbox-checklist-spinners-2026-11-07"): while the Checklist switch is on, a
+    // thread whose checklist has a step waiting on the person; the row's still amber pause (and the Board lane card's,
+    // which reads this flag). Only while the thread still waits: the person has written nothing there since that list
+    // was last written, and its session has not ended (an ended session never updates the list). Off: never.
+    const stepsWaiting = stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null;
+    const withStepsWaiting = (row: InboxListRow): InboxListRow => (stepsWaiting?.has(row.thread_id) ? { ...row, steps_waiting: true } : row);
     const own = store
       .listRows()
-      .map((row) => withSnooze(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row), byThread, now));
+      .map((row) => withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
+    // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(row, now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -1663,14 +1687,37 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let connecting: Promise<InboxConnectReport> | null = null;
   // The Inbox's stop ends a run still going: its agent CLIs are killed, never left running.
   const connectStop = new AbortController();
-  const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal }).finally(() => {
-      connecting = null;
+  // The note in each connected agent's instructions, written by itself for the agents proven to load it
+  // (approval "inbox-agent-note-auto"; autoAddInboxNotes): at this start, and after each connecting run (an
+  // agent connected by it can take one now). One pass at a time; the agents' model waits for the one going,
+  // so the window reads the notes it wrote.
+  let notesPass: Promise<void> = Promise.resolve();
+  const autoNotes = (): Promise<void> => {
+    notesPass = notesPass.then(async () => {
+      if (connectStop.signal.aborted) return;
+      try {
+        await autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment });
+      } catch {
+        // Tried again at the next start or run.
+      }
     });
+    return notesPass;
+  };
+  void autoNotes();
+  const connectAgents = (): Promise<InboxConnectReport> => {
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
+      .then(async (report) => {
+        await autoNotes();
+        return report;
+      })
+      .finally(() => {
+        connecting = null;
+      });
     return connecting;
   };
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = async () => {
+    await notesPass;
     const file = readInboxAgents(dataDir);
     const records = Object.fromEntries(
       Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
@@ -1723,6 +1770,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notes_offered: loadConfig().inboxAgentNotes?.offered === true,
       notes_asked: await notesAsked(options),
       note_text: INBOX_NOTE_BLOCK,
+      notes_auto: unsaidAutoNotes(),
       // The open sessions that poll now, per host, and which need a restart or an update (inbox-restart.ts).
       sessions: live.hostSessions((host) => {
         if (host !== "claude-code") return { installed: host === "pi" && version !== "dev" ? version : null, update_command: null };
@@ -1783,8 +1831,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       } else {
         const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
         if (!change.ok) problems.push(change.reason);
-        // A yes in Settings answers the note dialog for this agent: removing the note later never asks again.
-        else if (body.note) await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
+        // Either way the person decided for this agent: a note turned off stays off (never written again by
+        // itself, never asked again), and removing one turned on later never asks again.
+        else await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
       }
     }
     return { ...(await agentsModel()), error: problems.length ? problems.join("; ") : null };
@@ -2348,12 +2397,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * lands, only config.json `inboxSystem` turns it on.
    */
   const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
-  /**
-   * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
-   * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
-   * so Show me). Read on every request, as the switch is.
-   */
-  const askOnNow = () => askOn || codeReviewOn();
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2710,8 +2753,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
-    /** Launch (config.json `inboxLaunch`): present only while it is on; Settings → Agents' full-permissions switch. */
-    ...(launch.enabled() ? { launch: launch.settingsState() } : {}),
+    /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. Never for a tailnet guest, whom `/launch/settings` refuses. */
+    ...(guest ? {} : { launch: launch.settingsState() }),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
@@ -2728,8 +2771,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
-    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI, or Code review on): absent while it is off, and for a tailnet guest, who may not use it. */
-    ...(askOnNow() && !guest ? { ask_ai: true } : {}),
+    /** Ask AI, on in every Inbox: always true, kept for older windows that read it; absent for a tailnet guest, who may not use it. */
+    ...(!guest ? { ask_ai: true } : {}),
     /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
     cswap: !guest && accounts.installed(),
   });
@@ -3491,7 +3534,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
-  // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
+  // Launch: compose starts Claude Code or Pi in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
     store,
@@ -3528,8 +3571,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
     isGuest,
   });
-  // The login shell read ahead, off any request's path (launch on only).
-  launch.warm();
+  // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({
@@ -3542,7 +3584,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn,
     onReviewStart: (threadId, review, where) => {
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
-      if (start) pullOwners.start(threadId, start);
+      if (!start) return;
+      // Whose PR it is comes from what the Inbox read itself (the list, or the link's read just before Start), never the window's word.
+      const read = start.pull && (pulls.find(start.pull.key) ?? linkReads.get(start.pull.key));
+      const started = start.pull ? { ...start, pull: { ...start.pull, mine: read?.mine === true } } : start;
+      pullOwners.start(threadId, started);
+      // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
+      if (started.pull) pullOwners.set([started.pull.key], threadId, { ask: started.ask, theirs: !started.pull.mine });
     },
     launch,
     isGuest,
@@ -3564,7 +3612,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOnNow,
     codeReviewOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
@@ -3852,8 +3899,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A launched session's permission hook (Claude Code's: inbox-launch-claude-permission.ts): guarded like the bridge below
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
-    // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    // Ask AI's client (inbox-ask-live.ts).
+    const askClient = path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
@@ -3959,7 +4006,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tourAnswer) return tourAnswer;
 
     try {
-      // Ask AI's session and query routes. Off, and on any other server path, they do not exist here.
+      // Ask AI's session and query routes. On any other server path, they do not exist here.
       if (path.startsWith("/api/ai/")) {
         const answer = await ask.aiRoute(req, path, via);
         if (answer) return answer;
@@ -4139,6 +4186,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
+      // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
+      if (path === "/api/inbox/reviews/link") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const link = inboxReviewLinkOf(url.searchParams.get("ref") ?? "");
+        if (!link) return json({ serverSession, ok: false, reason: "not_a_link" });
+        if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
+        const { ref } = link;
+        const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
+        const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
+        if (pull) linkReads.set(ref.key, pull);
+        if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        const { projectsByRepo } = await pullProjects();
+        const owner = pullOwners.get(ref.key);
+        const row = owner ? store.listRow(owner.thread_id) : null;
+        const inReview = owner && row && !inboxRowArchived(row) && threadAgent(pullLinkStore, owner.thread_id)?.ended !== true;
+        return json({ serverSession, ok: true, cli, pull, projects: projectsByRepo.get(`${ref.host}/${ref.repo}`.toLowerCase()) ?? [], thread_id: inReview ? owner.thread_id : null });
+      }
       // New review's change summary: what `plannotator review` would show for a project's local changes. Same guards.
       if (path === "/api/inbox/reviews/changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -4244,7 +4313,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fileLevelSent = Array.isArray(body.fileLevelComments) ? body.fileLevelComments.length : 0;
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
+        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
+        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
@@ -4405,11 +4477,44 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (path === "/api/inbox/agents") return json(await saveAgent(body));
         if (path === "/api/inbox/agents/notes") return json(await answerNotes(body));
         if (path === "/api/inbox/agents/seen") {
+          // The window's line said the last run's news and the notes written by themselves: only what it showed
+          // (`report_at`: the report's time, null for none; `notes`), so news that came after its read is said next
+          // time. A window without these fields (older) says all.
+          const shown = seenFields(body);
+          if (!shown) return json({ error: "notes must be a list of { agent, path }, report_at a string or null", code: "invalid" }, 422);
           const file = readInboxAgents(dataDir);
-          if (file.last_report && !file.last_report.seen) writeInboxAgents(dataDir, { ...file, last_report: { ...file.last_report, seen: true } });
+          const report = file.last_report;
+          if (report && !report.seen && (shown.reportAt === undefined || shown.reportAt === report.at)) {
+            writeInboxAgents(dataDir, { ...file, last_report: { ...report, seen: true } });
+          }
+          markAutoNotesSaid(shown.notes);
           return json(await agentsModel());
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // Settings -> Decision data's numbers, asked for only while that section is shown. Read only, nothing kept: the
+      // calculation hands the server back every few ms and stops when the reader leaves (decision-data.ts).
+      // Never on the device door (not on its allowlist).
+      if (path === "/api/inbox/decision-data") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const days = Number(url.searchParams.get("days") ?? "0");
+        const tz = Number(url.searchParams.get("tz") ?? "0");
+        const now = Date.now();
+        const since = Number.isFinite(days) && days > 0 ? now - days * 86_400_000 : null;
+        const input = { ...store.decisionDataInput(), deleted: await readDecisionLines(store.dir) };
+        try {
+          if (url.searchParams.get("format") === "csv") {
+            const csv = await decisionDataCsv(input, since, req.signal);
+            return new Response(csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="plannotator-decisions.csv"' } });
+          }
+          return json(await decisionDataSummary(input, { since, until: now, tz_offset_min: Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0, now }, req.signal));
+        } catch (error) {
+          if (error instanceof DecisionDataAborted) return new Response(null, { status: 499 });
+          throw error;
+        }
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
       if (path === "/api/inbox/settings/storage") {
@@ -4683,7 +4788,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
       if (skills) return skills;
 
-      // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its setting (404 while `inboxLaunch.enabled` is off).
+      // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
       const door = fromDeviceDoor.get(req) ?? null;
       const launched = await launch.route(req, path, via, isOwner(req, via), door);
       if (launched) return launched;
@@ -4696,7 +4801,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
-      // Ask AI: off, this answers nothing and the path is an unknown route.
+      // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
@@ -5721,4 +5826,21 @@ export async function handleInboxServerReady(
     process.stderr.write("The Inbox could not reuse its last port; allow notifications again when the page asks.\n");
   }
   if (options.open && process.env.PLANNOTATOR_SKIP_BROWSER_OPEN !== "1") await openBrowser(inbox.url);
+}
+
+
+/** POST /api/inbox/agents/seen's fields: what the window's line showed. null: malformed. */
+function seenFields(body: Record<string, unknown>): { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } | null {
+  const out: { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } = {};
+  if ("report_at" in body) {
+    if (body.report_at !== null && typeof body.report_at !== "string") return null;
+    out.reportAt = body.report_at as string | null;
+  }
+  if ("notes" in body) {
+    const notes = body.notes;
+    if (!Array.isArray(notes)) return null;
+    if (!notes.every((note) => !!note && typeof note === "object" && typeof (note as InboxNoteAutoAdd).agent === "string" && typeof (note as InboxNoteAutoAdd).path === "string")) return null;
+    out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
+  }
+  return out;
 }

@@ -214,7 +214,7 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
   }
   expect(saves).toBeGreaterThanOrEqual(3);
   // Saves went through, and the window read nothing for them.
-  expect(reads.filter((path) => path.startsWith('/api/inbox/threads') || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
 
   await until(() => field.value === words && count(threadRoute()) > 0, 'the read after the last save');
   await wait(SAVE_MS + 120);

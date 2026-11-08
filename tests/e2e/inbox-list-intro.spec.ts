@@ -34,7 +34,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -88,6 +88,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
     writeFileSync(
       join(dataDir, 'config.json'),
       JSON.stringify({
+        // Written whole: launch stays off (inboxScratch's launchOff), so New message runs no `claude --version` on the runner's PATH.
+        ...E2E_LAUNCH_OFF,
         inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
         inboxNotifications: { dismissed: true },
         inboxAgentNotes: { offered: true },

@@ -9,6 +9,8 @@
  * backwards; pictures that do not follow the look, or a phone that draws the full-width picture. Letter marks
  * (approval "inbox-letter-marks"): on by default anywhere, a Mark style picked while off that does nothing, a picture
  * switch that does nothing while project marks are off, Detailed not turning them on (Both, Avatar, no pictures).
+ * The notes-list look (addendum 2026-11-07): Time position, Dividers or Status mark on by default, a choice that takes
+ * two saves or turns another option, pictures that do not show it (the phone's included), a preset that keeps it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -184,7 +186,7 @@ describe.if(hasDom)('Settings → Rows', () => {
   test("the Project switch's words describe it to a screen reader", () => {
     const el = render();
     const project = el.querySelector<HTMLElement>('[data-rows-control="hideProject"] [role="switch"]')!;
-    expect(el.querySelector(`#${project.getAttribute('aria-describedby')}`)!.textContent).toBe('With its machine, when you link machines');
+    expect(el.querySelector(`#${project.getAttribute('aria-describedby')}`)!.textContent).toBe('With its machine');
     expect(el.querySelector('[data-rows-control="hideAgents"] [role="switch"]')!.hasAttribute('aria-describedby')).toBe(false);
   });
 
@@ -251,5 +253,61 @@ describe.if(hasDom)('Settings → Rows', () => {
       expect(chosen(el, 'marks')).toEqual(['Off']);
       expect(chosen(el, 'markstyle')).toEqual([]);
     }
+  });
+
+  test('the notes-list look: off by default; Time position, Dividers, Status mark and Bold names each one save of their own name', async () => {
+    const el = render();
+    const sw = (key: string) => el.querySelector<HTMLElement>(`[data-rows-control="${key}"] [role="switch"]`)!;
+    expect(chosen(el, 'timeplace')).toEqual(['Top right']);
+    for (const key of ['dividers', 'statusMark', 'boldNames']) expect(sw(key).getAttribute('aria-checked')).toBe('false');
+    // Only Status mark has words (what it replaces), and they describe its switch to a screen reader.
+    expect(el.querySelector(`#${sw('statusMark').getAttribute('aria-describedby')}`)!.textContent).toBe('Instead of counts');
+    for (const key of ['dividers', 'boldNames']) expect(sw(key).hasAttribute('aria-describedby')).toBe(false);
+    await pick(el, 'timeplace', 'Under the preview');
+    act(() => sw('dividers').click());
+    await settle();
+    act(() => sw('statusMark').click());
+    await settle();
+    expect(chosen(el, 'timeplace')).toEqual(['Under the preview']);
+    expect(sw('dividers').getAttribute('aria-checked')).toBe('true');
+    expect(saves).toEqual([
+      ['smallNames', 'timeBelow'],
+      ['smallNames', 'timeBelow', 'dividers'],
+      ['smallNames', 'timeBelow', 'dividers', 'statusMark'],
+    ]);
+    expect(readListLook()).toEqual(lookOf({ timeBelow: true, dividers: true, statusMark: true }));
+    expect(chosen(el, 'preset')).toEqual([]);
+    await pick(el, 'timeplace', 'Top right');
+    expect(readListLook()).toEqual(lookOf({ dividers: true, statusMark: true }));
+    act(() => sw('boldNames').click());
+    await settle();
+    expect(saves.at(-1)).toEqual(['smallNames', 'dividers', 'statusMark', 'boldNames']);
+    for (const picture of el.querySelectorAll('[data-rows-preview] .ib-listcol')) expect(picture.className).toContain('ib-lk-bold');
+  });
+
+  test("the pictures show the notes-list look at once, the phone's too; a preset turns it off", async () => {
+    const el = render();
+    expect(el.querySelectorAll('[data-rows-preview] :is(.ib-l4, .ib-stm)').length).toBe(0);
+    await pick(el, 'timeplace', 'Under the preview');
+    act(() => el.querySelector<HTMLElement>('[data-rows-control="statusMark"] [role="switch"]')!.click());
+    await settle();
+    act(() => el.querySelector<HTMLElement>('[data-rows-control="dividers"] [role="switch"]')!.click());
+    await settle();
+    expect(el.querySelectorAll('[data-rows-preview="narrow"] .ib-nrow > .ib-l4').length).toBe(3);
+    // The samples: a stopped and a waiting thread wait on you, a quiet one is done; the wide picture too.
+    for (const picture of ['narrow', 'wide']) {
+      expect([...el.querySelectorAll(`[data-rows-preview="${picture}"] .ib-stm`)].map((m) => m.getAttribute('data-status'))).toEqual(['waiting', 'waiting', 'done']);
+    }
+    for (const picture of el.querySelectorAll('[data-rows-preview] .ib-listcol')) expect(picture.className).toContain('ib-lk-div');
+    await pick(el, 'preset', 'Detailed');
+    expect(el.querySelectorAll('[data-rows-preview] :is(.ib-l4, .ib-stm)').length).toBe(0);
+    act(() => root!.unmount());
+    host!.remove();
+    const phone = render(true);
+    await pick(phone, 'timeplace', 'Under the preview');
+    act(() => phone.querySelector<HTMLElement>('[data-rows-control="statusMark"] [role="switch"]')!.click());
+    await settle();
+    expect(phone.querySelectorAll('[data-rows-preview="phone"] .ib-mrow > .ib-m4').length).toBe(3);
+    expect(phone.querySelectorAll('[data-rows-preview="phone"] .ib-stm').length).toBe(3);
   });
 });

@@ -206,6 +206,7 @@ export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
+  const composeKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'compose' });
   const phone = usePhone();
   // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
@@ -350,12 +351,13 @@ export function Sidebar(props: SidebarProps) {
           <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
         </button>
         {props.onCompose && (
-          <Tip content="New message">
+          <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
             <button
               type="button"
               className="ib-compose-btn"
               data-open-compose=""
               aria-label="New message"
+              aria-keyshortcuts={composeKeys}
               aria-haspopup="dialog"
               onClick={(event) => {
                 const opener = event.currentTarget;

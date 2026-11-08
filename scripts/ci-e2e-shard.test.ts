@@ -4,7 +4,8 @@
  * Each failure this catches would make the e2e workflow pass while running
  * fewer specs than before: a spec in no shard (or in two), a shard missing
  * from the workflow's matrix, the shard job no longer calling the script, or
- * a file filter that also picks up another spec. The balance check catches
+ * a file filter that also picks up another spec, or a shard that no longer
+ * records the specs it passed (the next run would rerun them all). The balance check catches
  * stale times: a shard well past an even split holds the whole run up.
  */
 import { describe, expect, test } from 'bun:test';
@@ -13,7 +14,7 @@ import { join } from 'node:path';
 import { E2E_SHARDS, SHARD_1_EXTRA_S, fileFilter, repoRoot, shards, specFiles, specTimes } from './ci-e2e-shard';
 
 const workflow = Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows/inbox-e2e.yml'), 'utf8')) as {
-  jobs: Record<string, { needs?: string; strategy?: { matrix?: { shard?: number[] } }; steps?: { run?: string; env?: Record<string, string> }[] }>;
+  jobs: Record<string, { needs?: string | string[]; strategy?: { matrix?: { shard?: number[] | string } }; steps?: { run?: string; if?: string; env?: Record<string, string> }[] }>;
 };
 
 describe('Inbox window e2e shards', () => {
@@ -61,16 +62,24 @@ describe('Inbox window e2e shards', () => {
     }
   });
 
-  test('the workflow runs every shard through the script, on the built apps', () => {
+  test('the workflow runs every shard of the plan through the script, on the built apps, and records what passed', () => {
     const job = workflow.jobs['inbox-window-e2e'];
-    expect(job.needs).toBe('build');
-    expect(job.strategy?.matrix?.shard).toEqual(Array.from({ length: E2E_SHARDS }, (_, i) => i + 1));
+    expect(job.needs).toEqual(['build', 'plan']);
+    // The plan job gives the matrix: 1..E2E_SHARDS for a full run (scripts/ci-e2e-reuse.test.ts).
+    expect(job.strategy?.matrix?.shard).toBe('${{ fromJSON(needs.plan.outputs.matrix) }}');
+    const planSteps = workflow.jobs.plan?.steps ?? [];
+    expect(planSteps.some((step) => step.run?.trim() === 'bun run scripts/ci-e2e-reuse.ts plan')).toBe(true);
     const steps = job.steps ?? [];
     const run = steps.findIndex((step) => step.run?.trim() === 'bun run scripts/ci-e2e-shard.ts "$SHARD"');
     expect(run, 'shard step').toBeGreaterThanOrEqual(0);
     expect(steps[run].env?.SHARD).toBe('${{ matrix.shard }}');
+    expect(steps[run].env?.E2E_PLAN).toBe('.local/e2e-plan/plan.json');
     const compile = steps.findIndex((step) => step.run?.includes('--outfile .local/plannotator') && !step.run.includes('0.28.10'));
     expect(compile, 'compile before the specs').toBeGreaterThanOrEqual(0);
     expect(compile).toBeLessThan(run);
+    // Recorded even when the shard failed: the specs that did pass are left out next time.
+    const record = steps.findIndex((step) => step.run?.startsWith('bun run scripts/ci-e2e-reuse.ts passed '));
+    expect(record).toBeGreaterThan(run);
+    expect(steps[record].if).toBe('always()');
   });
 });

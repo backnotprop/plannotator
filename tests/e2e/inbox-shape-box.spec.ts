@@ -554,13 +554,13 @@ test('Add to reply with the box closed: Undo works on the saved draft, and a sec
   await page.screenshot({ path: join(replyShots, '07-undo-after-esc-light.png') });
   await reply.press('Escape');
 
-  // Added, Cancel (the draft keeps the picture), the same box again: the second picture is omnibox-2.png.
+  // Added, the box closed (the draft keeps the picture), the same box again: the second picture is omnibox-2.png.
   await reopenBoard(page, thread, id);
   await omniboxBox(page);
   await addToReply(page);
   await close();
   await expect(files).toHaveAttribute('data-compose-file', 'done');
-  await page.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('.ib-pfoot [data-reply-close]').click();
   await expect(reply).toHaveCount(0);
   await reopenBoard(page, thread, id);
   await omniboxBox(page);
