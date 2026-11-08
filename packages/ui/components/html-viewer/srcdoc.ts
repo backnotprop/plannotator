@@ -17,6 +17,7 @@
  * Pure string logic (no DOM) so the rendering-neutrality contract is unit-testable.
  */
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
 
 export const THEME_TOKENS = [
   "--background",
@@ -270,7 +271,7 @@ export function buildSrcdocInjection({
  * for its standalone context, so it is removed before injection.
  *
  * The package itself never adds a CSP `<meta>` to the srcdoc document (the
- * injection is one `<style>` and one `<script>`), so nothing here blocks a
+ * injection is `<style>` and `<script>` only), so nothing here blocks a
  * `<script src>` on the URL path. A CSP delivered as an HTTP header on the
  * HOST page is inherited by the srcdoc document, and the host must allow
  * `script-src` for the origin the asset is served from.
@@ -283,6 +284,24 @@ export function neutralizeMetaCsp(rawHtml: string): string {
 }
 
 /** Splice the injection just before `</head>`, or prepend when there is none. */
+const HEAD_OPEN_RE = /<head(?:\s[^>]*)?>/i;
+
+/**
+ * The sandbox shim (`sandboxShim.ts`) as the first thing in `<head>`, so a
+ * page's own head scripts already find history and storage safe to use. Only
+ * when the page's `<head>` tag comes before any script (a `<head>` found after
+ * one could sit inside that script's text); otherwise the page is returned
+ * unchanged and the bridge, at the end of `<head>`, installs the shim instead.
+ */
+export function injectSandboxShim(html: string): string {
+  const head = HEAD_OPEN_RE.exec(html);
+  if (!head) return html;
+  const firstScript = html.search(/<script[\s>]/i);
+  if (firstScript !== -1 && firstScript < head.index) return html;
+  const at = head.index + head[0].length;
+  return `${html.slice(0, at)}<script>${SANDBOX_SHIM_SCRIPT}</script>${html.slice(at)}`;
+}
+
 export function injectIntoHead(rawHtml: string, injection: string): string {
   const html = neutralizeMetaCsp(rawHtml);
   const headClose = html.indexOf("</head>");

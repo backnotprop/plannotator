@@ -8,6 +8,7 @@
  * This is a string constant — it gets prepended to the iframe's srcdoc.
  * No external dependencies.
  */
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -291,6 +292,12 @@ export const BRIDGE_SCRIPT = `(function() {
   // may run.
   var LIVE = window.__plannotatorLiveConfig || null;
   if (LIVE && (window === window.parent || window.parent !== window.top)) return;
+  // The sandboxed frame's history and storage, made safe for a page that uses
+  // them as it builds itself (sandboxShim.ts). A no-op when the inline path
+  // already ran it first in <head>.
+  if (!LIVE) {
+${SANDBOX_SHIM_SCRIPT}
+  }
   // The server cannot know which origin form (localhost or 127.0.0.1) the
   // editor tab was opened on, so live outbound messages are posted once per
   // listed editor origin: the browser delivers only the post whose
