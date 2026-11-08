@@ -5,7 +5,9 @@
  * Escape, × or the backdrop no longer close it; hovering a mark there shows no
  * tooltip or the wrong thread's facts; a click (or a second tap on a touch
  * screen) opens nothing or the wrong thread; the chart takes a key (the owner:
- * mouse and touch only).
+ * mouse and touch only); an empty or failed read leaves no way to another
+ * range or project; a linked machine's project as the list's filter is read
+ * (a lasting 404); Escape in the project menu closes the full screen too.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * The server half is packages/shared/inbox/activity.test.ts; the layout and keys'
@@ -15,6 +17,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxActivityModel } from '@plannotator/core/inbox-types';
+import type { ProjectFolder } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { ActivityChart } = (hasDom ? await import('./components/ActivityChart') : {}) as typeof import('./components/ActivityChart');
@@ -42,14 +45,23 @@ let savedFetch: typeof fetch;
 let savedWidth: PropertyDescriptor | undefined;
 let savedHeight: PropertyDescriptor | undefined;
 let asked: string[] = [];
+const ok = (model: InboxActivityModel) => new Response(JSON.stringify(model), { status: 200, headers: { 'Content-Type': 'application/json' } });
+/** The stubbed server: every read answers MODEL unless a test says otherwise. */
+let respond: (url: URL) => Response = () => ok(MODEL);
+const EMPTY: InboxActivityModel = { ...MODEL, threads: [] };
+const PROJECTS = [
+  { id: 'prj_a', key: 'billing-aaaaaa', name: 'billing', threads: 3, unread: 0 },
+  { id: 'prj_b', key: 'docs-bbbbbb', name: 'docs', threads: 2, unread: 0 },
+] as unknown as ProjectFolder[];
 
 beforeEach(() => {
   if (!hasDom) return;
   asked = [];
+  respond = () => ok(MODEL);
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     asked.push(String(input));
-    return new Response(JSON.stringify(MODEL), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return respond(new URL(String(input), 'http://x'));
   }) as typeof fetch;
   // happy-dom lays nothing out: give the chart its width.
   savedWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
@@ -70,28 +82,32 @@ afterEach(() => {
   else delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
 });
 
-async function mount(opened: [string, string | null][] = []) {
+const NAMES = new Map([
+  ['prj_a', 'billing'],
+  ['prj_b', 'docs'],
+]);
+
+function chartWith(opened: [string, string | null][], projects: ProjectFolder[], project: string | null) {
+  return <ActivityChart projects={projects} names={NAMES} project={project} phone={false} now={() => NOW} look="blend" onOpenThread={(thread, p) => opened.push([thread, p])} />;
+}
+
+async function until(host: ParentNode, selector: string) {
+  for (let i = 0; i < 40 && !host.querySelector(selector); i++) await act(async () => new Promise((r) => setTimeout(r, 5)));
+  const el = host.querySelector<HTMLElement>(selector);
+  if (!el) throw new Error(`never drew ${selector}`);
+  return el;
+}
+
+async function mount(opened: [string, string | null][] = [], { projects = [] as ProjectFolder[], project = 'prj_a' as string | null, wait = '[data-activity-preview] .ib-activity-svg' } = {}) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(
-      <ActivityChart
-        projects={[]}
-        names={new Map([['prj_a', 'billing']])}
-        project="prj_a"
-        phone={false}
-        now={() => NOW}
-        look="blend"
-        onOpenThread={(thread, project) => opened.push([thread, project])}
-      />,
-    );
+    root!.render(chartWith(opened, projects, project));
   });
-  for (let i = 0; i < 20 && !host.querySelector('[data-activity-preview] .ib-activity-svg'); i++) await act(async () => new Promise((r) => setTimeout(r, 5)));
-  const preview = host.querySelector<HTMLElement>('[data-activity-preview]');
-  if (!preview) throw new Error('the preview did not draw');
-  return { host, preview };
+  await until(host, wait);
+  return { host, preview: host.querySelector<HTMLElement>('[data-activity-preview]')! };
 }
 
 const dialog = (host: HTMLElement) => host.querySelector<HTMLDialogElement>('dialog[data-dialog="activity"]');
@@ -202,4 +218,68 @@ test.skipIf(!hasDom)('the chart takes no keys: nothing in it is focusable but it
   }
   expect(passed).toEqual(['ArrowLeft', 'ArrowUp', 'Home', 'End', 'Enter', ' ', 'ArrowLeft', 'ArrowUp', 'Home', 'End', 'Enter', ' ']);
   expect(opened).toEqual([]);
+});
+
+const spanDays = (url: URL) => Math.round((Date.parse(url.searchParams.get('to')!) - Date.parse(url.searchParams.get('from')!)) / 86_400_000);
+const lastAsked = () => new URL(asked[asked.length - 1]!, 'http://x');
+
+test.skipIf(!hasDom)('an empty week still opens the full screen, where a wider range finds the threads', async () => {
+  respond = (url) => ok(spanDays(url) <= 7 ? EMPTY : MODEL);
+  const { host } = await mount([], { wait: '[data-activity-empty]' });
+  const expandButton = host.querySelector<HTMLButtonElement>('[data-activity-expand]')!;
+  expect(expandButton.disabled).toBe(false);
+  await act(async () => expandButton.click());
+  const dlg = dialog(host)!;
+  // The note names the way out the full screen has.
+  expect(dlg.querySelector('[data-activity-empty]')?.textContent).toContain('a longer range');
+  await act(async () => dlg.querySelector<HTMLInputElement>('input[name="ib-activity-range"][value="30"]')!.click());
+  await until(dlg, '.ib-activity-plot[data-size="full"] .ib-activity-svg');
+  expect(spanDays(lastAsked())).toBe(30);
+  expect(dlg.querySelector('[data-activity-empty]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a failed read still opens the full screen, where another project reads again', async () => {
+  respond = (url) =>
+    url.searchParams.get('project')
+      ? new Response(JSON.stringify({ error: { code: 'project_not_found', message: 'No project prj_a' } }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      : ok(MODEL);
+  const { host } = await mount([], { projects: PROJECTS, wait: '[role="alert"]' });
+  const expandButton = host.querySelector<HTMLButtonElement>('[data-activity-expand]')!;
+  expect(expandButton.disabled).toBe(false);
+  await act(async () => expandButton.click());
+  const dlg = dialog(host)!;
+  expect(dlg.querySelector('[role="alert"]')).not.toBeNull();
+  await act(async () => dlg.querySelector<HTMLButtonElement>('[data-board-project-clear]')!.click());
+  await until(dlg, '.ib-activity-plot[data-size="full"] .ib-activity-svg');
+  expect(lastAsked().searchParams.get('project')).toBeNull();
+  expect(dlg.querySelector('[role="alert"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a linked machine's project as the list's filter starts on every project, also when the projects arrive later", async () => {
+  await mount([], { projects: PROJECTS, project: 'prj_remote' });
+  expect(asked.map((u) => new URL(u, 'http://x').searchParams.get('project'))).toEqual([null]);
+  // The projects not loaded yet at first: the filter goes once they arrive.
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  asked = [];
+  const { host } = await mount([], { projects: [], project: 'prj_remote', wait: '.ib-activity-box' });
+  await act(async () => root!.render(chartWith([], PROJECTS, 'prj_remote')));
+  await until(host, '[data-activity-preview] .ib-activity-svg');
+  expect(lastAsked().searchParams.get('project')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Escape in the project menu inside the full screen closes the menu, not the full screen', async () => {
+  const { host } = await mount([], { projects: PROJECTS });
+  await expand(host);
+  const dlg = dialog(host)!;
+  await act(async () => dlg.querySelector<HTMLElement>('[data-board-project-chip]')!.click());
+  const menu = await until(document.body, '[data-board-project-menu]');
+  // Drawn inside the modal (outside, the top layer would cover it).
+  expect(dlg.contains(menu)).toBe(true);
+  await act(async () => {
+    (document.activeElement ?? menu).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  for (let i = 0; i < 20 && document.querySelector('[data-board-project-menu]'); i++) await act(async () => new Promise((r) => setTimeout(r, 5)));
+  expect(document.querySelector('[data-board-project-menu]')).toBeNull();
+  expect(dialog(host)?.open).toBe(true);
 });

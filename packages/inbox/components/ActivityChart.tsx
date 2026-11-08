@@ -310,9 +310,19 @@ function ActivityKey({ look }: { look: ActivityLook }) {
 
 export function ActivityChart({ projects, names, project: startProject, phone, refreshKey = null, onOpenThread, now = () => new Date(), look: lookProp }: ActivityChartProps) {
   const look = useMemo<ActivityLook>(() => lookProp ?? activityLookOf(typeof location === 'undefined' ? '' : location.search), [lookProp]);
-  const [project, setProject] = useState<string | null>(startProject);
+  // The list's project, unless it is not one of this Inbox's own (a linked machine's, in the merged view: this
+  // store cannot read it), then every project. Checked again once the projects arrive.
+  const ownProject = (id: string | null) => (id && (projects.length === 0 || projects.some((p) => p.id === id)) ? id : null);
+  const [project, setProject] = useState<string | null>(() => ownProject(startProject));
+  useEffect(() => {
+    if (project && ownProject(project) === null) setProject(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, project]);
   const [range, setRange] = useState<ActivityRange>(() => defaultActivityRange(phone));
-  const [model, setModel] = useState<InboxActivityModel | null>(null);
+  // The last answer, with the range and project it was read for (the words above it describe what is drawn, not
+  // a pick still being read).
+  const [read, setRead] = useState<{ model: InboxActivityModel; range: ActivityRange; project: string | null } | null>(null);
+  const model = read?.model ?? null;
   const [error, setError] = useState<string | null>(null);
   const [reads, setReads] = useState(0);
   const [open, setOpen] = useState(false);
@@ -341,10 +351,11 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
   useEffect(() => {
     let live = true;
     const { from, to } = activitySpan(range, now());
+    const asked = { range, project };
     inboxApi.activity(from, to, project).then(
       (next) => {
         if (!live) return;
-        setModel(next);
+        setRead({ model: next, ...asked });
         setError(null);
       },
       (err: unknown) => {
@@ -361,15 +372,23 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
   const rows = useMemo(() => (model ? activityRows(model) : []), [model]);
   const days = useMemo(() => (model ? activityDays(new Date(model.from), new Date(model.to)) : []), [model]);
   const total = useMemo(() => rows.reduce((sum, row) => sum + row.counts.reduce((a, b) => a + b, 0), 0), [rows]);
-  const where = project ? (names.get(project) ?? 'this project') : 'every project';
-  const summary = model ? `${plural(rows.length, 'thread')}, ${plural(total, 'message')} ${rangeWords(range)}` : '';
+  const shownProject = read?.project ?? null;
+  const where = shownProject ? (names.get(shownProject) ?? 'this project') : 'every project';
+  const summary = read && rows.length > 0 ? `${plural(rows.length, 'thread')}, ${plural(total, 'message')} ${rangeWords(read.range)}` : '';
   const inkStyle = ink ? (activityInkStyle(ink) as CSSProperties) : undefined;
 
-  const empty = model && rows.length === 0 && (
-    <p className="ib-activity-note" data-activity-empty="">
-      No messages in {where} {rangeWords(range)}.
-    </p>
-  );
+  // An empty answer names the way out it has: a longer range (the full screen offers it) or another project.
+  const longest = phone ? 7 : ACTIVITY_RANGES[ACTIVITY_RANGES.length - 1]!;
+  const ways = [read && read.range < longest ? 'a longer range' : null, projects.length > 1 || shownProject ? 'another project' : null].filter(Boolean).join(' or ');
+  const emptyNote = (inFull: boolean) =>
+    read &&
+    rows.length === 0 && (
+      <p className="ib-activity-note" data-activity-empty="">
+        No messages {shownProject ? `in ${where} ` : ''}
+        {rangeWords(read.range)}.{ways && (inFull ? ` Try ${ways}.` : ` Expand to try ${ways}.`)}
+      </p>
+    );
+  const empty = emptyNote(false);
   const failed = error && (
     <p className="ib-activity-note" role="alert">
       Activity could not be read. {error}{' '}
@@ -383,9 +402,9 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
     <section ref={section} className="ib-sgroup ib-activity" data-activity="" data-activity-look={look} aria-label="Activity" style={inkStyle} data-activity-ink={ink?.ink}>
       <div className="ib-activity-bar">
         <span className="ib-activity-sum" data-activity-summary="">
-          {summary && (project ? `${where}: ${summary}` : summary)}
+          {summary && (shownProject ? `${where}: ${summary}` : summary)}
         </span>
-        <button type="button" className="ib-btn ib-activity-expand" data-activity-expand="" onClick={() => setOpen(true)} disabled={!model || rows.length === 0}>
+        <button type="button" className="ib-btn ib-activity-expand" data-activity-expand="" onClick={() => setOpen(true)} disabled={!model && !error}>
           <Icon name="expand" size={14} />
           Expand
         </button>
@@ -403,7 +422,8 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
           ))}
       </div>
       {model && rows.length > 0 && <ActivityKey look={look} />}
-      {open && model && (
+      {/* Open once a read has answered, empty or failed too: the range and project are in there, the way out. */}
+      {open && (model || error) && (
         <ActivityFull
           onClose={() => setOpen(false)}
           inkStyle={inkStyle}
@@ -419,7 +439,7 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
           rows={rows}
           days={days}
           summary={summary}
-          note={failed || empty || null}
+          note={failed || emptyNote(true) || null}
           onOpen={(row) => {
             setOpen(false);
             onOpenThread(row.id, project);
@@ -441,7 +461,7 @@ interface FullProps {
   onProject: (project: string | null) => void;
   projects: readonly ProjectFolder[];
   names: ReadonlyMap<string, string>;
-  model: InboxActivityModel;
+  model: InboxActivityModel | null;
   rows: readonly ActivityRow[];
   days: readonly ActivityDay[];
   summary: string;
@@ -473,7 +493,7 @@ function ActivityFull({ onClose, inkStyle, look, phone, range, onRange, project,
         </div>
         <div className="ib-activity-lbbody" ref={body}>
           {note ??
-            (size.width > 0 && <ActivityPlot size="full" rows={rows} days={days} model={model} look={look} width={size.width} height={size.height} onOpen={onOpen} />)}
+            (model && size.width > 0 && <ActivityPlot size="full" rows={rows} days={days} model={model} look={look} width={size.width} height={size.height} onOpen={onOpen} />)}
         </div>
         {rows.length > 0 && <ActivityKey look={look} />}
       </div>

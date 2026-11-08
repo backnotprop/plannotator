@@ -1588,7 +1588,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-activity-scroll { position: relative; overflow-x: clip; border-radius: 6px; }
 .ib-activity-scroll[data-scrolls] { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .ib-activity-svg { display: block; touch-action: pan-x pan-y; }
-/* The day labels stay on top while the page scrolls (when the chart is not scrolling sideways itself). */
+/* The day labels over the chart (the SVG's own top band); in the full screen they stick to its top as it scrolls down. */
 .ib-activity-days { position: relative; z-index: 1; pointer-events: none; }
 .ib-activity-day { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 6px 6px; overflow: hidden; white-space: nowrap; }
 .ib-activity-day + .ib-activity-day::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 0; width: 1px; background: var(--ib-hair); }
