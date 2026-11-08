@@ -98,6 +98,7 @@ packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
 packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
@@ -152,6 +153,7 @@ packages/inbox/listViewMenu.test.tsx
 packages/inbox/listViewReveal.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
+packages/inbox/letterMarksRows.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
@@ -424,6 +426,7 @@ packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
+packages/ui/components/blocks/AlertBlock.body.test.tsx
 packages/ui/components/Viewer.driftedRestore.test.tsx
 packages/ui/components/Viewer.crossBlockRestore.test.tsx
 packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
@@ -531,6 +534,7 @@ packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
+packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
@@ -541,6 +545,7 @@ packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
+packages/ui/components/shape/scene/ScenePlayer.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/review-drawing/ShowMeLayer.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
@@ -574,3 +579,5 @@ packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/inbox/composeRemoteLaunch.test.tsx
+packages/inbox/composeOtherFolder.test.tsx

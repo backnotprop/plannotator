@@ -696,6 +696,9 @@ test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where
 test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
   const { page } = world;
   await setCodeReview(true);
+  // A fresh load: the page is still on #reviews from the test before, where Code review was off. A hash change alone
+  // can land before the switch reaches it, and an off window rightly forgets `&new`.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await expect(page.locator('dialog[data-compose]')).toBeVisible();
@@ -1517,6 +1520,74 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
   renameSync(join(dir, recorded!), join(proofDir, 'walkthrough.webm'));
 });
 
+test("A guided review of a PR's own diff posts its comment inline, and what posted isn't sent to the agent", async () => {
+  const { page, claude } = world;
+  const words = 'Should this fall back further?';
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('about:blank');
+  // The PR's own page: its row opens its review thread now that it has one, so the stack is asked for by name.
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
+  const threadId = String(await page.locator('[data-pulls-stack] [data-pulls-thread]').first().getAttribute('data-pulls-thread'));
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'Another look.',
+    review: true,
+    guide: {
+      title: 'Locale fallback, to post',
+      intent: 'Read the fallback.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+  } as never);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#thread=${encodeURIComponent(threadId)}`);
+  await page.locator('[data-review-card]', { hasText: 'Locale fallback, to post' }).locator('[data-review-start]').click();
+
+  const shell = page.locator('[data-guide-file-shell="src/i18n/fallback.ts"]').first();
+  const added = shell.locator('[data-line-type="change-addition"][data-column-number="1"]');
+  await expect(added).toBeVisible({ timeout: 30_000 });
+  await shell.hover();
+  await added.click();
+  await page.getByPlaceholder('Leave feedback...').fill(words);
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+
+  await page.waitForTimeout(800);
+  await shot(page, 'post-inline-commented');
+  await page.locator('[data-review-destination-choice="forge"]').click();
+  await shot(page, 'post-inline-ending');
+  const before = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).length;
+  await page.locator('[data-review-posts] [data-decision-primary]').click();
+  const dialog = page.getByRole('dialog');
+  await shot(page, 'post-inline-dialog');
+  await dialog.getByRole('button', { name: 'Post Comments', exact: true }).click();
+  await expect(page.locator('[data-review-posted], [data-pull-review-posted]').first()).toContainText('on GitHub');
+  await shot(page, 'post-inline-posted');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'post-inline-posted-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const sent = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { body: string; comments?: unknown[] });
+  expect(sent.length).toBe(before + 1);
+  expect(sent.at(-1)!.comments).toEqual([expect.objectContaining({ path: 'src/i18n/fallback.ts', line: 1, side: 'RIGHT', body: words })]);
+  expect(sent.at(-1)!.body).not.toContain(words);
+
+  // It's on GitHub now: the agent's ending sends the verdict, without it.
+  await page.locator('[data-review-destination-choice="agent"]').click();
+  await page.locator('[data-review-decision] [data-decision-primary]').click();
+  await expect.poll(() => page.evaluate(async (id) => {
+    const { thread } = (await (await fetch(`/api/inbox/threads/${encodeURIComponent(id)}`)).json()) as { thread: { messages: { author: { kind: string } }[] } };
+    return thread.messages.at(-1)!.author.kind;
+  }, threadId)).not.toBe('agent');
+  const last = await page.evaluate(async (id) => {
+    const { thread } = (await (await fetch(`/api/inbox/threads/${encodeURIComponent(id)}`)).json()) as { thread: { messages: unknown[] } };
+    return JSON.stringify(thread.messages.at(-1));
+  }, threadId);
+  expect(last).not.toContain(words);
+  expect(world.errors).toEqual([]);
+});
+
 test('Reviews: a review from an ordinary thread is a local row, opens at its card with what was read left out, and is the same thread', async () => {
   const { page, claude } = world;
   await setCodeReview(true);
@@ -1527,7 +1598,6 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
   await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
   await page.goto(`${world.url}#reviews`);
   await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
-  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
   await claude.submitGuide({
     project_path: world.projects.web,
     thread: 'jitter',
@@ -1542,11 +1612,15 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
     },
     review: true,
   } as never);
-  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
+  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count. The count is
+  // checked against the server's rows (its cached answer: no forge read), not a number read before the review: the
+  // tests before this one leave rows whose move can still settle on the page's next read, so that number may be stale.
   const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
-  await expect(row).toContainText('Add jitter to retries');
+  await expect(row).toContainText('Add jitter to retries', { timeout: 15_000 });
   await expect(row).toContainText('Review ready');
+  const onYou = () => page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.filter((r) => r.move === 'on_you'));
+  await expect.poll(async () => (await onYou()).some((r) => r.thread_id === first.thread_id), { message: 'the review is on the person' }).toBe(true);
+  await expect.poll(async () => (await page.locator('[data-pulls-nav] .ib-n').textContent()) === String((await onYou()).length), { message: "the sidebar's count is the rows on the person", timeout: 15_000 }).toBe(true);
   await expect(row).not.toHaveAttribute('data-pulls-row');
   await page.reload();
   await expect(row).toBeVisible();

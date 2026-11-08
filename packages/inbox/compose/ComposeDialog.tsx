@@ -30,18 +30,19 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAttachmentState, type InboxDraft, type InboxDraftTo, type InboxReviewChanges } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type DraftView, type StartThreadInput } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
 import { ThreadFilesStrip } from './ThreadFilesStrip';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
-import { FolderMenu } from './FolderMenu';
+import { FolderMenu, type FolderGroup } from './FolderMenu';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
 import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
+import { useMachineLaunches } from './useMachineLaunches';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
@@ -69,6 +70,8 @@ import {
   startStatusLine,
   scratchFolderOf,
   scratchProject,
+  folderProject,
+  untildePath,
   SCRATCH_PICK,
   sendThreadName,
   suggestThreadName,
@@ -76,6 +79,9 @@ import {
   type ThreadNameState,
   type ComposeTarget,
   type ComposeStart,
+  launchGroups,
+  type LaunchHistory,
+  type MachineLaunchProject,
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
@@ -126,6 +132,8 @@ export interface ComposeSent {
   launched?: boolean;
   /** The PRs the thread was started for (`ComposeRequest.pulls`): hand them to it. */
   pullKeys?: readonly string[] | null;
+  /** The linked machine the agent was started on (remote launch), or absent for this computer. */
+  machine?: string | null;
   /** What the hand-off asked for: its guided-review line still in the words, or the person's own curation. */
   pullAsk?: 'guide' | 'custom' | null;
 }
@@ -137,6 +145,25 @@ export interface ComposeSent {
  * one that writes nothing (`drafts: false`: closing asks nothing and Save
  * draft is gone; `uploads: false`: no paperclip, drop or paste).
  */
+/**
+ * A new session for a linked machine that its Inbox could not take yet (remote launch, `InboxHeldError`): it waits
+ * in this Inbox's outbox, and the agent starts there when that machine is back. Cancel takes it back while `queued`.
+ */
+export interface ComposeHeld {
+  /** The outbox entry's key (`inboxApi.cancelOutbox`). */
+  key: string;
+  /** It never left yet: Cancel can take it back. */
+  queued: boolean;
+  machineName: string;
+  /** That machine is asleep (offline), not just slow to answer. */
+  asleep: boolean;
+  /** "Claude Code". */
+  agentName: string;
+  draftId: string | null;
+  /** What was written, kept so Cancel can put it back in Drafts (the one it was sent from is gone here). */
+  words: { body: string; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true };
+}
+
 export interface ComposeTransport {
   sessions: ComposeSessionsLoader;
   startThread: (input: StartThreadInput) => Promise<{ thread_id: string; project?: { id: string; name: string; root: string } }>;
@@ -167,6 +194,10 @@ export interface ComposeDialogProps {
   aside?: React.ReactNode;
   /** The Board is on (Settings): compose offers the Board chip. Absent: off, no chip. */
   board?: boolean;
+  /** Remote launch: where the person last started an agent on each machine (`launchHistory` of the list). */
+  launched?: LaunchHistory;
+  /** Remote launch: a new session for a linked machine is held until that machine is back. Absent: said as an error. */
+  onHeld?: (held: ComposeHeld) => void;
   /** New review: the pull requests Reviews lists (`request.review`). */
   reviewPulls?: readonly ReviewBoxPull[];
   /** How the read behind `reviewPulls` went: an empty list only means "none" once it was read. */
@@ -256,8 +287,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
     for (const source of request.reuse ?? []) files.addExisting(source);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
-  const { model, load } = useComposeSessions(true, transport?.sessions, startPick ? { agent: startPick.agent, project: startPick.projectId } : null);
+  // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
+  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project.
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string } } | null>(null);
+  // A typed folder has no project id, so no sessions read can look at its files (Trust and start is not offered for it).
+  const trustPick = startPick && !startPick.folder ? startPick : null;
+  const { model, load: loadHere } = useComposeSessions(true, transport?.sessions, trustPick && !trustPick.machine ? { agent: trustPick.agent, project: trustPick.projectId } : null);
+  // Linked machines (remote launch): each one's launch block, read through the forward while launch is on here.
+  const there = useMachineLaunches(!transport && !!model?.launch, trustPick?.machine ? { agent: trustPick.agent, project: trustPick.projectId, machine: trustPick.machine } : null);
+  const load = async () => {
+    await Promise.all([loadHere(), startPick?.machine ? there.readOne(startPick.machine) : null]);
+  };
   const voice = useVoiceSession();
   const projects = useMemo(() => (model?.projects ?? []).filter((g) => !pulls || (g.project.id !== null && pulls.projects.includes(g.project.id))), [model, pulls]);
   const target = findTarget(projects, chosen);
@@ -265,22 +305,64 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
   // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
+  // Linked machines (remote launch): the folder menu groups every machine's projects (`launchGroups`); with none, or
+  // none with anything to offer, `grouped` is false and everything below is exactly this computer's.
+  const selfView = there.machines.find((m) => m.self) ?? null;
+  const machineGroups = useMemo(() => {
+    const here = model?.launch;
+    const anyAgent = startPick?.agent ?? here?.agents[0]?.agent ?? [...there.reads.values()].find((r) => r.launch?.agents[0])?.launch?.agents[0]?.agent ?? null;
+    const made = launchGroups({
+      agent: (anyAgent as ComposeStart['agent'] | null) ?? null,
+      self: { launch: here, home, id: selfView?.id ?? null, name: selfView?.name ?? null },
+      machines: there.machines,
+      reads: there.reads,
+      history: props.launched,
+    });
+    // New review reads the changes it reviews on this computer: its folder menu is this computer's alone.
+    if (box) return { grouped: false, groups: [] };
+    if (!pulls) return made;
+    return { grouped: made.grouped, groups: made.groups.map((g) => ({ ...g, scratch: null, projects: g.projects.filter((p) => pulls.projects.includes(p.id)) })) };
+  }, [model?.launch, startPick?.agent, there.machines, there.reads, selfView?.id, selfView?.name, home, props.launched, pulls, box]);
+  const grouped = machineGroups.grouped;
   const launch = useMemo(() => {
     const offered = model?.launch;
-    if (!offered || (!pulls && !box)) return offered;
-    // New review reviews a project's changes, which a new scratch folder has none of.
-    return { agents: offered.agents, projects: pulls ? offered.projects.filter((p) => pulls.projects.includes(p.id)) : offered.projects };
-  }, [model?.launch, pulls?.projects.join(), box]);
-  const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
-  const start: ComposeStart | null = useMemo(() => {
-    const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
+    if (!grouped) {
+      if (!offered || (!pulls && !box)) return offered;
+      // New review reviews a project's changes, which a new scratch folder has none of.
+      return { agents: offered.agents, projects: pulls ? offered.projects.filter((p) => pulls.projects.includes(p.id)) : offered.projects };
+    }
+    // Every machine's projects in the menu's order, each with its machine; the agents any of them can start.
+    const agents = [...(offered?.agents ?? [])];
+    for (const read of there.reads.values()) for (const a of read.launch?.agents ?? []) if (!agents.some((b) => b.agent === a.agent)) agents.push({ agent: a.agent, name: a.name });
+    // The default start (the first project, when the person is looking at none) is never an asleep machine's while an
+    // awake one has projects: those come last here, and the folder menu keeps its own order.
+    const projects: MachineLaunchProject[] = [...machineGroups.groups.filter((g) => !g.asleep), ...machineGroups.groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
+    return { agents, projects, ...(offered?.scratch && !pulls ? { scratch: offered.scratch } : {}) };
+  }, [model?.launch, pulls, box, grouped, machineGroups, there.reads]);
+  const canStart = !!launch && launch.agents.length > 0 && (launch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
+  // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
+  const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
+  const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
+    if (!startPick) return null;
+    const block = startPick.machine ? there.reads.get(startPick.machine)?.launch : model?.launch;
+    const agent = block?.agents.find((a) => a.agent === startPick.agent);
+    // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
+    if (agent && startPick.folder && !pulls && !box) {
+      return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, machine: startPick.machine };
+    }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
-    if (agent && startPick.projectId === SCRATCH_PICK && launch?.scratch) return { agent: agent.agent, name: agent.name, project: scratchProject(launch.scratch.root), scratch: true };
-    const project = startPick && launch?.projects.find((p) => p.id === startPick.projectId);
-    return agent && project ? { agent: agent.agent, name: agent.name, project } : null;
-  }, [startPick, launch]);
+    if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && !pulls && !box) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
+    const project = block?.projects.find((p) => p.id === startPick.projectId && (!pulls || pulls.projects.includes(p.id)));
+    return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startPick, model?.launch, there.reads, pulls, box]);
+  // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
+  const startMachine = start?.machine ? (there.machines.find((m) => m.id === start.machine) ?? null) : null;
+  const startMachineName = start?.machine ? (startMachine?.name ?? machineGroups.groups.find((g) => g.machine === start.machine)?.name ?? null) : null;
+  const startHome = start?.machine ? (there.reads.get(start.machine)?.home ?? null) : home;
+  const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(false);
-  const startAgent = start ? launch?.agents.find((a) => a.agent === start.agent) : undefined;
+  const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
@@ -311,7 +393,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
-    else setStartPick(to);
+    else setStartPick({ ...to, machine: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [box, model, chosen, startPick, projects, launch]);
   // What it reviews changed: To follows, since a PR is reviewed from its own project.
@@ -413,7 +495,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [!!box, body, nameState, reviewKind, reviewPick]);
   useEffect(() => {
     sendKey.current = newUuid();
-  }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
+  }, [body, chosen, start?.agent, start?.project.id, start?.machine, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
@@ -516,6 +598,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Wait for the files to finish uploading.');
       return;
     }
+    // Files wait on this computer: a new session on another machine can't take them yet.
+    if (start?.machine && files.files.some((file) => file.state !== 'refused')) {
+      setError(`Files can't go with a new session on ${startMachineName ?? 'another machine'} yet. Remove them to start it there.`);
+      return;
+    }
     // The chip's suggestion as it would be once typing settles: never one a moment old.
     const named = sendThreadName(nameState, nameState.edited ? '' : (reviewName ?? suggestThreadName(body, fileNames ? fileNames.split('\n') : [])));
     if ('error' in named) {
@@ -533,11 +620,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
-      const result = await (transport ? transport.startThread : inboxApi.startThread)({
+      const machine = start?.machine ?? null;
+      const input: StartThreadInput = {
         to: start
           ? {
               launch: {
-                ...(start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id }),
+                ...(start.scratch ? { agent: start.agent, scratch: true as const } : start.folder ? { agent: start.agent, folder: start.folder } : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
               },
@@ -552,7 +640,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(box && 'thread_name_auto' in named ? { thread_name_numbered: true as const } : {}),
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
-      });
+      };
+      // Another machine's project (remote launch): through the forward, so that machine's Inbox starts the agent there.
+      const result = transport ? await transport.startThread(input) : await inboxApi.startThread(input, machine);
+      // Drafts stay on this computer (the forward drops `draft_id`): the one this was sent from is done here.
+      if (machine && draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
       // A launch's answer names its launch (the window's own startThread; a transport never starts one).
       const launchId = (result as { launch?: { id: string } }).launch?.id ?? null;
       const sentTo = start
@@ -560,13 +652,27 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // The placeholder the root is addressed to until the start settles: `launch:<launch id>`.
             session: launchId ? `launch:${launchId}` : '',
             host: start.agent as string,
-            projectName: start.project.name,
+            // Another machine's project reads as the list's row does: "infra · Mac mini".
+            projectName: startMachineName ? `${start.project.name} · ${startMachineName}` : start.project.name,
           }
         : { session: target!.session, host: target!.host, projectName: target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}) });
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: start?.machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(start?.machine ? { machine: start.machine } : {}) });
     } catch (cause) {
-      if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
+      if (cause instanceof InboxHeldError && start?.machine && props.onHeld) {
+        // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
+        // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
+        if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
+        props.onHeld({
+          key: cause.outbox.key,
+          queued: cause.outbox.state === 'queued',
+          machineName: cause.machine?.name ?? startMachineName ?? 'the other machine',
+          asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
+          agentName: start.name,
+          draftId: draft?.id ?? null,
+          words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
+        });
+      } else if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');
       } else if (cause instanceof InboxApiError && (cause.code === 'folder_missing' || cause.code === 'agent_unavailable')) {
@@ -609,6 +715,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
+        : start?.folder
+          ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
+            { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
         : start && !start.scratch
           ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
@@ -720,7 +829,27 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const title = box ? 'New review' : draft ? 'Draft' : 'New message';
   // A scratch start names the folder a Send would make now (from the thread's name).
   const scratchFolder = launch?.scratch ? scratchFolderOf(launch.scratch.root, threadName.trim() || (reviewName ?? suggested)) : null;
-  const sendLabel = trust ? 'Trust and start' : box ? 'Start review' : 'Send';
+  // Linked machines: the folder menu's groups, each scratch row named for its own machine's root and the thread's name.
+  const folderGroups: FolderGroup[] = machineGroups.groups.map((g) => {
+    const agentThere = start ? blockOf(g.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
+    const folder = g.scratch ? scratchFolderOf(g.scratch.root, threadName.trim() || (reviewName ?? suggested)) : null;
+    return {
+      machine: g.machine,
+      name: g.name,
+      quiet: g.quiet,
+      home: g.home,
+      projects: g.projects,
+      last: g.last,
+      notice: g.notice,
+      asleep: g.asleep,
+      scratch:
+        g.scratch && folder && start
+          ? { folder: tildePath(folder, g.home), root: tildePath(g.scratch.root, g.home), trusted: agentThere?.scratch_trusted !== false || !!agentThere.untrusted?.[SCRATCH_PICK], agentName: start.name }
+          : null,
+    };
+  });
+  // Another machine asleep: the Send waits for it, and says so.
+  const sendLabel = trust ? 'Trust and start' : start && startAsleep && startMachineName ? `Start when ${startMachineName} is back` : box ? 'Start review' : 'Send';
   // The details cover the error line, and on a phone the whole footer: open, they say it.
   const errorInDetails = trustInfoOpen && !conflict;
   const status = start
@@ -802,13 +931,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
             data-missing={start.project.exists ? undefined : ''}
             aria-haspopup="listbox"
             aria-expanded={folderMenu}
-            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, home)}${start.project.exists ? '' : ', not there any more'}. Change`}
+            data-compose-folder-machine={start.machine ?? undefined}
+            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
             onClick={() => {
               setPicker(false);
               setFolderMenu((open) => !open);
             }}
           >
             {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
+            {/* Another machine's project names its machine, as the list's rows do ("billing-svc · Mac mini"). */}
+            {startMachineName && (
+              <span className="ib-cp-on" data-compose-machine={start.machine ?? undefined}>
+                · <bdi>{startMachineName}</bdi>
+              </span>
+            )}
             <Icon name="chevD" size={15} />
           </button>
         </span>
@@ -920,10 +1056,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
           selected={target?.session ?? (start ? startKey(start.agent) : null)}
           home={home}
           phone={phone}
-          start={launch && canStart ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
+          start={launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
           onStart={(picked) => {
             setToFilled(false);
-            setStartPick({ agent: picked.agent, projectId: picked.project.id });
+            setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
             // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
             void inboxApi.launchSettingsRead(true).catch(() => {});
             setChosen(null);
@@ -951,6 +1087,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <FolderMenu
           projects={launch.projects}
           selected={start.project.id}
+          selectedMachine={start.machine}
+          groups={grouped ? folderGroups : null}
           scratch={
             launch.scratch && scratchFolder
               ? {
@@ -963,16 +1101,30 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 }
               : null
           }
-          onScratch={() => {
-            setStartPick({ agent: start.agent, projectId: SCRATCH_PICK });
+          onFolder={
+            pulls || box
+              ? undefined
+              : (folder, name, machine) => {
+                  // A folder that is one of that machine's projects already is that project (its trust facts and all).
+                  const machineHome = machine ? (there.reads.get(machine)?.home ?? null) : home;
+                  const known = blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
+                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name } });
+                  setFolderMenu(false);
+                  setError(null);
+                  textRef.current?.focus();
+                }
+          }
+          folderPicked={start.folder ? { folder: start.folder, machine: start.machine } : null}
+          onScratch={(machine) => {
+            setStartPick({ agent: start.agent, projectId: SCRATCH_PICK, machine });
             setFolderMenu(false);
             setError(null);
             textRef.current?.focus();
           }}
           home={home}
           phone={phone}
-          onPick={(project) => {
-            setStartPick({ agent: start.agent, projectId: project.id });
+          onPick={(project, machine) => {
+            setStartPick({ agent: start.agent, projectId: project.id, machine });
             setFolderMenu(false);
             setError(null);
             textRef.current?.focus();
@@ -1036,7 +1188,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <Icon name="warn" size={16} />
           <div>
             <b>
-              <bdi>{tildePath(start.project.root, home)}</bdi> isn't there any more.
+              <bdi>{tildePath(start.project.root, startHome)}</bdi> isn't there any more.
             </b>
             <p>
               It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
@@ -1105,6 +1257,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           onPutBack={(key) => files.putBack(key, textRef.current)}
         />
       </div>
+      {start && startAsleep && startMachineName && (
+        <p className="ib-cp-asleep" data-compose-note="asleep">
+          <Icon name="moon" size={15} />
+          <span>
+            {startMachineName} is asleep (since {whenTime(startMachine!.since)}). Your message waits here, and {start.name} starts on {startMachineName} when it's back. You can cancel it until then.
+          </span>
+        </p>
+      )}
       {error && (
         // Kept, unseen, while the details say it: the button under a press that closes them must not move.
         <div className="ib-cp-error" role={errorInDetails ? undefined : 'alert'} data-compose-error={errorInDetails ? undefined : ''} data-in-details={errorInDetails ? '' : undefined}>
@@ -1148,7 +1308,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       ) : (
         <div className="ib-cp-foot">
-          {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, home)} facts={trustFacts} said={errorInDetails ? error : null} />}
+          {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
           {takesFiles ? (
             // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
             <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
