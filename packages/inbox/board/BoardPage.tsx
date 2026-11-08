@@ -16,6 +16,10 @@ import { CardPanel } from './CardPanel';
 import { CardMenu } from './CardMenu';
 import type { InboxToastModel } from '../components/Toast';
 import { shortcutAria } from '../shortcuts/hint';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { isGridKey, laneStep, type GridKey } from '../gridMove';
+import { inboxBoardShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { OnceButton } from './OnceButton';
 import { RefMark, markLabel } from './RefMark';
@@ -453,6 +457,36 @@ export function BoardPage(props: BoardPageProps) {
 
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
+  // Arrow keys between the cards (approval "inbox-keyboard-keys-2026-11-07", item 6; gridMove.ts), only while a card's
+  // button has focus: ↑ ↓ within its lane, ← → the nearest card in the lane beside, Home End the lane's ends. Enter
+  // opens and Shift+F10 opens its menu, as before.
+  const cardKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      return !!target && !!pageRef.current?.querySelector('.ib-bmain')?.contains(target) && target.matches('.ib-bcard[data-card-id] button[data-card-open]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const main = pageRef.current?.querySelector('.ib-bmain');
+      const target = keyTarget(event);
+      if (!main || !target) return;
+      // The lists on screen that hold cards (the lanes, the Done or Cancelled list, a phone's groups), in order.
+      const shown = (el: Element) => el.getClientRects().length > 0;
+      const lists = [...main.querySelectorAll<HTMLElement>('[data-lane], .ib-blist')].filter(shown);
+      const buttons = lists.map((list) => [...list.querySelectorAll<HTMLElement>('.ib-bcard[data-card-id] button[data-card-open]')].filter(shown));
+      const lane = buttons.findIndex((cards) => cards.includes(target as HTMLElement));
+      if (lane < 0) return;
+      const to = laneStep(
+        buttons.map((cards) => cards.map((card) => card.getBoundingClientRect())),
+        { lane, card: buttons[lane]!.indexOf(target as HTMLElement) },
+        event.key as GridKey,
+      );
+      const next = to ? buttons[to.lane]?.[to.card] : null;
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxBoardShortcuts, handlers: { move: cardKey, ends: cardKey } });
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
   // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
