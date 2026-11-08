@@ -32,6 +32,7 @@
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
+import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -118,7 +119,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
-  ack?: { label: string; at: string };
+  /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
+  ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
   /** A person's message addressed to one agent session (a New message, or a reply sent to another session because the asker ended); on a reply that tags agents, its owner. */
   to?: AgentAddressee;
@@ -166,6 +168,8 @@ export interface AgentMessageLine {
   attachments?: string[];
   guide?: string;
   ack?: true;
+  /** With `ack`: the emoji the person reacted with, 👍 included (approval "inbox-reaction-tray"); the line shows it, never its name. */
+  reaction?: string;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
   board_request?: true;
@@ -420,7 +424,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
-    ...(ack ? { ack: { label: ack.label, at: ack.at } } : {}),
+    ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
@@ -452,6 +456,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => a.name) } : {}),
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
+    ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
@@ -665,10 +670,25 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
-  if (line.ack) parts.push("👍");
+  if (line.ack) parts.push(line.reaction ?? "👍");
   // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
   if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");
+}
+
+/**
+ * The person's reaction as an agent reads it (approval "inbox-reaction-tray"): `{ emoji, label? }`, 👍 Looks good
+ * for an ack with none (an older one, or 👍 itself).
+ */
+function agentReaction(value: unknown): { emoji: string; label?: string } {
+  const { emoji, label } = inboxAckReaction(value);
+  return label ? { emoji, label } : { emoji };
+}
+
+/** The line under a message the person reacted to: the emoji, its name when it has one, and when. */
+function ackLineText(ack: NonNullable<AgentMessage["ack"]>): string {
+  const { emoji, label } = inboxAckReaction(ack.reaction);
+  return `${emoji}${label ? ` ${label}` : ""} (${shortTime(ack.at)}): the person's reaction.`;
 }
 
 /** One message in full as text: a heading line, the body, then its questions, files, guide and 👍. */
@@ -685,7 +705,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }
   if (message.guide) lines.push(`Guided review: ${message.guide.title}`);
-  if (message.ack) lines.push(`👍 ${message.ack.label} (${shortTime(message.ack.at)}): the person read it and needs nothing more.`);
+  if (message.ack) lines.push(ackLineText(message.ack));
   // Compose's Board chip: the request, once, after the words and files (the wake's order), and the cards
   // that link the thread already, so a second reader keeps those current instead of making more.
   if (message.board_request) {

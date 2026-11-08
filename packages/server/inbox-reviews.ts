@@ -155,12 +155,20 @@ export const INBOX_PULL_STATE_CLOSED_AGAIN_MS = 24 * 60 * 60_000;
 /** At most this many PRs are read after one read of the list; the rest wait for the next. */
 export const INBOX_PULL_STATE_READS = 5;
 
+/** A GitLab fork: its answer has only project ids, so `head_repo` says it's another repository and can't name it. */
+const INBOX_UNNAMED_FORK = "fork";
+
 export interface InboxPullStateAnswer {
   state: "open" | "merged" | "closed";
   at: string | null;
   title: string;
   url: string;
   head: string | null;
+  head_sha: string | null;
+  /** The repository the head branch is on, when the forge says. */
+  head_repo: string | null;
+  base: string | null;
+  author: string | null;
 }
 
 /** A PR gone from the forge's list: what one read answered, or null when it could not say. */
@@ -169,16 +177,71 @@ export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli
   const read = await run(cli, ["api", "--hostname", ref.host, endpoint]).catch(() => null);
   if (!read || read.exitCode !== 0) return null;
   try {
-    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown }; source_branch?: unknown };
+    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown; sha?: unknown; repo?: { full_name?: unknown } }; sha?: unknown; source_project_id?: unknown; target_project_id?: unknown; source_branch?: unknown; base?: { ref?: unknown }; target_branch?: unknown; user?: { login?: unknown }; author?: { username?: unknown } };
     const text = (value: unknown) => (typeof value === "string" && value ? value : null);
     const merged = text(pr.merged_at);
     const state = merged || pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : pr.state === "open" || pr.state === "opened" ? "open" : null;
     const url = text(pr.html_url) ?? text(pr.web_url);
     if (!state || !url) return null;
-    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch) };
+    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch), head_sha: text(pr.head?.sha) ?? text(pr.sha), head_repo: text(pr.head?.repo?.full_name) ?? (pr.source_project_id && pr.source_project_id !== pr.target_project_id ? INBOX_UNNAMED_FORK : null), base: text(pr.base?.ref) ?? text(pr.target_branch), author: text(pr.user?.login) ?? text(pr.author?.username) };
   } catch {
     return null;
   }
+}
+
+/** Who the CLI is signed in as on a host, when no list has said yet; null when it won't say. */
+async function readInboxForgeLogin(run: RefRunner, cli: InboxPullHost["cli"], host: string): Promise<string | null> {
+  const read = await run(cli, ["api", "--hostname", host, "user"]).catch(() => null);
+  if (!read || read.exitCode !== 0) return null;
+  try {
+    const user = JSON.parse(read.stdout) as { login?: unknown; username?: unknown };
+    const name = user.login ?? user.username;
+    return typeof name === "string" && name ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A pull request link's one read, as a PR of the list. Nothing else of its repository is read. */
+export async function readInboxReviewLink(
+  run: RefRunner | undefined,
+  link: { ref: { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } },
+  login: string | null,
+): Promise<InboxPull | null> {
+  const { ref } = link;
+  const cli = ref.platform === "gitlab" ? "glab" : "gh";
+  const runner = run ?? refCliRunner;
+  const state = await readInboxPullState(runner, cli, ref);
+  // A host speaks only for its own PRs: an answer pointing elsewhere could take a PR from its thread.
+  const address = state && URL.canParse(state.url) ? new URL(state.url) : null;
+  if (!state || address?.protocol !== "https:" || address.host.toLowerCase() !== ref.host) return null;
+  const me = login ?? (await readInboxForgeLogin(runner, cli, ref.host));
+  return {
+    key: ref.key,
+    platform: ref.platform,
+    host: ref.host,
+    repo: ref.repo,
+    number: ref.number,
+    url: state.url,
+    title: state.title,
+    author: state.author,
+    mine: !!me && state.author === me,
+    requested: false,
+    state: state.state,
+    base: state.base ?? "",
+    head: state.head ?? "",
+    ...(state.head_sha ? { head_sha: state.head_sha } : {}),
+    head_repo: state.head_repo,
+    additions: 0,
+    deletions: 0,
+    files: 0,
+    review: null,
+    approved_by: null,
+    reviewers: [],
+    checks: null,
+    updated_at: state.at ?? "",
+    merged_at: state.state === "merged" ? state.at : null,
+  };
 }
 
 /**

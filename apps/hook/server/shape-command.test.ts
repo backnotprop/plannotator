@@ -317,7 +317,8 @@ describe("the Shape switch, through the entrypoint", () => {
     writeFileSync(join(project, "old.json"), JSON.stringify({ title: "T", claim: "C", views: { reqs: { groups: [] } } }));
     const r = await run("update", "--file", "old.json");
     expect(r.code).not.toBe(0);
-    expect(r.err).toContain("views.know");
+    expect(r.err).toContain("a ref's sub");
+    expect(r.err).not.toContain("views.know");
   });
 
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json

@@ -97,6 +97,28 @@ export function inboxQuestionKeysWithRecommendedMarker(markdown: string): string
   return questionBlocksOf(markdown).flatMap(({ key, parsed }) => (parsed.recommendedMarker ? [key] : []));
 }
 
+/** One question of a body worth a second look, in block order: `position` 1-based among the questions. */
+export interface InboxQuestionToCheck {
+  key: string;
+  position: number;
+  /** A pick-one or pick-several block (`:::question`, `:::question-multi`) with no choices, as written: the person answers in words. */
+  no_choices: string;
+}
+
+/**
+ * The questions of a body that likely do not ask what the agent meant (the
+ * send result says so; the send goes through): a `:::question` or
+ * `:::question-multi` block with no choices, which the person answers in
+ * words. (An `id:` label before the question line is no mistake: the parser
+ * reads the next line as the question and shows the label as context, see
+ * "Id label" in `./question-block`.) Pure; never throws.
+ */
+export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] {
+  return questionBlocksOf(markdown).flatMap(({ key, parsed }, index) =>
+    parsed.directiveKind !== "question-text" && parsed.choices.length === 0 ? [{ key, position: index + 1, no_choices: `:::${parsed.directiveKind}` }] : [],
+  );
+}
+
 /** Each question block of a body, parsed as the Inbox reads it. */
 function questionBlocksOf(markdown: string): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];

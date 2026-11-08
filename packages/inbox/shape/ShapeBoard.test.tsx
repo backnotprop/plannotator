@@ -1,7 +1,7 @@
 /**
  * The Inbox's board (ShapeBoard.tsx) draws the crosshair only when asked (`crosshair`, which only the Inbox's
  * ShapeLayer passes); without it the board keeps Annotate, as `plannotator shape open` shows it. What regresses: the
- * crosshair (and its Show me stub) reaching the standalone page, or the Inbox losing it.
+ * crosshair reaching the standalone page, or the Inbox losing it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */

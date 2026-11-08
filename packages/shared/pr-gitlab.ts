@@ -131,7 +131,7 @@ export async function getGlUser(runtime: PRRuntime, host: string): Promise<strin
  * flags entirely; there an empty diff on a plain modification is the only
  * reliable withheld signal — empty adds/deletes/renames stay exempt.
  */
-function entryMissingContent(d: GitLabDiffEntry): boolean {
+export function entryMissingContent(d: GitLabDiffEntry): boolean {
   if (d.diff.trim() !== "") return false;
   if (d.too_large || d.collapsed) return true;
   // == null catches both absent (old GitLab) and explicit null (GitLab emits

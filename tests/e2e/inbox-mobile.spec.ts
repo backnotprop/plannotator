@@ -397,7 +397,7 @@ for (const phone of [
       await shot(page, '5-reply');
       expect(await sideways(page)).toEqual([]);
       expect(await smallTargets(page, '.ib-pfoot .ib-btn')).toEqual([]);
-      await pane.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+      await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // Back: the list, and the address of the list (the history is the stack it looks like).
       await back.click();
@@ -577,13 +577,13 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.stopped}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-      // One of the two questions picked: on a phone the reply box's foot line ("1 question open") opens a sheet that
-      // offers Skip it for the other (approvals "inbox-explicit-skip", "inbox-reply-foot-phone").
+      // One of the two questions picked: on a phone the reply box's summary line ("1 question open", over its row) opens a
+      // sheet that offers Skip it for the other (approvals "inbox-explicit-skip", "inbox-reply-foot-phone", "inbox-reply-box").
       await pane.getByText('Retry with the same idempotency key').click();
       await pane.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
-      const line = pane.locator('.ib-rfoot [data-foot-summary]');
+      const line = pane.locator('.ib-rbox [data-reply-line] [data-foot-summary]');
       await expect(line).toHaveText('1 question open');
-      const lineHit = await shortHitAreas(page, '.ib-rfoot [data-foot-summary]');
+      const lineHit = await shortHitAreas(page, '.ib-rbox [data-reply-line] [data-foot-summary]');
       expect(lineHit.measured).toBe(1);
       expect(lineHit.short).toEqual([]);
       await line.click();
@@ -594,7 +594,7 @@ for (const phone of [
       await sheet.getByRole('button', { name: 'Skip it' }).click();
       await expect(sheet.getByRole('button', { name: 'Keep open' })).toBeVisible();
       await sheet.getByRole('button', { name: 'Close' }).click();
-      await pane.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+      await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // An open file: ui's toolstrip and the viewer's Global comment and Copy file.
       await page.goto(`${world.url}#thread=${world.threads.attach}`);

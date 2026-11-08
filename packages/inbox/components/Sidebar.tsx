@@ -19,6 +19,7 @@ import { shownProjects, type ProjectAction } from '../projectMenu';
 import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
+import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
@@ -90,6 +91,10 @@ export interface SidebarProps {
   onProjectPicture?: (projectId: string, file: File | null) => Promise<boolean>;
   /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
+  /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
+  onProjectNewSession?: (projectId: string, machine: string | null) => void;
+  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there). Absent: every row's can. */
+  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined) => boolean;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
@@ -206,6 +211,7 @@ export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
+  const composeKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'compose' });
   const phone = usePhone();
   // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
@@ -350,12 +356,13 @@ export function Sidebar(props: SidebarProps) {
           <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
         </button>
         {props.onCompose && (
-          <Tip content="New message">
+          <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
             <button
               type="button"
               className="ib-compose-btn"
               data-open-compose=""
               aria-label="New message"
+              aria-keyshortcuts={composeKeys}
               aria-haspopup="dialog"
               onClick={(event) => {
                 const opener = event.currentTarget;
@@ -605,6 +612,23 @@ export function Sidebar(props: SidebarProps) {
                   }
                   // A picture is kept by the Inbox that has the project: this machine's projects only.
                   onPicture={props.onProjectPicture && local(project) ? (file) => props.onProjectPicture!(project.id, file) : undefined}
+                  newSession={
+                    props.onProjectNewSession
+                      ? (() => {
+                          const machine = project.machine && project.machine !== props.machines?.self ? project.machine : null;
+                          const machineView = machine ? props.machines?.linked.find((m) => m.id === machine) : undefined;
+                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch)) return undefined;
+                          const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, machineView?.state === 'offline');
+                          return {
+                            tip,
+                            onPress: () => {
+                              setOpenMobile(false);
+                              props.onProjectNewSession!(project.id, machine);
+                            },
+                          };
+                        })()
+                      : undefined
+                  }
                   announce={props.announce}
                   // This machine's projects only: combining never crosses machines.
                   others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}

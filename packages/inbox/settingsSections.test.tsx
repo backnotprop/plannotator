@@ -203,7 +203,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'Decision data', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'Decision data', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/rows',
@@ -214,6 +214,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
     '#settings/accounts',
     '#settings/voice',
     '#settings/capabilities',
+    '#settings/activity',
     '#settings/archived',
     '#settings/storage',
     '#settings/decision-data',
@@ -232,6 +233,27 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   host?.remove();
   const again = await renderApp('#settings/nonsense');
   await until(() => heading(again) === 'General', 'General for an unknown section');
+});
+
+test.skipIf(!hasDom)('nothing asks the server to count until Decision data is shown: not the list, not Settings opening, not another section', async () => {
+  const counted = () => requests.filter((line) => line.includes('/decision-data')).length;
+  const el = await renderApp(`#thread=${current!.thread}`);
+  act(() => (el.querySelector('.ib-setrow .ib-nav') as HTMLButtonElement).click());
+  await until(() => heading(el) === 'General', 'Settings');
+  for (const section of ['storage', 'archived', 'about'] as const) {
+    act(() => navLink(el, section).click());
+    await until(() => navLink(el, section).getAttribute('aria-current') === 'page', section);
+  }
+  expect(counted()).toBe(0);
+  act(() => navLink(el, 'decision-data').click());
+  await until(() => heading(el) === 'Decision data', 'Decision data');
+  await until(() => counted() === 1, 'the count');
+  // Leaving asks for nothing more; coming back asks once.
+  act(() => navLink(el, 'about').click());
+  await until(() => heading(el) === 'About', 'About');
+  expect(counted()).toBe(1);
+  act(() => navLink(el, 'decision-data').click());
+  await until(() => counted() === 2, 'the next count');
 });
 
 test.skipIf(!hasDom)('the Inbox sidebar closes while Settings is open and comes back on leaving, without its cookie being written; ← Inbox returns to where the person was', async () => {
@@ -422,7 +444,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
-  expect(rows).toEqual(['Board', 'Checklist']);
+  expect(rows).toEqual(['Board', 'Checklist', 'Bro mode']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -436,6 +458,25 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
     await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
   } finally {
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
+test.skipIf(!hasDom)('Capabilities: Bro mode is off by default; its switch saves config.json inboxBro both ways', async () => {
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Bro mode') !== null, 'the Bro mode switch');
+  expect(readConfig(current!).inboxBro).toBeUndefined();
+  expect(switchNamed(el, 'Bro mode')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Bro mode')!.click());
+    await until(() => readConfig(current!).inboxBro === true, 'config.json inboxBro true');
+    await until(() => switchNamed(el, 'Bro mode')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Bro mode')!.click());
+    await until(() => readConfig(current!).inboxBro === false, 'config.json inboxBro false');
+    await until(() => switchNamed(el, 'Bro mode')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    // The world is shared across this file's tests: back to never set.
+    const { inboxBro: _bro, ...rest } = readConfig(current!);
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify(rest));
   }
 });
 
@@ -499,7 +540,7 @@ test.skipIf(!hasDom)(
       const el = await renderApp('#settings/capabilities');
       await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
+      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape', 'Bro mode']);
       for (const held of HELD) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
@@ -753,12 +794,12 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="machines"]') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'decision-data', 'about']);
-  // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'decision-data', 'about']);
+  // Capabilities is the last row of the first group, above Activity, Archived, Storage and About; no Experimental row or group.
   const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
   expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
   expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
-  expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['archived', 'storage', 'decision-data', 'about']);
+  expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['activity', 'archived', 'storage', 'decision-data', 'about']);
   const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
   expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');
   act(() => capabilitiesRow.click());

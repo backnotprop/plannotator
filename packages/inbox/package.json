@@ -20,6 +20,7 @@
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
+    "@plannotator/system": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "motion": "^14.4.0",
     "react": "^19.3.1",

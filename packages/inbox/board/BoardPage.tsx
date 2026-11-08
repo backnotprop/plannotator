@@ -16,6 +16,10 @@ import { CardPanel } from './CardPanel';
 import { CardMenu } from './CardMenu';
 import type { InboxToastModel } from '../components/Toast';
 import { shortcutAria } from '../shortcuts/hint';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { isGridKey, laneStep, type GridKey } from '../gridMove';
+import { inboxBoardShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { OnceButton } from './OnceButton';
 import { RefMark, markLabel } from './RefMark';
@@ -66,8 +70,8 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
-import { cardStepLists, presenceClass, stepsCount, stepsDoneWords } from '../steps/model';
-import { StepsPie } from '../steps/StepsMarks';
+import { cardStepLists, stepsWaitWords } from '../steps/model';
+import { StepGlyph } from '../steps/StepsMarks';
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
@@ -453,6 +457,36 @@ export function BoardPage(props: BoardPageProps) {
 
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
+  // Arrow keys between the cards (approval "inbox-keyboard-keys-2026-11-07", item 6; gridMove.ts), only while a card's
+  // button has focus: ↑ ↓ within its lane, ← → the nearest card in the lane beside, Home End the lane's ends. Enter
+  // opens and Shift+F10 opens its menu, as before.
+  const cardKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      return !!target && !!pageRef.current?.querySelector('.ib-bmain')?.contains(target) && target.matches('.ib-bcard[data-card-id] button[data-card-open]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const main = pageRef.current?.querySelector('.ib-bmain');
+      const target = keyTarget(event);
+      if (!main || !target) return;
+      // The lists on screen that hold cards (the lanes, the Done or Cancelled list, a phone's groups), in order.
+      const shown = (el: Element) => el.getClientRects().length > 0;
+      const lists = [...main.querySelectorAll<HTMLElement>('[data-lane], .ib-blist')].filter(shown);
+      const buttons = lists.map((list) => [...list.querySelectorAll<HTMLElement>('.ib-bcard[data-card-id] button[data-card-open]')].filter(shown));
+      const lane = buttons.findIndex((cards) => cards.includes(target as HTMLElement));
+      if (lane < 0) return;
+      const to = laneStep(
+        buttons.map((cards) => cards.map((card) => card.getBoundingClientRect())),
+        { lane, card: buttons[lane]!.indexOf(target as HTMLElement) },
+        event.key as GridKey,
+      );
+      const next = to ? buttons[to.lane]?.[to.card] : null;
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxBoardShortcuts, handlers: { move: cardKey, ends: cardKey } });
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
   // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
@@ -947,10 +981,12 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  // The checklist's mark (approval "inbox-thread-steps", part 4): the pie alone, no count; the opened card has the number.
-  const plan = stepsOf(card)[0] ?? null;
-  const planCount = plan ? stepsCount(plan) : null;
-  const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
+  // The checklist's mark (approval "inbox-checklist-spinners-2026-11-07"): the lane card stays still, with nothing
+  // while the agent works and the still amber pause only while a list waits on the person; the opened card has the rest.
+  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has answered since the list
+  // (a reply or a 👍), nor once its session has ended, so the card and the list row always agree; the words come from
+  // the first list that still waits by that rule (`stepsWaitWords`: never an ended session's), as the mark does.
+  const planWords = stepsWaitWords(stepsOf(card).filter((list) => rowOf(list.thread_id)?.steps_waiting));
   const cardProject = projectOfCard(card);
   const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
@@ -965,10 +1001,10 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
-      {plan && planCount && planWords && (
+      {planWords && (
         <Tip content={planWords}>
-          <span className={`ib-bc-plan ${presenceClass(plan.presence)}`} data-card-steps={planCount.text}>
-            <StepsPie done={planCount.done} total={planCount.total} size={13} />
+          <span className="ib-strow ib-bc-plan" data-card-steps="waiting">
+            <StepGlyph status="waiting" size={13} />
           </span>
         </Tip>
       )}

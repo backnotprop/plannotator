@@ -3,7 +3,7 @@
  *
  * A shape is one thing being worked out with one agent session. Each time the
  * agent draws it, the store keeps a full snapshot: a version. A version holds
- * its views (Picture, How it works, What's changed, What to know, Code), the numbered
+ * its views (Picture, How it works, Code), the numbered
  * references the views cite, and the parts the person can point at.
  *
  * Browser-safe and dependency-free: the store (packages/shared/shape), the
@@ -12,8 +12,7 @@
  *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
  *    update --file`) and names the exact field that is wrong.
  *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every change and call path of What's changed, every paragraph of What to know,
- *    every Code step, the title and the claim. Ids
+ *    view, every Code step, the title and the claim. Ids
  *    stay the same across versions, which is what lets the board redraw only
  *    what changed.
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
@@ -34,7 +33,11 @@ export const SHAPE_FORMAT_VERSION = 1;
 
 export type ShapeViewId = 'picture' | 'how' | 'changed' | 'know' | 'code';
 
-/** The views, in the dock's order. Their labels are the product's words. */
+/**
+ * The views a board may hold. Their labels are the words `shape update` reports to the agent; the bar's words are
+ * ShapeSurface's. `changed` and `know` stay so a board that still sends them is accepted; they are never shown, diffed
+ * or reported (`SHAPE_HIDDEN_VIEWS`).
+ */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
@@ -42,6 +45,9 @@ export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'know', label: 'What to know' },
   { id: 'code', label: 'Code' },
 ];
+
+/** Views a board may carry but nothing shows (approvals shape-know-removed, shape-whats-changed-removed). */
+const SHAPE_HIDDEN_VIEWS: ReadonlySet<string> = new Set(['know', 'changed']);
 
 export function shapeViewLabel(view: ShapeViewId): string {
   return SHAPE_VIEWS.find((v) => v.id === view)?.label ?? view;
@@ -155,7 +161,7 @@ export interface ShapeExampleStep {
   code: { path: string; line: number };
 }
 
-// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and What to know shows them.
+// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them, and nothing shows them.
 export interface ShapeRequirement {
   /** Stable across versions. */
   id: string;
@@ -205,9 +211,9 @@ export interface ShapeCodeView {
 }
 
 /**
- * What's changed: the change read as a patch, after How it works. The agent
- * that draws the board writes it, and keeps it in agreement with the Picture
- * and How it works.
+ * What an agent used to send as "What's changed": the change read as a patch.
+ * Still accepted, so no send is refused, but never shown, never a part and
+ * never asked for (approval shape-whats-changed-removed).
  *
  * Text fields are inline Markdown (`code`, **bold**, links, `[^n]`), except
  * `was` and `now`, which are diff lines: plain words, with `code` for names.
@@ -314,17 +320,58 @@ export interface ShapeBoard {
   views: {
     picture?: ShapeDrawnView;
     how?: ShapeDrawnView;
-    /** What's changed: the change as a patch (items, call paths). */
+    /** Once "What's changed". Still accepted and kept; never shown or a part (approval shape-whats-changed-removed). */
     changed?: ShapeChanged;
-    /** What the person needs to know: at most two short paragraphs of prose. Inline Markdown. */
+    /**
+     * Words an agent used to send as "What to know": at most two short paragraphs of prose. Still accepted, so no send is
+     * refused, but never shown and never a part (approval shape-know-removed). Nothing asks an agent for it.
+     */
     know?: string;
-    /** Only on a version saved before What to know. */
+    /** Only on a version saved before `views.know`. */
     reqs?: ShapeRequirements;
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
   /** Scenes the agent draws and the board's player plays, by id (`./shape-scene`): where a drawn view puts `<div data-scene="id">…</div>`. */
   scenes?: Record<string, ShapeScene>;
+  /**
+   * A stack review's pull requests (approval "stack-show-me", addendum 2026-11-06): which PR changed each drawn part,
+   * and in the agent's words what it did there. Only a board with two or more `pulls` shows them (`shapeStackBadges`).
+   */
+  stack?: ShapeStack;
+}
+
+/** One pull request of a stack, in landing order. */
+export interface ShapeStackPull {
+  n: number;
+  title: string;
+  /** Its page on the forge (http or https). */
+  url?: string;
+  /** The review's chapter (a guide step, from 1) that walks this PR: "Read it in the review" lands there. */
+  step?: number;
+}
+
+/** A file a PR changed in a part, with its own counts. */
+export interface ShapeStackFile {
+  path: string;
+  additions?: number;
+  deletions?: number;
+  /** New-side line ranges this PR changed (`[from, to]`, inclusive): the code popup shows only the hunks they touch. */
+  lines?: [number, number][];
+}
+
+/** What one PR did to one drawn part (a `data-mark` on Picture or How it works). */
+export interface ShapeStackChange {
+  part: string;
+  pr: number;
+  /** One or two plain sentences: what this PR did there. */
+  said: string;
+  files: ShapeStackFile[];
+}
+
+export interface ShapeStack {
+  pulls: ShapeStackPull[];
+  changes: ShapeStackChange[];
 }
 
 // ───────────────────────────── what the store keeps ─────────────────────────────
@@ -414,7 +461,7 @@ export interface ShapeNote {
   picture?: string;
 }
 
-/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+/** Where a box sits, as fractions of its drawing. `tall` and `more`: on that layout of the view. */
 export interface ShapeNoteBox {
   x: number;
   y: number;
@@ -475,7 +522,7 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
-  /** What's changed: items, lines per side, call paths, steps and forks per path. */
+  /** `views.changed` (still checked, never shown): items, lines per side, call paths, steps and forks per path. */
   changes: 40,
   changeLines: 12,
   flows: 6,
@@ -487,6 +534,11 @@ export const SHAPE_LIMITS = {
   exampleCode: 600,
   /** A box's picture, as a data: URL. */
   notePicture: 6_000_000,
+  /** A stack's pull requests, its part changes, the files of one change, and one file's line ranges. */
+  stackPulls: 20,
+  stackChanges: 200,
+  stackFiles: 30,
+  stackLines: 50,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -1288,7 +1340,7 @@ function checkExampleSource(c: Checker, from: unknown, f: string, index: number)
   return path && line ? { path, line } : undefined;
 }
 
-/** What to know's paragraphs: blank lines part them. */
+/** `views.know`'s paragraphs: blank lines part them. Only the check reads them now. */
 export function shapeKnowParagraphs(text: string): string[] {
   return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 }
@@ -1404,8 +1456,8 @@ function checkCodePlace(c: Checker, value: unknown, field: string): string | und
 const CITE_RE = /\[\^\d{1,3}\]/;
 
 /**
- * Words What's changed draws as they are (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
- * there would show as written, so it is refused, naming the field.
+ * Words `views.changed` held as plain text (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
+ * there is refused, naming the field, as it was when What's changed drew them.
  */
 function plainText(c: Checker, value: string | undefined, field: string): string | undefined {
   if (value !== undefined && CITE_RE.test(value)) {
@@ -1611,6 +1663,126 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
   return out.sort((a, b) => a.n - b.n);
 }
 
+/** Every `data-mark` the Picture (and its Show more and tall drawings) and How it works draw: where a stack badge may sit. */
+function drawnMarks(views: ShapeBoard['views']): Set<string> {
+  const marks = new Set<string>();
+  for (const v of [views.picture, views.how]) {
+    if (!v) continue;
+    for (const html of [v.html, v.tall?.html, v.more?.html]) if (html) for (const m of shapeHtmlMarks(html)) marks.add(m.id);
+  }
+  return marks;
+}
+
+function checkStack(c: Checker, value: unknown, views: ShapeBoard['views']): ShapeStack | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail('stack', 'must be { pulls, changes }');
+    return undefined;
+  }
+  const pullList = c.list(value.pulls, 'stack.pulls', SHAPE_LIMITS.stackPulls);
+  if (!pullList) {
+    if (value.pulls === undefined || value.pulls === null) c.fail('stack.pulls', 'is required: the stack\'s pull requests, in landing order');
+    return undefined;
+  }
+  const pulls: ShapeStackPull[] = [];
+  const numbers = new Set<number>();
+  pullList.forEach((p, i) => {
+    const f = `stack.pulls[${i}]`;
+    if (!isRecord(p)) return c.fail(f, 'must be { n, title, url?, step? }');
+    const n = c.int(p.n, `${f}.n`, 1, Number.MAX_SAFE_INTEGER);
+    if (n !== undefined && numbers.has(n)) c.fail(`${f}.n`, `#${n} is listed twice`);
+    const title = c.text(p.title, `${f}.title`, SHAPE_LIMITS.title);
+    const url = c.text(p.url, `${f}.url`, SHAPE_LIMITS.target, false);
+    if (url && !shapeLinkUrl(url)) c.fail(`${f}.url`, 'must be an http(s) URL');
+    const step = c.int(p.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
+    if (n === undefined || !title || numbers.has(n)) return;
+    numbers.add(n);
+    pulls.push({ n, title, ...(url && shapeLinkUrl(url) ? { url } : {}), ...(step ? { step } : {}) });
+  });
+  const marks = drawnMarks(views);
+  const changeList = c.list(value.changes, 'stack.changes', SHAPE_LIMITS.stackChanges) ?? [];
+  const changes: ShapeStackChange[] = [];
+  const pairs = new Set<string>();
+  changeList.forEach((ch, i) => {
+    const f = `stack.changes[${i}]`;
+    if (!isRecord(ch)) return c.fail(f, 'must be { part, pr, said, files }');
+    const part = c.id(ch.part, `${f}.part`);
+    if (part && !marks.has(part)) c.fail(`${f}.part`, `"${part}" is not a data-mark on the Picture or How it works`);
+    const pr = c.int(ch.pr, `${f}.pr`, 1, Number.MAX_SAFE_INTEGER);
+    if (pr !== undefined && !numbers.has(pr)) c.fail(`${f}.pr`, `#${pr} is not in stack.pulls`);
+    const pair = `${part}#${pr}`;
+    if (part && pr !== undefined && pairs.has(pair)) c.fail(f, `#${pr} on "${part}" is written twice; one entry per PR and part`);
+    const said = plainText(c, c.text(ch.said, `${f}.said`, SHAPE_LIMITS.line), `${f}.said`);
+    const fileList = c.list(ch.files, `${f}.files`, SHAPE_LIMITS.stackFiles);
+    if (!fileList) {
+      if (ch.files === undefined || ch.files === null) c.fail(`${f}.files`, 'is required: the files this PR changed in this part');
+      return;
+    }
+    if (!fileList.length) return c.fail(`${f}.files`, 'needs at least one file');
+    const files: ShapeStackFile[] = [];
+    fileList.forEach((file, j) => {
+      const ff = `${f}.files[${j}]`;
+      if (!isRecord(file)) return c.fail(ff, 'must be { path, additions?, deletions?, lines? }');
+      const path = c.path(file.path, `${ff}.path`);
+      const additions = c.int(file.additions, `${ff}.additions`, 0, 10_000_000, false);
+      const deletions = c.int(file.deletions, `${ff}.deletions`, 0, 10_000_000, false);
+      let lines: [number, number][] | undefined;
+      const ranges = c.list(file.lines, `${ff}.lines`, SHAPE_LIMITS.stackLines);
+      if (ranges) {
+        lines = [];
+        ranges.forEach((r, k) => {
+          const ok = Array.isArray(r) && r.length === 2 && r.every((v) => Number.isInteger(v) && v >= 1 && v <= 10_000_000) && r[0] <= r[1];
+          if (!ok) c.fail(`${ff}.lines[${k}]`, 'must be [from, to]: whole line numbers, from <= to');
+          else lines!.push([r[0], r[1]]);
+        });
+      }
+      if (path) files.push({ path, ...(additions !== undefined ? { additions } : {}), ...(deletions !== undefined ? { deletions } : {}), ...(lines?.length ? { lines } : {}) });
+    });
+    if (!part || pr === undefined || !said || !marks.has(part) || !numbers.has(pr) || pairs.has(pair) || files.length !== fileList.length) return;
+    pairs.add(pair);
+    changes.push({ part, pr, said, files });
+  });
+  if (!pulls.length) return undefined;
+  return { pulls, changes };
+}
+
+/** A stack's badges, part by part: the PRs that changed it, in landing order. None for a board of one PR or none. */
+export function shapeStackBadges(stack: ShapeStack | undefined): Map<string, number[]> {
+  const badges = new Map<string, number[]>();
+  if (!stack || stack.pulls.length < 2) return badges;
+  const order = new Map(stack.pulls.map((p, i) => [p.n, i]));
+  for (const ch of stack.changes) {
+    if (!order.has(ch.pr)) continue;
+    const list = badges.get(ch.part) ?? [];
+    if (!list.includes(ch.pr)) list.push(ch.pr);
+    badges.set(ch.part, list);
+  }
+  for (const list of badges.values()) list.sort((a, b) => order.get(a)! - order.get(b)!);
+  return badges;
+}
+
+/**
+ * The PRs' hues (OKLCH degrees), by place in the stack (owner, 2026-11-07: "Dude why limit."): every PR its own, and
+ * fixed by its place, so a stack that grows never recolours the PRs already on the board. #1 to #3 keep the first look:
+ * teal, amber, rose. Each next one is the hue that looks farthest from all before it (the most distant by eye, OKLab
+ * distance of the colours as drawn, light and dark), picked once and written here; hues between 235 and 330 are never
+ * picked, so the board's purple (about 280) stays out. PRs next to each other in the stack are at least 24° apart.
+ * The UI turns a hue into a colour at one lightness and chroma (`--shp-h`, shape.css), so every hue holds the same
+ * contrast. One per allowed pull (`SHAPE_LIMITS.stackPulls`).
+ */
+const STACK_HUES = [186, 72, 357, 125, 235, 33, 155, 330, 99, 209, 15, 51, 171, 140, 344, 112, 86, 221, 197, 24] as const;
+
+/** The hues of a stack of `count` PRs, in landing order (`STACK_HUES`): the first `count` of one fixed sequence. */
+export function shapeStackHues(count: number): number[] {
+  return Array.from({ length: Math.max(0, count) }, (_, i) => STACK_HUES[i % STACK_HUES.length]!);
+}
+
+/** A PR's hue on the board (`shapeStackHues`, by its place in the stack); null when it is not in it. */
+export function shapeStackHue(stack: ShapeStack, n: number): number | null {
+  const i = stack.pulls.findIndex((p) => p.n === n);
+  return i < 0 ? null : STACK_HUES[i % STACK_HUES.length]!;
+}
+
 /** Validate what an agent writes. Every problem is named by its field. */
 /**
  * One drawn view on its own, as another surface takes it (code review's
@@ -1696,11 +1868,11 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     else asOf = new Date(input.asOf).toISOString();
   }
   const views: ShapeBoard['views'] = {};
-  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, know, code }, at least one');
+  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, code }, at least one');
   else {
     for (const key of Object.keys(input.views)) {
-      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
-      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, changed, know, code)');
+      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put a caveat behind a numbered mark (a ref\'s sub), or say it in your message to the person');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
     const how = checkDrawn(c, input.views.how, 'views.how', true);
@@ -1715,9 +1887,10 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
+  const stack = checkStack(c, input.stack, views);
   const scenes = checkScenes(c, input.scenes, views);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
-  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(scenes ? { scenes } : {}) };
+  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(scenes ? { scenes } : {}), ...(stack ? { stack } : {}) };
   // Every cited reference must exist.
   const known = new Set((refs ?? []).map((r) => r.n));
   const cited = shapeCitedRefs(board);
@@ -1817,16 +1990,8 @@ export function shapeParts(board: ShapeBoard): ShapePart[] {
       }
     }
   }
-  const changed = board.views.changed;
-  for (const item of changed?.items ?? []) {
-    const lines = [item.was, item.now].flatMap((l) => (l === undefined ? [] : Array.isArray(l) ? l : [l]));
-    parts.push({ view: 'changed', id: item.id, text: fold([item.kind, item.title, ...lines, item.from, item.to, item.note, ...(item.code ?? [])].filter(Boolean).join(' ')) });
-  }
-  for (const flow of changed?.flows ?? []) parts.push({ view: 'changed', id: flow.id, text: fold(JSON.stringify([flow.title, flow.start, flow.steps ?? [], flow.forks ?? [], flow.end ?? null])) });
-  shapeKnowParagraphs(board.views.know ?? '').forEach((text, i) => parts.push({ view: 'know', id: `know-${i + 1}`, text: fold(text) }));
-  for (const group of board.views.reqs?.groups ?? []) {
-    for (const item of group.items) parts.push({ view: 'know', id: item.id, text: fold(`${group.label}: ${item.text}`) });
-  }
+  // `views.changed`, `views.know` (and an old board's Requirements) are never shown, so they have no parts: a change in
+  // them marks nothing.
   board.views.code?.guide.sections.forEach((section, i) => {
     parts.push({ view: 'code', id: `step-${i + 1}`, text: fold(`${section.title}. ${section.overview} ${section.diffs.map((d) => d.file).join(' ')}`) });
   });
@@ -1900,17 +2065,17 @@ export interface ShapeDiff {
   from: number;
   to: number;
   changes: ShapeChange[];
-  /** Views whose content changed at all (a part, or anything else in the view). In the dock's order. */
+  /** Views whose content changed at all (a part, or anything else in the view). In the dock's order. Never `know` or `changed`: they are not shown. */
   views: ShapeViewId[];
   refs: { added: number[]; removed: number[]; changed: number[] };
 }
 
-/** What a view holds on this version. What to know is the words, or an old board's Requirements. */
-/** A view, part or note saved when What to know was Requirements says "reqs": it is `know` now. */
+/** A view, part or note saved when `know` was Requirements says "reqs": it is `know` now. */
 export function shapeViewNow<T>(view: T): T | 'know' {
   return (view as unknown) === 'reqs' ? 'know' : view;
 }
 
+/** What a view holds on this version. `know` is the words, or an old board's Requirements. */
 export function shapeViewContent(views: ShapeBoard['views'], view: ShapeViewId): unknown {
   return view === 'know' ? views.know ?? views.reqs : views[view];
 }
@@ -1921,8 +2086,11 @@ type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<P
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
   const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
-  const partsA = a.parts.map(now);
-  const partsB = b.parts.map(now);
+  // A version saved while `views.know` or `views.changed` was shown has parts in them: they are not parts now, so the
+  // diff skips them.
+  const shown = (p: ShapePart) => !SHAPE_HIDDEN_VIEWS.has(p.view);
+  const partsA = a.parts.map(now).filter(shown);
+  const partsB = b.parts.map(now).filter(shown);
   const before = new Map(partsA.map((p) => [key(p), p]));
   const after = new Map(partsB.map((p) => [key(p), p]));
   const changes: ShapeChange[] = [];
@@ -1933,7 +2101,7 @@ export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   }
   for (const p of partsA) if (!after.has(key(p))) changes.push({ view: p.view, id: p.id, kind: 'removed', before: p.text });
 
-  const views = SHAPE_VIEWS.map((v) => v.id).filter((view) => {
+  const views = SHAPE_VIEWS.map((v) => v.id).filter((view) => !SHAPE_HIDDEN_VIEWS.has(view)).filter((view) => {
     if (changes.some((c) => c.view === view)) return true;
     return JSON.stringify(shapeViewContent(a.views, view) ?? null) !== JSON.stringify(shapeViewContent(b.views, view) ?? null);
   });
@@ -2062,7 +2230,7 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
-  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to your message to the person.`);
   // A Picture that plays a scene: the player sizes the drawing and its controls to the screen, so it wants no canvas.
   const scene = shapeHtmlScenes(picture.html).length > 0;
   if (scene) {

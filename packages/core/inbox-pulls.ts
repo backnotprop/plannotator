@@ -14,6 +14,8 @@
  *   On you, Ready to land, or waiting on others.
  */
 
+import { forgeRefKey } from "./forge-ref-card";
+
 export type InboxPullPlatform = "github" | "gitlab";
 export type InboxPullState = "open" | "draft" | "merged" | "closed";
 export type InboxPullChecks = "success" | "failure" | "pending";
@@ -560,14 +562,24 @@ export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPu
   const host = match[1]!.toLowerCase();
   const repo = match[2]!;
   const number = Number(match[4]);
-  return { key: `${host}/${repo}#${number}`, platform: match[3] === "-/merge_requests" ? "gitlab" : "github", host, repo, number };
+  const platform = match[3] === "-/merge_requests" ? "gitlab" : "github";
+  const at = repo.lastIndexOf("/");
+  // The key the list gives the same PR.
+  const key = forgeRefKey({ platform, host, owner: repo.slice(0, at), repo: repo.slice(at + 1), number, kind: "pull" });
+  return { key, platform, host, repo, number };
 }
 
-/** A pull key's parts (`host/repo#number`); null for anything else. */
-export function inboxPullRefOfKey(key: string): { host: string; repo: string; number: number } | null {
-  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)$/.exec(key);
+/** A pull key's parts (`host/repo#number`, GitLab's with `:pull`); null for anything else. */
+export function inboxPullRefOfKey(key: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
+  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
-  return { host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
+  return { key, platform: match[4] ? "gitlab" : "github", host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
+}
+
+/** A pull key's web address, for reading one PR that isn't on the list. */
+export function inboxPullUrlOfKey(key: string): string | null {
+  const ref = inboxPullRefOfKey(key);
+  return ref && `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`;
 }
 
 /**

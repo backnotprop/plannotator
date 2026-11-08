@@ -89,9 +89,13 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
 /**
  * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
  * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
- * pins the new hash here; one that names the code review belongs in the request.
+ * pins the new hash here; one that names the code review belongs in the request. Last pinned for the stack paragraph
+ * ("A stack of PRs", approval "stack-show-me" q-c24e5d2c, after its clean-room test), which names no code review,
+ * re-pinned on merging main's later Shape text.
  */
-const SHAPE_TEXT_SHA256 = { "shape --help": "7f0c88c47c14273c946e8c46df7c66db22e9353a18862a47c5a0dc798c3df4c0", "/shape skill": "50655c752711141f1f018b98154435a87e2e3d0dbe4dfd212811dd06afb2db81" };
+// #2703 (approvals shape-know-removed, shape-whats-changed-removed): Shape stops asking agents for views.know and views.changed.
+// Re-pinned in merge train B for the stack paragraph and #2703's removals together.
+const SHAPE_TEXT_SHA256 = { "shape --help": "ce2ee98da4eebc163bb184abb8dc6c32f43e2d0ea5407a0a2030395faa0df196", "/shape skill": "2d311dca120c01f3e9c6dbe6d360bdde401f3b8c857b6ef3f2455748a72e39f9" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");

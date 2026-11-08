@@ -32,11 +32,9 @@ describe('the kit', () => {
       claim: 'C',
       picture: svg(900, 500, drawing()),
       how: { ...svg(900, 500, drawing()), css: followCss(['a', 'b']) },
-      know: 'The one thing.',
       refs: [{ n: 1, kind: 'link', title: 'R', target: 'https://example.com' }],
     });
     const written = JSON.parse(readFileSync(out, 'utf8'));
-    expect(written.views.know).toBe('The one thing.');
     const r = checkShapeBoard(written);
     expect(r.ok ? [] : r.errors).toEqual([]);
     if (r.ok) expect(shapeParts(r.value).some((p) => p.view === 'how' && p.id === 'p-a')).toBe(true);

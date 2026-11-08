@@ -27,7 +27,10 @@ import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
 import { RowsSection, rowsSummary } from './RowsSettings';
 import { useListLook } from '../listLook';
-import { DecisionAsk } from './DecisionAsk';
+import { DecisionData } from './DecisionData';
+import type { SystemProjectRow } from '@plannotator/core/inbox-system';
+import { openSystemSetup } from '../system/opener';
+import { systemStateWords } from '../system/projects';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -51,6 +54,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   'decision-data': 'contents',
   about: 'info',
   capabilities: 'puzzle',
+  activity: 'clock',
 };
 
 /** Projects listed before the rest fold under "N more projects". */
@@ -80,8 +84,14 @@ export interface SettingsPageProps {
   onToggleCodeReview?: (next: boolean) => void;
   /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
   onToggleShape?: (next: boolean) => void;
+  /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on; in 0.29 also only while System is on (SYSTEM_SETTINGS_ROW_VISIBLE). Absent: no row. */
+  onToggleSystem?: (next: boolean) => void;
+  /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
+  systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
+  /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
+  onToggleBro?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -117,6 +127,8 @@ export interface SettingsPageProps {
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
+  /** Settings → Activity: the threads hour by hour (components/ActivityChart.tsx). Absent: no Activity section. */
+  activity?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
   /** The section on screen (`#settings/<section>`); null is `#settings` alone: General, or the list of sections on a phone. */
@@ -456,6 +468,14 @@ function GeneralSection({
 }
 
 /**
+ * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
+ * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). False: the
+ * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. Set it
+ * to true when System is announced.
+ */
+export const SYSTEM_SETTINGS_ROW_VISIBLE = false;
+
+/**
  * Capabilities (the owner, 2026-10-27): the switches that turn a whole
  * feature on or off, moved out of General. First the main ones, today the
  * Board (config.json `inboxBoard`, POST /api/inbox/settings `{ board: { on } }`),
@@ -473,6 +493,11 @@ function CapabilitiesSection({
   onToggleCodeReview,
   shape,
   onToggleShape,
+  system,
+  onToggleSystem,
+  systemProjects,
+  bro,
+  onToggleBro,
   experimental,
   onToggleExperimental,
   experimentalHeading,
@@ -488,6 +513,13 @@ function CapabilitiesSection({
   /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
   shape: { on: boolean } | null;
   onToggleShape?: (next: boolean) => void;
+  /** System (approval "system-inbox"): null unless Code review is on. */
+  system: { on: boolean } | null;
+  onToggleSystem?: (next: boolean) => void;
+  systemProjects?: SystemProjectRow[] | null;
+  /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
+  bro: { on: boolean } | null;
+  onToggleBro?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
@@ -497,9 +529,15 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const codeReviewRow = codeReview && onToggleCodeReview;
   const shapeRow = shape && onToggleShape;
+  // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
+  // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
+  const [systemRowSeen, setSystemRowSeen] = useState(false);
+  if (system?.on === true && codeReview?.on === true && !systemRowSeen) setSystemRowSeen(true);
+  const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
+  const broRow = bro && onToggleBro;
   return (
     <>
-      {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || codeReviewRow || shapeRow || broRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -547,6 +585,38 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
+            {systemRow && (
+              <div className="ib-prow ib-sysrow" data-settings-system="">
+                <div className="ib-sysrow-top">
+                  <span className="ib-txt">
+                    <span className="ib-l" id="ib-system-label">
+                      System
+                    </span>
+                    <span className="ib-desc">A drawing of each project's system, kept current by an agent when main moves. Shows while Code review is on. Off, none of it shows; every drawing is kept. Yours alone.</span>
+                  </span>
+                  <span className="ib-ctl">
+                    <Switch on={system.on} labelledBy="ib-system-label" onClick={() => onToggleSystem(!system.on)} />
+                  </span>
+                </div>
+                {system.on && systemProjects && systemProjects.length > 0 && (
+                  <ul className="ib-sysrow-list" aria-label="Projects" data-settings-system-projects="">
+                    {systemProjects.map((project) => (
+                      <li key={project.id} className="ib-sysrow-p" data-settings-system-project={project.id}>
+                        <span className="ib-sysrow-n" dir="auto">
+                          {project.name}
+                        </span>
+                        <span className="ib-sysrow-s">{systemStateWords(project)}</span>
+                        {project.repo && (
+                          <button type="button" className="ib-btn" onClick={() => openSystemSetup(project.id)} aria-label={`Set up ${project.name}`} data-settings-system-setup={project.id}>
+                            Set up
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {shapeRow && (
               <div className="ib-prow" data-settings-shape="">
                 <span className="ib-txt">
@@ -559,6 +629,19 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={shape.on} labelledBy="ib-shape-label" onClick={() => onToggleShape(!shape.on)} />
+                </span>
+              </div>
+            )}
+            {broRow && (
+              <div className="ib-prow" data-settings-bro="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-bro-label">
+                    Bro mode
+                  </span>
+                  <span className="ib-desc">Agents write to your Inbox in plain words, from their next session.</span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
                 </span>
               </div>
             )}
@@ -782,6 +865,7 @@ const LEDE: Record<SettingsSection, string> = {
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
   capabilities: 'What the Inbox does beyond your messages. Each switch turns a whole feature on or off.',
+  activity: 'Your threads hour by hour: one row per thread in the order they began, a mark for each hour with messages.',
 };
 
 /**
@@ -895,18 +979,20 @@ export function SettingsPage(props: SettingsPageProps) {
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
+  const system = settings?.system && props.onToggleSystem ? settings.system : null;
+  const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null) && (id !== 'activity' || props.activity !== undefined),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
-    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
+    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'activity' || id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
   ].filter((group) => group.ids.length > 0);
 
   const devicesDot = devicesNeedAttention(phonesOn ? phones : null, settings?.tailscale);
@@ -965,6 +1051,7 @@ export function SettingsPage(props: SettingsPageProps) {
         // Only once Storage was opened this visit: the list never asks for the walk.
         return store ? formatBytes(store.bytes) : '';
       case 'decision-data':
+      case 'activity':
         return '';
       case 'about':
         return settings.version;
@@ -1071,7 +1158,10 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'decision-data':
-        body = <DecisionAsk />;
+        body = <DecisionData />;
+        break;
+      case 'activity':
+        body = props.activity ?? null;
         break;
       case 'about':
         body = about;
@@ -1081,7 +1171,7 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || codeReview || shape || experimental ? (
+          (board && props.onToggleBoard) || steps || codeReview || shape || bro || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1091,6 +1181,11 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleCodeReview={props.onToggleCodeReview}
               shape={shape}
               onToggleShape={props.onToggleShape}
+              system={system}
+              onToggleSystem={props.onToggleSystem}
+              systemProjects={props.systemProjects}
+              bro={bro}
+              onToggleBro={props.onToggleBro}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}

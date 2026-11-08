@@ -26,10 +26,42 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { parseCssColor } from '../../utils/cssColor';
+import { readThemeTokenValues } from '../../utils/themeTokens';
+import { SHAPE_COLOR_NAMES, shapeContrastFixes, shapeLogoFill, type ShapeColors } from './shapeContrast';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
 import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 import { ScenePlayers } from './scene/ScenePlayers';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
+
+/**
+ * Holds a board's colours to contrast in the palette on screen (`shapeContrast.ts`): the frame's
+ * own colours where they hold, a darker or lighter one (hue kept) where not, and a dark logo lifted on a dark board.
+ * Returns the undo. Nothing changes where the palette's tokens cannot be read.
+ */
+function holdShapeContrast(board: HTMLElement): () => void {
+  const undo: (() => void)[] = [];
+  const read = readThemeTokenValues(SHAPE_COLOR_NAMES, board);
+  const colors = {} as ShapeColors;
+  for (const name of SHAPE_COLOR_NAMES) {
+    const c = parseCssColor(read?.[name]);
+    if (!c) return () => {};
+    colors[name] = c;
+  }
+  const fixes = shapeContrastFixes(colors);
+  for (const [name, value] of Object.entries(fixes)) {
+    board.style.setProperty(name, value);
+    undo.push(() => board.style.removeProperty(name));
+  }
+  for (const el of board.querySelectorAll<SVGElement>('svg[data-brand] [fill]')) {
+    const logo = parseCssColor(el.getAttribute('fill'));
+    const fill = logo && logo.a > 0 ? shapeLogoFill(logo, colors, fixes) : null;
+    if (!fill) continue;
+    el.style.setProperty('fill', fill);
+    undo.push(() => el.style.removeProperty('fill'));
+  }
+  return () => undo.forEach((u) => u());
+}
 
 /**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
@@ -451,18 +483,31 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
 
-  // darkContrast: held on a dark board, again when the theme changes; a light board is left as drawn.
+  // Contrast, in one pass so the two never undo each other: the palette's (`holdShapeContrast`, every board) first, then
+  // on a dark board `darkContrast` (opt-in), which starts from the colours the first left; undone the other way round.
+  // Both again when the theme or mode changes (every frame colour comes from these page tokens, which neither sets).
   const darkContrast = !!props.darkContrast;
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
-    if (!darkContrast) return releaseDarkBoard(board);
+    let undoPalette = () => {};
+    const release = () => {
+      releaseDarkBoard(board);
+      undoPalette();
+      undoPalette = () => {};
+    };
+    const hold = () => {
+      release();
+      undoPalette = holdShapeContrast(board);
+      if (darkContrast) holdDarkBoard(board);
+    };
     const tokens = () => {
       const cs = getComputedStyle(board);
       return ['--shp-paper', '--background', '--foreground', '--card', '--border', '--muted-foreground', '--primary', '--destructive'].map((t) => cs.getPropertyValue(t)).join('|');
     };
     let key = tokens();
-    holdDarkBoard(board);
+    hold();
+    if (typeof MutationObserver === 'undefined') return release;
     let frame = 0;
     const again = () => {
       cancelAnimationFrame(frame);
@@ -470,7 +515,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         const now = tokens();
         if (now === key) return;
         key = now;
-        holdDarkBoard(board);
+        hold();
       });
     };
     const watch = new MutationObserver(again);
@@ -481,7 +526,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       watch.disconnect();
       cancelAnimationFrame(frame);
       scheme?.removeEventListener?.('change', again);
-      releaseDarkBoard(board);
+      release();
     };
   }, [darkContrast, contentKey]);
 

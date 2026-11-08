@@ -269,7 +269,7 @@ function howTall(m: SnoozeModel): string {
 </div>`;
 }
 
-// ───────────────────────── What to know ─────────────────────────
+// ───────────────────────── views.know ─────────────────────────
 
 function know(m: SnoozeModel): string {
   return `It shows at a quiet moment, after you leave a thread that still waits on you, and never over a half-typed reply${m.calmReq ? ', and only when the page is calm' : ''}. You get it **2 days** after you started, unless you already snoozed.[^4][^9]\n\nTry it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick. ${m.onceLabel}.[^5] It goes out with 0.28.48 ([#2547](${PR_URL})); no question waits on you.`;
