@@ -1965,6 +1965,16 @@ export const INBOX_ROWS_OPTIONS = [
   "markDot",
   "repoLogo",
   "githubPictures",
+  // A notes-list look (the owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by
+  // default. `timeBelow`: Time position "Under the preview", the time on a line of its own at the left, under the
+  // preview, on three-line and phone rows. `dividers`: a hairline between rows. `statusMark`: one mark at the row's
+  // end, waiting on you or done, in place of the open counts (their words stay its name and tooltip).
+  "timeBelow",
+  "dividers",
+  "statusMark",
+  // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
+  // every thread name in bold, read or not.
+  "boldNames",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 

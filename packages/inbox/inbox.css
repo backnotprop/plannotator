@@ -7632,6 +7632,65 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-from { flex: 1 1 auto; min-width: 0; }
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
 .ib-lk-tfirst .ib-m1-lead { min-height: 0; }
+/* A notes-list look (the owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default,
+   so none of these applies until its class is on the list column. */
+/* Time position "Under the preview" (.ib-lk-tbelow): the time on a line of its own under the preview, at the left, in
+   the muted text; the row's end (pin, badge, words, count or status mark) at its right, so the preview keeps its
+   width. Three-line rows here, phone rows below; a wide row keeps its columns. */
+.ib-nrow .ib-l4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-top: 4px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-nrow .ib-l4 > .ib-t { flex: none; margin-right: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-nrow .ib-l4-end > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
+.ib-nrow .ib-l4 .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-nrow .ib-l4 .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
+.ib-m4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 22px; margin-top: 2px; }
+.ib-m4 > .ib-t { flex: none; margin-right: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-m4 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
+.ib-m4 .ib-c { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+/* Unrendered rows' estimates with the time's line (17 px and its 4 px gap; a phone's 22 px and 2 px): each density's
+   own estimate plus the line, so a compact row (one line fewer) is not read as a three-line one. */
+.ib-lk-tbelow:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 105px; }
+.ib-lk-tbelow.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 123px; }
+.ib-lk-tbelow.ib-lk-compact .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 64px; }
+.ib-lk-tbelow.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 82px; }
+.ib-lk-tbelow:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 90px; }
+.ib-lk-tbelow.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 109px; }
+.ib-lk-tbelow.ib-lk-compact .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 71px; }
+.ib-lk-tbelow.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 90px; }
+/* With the time under the preview, line 1 has no time for the hover action (Mark read, Mark unread, Send now) to
+   cover, and the name runs to the row's edge: the action sits on the time's line instead, over the row's end (the
+   pin, badge, words, count or status mark, hidden under it), as a wide row's covers its counts. The time at that
+   line's left, and its delivery tick, stay as they are, so the action keeps its 12 px from the edge. The default
+   look keeps line 1. */
+.pn-inbox .ib-lk-tbelow .ib-rw .ib-nrow ~ .ib-ract { top: auto; bottom: 10px; }
+.ib-nrow .ib-l4-end { display: contents; }
+.ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4-end { visibility: hidden; }
+.pn-inbox .ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 12px; }
+.ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4 .ib-t .ib-tickt { flex-direction: row; }
+/* Dividers (.ib-lk-div): a hairline in the theme's border colour between two rows, inset to the row's text on both
+   sides. A separator, never a row's outline: it is the next row's background image at its top edge, under the hover
+   and selection pill (3 px inside the row), so it moves nothing and the pill never touches it. */
+.ib-lk-div .ib-rw + .ib-rw > :is(.ib-nrow, .ib-row), .ib-lk-div :is(.ib-mrow + .ib-mrow, .ib-mrow + [hidden] + .ib-mrow) { background-image: linear-gradient(var(--border), var(--border)); background-repeat: no-repeat; background-position: center top; background-size: calc(100% - 24px) 1px; }
+.ib-lk-div :is(.ib-mrow + .ib-mrow, .ib-mrow + [hidden] + .ib-mrow) { background-size: calc(100% - 32px) 1px; }
+/* Show → Status mark (RowStatus.tsx): one 16 px mark in place of the open counts. Waiting on you in the warning hue,
+   done in the success hue, each mixed a little toward the text so a pale theme hue still reads on the page. */
+.ib-stm { display: inline-flex; align-items: center; flex: none; line-height: 0; }
+.ib-stm[data-status="waiting"] { color: color-mix(in oklab, var(--warning) 85%, var(--foreground)); }
+.ib-stm[data-status="done"] { color: color-mix(in oklab, var(--success) 85%, var(--foreground)); }
+.ib-nrow .ib-l3 > .ib-stm, .ib-m3 > .ib-stm { flex: none; }
+/* A name-first row whose second line draws nothing (Agent icons and Project both off, `data-lead-empty`): the line
+   leaves the flow, so the preview sits under the name, and stays in the row for a screen reader (the agents' names),
+   as .ib-sr. A row with the agents or the project shown never has the attribute. */
+:is(.ib-nrow > .ib-l2-lead, .ib-mrow > .ib-m1-lead)[data-lead-empty] { position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* Its unrendered rows' estimates: a name-first row's, less the folded line (19 px beside a thread; a phone's row
+   keeps its height). */
+.ib-lk-tfirst.ib-lk-noagents.ib-noproj:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 67px; }
+.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 85px; }
+.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 69px; }
+.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-roomy.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 87px; }
+.ib-lk-tbelow.ib-lk-tfirst.ib-lk-noagents.ib-noproj:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 86px; }
+.ib-lk-tbelow.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
+/* Show → Bold thread names (.ib-lk-bold): every row's name in bold, read or not; Sent and Quiet keep their colour. */
+.ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */
