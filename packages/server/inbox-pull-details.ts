@@ -122,7 +122,8 @@ export function pullDetailsOf(key: string, context: PRContext, author: string | 
   const avatars: Record<string, string> = {};
   const reviewers = reviewersOf(context, author, avatars);
   const comments = commentsOf(context, avatars);
-  const body = context.body.replace(/<!--[\s\S]*?(?:-->|$)/g, "").trim();
+  // `-{2}`, not a literal `--`: Semgrep's TypeScript parser reads `<!--` and `-->` as HTML-like comments.
+  const body = context.body.replace(/<!-{2}[\s\S]*?(?:-{2}>|$)/g, "").trim();
   return {
     answer: {
       key,
