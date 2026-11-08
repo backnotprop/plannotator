@@ -2354,8 +2354,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           phone={phone}
           reuse={
             <>
-              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). */}
-              {props.pin && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
+              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). Like Reuse, not
+                  while the reply's pill shares the bar's row (a phone's HTML page): the row must fit at 320 px. */}
+              {props.pin && !phonePillShown && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
               {phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
             </>
           }
