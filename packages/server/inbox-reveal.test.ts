@@ -105,7 +105,7 @@ async function world(options: Options = {}) {
     // The update-day dialogs (sound, list options, voice) are first in the line (approval "inbox-one-time-dialogs"):
     // already settled here (a fresh install's marks), so the offers are what these cases see.
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
-    inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
+    inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString(), version: 2 },
     inboxVoiceIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
     ...options.config,
   };
@@ -348,7 +348,7 @@ describe("the Board reveal at day 4", () => {
 
   test("a fresh install's list options and voice marks (shownAt with no dueAt: never shown) do not hold it back", async () => {
     const hourAgo = new Date(Date.now() - HOUR).toISOString();
-    const w = await world({ config: { inboxListIntro: { shownAt: hourAgo }, inboxVoiceIntro: { shownAt: hourAgo } } });
+    const w = await world({ config: { inboxListIntro: { shownAt: hourAgo, version: 2 }, inboxVoiceIntro: { shownAt: hourAgo } } });
     expect(await w.next()).toBe("board");
   });
 

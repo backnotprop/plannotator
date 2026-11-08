@@ -20,8 +20,10 @@ import { useRef } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import { snoozeIntroNeed, snoozeIntroWaits } from './snoozeIntroRows';
-import { LIST_INTRO_MIN_ROWS } from './listIntro';
 import { REVEAL_TIMES, useRevealMoment, type RevealStage, type RevealVisit } from './reveal';
+
+/** A list shorter than this has too little to show Snooze on: the dialog waits for a later load. */
+export const SNOOZE_INTRO_MIN_ROWS = 3;
 
 /** The page's thresholds, ms: the reveals' (reveal.ts), one object. A test shrinks them (and puts them back). */
 export const SNOOZE_INTRO_TIMES = REVEAL_TIMES;
@@ -101,7 +103,7 @@ export function snoozeIntroWanted(gate: Pick<SnoozeIntroGate, 'due' | 'blocked' 
 export function snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>, now: Date = new Date()): boolean {
   if (!snoozeIntroWanted(gate) || !gate.listLoaded || gate.firstRun) return false;
   if (gate.pageAge < SNOOZE_INTRO_TIMES.pageAgeMs) return false;
-  if (gate.rows.length < LIST_INTRO_MIN_ROWS) return false;
+  if (gate.rows.length < SNOOZE_INTRO_MIN_ROWS) return false;
   return snoozeIntroNeed(gate.rows, now);
 }
 

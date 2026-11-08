@@ -209,7 +209,7 @@ test.beforeAll(async () => {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: '0.0.0-dev' },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },

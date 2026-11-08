@@ -135,7 +135,7 @@ import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
-import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
+import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -4624,8 +4624,8 @@ function Inbox() {
   ) : null;
   const firstRun = latest !== null && projects.length === 0;
 
-  // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
-  // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
+  // The one-time "Choose how your list looks" dialog (listIntro.ts): after this load's sound and agent-note dialogs are
+  // decided, never on a load that showed either or the tour, only with five threads or more and only once the Inbox page (the list, a
   // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
   // new message over it (each keeps the claim waiting, unspent); opening another thread, project or machine starts the
   // wait again. It waits while a reply is typed or left open with words or files, or another dialog, an image opened
@@ -6799,11 +6799,15 @@ function Inbox() {
           awayMachines={machines.away}
           projectNames={projectNames}
           phone={phone}
-          onDone={(look, opened) => {
-            void writeMenuLook(look, opened);
+          onDone={(look) => {
+            void writeListLookOptions(look);
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}
+          onCustomize={() => {
+            setListIntro('shown');
+            go({ page: 'settings', project: null, thread: null, section: 'rows' });
+          }}
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
