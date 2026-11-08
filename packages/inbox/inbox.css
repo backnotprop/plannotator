@@ -3585,7 +3585,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
 
 /* The agents on this computer (the approved "inbox-agent-awareness" design):
    the one-time agent-note dialog (components/AgentNoteDialog.tsx, the approved
-   "inbox-agent-note-dialog" design, Checklist with the band at the top) and
+   "inbox-agent-note-dialog" design, Checklist; since "inbox-agent-note-auto"
+   only for agents whose note is not written by itself), the connect line above
+   the list (components/ConnectLine.tsx: the dialog's band, moved there) and
    Settings → Agents (components/AgentsSettings.tsx). */
 .ib-mk svg.ib-glyph { stroke: var(--muted-foreground); fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
@@ -3595,13 +3597,20 @@ dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
 .ib-anote code { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
 .pn-inbox .ib-anote .ib-lnk { display: inline; margin: 0; font-size: inherit; font-weight: 550; }
 .ib-anote .ib-lnk:hover { text-decoration: underline; text-underline-offset: 2px; }
-.ib-anote-band { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 12px 28px; background: color-mix(in oklch, var(--muted) 45%, var(--popover)); border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
-.ib-anote-band p { margin: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 9px; align-items: start; }
-.pn-inbox .ib-anote-band svg.ib-ic { width: 16px; height: 16px; margin-top: 1px; }
-.pn-inbox .ib-anote-band .ib-anote-ok svg.ib-ic { color: var(--success); }
-.ib-anote-band .ib-anote-quiet { color: var(--muted-foreground); }
-.pn-inbox .ib-anote-band .ib-anote-quiet svg.ib-ic { color: var(--muted-foreground); }
-.pn-inbox .ib-anote-band .ib-anote-warn svg.ib-ic { color: var(--warning); }
+/* The connect line: the quiet ask line's box, one row per piece of news (its own icon, so colour is never the only signal), Got it at the end. */
+.ib-cline-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; }
+.ib-cline-lines { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.ib-cline-lines p { margin: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 9px; align-items: start; overflow-wrap: anywhere; text-wrap: pretty; }
+/* The ask line's icon takes the `icon` grid area of its row; here each line is its own small grid. */
+.pn-inbox .ib-askline.ib-cline svg.ib-ic { grid-area: auto; width: 16px; height: 16px; margin-top: 2px; }
+/* The quiet ask line pulls its actions toward its grid's text column; this line is a flex row with its own gap, so none. */
+.pn-inbox .ib-askline.ib-cline .ib-ask-acts { margin-inline-start: 0; }
+.pn-inbox .ib-askline.ib-cline .ib-cline-ok svg.ib-ic { color: var(--success); }
+.ib-cline .ib-cline-quiet { color: var(--muted-foreground); }
+.pn-inbox .ib-askline.ib-cline .ib-cline-warn svg.ib-ic { color: var(--warning); }
+.ib-cline-agent { font-weight: 550; text-decoration: underline dotted color-mix(in oklch, currentcolor 45%, transparent); text-underline-offset: 3px; cursor: default; }
+.pn-inbox .ib-cline .ib-lnk { display: inline; margin: 0; font-size: inherit; font-weight: 550; }
+.ib-cline .ib-lnk:hover { text-decoration: underline; text-underline-offset: 2px; }
 .ib-anote-head { flex: none; padding: 24px 28px 0; }
 .ib-anote .ib-anote-head h2 { margin: 0; font-size: var(--ib-fs-17, 17px); font-weight: 650; letter-spacing: -0.005em; line-height: 1.3; }
 .ib-anote-head h2:focus { outline: none; }
@@ -3657,7 +3666,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* A phone (no hover): the whole path shows, wrapped after each "/", the state under it; the buttons stack at 44 px. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
-  .ib-anote-band, .ib-anote-head, .ib-anote-body, .ib-anote-foot { padding-left: 18px; padding-right: 18px; }
+  .ib-anote-head, .ib-anote-body, .ib-anote-foot { padding-left: 18px; padding-right: 18px; }
   .ib-anote-head { padding-top: 20px; }
   .ib-anote-r { grid-template-columns: 16px 20px minmax(0, 1fr); grid-template-areas: "chk mk main" ". . st"; row-gap: 8px; align-items: start; }
   .ib-anote-r.ib-anote-nobox { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "mk main" ". st"; }

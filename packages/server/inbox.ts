@@ -184,7 +184,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -295,7 +295,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, INBOX_NOTE_BLOCK, inboxNotesDisabled, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -1687,14 +1687,37 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let connecting: Promise<InboxConnectReport> | null = null;
   // The Inbox's stop ends a run still going: its agent CLIs are killed, never left running.
   const connectStop = new AbortController();
-  const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal }).finally(() => {
-      connecting = null;
+  // The note in each connected agent's instructions, written by itself for the agents proven to load it
+  // (approval "inbox-agent-note-auto"; autoAddInboxNotes): at this start, and after each connecting run (an
+  // agent connected by it can take one now). One pass at a time; the agents' model waits for the one going,
+  // so the window reads the notes it wrote.
+  let notesPass: Promise<void> = Promise.resolve();
+  const autoNotes = (): Promise<void> => {
+    notesPass = notesPass.then(async () => {
+      if (connectStop.signal.aborted) return;
+      try {
+        await autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment });
+      } catch {
+        // Tried again at the next start or run.
+      }
     });
+    return notesPass;
+  };
+  void autoNotes();
+  const connectAgents = (): Promise<InboxConnectReport> => {
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
+      .then(async (report) => {
+        await autoNotes();
+        return report;
+      })
+      .finally(() => {
+        connecting = null;
+      });
     return connecting;
   };
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = async () => {
+    await notesPass;
     const file = readInboxAgents(dataDir);
     const records = Object.fromEntries(
       Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
@@ -1747,6 +1770,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notes_offered: loadConfig().inboxAgentNotes?.offered === true,
       notes_asked: await notesAsked(options),
       note_text: INBOX_NOTE_BLOCK,
+      notes_auto: unsaidAutoNotes(),
       // The open sessions that poll now, per host, and which need a restart or an update (inbox-restart.ts).
       sessions: live.hostSessions((host) => {
         if (host !== "claude-code") return { installed: host === "pi" && version !== "dev" ? version : null, update_command: null };
@@ -1807,8 +1831,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       } else {
         const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
         if (!change.ok) problems.push(change.reason);
-        // A yes in Settings answers the note dialog for this agent: removing the note later never asks again.
-        else if (body.note) await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
+        // Either way the person decided for this agent: a note turned off stays off (never written again by
+        // itself, never asked again), and removing one turned on later never asks again.
+        else await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
       }
     }
     return { ...(await agentsModel()), error: problems.length ? problems.join("; ") : null };
@@ -4452,8 +4477,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (path === "/api/inbox/agents") return json(await saveAgent(body));
         if (path === "/api/inbox/agents/notes") return json(await answerNotes(body));
         if (path === "/api/inbox/agents/seen") {
+          // The window's line said the last run's news and the notes written by themselves: only what it showed
+          // (`report_at`: the report's time, null for none; `notes`), so news that came after its read is said next
+          // time. A window without these fields (older) says all.
+          const shown = seenFields(body);
+          if (!shown) return json({ error: "notes must be a list of { agent, path }, report_at a string or null", code: "invalid" }, 422);
           const file = readInboxAgents(dataDir);
-          if (file.last_report && !file.last_report.seen) writeInboxAgents(dataDir, { ...file, last_report: { ...file.last_report, seen: true } });
+          const report = file.last_report;
+          if (report && !report.seen && (shown.reportAt === undefined || shown.reportAt === report.at)) {
+            writeInboxAgents(dataDir, { ...file, last_report: { ...report, seen: true } });
+          }
+          markAutoNotesSaid(shown.notes);
           return json(await agentsModel());
         }
         return json({ error: "Not found", code: "not_found" }, 404);
@@ -5792,4 +5826,21 @@ export async function handleInboxServerReady(
     process.stderr.write("The Inbox could not reuse its last port; allow notifications again when the page asks.\n");
   }
   if (options.open && process.env.PLANNOTATOR_SKIP_BROWSER_OPEN !== "1") await openBrowser(inbox.url);
+}
+
+
+/** POST /api/inbox/agents/seen's fields: what the window's line showed. null: malformed. */
+function seenFields(body: Record<string, unknown>): { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } | null {
+  const out: { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } = {};
+  if ("report_at" in body) {
+    if (body.report_at !== null && typeof body.report_at !== "string") return null;
+    out.reportAt = body.report_at as string | null;
+  }
+  if ("notes" in body) {
+    const notes = body.notes;
+    if (!Array.isArray(notes)) return null;
+    if (!notes.every((note) => !!note && typeof note === "object" && typeof (note as InboxNoteAutoAdd).agent === "string" && typeof (note as InboxNoteAutoAdd).path === "string")) return null;
+    out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
+  }
+  return out;
 }

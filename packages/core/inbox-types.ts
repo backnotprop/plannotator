@@ -2226,6 +2226,21 @@ export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "ge
 export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor"];
 
 /**
+ * The agents whose note is written by itself, without asking (approval
+ * "inbox-agent-note-auto", which superseded the one-time dialog): only agents
+ * proven to load the file where Plannotator writes it (their own code, source
+ * and docs, plus a live check). Qwen Code is not proven (likely only): its note
+ * is still offered, and Cursor's is copied by hand.
+ */
+export const INBOX_NOTE_AUTO_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+
+/** A note Plannotator wrote by itself that the window has not said yet. `path` is shown with `~`. */
+export interface InboxNoteAutoAdd {
+  agent: InboxNoteAgentId;
+  path: string;
+}
+
+/**
  * Where an agent's note would go and how it stands:
  *  - absent: no note; `create` says whether adding it creates the file.
  *  - added: the note Plannotator wrote is there, untouched.
@@ -2402,6 +2417,8 @@ export interface InboxAgentsModel {
   notes_asked?: InboxNoteAgentId[];
   /** The exact block a note writes, markers included. */
   note_text: string;
+  /** Notes Plannotator wrote by itself that the window has not said yet (one quiet line; POST /api/inbox/agents/seen clears it). Absent from older Inboxes. */
+  notes_auto?: InboxNoteAutoAdd[];
   /** A switch's refusal, after POST /api/inbox/agents. */
   error?: string | null;
   /**
