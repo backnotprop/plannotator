@@ -13,7 +13,8 @@
  *     agent starts here.
  *  3. "Another folder on Mac mini…": a folder in Mac mini's home that is no project yet, typed and picked through
  *     Mac mini's own folder route; Start puts "billing-api · Mac mini" in To and Send starts Claude Code there on Mac
- *     mini (MacBook's fake starts nothing); a missing path says so, with the folders that are there under the line.
+ *     mini (MacBook's fake starts nothing); a name Mac mini doesn't have offers Create, with the folders that are
+ *     there under its line.
  *  4. An untrusted folder picked that way (Mac mini's fake checks Claude's folder trust): the Send still goes, the
  *     start stops on trust, and the thread's run line Trust folder (through the forward) starts it there.
  *  5. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
@@ -333,7 +334,7 @@ test("2. Another folder on MacBook…: this computer's own folder route, and the
   trustProjects(macbook);
 });
 
-test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing path says so', async () => {
+test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing name offers Create there', async () => {
   const [page, phone] = contexts.map((c) => c.pages()[0]!) as [Page, Page];
   // Folders in Mac mini's home that are no project of its Inbox (the sandboxed Inbox's home is its agents' home).
   for (const name of ['billing-api', 'billing-reports', 'billing-svc']) mkdirSync(join(homeOf(mini), 'code', name), { recursive: true });
@@ -357,8 +358,10 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await folderShot(phone, 'to-line');
   await dialog(phone).locator('[data-compose-folder]').click();
   await browse(phone, mini.id, '~/code/biling-svc');
-  await expect(phone.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
-  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  // A name Mac mini doesn't have: Create leads (read there: its ~/code has no such folder), and under its line Mac mini's
+  // folders in ~/code, the closest to what was typed first.
+  await expect(phone.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
+  await expect(phone.locator('[data-home-folders-after]')).toHaveText("A new, empty folder. Or pick one that's there:");
   await expect(phone.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
   expect(await phone.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(phone, 'missing');
@@ -372,8 +375,8 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   // The desktop: the same, then Send.
   await openFolderMenu(page, words, 'Mac mini');
   await browse(page, mini.id, '~/code/biling-svc');
-  await expect(page.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
-  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  await expect(page.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
+  await expect(page.locator('[data-home-folders-after]')).toHaveText("A new, empty folder. Or pick one that's there:");
   await expect(page.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
   expect(await page.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(page, 'missing');

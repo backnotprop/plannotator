@@ -8841,6 +8841,13 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prlist .ib-lhead .ib-pr-riskf { margin-left: auto; }
 .ib-prlist .ib-lhead .ib-pf-slot:has(+ .ib-pr-riskf) { margin-right: 0; }
 .ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 6px; }
+/* A narrow phone (320 px): the head's 44 px targets keep their size and the chip its word; the space between them
+   narrows so New review stays inside the edge. */
+@media (max-width: 374px) {
+  .ib-prlist .ib-lhead { gap: 4px; }
+  .ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 0; }
+  .pn-inbox .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-btn { padding: 0 8px; }
+}
 .ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
 .ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
 .ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }

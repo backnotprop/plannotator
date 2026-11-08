@@ -7,8 +7,8 @@
  * In order: from a review (Code review on, Shape's switch off), the box, the wait on the board, the new board, three
  * levels, the arrow, browser Back, each board intact, Show me again, the whole-board box, a part outside the diff,
  * the list with 2, 6 and 20 boards, several presses in a row, a phone's tap; the review's selection still works; then
- * Shape on its own (Code review off): the same on a board over its thread, with a plain Ask still refused; then both
- * off: nothing.
+ * Shape on its own (Code review off): the same on a board over its thread (Ask itself is on for everyone); then both
+ * off: no board, and a Show me is refused.
  *
  * HOME is a scratch folder. gh and glab are traps. Build the binary first (see inbox.spec.ts). 2x PNGs land in
  * PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/show-me-part).
@@ -654,7 +654,7 @@ test('800 wide and on a phone: the arrow, the list, and a tap on a part offers t
   }
 });
 
-test('Shape on its own, Code review off: the same on a board over its thread; plain Ask is still off', async () => {
+test('Shape on its own, Code review off: the same on a board over its thread', async () => {
   test.setTimeout(150_000);
   const { page } = world;
   setSwitches({ inboxCodeReview: false, inboxShape: true });
@@ -663,12 +663,6 @@ test('Shape on its own, Code review off: the same on a board over its thread; pl
   await page.goto(`${world.url}#thread=${thread}&shape=${made.id}`);
   await expect(title(page)).toHaveText('On its own', { timeout: 30_000 });
   const kept = stored(made.id);
-  // The window's Ask stays off.
-  const info = await page.evaluate(async (t) => {
-    const plain = await fetch(`/api/inbox/threads/${t}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: 'ask_0', question: 'hello' }) });
-    return { plain: plain.status };
-  }, thread);
-  expect(info.plain).toBe(404);
   // A board of another thread is refused, even with the exact request the window would send for it.
   const elsewhere = { review: null, file: null, lines: null, round: 1, part: { board: 'shp_01J8ZK3TQ4VW7Y9A2B5C6D8E0F', name: 'x' } };
   const otherQuestion = inboxShowMeRequest({ target: elsewhere, title: '', threadId: thread });
@@ -767,11 +761,16 @@ test('both off: no board, and a Show me is refused', async () => {
   await expect(page.getByRole('heading', { name: 'Retry failed charges', level: 2 })).toBeVisible({ timeout: 30_000 });
   await expect(board(page)).toHaveCount(0);
   await expect(page.locator('[data-comment-extra-action]')).toHaveCount(0);
+  // Ask is on for everyone, so the route answers: a Show me on a board is refused because the boards are off.
   const refused = await page.evaluate(
-    async ([t, b]) => (await fetch(`/api/inbox/threads/${t}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: 'ask_0', question: 'x', kind: 'show_me', show_me: { review: null, file: null, lines: null, part: { board: b, name: 'x' } } }) })).status,
+    async ([t, b]) => {
+      const res = await fetch(`/api/inbox/threads/${t}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: 'ask_01J8ZK3TQ4VW7Y9A2B5C6D8E0G', question: 'x', kind: 'show_me', show_me: { review: null, file: null, lines: null, part: { board: b, name: 'x' } } }) });
+      return { status: res.status, body: await res.text() };
+    },
     [thread, first],
   );
-  expect(refused).toBe(404);
+  expect(refused.status).toBe(409);
+  expect(refused.body).toContain('code_review_off');
   setSwitches({ inboxCodeReview: true, inboxShape: false });
   expect(world.errors).toEqual([]);
 });

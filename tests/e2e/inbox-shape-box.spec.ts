@@ -304,8 +304,9 @@ test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   await expect(composer(page)).toHaveCount(0);
   // An Ask opens the chat beside the board.
   await expect(page.locator('.shp-sidep.open')).toBeVisible();
-  await expect.poll(() => waiting(id).length).toBeGreaterThan(0);
-  const notes = waiting(id) as { view: string; part: string; code?: string[]; picture?: string }[];
+  // `shape read --notes` hands the notes over and marks them delivered, so the read that finds them is the one kept.
+  let notes: { view: string; part: string; code?: string[]; picture?: string }[] = [];
+  await expect.poll(() => (notes = waiting(id) as typeof notes).length).toBeGreaterThan(0);
   writeFileSync(join(shots, '06-agent-receives-diagram.json'), JSON.stringify(notes, null, 2));
   expect(notes.find((n) => n.view === 'how')!.part.split(',')).toEqual(expect.arrayContaining(['h-fill', 'h-open']));
   expect(notes.find((n) => n.view === 'how')!.code).toEqual(['src/search/template.ts#L8']);
