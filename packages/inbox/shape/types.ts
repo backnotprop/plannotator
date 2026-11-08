@@ -17,7 +17,7 @@ export interface ShapeBoardProps {
   onNavigate?: (state: ShapeBoardPlace) => void;
   /** Before the board's title (the Inbox's sidebar toggle). */
   headStart?: ReactNode;
-  /** The review the board is part of (its thread's): What's changed's buttons and links, and where `file:line` opens. */
+  /** The review the board is part of (its thread's): where a place in code on the board opens. */
   review?: ShapeSurfaceReview | null;
   /** The crosshair in Annotate's place (a click marks a part, a drag draws a box). The Inbox's board only. */
   crosshair?: boolean;

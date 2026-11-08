@@ -33,7 +33,7 @@
  *     the board's own viewer; a deleted file and a rename's old name: the file and the
  *     note, never a dead click; leaving the review closes the board.
  *
- * 11. A link on a board over the thread (What's changed's `file:line`) shows the code:
+ * 11. A drawn part's place in code on a board over the thread (`data-code`) shows the code:
  *     the review at that line, painted, with the board as the corner card naming no
  *     part (the owner, approval "review-show-me", addendum 2026-11-07); the card brings
  *     the board back over the review, its links land the same way, and Esc closes it.
@@ -554,15 +554,17 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   await expect(page).toHaveURL(new RegExp(`guide=${round1.message_id}.*shape=${shapeId}`));
   await expect(board(page).getByRole('heading', { name: 'After the third failure' })).toBeVisible();
   await expect(part(board(page), 'stays')).toBeVisible();
-  for (const name of ['Picture', 'How it works', 'What to know', 'Comment', 'References', 'Chat']) {
+  for (const name of ['Shape', 'How it works', 'Comment', 'References', 'Chat']) {
     await expect(board(page).getByRole('toolbar').getByRole('button', { name, exact: false }).first()).toBeVisible();
   }
+  // What to know is gone (approval shape-know-removed).
+  await expect(board(page).getByRole('toolbar').getByRole('button', { name: 'What to know' })).toHaveCount(0);
   await expect(board(page).getByRole('button', { name: 'Global comment' })).toBeVisible();
   await shot(page, '04-board', ['light', 'dark']);
   await board(page).getByRole('toolbar').getByRole('button', { name: 'How it works' }).click();
   await shot(page, '04b-how', ['light']);
-  await board(page).getByRole('toolbar').getByRole('button', { name: 'Picture' }).click();
-  // The board's own "Requirements" never shows: the review's board has What to know.
+  await board(page).getByRole('toolbar').getByRole('button', { name: 'Shape', exact: true }).click();
+  // The board's own "Requirements" never shows.
   await expect(board(page).getByRole('toolbar')).not.toContainText('Requirements');
 });
 
@@ -1019,7 +1021,7 @@ test("a part on a deleted file or a rename's old name: the file and the note, ne
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
-test("a link on a board over the thread (What's changed): the code shows and the board shrinks to the corner card; the card brings it back", async () => {
+test("a drawn part's place in code on a board over the thread: the code shows and the board shrinks to the corner card; the card brings it back", async () => {
   test.setTimeout(120_000);
   const { page } = world;
   const asked = await call('send_message', { project_path: world.project, body: 'What changed in the retry?', thread: 'board-links', subject: 'Board links' });
@@ -1032,24 +1034,22 @@ test("a link on a board over the thread (What's changed): the code shows and the
       title: 'Board links',
       claim: 'The retry stops after the third failure.',
       views: {
-        picture: { width: 800, height: 300, html: '<div data-mark="it" style="padding:16px">it</div>' },
-        changed: { summary: 'The third failure stops the retry.', items: [{ id: 'stop', kind: 'behaviour', title: 'The retry stops after three', now: 'stop after the third failure', code: [`${WORKER}:17`] }] },
+        picture: { width: 800, height: 300, html: `<div data-mark="it" data-code="${WORKER}#L17" style="padding:16px">it</div>` },
       },
     }),
   );
   const run = world.shape(['update', '--file', path, '--thread', asked.thread_id]);
   expect(run.status, run.stderr).toBe(0);
   const id = (JSON.parse(run.stdout) as { id: string }).id;
-  const link = (scope: Locator) => scope.getByRole('button', { name: `retry-worker.ts:17, open ${WORKER} at line 17` });
+  const link = (scope: Locator) => part(scope, 'it');
   const pane = page.locator(`[data-review-message="${review.message_id}"]`);
   const shell = page.locator(`[data-guide-file-shell="${WORKER}"]`).first();
 
-  // The board over the thread, no review open: its What's changed link.
+  // The board over the thread, no review open: a part with its place in code.
   await page.goto(`${world.url}#thread=${asked.thread_id}&shape=${encodeURIComponent(id)}`);
   await page.reload();
   await expect(board(page)).toContainText('The retry stops after the third failure.');
   await expect(pane).toHaveCount(0);
-  await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
   await link(board(page)).click();
 
   // The code shows: the review at that line, painted and scrolled into view clear of the card; the board is the
@@ -1070,11 +1070,11 @@ test("a link on a board over the thread (What's changed): the code shows and the
   await expect(board(page)).toBeHidden();
   await shot(page, '13-board-link', ['light', 'dark']);
 
-  // The card brings the board back, over the review, on What's changed where the person left it; its link lands the same way.
+  // The card brings the board back, over the review, on the view the person left; its part lands the same way.
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
   await expect(corner(page)).toHaveCount(0);
   await expect(board(page)).toBeVisible();
-  await expect(board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" })).toHaveAttribute('aria-pressed', 'true');
+  await expect(board(page).getByRole('toolbar').getByRole('button', { name: 'Shape', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await link(board(page)).click();
   await expect(corner(page)).toBeVisible();
   await expect(board(page)).toBeHidden();

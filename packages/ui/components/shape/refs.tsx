@@ -16,7 +16,7 @@ export interface RefsState {
 
 export const RefsCtx = createContext<RefsState>({ refs: [], hover: null, flash: null, onHover: () => {}, onOpen: () => {} });
 
-/** A bubble in the board's own markup (the header's claim, `views.know`). Drawn views get theirs from ShapeDrawn. */
+/** A bubble in the board's own markup (the header's claim). Drawn views get theirs from ShapeDrawn. */
 export function Bubble({ n }: { n: number }) {
   const r = useContext(RefsCtx);
   const ref = r.refs.find((x) => x.n === n);

@@ -11,7 +11,7 @@ const PICTURE_MAX_SIDE = 1600;
 /**
  * What a box hands over, one object: the same one for Change it, Ask and Show me.
  * `parts` and `code` are in the drawing's order, and `picture` settles shortly after
- * the drag (null when there is none: `views.know`'s words, or a capture that failed).
+ * the drag (null when there is none: a capture that failed).
  */
 export interface ShapeBoxSelection {
   view: ShapeViewId;
@@ -67,7 +67,7 @@ function wordsIn(scope: Element, box: Rect, memo: Map<Element, boolean>): string
   return words.length > SHAPE_LIMITS.quote ? `${words.slice(0, SHAPE_LIMITS.quote - 1).replace(/\s+\S*$/, '')}…` : words;
 }
 
-/** The parts and words inside a box on `scope` (the drawing, or `views.know`'s words). Null: the box missed it. */
+/** The parts and words inside a box on `scope` (the drawing). Null: the box missed it. */
 export function readBox(scope: HTMLElement, box: Rect): Pick<ShapeBoxSelection, 'parts' | 'words' | 'code'> & { box: ShapeNoteBox } | null {
   const s = scope.getBoundingClientRect();
   if (!s.width || !s.height || !overlap(s, box)) return null;
@@ -138,7 +138,7 @@ export async function boxNoteInput(sel: ShapeBoxSelection, text: string): Promis
 
 // ── drawing a box on the board: in the drawing's own coordinates, so it scrolls and scales with it ──
 
-/** A box's own element, inside `scope`. All inline: the same in a shadow root and in `views.know`'s words. */
+/** A box's own element, inside `scope`. All inline. */
 export function placeBox(scope: HTMLElement, box: ShapeNoteBox, k = 1, comment?: string): HTMLElement {
   if (getComputedStyle(scope).position === 'static') scope.style.position = 'relative';
   const el = document.createElement('div');
@@ -225,8 +225,8 @@ export function pictureRect(scope: HTMLElement, box: Rect, parts: readonly strin
 
 /**
  * A PNG of the box: the drawing, serialized, in an SVG foreignObject, drawn to a canvas. A `data:` URL on purpose:
- * from a `blob:` one the canvas is tainted and cannot be read. Null for `views.know`'s words (its words are the whole of
- * it) and for any failure: the words still go.
+ * from a `blob:` one the canvas is tainted and cannot be read. Null outside a shadow root and for any failure: the
+ * words still go.
  */
 export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeReadAsset, drawn?: Rect): Promise<string | null> {
   try {

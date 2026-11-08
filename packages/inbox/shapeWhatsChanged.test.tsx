@@ -1,11 +1,10 @@
 /**
- * Plannotator's board in the Inbox (approval "shape-whats-changed"): no Code tab, even on a board the agent gave
- * one; What's changed after How it works; and its links open the thread's own review. The real ShapeLayer and
- * board, the Inbox's doors stubbed at `fetch`. What regresses:
- *  - the Code tab comes back on the Inbox's board;
- *  - What's changed leaves its place, or a board in a thread with a review cannot open that review from it;
- *  - a guide step or a `file:line` opens a review other than the thread's newest, or at the wrong place;
- *  - a board with no review in its thread shows review buttons that lead nowhere;
+ * Plannotator's board in the Inbox: no Code tab, even on a board the agent gave one, and no What's changed, even on
+ * a board that still carries `views.changed` (approval "shape-whats-changed-removed"); a drawn part's place in code
+ * opens the thread's own review. The real ShapeLayer and board, the Inbox's doors stubbed at `fetch`. What regresses:
+ *  - the Code tab or a What's changed tab comes back on the Inbox's board, or the review's facts and buttons do;
+ *  - a drawn part's place in code opens a review other than the thread's newest, or at the wrong place;
+ *  - a board in a thread with no review opens a review anyway;
  *  - the board under an open review takes the first Esc (closing its own panel) instead of leaving it to the review.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -21,6 +20,7 @@ import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-type
 import type { ShapeHost, ShapeLoaded, ShapeReviewAt } from '@plannotator/ui/components/shape';
 import { createShapeStore } from '../shared/shape/store';
 import { KETTLE_CHANGED } from '../../tests/fixtures/shape-whats-changed';
+import { bridgeSanitizerDom } from '../../tests/helpers/chat-sanitizer-dom';
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -62,6 +62,8 @@ beforeEach(() => {
     return Response.json({});
   }) as typeof fetch;
   restore.push(() => (globalThis.fetch = saved));
+  // The drawing's sanitizer needs a real DOM's parts, or a drawn part's `data-code` never reaches the drawing.
+  restore.push(bridgeSanitizerDom());
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1400 });
   restore.push(() => (width ? Object.defineProperty(HTMLElement.prototype, 'clientWidth', width) : delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth));
@@ -79,7 +81,7 @@ function board(): ShapeLoaded {
   const dir = mkdtempSync(join(tmpdir(), 'shape-whats-changed-'));
   dirs.push(dir);
   const store = createShapeStore({ dataDir: join(dir, 'data') });
-  const picture = { html: '<p data-mark="k">One whistle</p>' };
+  const picture = { html: '<p data-mark="k" data-code="src/settings.ts#L12">One whistle</p>' };
   const code = { stage: 'after' as const, guide: { title: 'Kettle', intent: '', sections: [{ title: 'The whistle', overview: '', diffs: [{ file: 'src/kettle.ts' }] }] } };
   const made = store.update({ board: { title: 'Kettle', claim: 'Built.', views: { picture, how: picture, changed: KETTLE_CHANGED, know: 'Once.', code } }, project: { root: dir, name: 'kettle' }, session: { id: 'ses_a', host: 'claude-code' } });
   if (!made.ok) throw new Error(JSON.stringify(made));
@@ -120,37 +122,39 @@ async function mount(thread: InboxThread | null): Promise<[string, ShapeReviewAt
 }
 const wait = () => act(() => new Promise((r) => setTimeout(r, 20)));
 const tabs = () => [...document.querySelectorAll<HTMLElement>('.shp-dock [aria-label="Views"] .shp-tbtn')].map((b) => b.title);
-const button = (words: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === words || b.getAttribute('aria-label') === words) ?? null;
-async function openChanged() {
-  await act(async () => document.querySelector<HTMLElement>('.shp-dock [title="What\'s changed"]')!.click());
-  for (let i = 0; i < 20 && !document.querySelector('.shp-chg'); i++) await wait();
+function inDrawing(selector: string): Element | null {
+  for (const el of document.querySelectorAll('*')) {
+    const found = el.shadowRoot?.querySelector(selector);
+    if (found) return found;
+  }
+  return null;
+}
+async function clickPart() {
+  for (let i = 0; i < 50 && !inDrawing('[data-code]'); i++) await wait();
+  await act(async () => void inDrawing('[data-code]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })));
+  await wait();
 }
 
-test.skipIf(!hasDom)("the Inbox's board has no Code tab, and What's changed sits after How it works", async () => {
+test.skipIf(!hasDom)("the Inbox's board has no Code tab and no What's changed, and none of its words or the review's buttons show", async () => {
   await mount(THREAD);
-  expect(tabs()).toEqual(['Shape', 'How it works', "What's changed"]);
+  expect(tabs()).toEqual(['Shape', 'How it works']);
   // It still opens on the Shape view.
   expect(document.querySelector('.shp-view.v-picture')).not.toBeNull();
+  for (const words of [KETTLE_CHANGED.summary!, KETTLE_CHANGED.items[0]!.title, 'Guided review', 'Full review', 'Guide step']) expect(document.body.textContent).not.toContain(words);
 });
 
-test.skipIf(!hasDom)("What's changed opens the thread's newest review: its buttons, a step, a file:line", async () => {
+test.skipIf(!hasDom)("a drawn part's place in code opens the thread's newest review there", async () => {
   const opened = await mount(THREAD);
-  await openChanged();
-  expect(document.querySelector('.shp-chg-meta')?.textContent).toContain('#12');
-  await act(async () => button('Guided review')!.click());
-  await act(async () => button('Full review')!.click());
-  await act(async () => button('Guide step 2, open the guided review there')!.click());
-  await act(async () => button('settings.ts:12, open src/settings.ts at line 12')!.click());
-  for (let i = 0; i < 20 && opened.length < 4; i++) await wait();
-  expect(opened).toEqual([[REVIEW, null], [REVIEW, { files: true }], [REVIEW, { step: 2 }], [REVIEW, { path: 'src/settings.ts', line: 12 }]]);
+  await clickPart();
+  for (let i = 0; i < 20 && !opened.length; i++) await wait();
+  expect(opened).toEqual([[REVIEW, { path: 'src/settings.ts', line: 12 }]]);
   expect(guideReads.every((p) => p.includes(REVIEW))).toBe(true);
 });
 
-test.skipIf(!hasDom)('a thread with no review: no review buttons or steps on the board', async () => {
+test.skipIf(!hasDom)('a thread with no review: a drawn part opens no review', async () => {
   const opened = await mount(PLAIN);
-  await openChanged();
-  expect(button('Guided review')).toBeNull();
-  expect(document.querySelector('.shp-chg-step')).toBeNull();
+  await clickPart();
+  await wait();
   expect(tabs()).not.toContain('Code');
   expect(opened).toEqual([]);
 });
@@ -175,12 +179,4 @@ test.skipIf(!hasDom)('with the review open over the board, Esc is the review\'s:
   expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(false);
   expect(esc().defaultPrevented).toBe(true);
   expect(panelOpen()).toBe(false);
-});
-
-test.skipIf(!hasDom)('a guide step the review does not have is not drawn', async () => {
-  const short = { ...THREAD, messages: [{ ...reviewMessage(REVIEW), guide: { ...reviewMessage(REVIEW).guide!, sections: 1 } }] } as unknown as InboxThread;
-  await mount(short);
-  await openChanged();
-  // KETTLE_CHANGED's steps are 1 and 2; a one-chapter review shows only step 1.
-  expect([...document.querySelectorAll('.shp-chg-step')].map((b) => b.textContent)).toEqual(['Guide step 1']);
 });

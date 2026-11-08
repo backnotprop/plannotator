@@ -289,7 +289,7 @@ test('a click still marks one part; a tiny drag is a click; Esc cancels a drag a
   await context.close();
 });
 
-test('How it works and the words under the drawing: a lazy drag over a diagram and over words', async ({ browser }) => {
+test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   const id = store('views');
   const { context, page, problems } = await openBoard(browser, id);
   await crosshair(page).click();
@@ -301,21 +301,16 @@ test('How it works and the words under the drawing: a lazy drag over a diagram a
   await page.screenshot({ path: join(shots, '06-diagram-comment.png') });
   await composer(page).getByRole('button', { name: 'Ask' }).click();
   await expect(composer(page)).toHaveCount(0);
-  // views.know's words sit under the drawing in the Shape view.
-  await view(page, 'Shape');
-  await part(page, 'know-1').scrollIntoViewIfNeeded();
-  await drag(page, await at(page, 'know-1', 0.02, 0.1), await at(page, 'know-1', 0.55, 0.6));
-  await expect(composer(page)).toContainText('Shape · “Adding an engine takes');
-  await composer(page).locator('textarea').fill('Plainer, please.');
-  // An Ask opened the chat beside the board; the composer's own buttons still work (they are not a click on the board).
+  // An Ask opens the chat beside the board.
   await expect(page.locator('.shp-sidep.open')).toBeVisible();
-  await composer(page).getByRole('button', { name: 'Change it' }).click();
-  await expect(kept(page)).toHaveCount(1);
+  await expect.poll(() => waiting(id).length).toBeGreaterThan(0);
   const notes = waiting(id) as { view: string; part: string; code?: string[]; picture?: string }[];
-  writeFileSync(join(shots, '06-agent-receives-diagram-and-words.json'), JSON.stringify(notes, null, 2));
+  writeFileSync(join(shots, '06-agent-receives-diagram.json'), JSON.stringify(notes, null, 2));
   expect(notes.find((n) => n.view === 'how')!.part.split(',')).toEqual(expect.arrayContaining(['h-fill', 'h-open']));
   expect(notes.find((n) => n.view === 'how')!.code).toEqual(['src/search/template.ts#L8']);
-  expect(notes.find((n) => n.view === 'know')!.part).toBe('know-1');
+  // The board's views.know is not shown, so nothing lands there.
+  expect(notes.some((n) => n.view === 'know')).toBe(false);
+  await expect(page.locator('.shp-know')).toHaveCount(0);
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -420,12 +415,6 @@ for (const [look, options, thread] of [
     await clearOfDock(page, toast.last());
     await page.screenshot({ path: join(replyShots, `02-added-toast-${look}.png`) });
     expect(waiting(id)).toEqual([]);
-    // A phone's toast floats over the board (above the thread's reply under it), where the omnibox sits once the
-    // words are under the drawing: a press there swipes the toast, not a box. Dismissed first, as a person would.
-    if (await page.locator('.ib-toast-phone').count()) {
-      await toast.last().locator('[data-toast-dismiss]').click();
-      await expect(toast).toHaveCount(0);
-    }
 
     // A second box, then its Undo: only the second goes, and its toast with it.
     await drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));

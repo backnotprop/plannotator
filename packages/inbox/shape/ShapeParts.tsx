@@ -68,7 +68,7 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
  * toggle every full page's head has sits at its title's left: the board can take the window's width.
  *
- * `onOpenReview`: a link on the board (What's changed, a `file:line`) opens the thread's review there; with Code
+ * `onOpenReview`: a place in code on the board (a drawn part's `data-code`) opens the thread's review there; with Code
  * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
  * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
  * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the

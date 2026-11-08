@@ -313,11 +313,6 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
-  /**
-   * Something follows the drawing in the view's scroll (the Shape view's words): the frame stands only as tall as the
-   * drawing, and a canvas leaves room for the start of what follows. The frame's parent is the box that scrolls.
-   */
-  followed?: boolean;
   /** On a dark board only: borders, zone edges, boxes and pictures held to contrast (`ShapeSurfaceProps.darkContrast`). Absent: as drawn. */
   darkContrast?: boolean;
   /** Pointing at marked parts (Change it / Ask). Board only. */
@@ -351,32 +346,24 @@ export interface ShapeDrawnProps {
   sceneLook?: 'technical';
 }
 
-/** What a followed canvas leaves of the view's height, so the words under it show above the dock. */
-const FOLLOWED_PEEK = 84;
-
 /** How much room the view has, for a fixed canvas. */
-function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean, followed: boolean) {
+function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
     const measure = () => {
       const cs = getComputedStyle(el);
-      const view = followed ? el.parentElement : null;
-      const vs = view && getComputedStyle(view);
       setSize({
         w: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
-        h: view && vs
-          ? view.clientHeight - parseFloat(vs.paddingTop) - parseFloat(vs.paddingBottom) - FOLLOWED_PEEK
-          : el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+        h: el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
       });
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    if (followed && el.parentElement) ro.observe(el.parentElement);
     return () => ro.disconnect();
-  }, [ref, enabled, followed]);
+  }, [ref, enabled]);
   return size;
 }
 
@@ -394,8 +381,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   handlers.current = props;
 
   const canvas = drawn.width !== undefined && drawn.height !== undefined;
-  const followed = !!props.followed;
-  const fit = useFit(frameRef, canvas, followed);
+  const fit = useFit(frameRef, canvas);
   const narrow = canvas ? (fit ? fit.w < 700 : false) : false;
   const useTall = canvas && narrow && !!drawn.tall;
   const html = useTall ? drawn.tall!.html : drawn.html;
@@ -711,7 +697,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   return (
     <div
       ref={frameRef}
-      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}${followed ? ' followed' : ''}`}
+      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}`}
       style={FRAME_CONTAIN}
       onPointerLeave={() => props.onHoverMark?.(null)}
     >

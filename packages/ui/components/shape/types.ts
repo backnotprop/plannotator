@@ -134,8 +134,10 @@ export interface ShapeReviewAt {
 }
 
 /**
- * The review a board is part of (the host found it: the Inbox, a review's thread). What's changed shows its facts,
- * Guided review, Full review and its guide-step links, and with no Code view the board's `file:line` links open it.
+ * The review a board is part of (the host found it: the Inbox, a review's thread). With no Code view, a place in code
+ * the board opens (a drawn part's `data-code`, a file reference) opens there through `open`. The board draws none of
+ * its facts or buttons: What's changed, which showed them, is gone (approval shape-whats-changed-removed), so `label`,
+ * `files`, `additions`, `deletions` and `steps` are read by nothing now; they stay so a host's code still checks.
  */
 export interface ShapeSurfaceReview {
   /** What names it on the facts line (a pull request's "#2661"). */
@@ -191,7 +193,7 @@ export interface ShapeSurfaceProps {
    * its own place). A part's `file:line` then opens the review there (`review`), else the file viewer. Absent: true.
    */
   codeView?: boolean;
-  /** The review this board is part of. Absent: What's changed shows no review facts, buttons or guide-step links. */
+  /** The review this board is part of: where a place in code opens with no Code view. Absent: the file viewer. */
   review?: ShapeSurfaceReview | null;
   /**
    * While annotating with the pointer, a mouse drag draws a box and comments on what is inside it (the Inbox, by

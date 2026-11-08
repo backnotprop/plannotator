@@ -2,15 +2,14 @@
  * The board as a person meets it (DOM-gated, tests/dom-test-list.txt). What regresses if these fail:
  * - annotation is on from the start, so a click on a part opens a comment box;
  * - the Annotate button no longer turns pointing on, or an SVG part throws when picked;
- * - `views.know` stops reading as paragraphs under the drawing, comes back as a tab, or an old link stops landing on it;
- * - a note on those words reaches the agent as one on the drawing;
- * - an old board's Requirements vanish or crash;
+ * - `views.know` (or an old board's Requirements) is drawn again, comes back as a tab, lights a dot, or crashes a board
+ *   that has nothing else; an old #view=know or #view=reqs link stops opening the Shape view;
  * - Show more cannot go back, or a bubble does not pop out, close on Esc, or avoid another number.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { checkShapeBoard, shapeParts, type ShapeBoard, type ShapeNote, type ShapeNoteInput, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
+import { checkShapeBoard, shapeParts, type ShapeBoard, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import type { ShapeHost, ShapeLoaded } from './types';
 
@@ -23,9 +22,9 @@ const ID = 'shp_board_test';
 const PICTURE = { html: '<p data-mark="whistle">One whistle</p><svg><g data-mark="svg-part"><text>Kettle</text><text>boils</text></g></svg><span data-ref="1"></span>' };
 const REFS: ShapeRef[] = [{ n: 1, kind: 'image', title: 'The dialog', sub: 'One line.', target: 'files/a.png' }];
 
-function host(views: ShapeVersion['views'], refs: ShapeRef[] = REFS): ShapeHost {
+function host(views: ShapeVersion['views'], refs: ShapeRef[] = REFS, claim = 'Built.'): ShapeHost {
   const at = '2026-11-04T10:00:00.000Z';
-  const board: ShapeBoard = { title: 'Kettle', claim: 'Built.', views, refs };
+  const board: ShapeBoard = { title: 'Kettle', claim, views, refs };
   const data: ShapeLoaded = {
     shape: { v: 1, id: ID, title: 'Kettle', project: { name: 'app', root: '/work/app' }, session: null, thread: null, state: 'active', created: at, updated: at, latest: 1, drawing: null },
     version: { ...board, n: 1, at, base: null, through: null, by: null, parts: shapeParts(board) },
@@ -210,9 +209,9 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
     }
   });
 
-  test('a saved Requirements view and its notes open in the Shape view', async () => {
+  test('a saved Requirements view and its notes open in the Shape view, with the Requirements not shown', async () => {
     const reqs = { groups: [{ id: 'g', label: 'Who', items: [{ id: 'r-1', text: 'Line one' }] }] };
-    const old = host({ reqs } as ShapeVersion['views']);
+    const old = host({ picture: PICTURE, reqs } as ShapeVersion['views']);
     const load = old.load;
     old.load = async (shapeId: string) => {
       const data = await load.call(old, shapeId);
@@ -220,7 +219,7 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
       return { ...data, notes: [note as unknown as ShapeLoaded['notes'][number]] };
     };
     await mount({}, { ...asHost, host: old, initialView: 'reqs' as ShapeViewId, initialPanel: 'ask' });
-    expect(document.querySelector('.shp-know')?.textContent).toContain('Line one');
+    expect(document.querySelector('.shp-know')).toBeNull();
     expect(dock('Shape')?.getAttribute('aria-pressed')).toBe('true');
     expect(document.body.textContent).toContain('Why this?');
     expect(document.body.textContent).not.toContain('reqs');
@@ -258,51 +257,26 @@ describe.if(hasDom)('annotation: off until asked for', () => {
   });
 });
 
-describe.if(hasDom)('the words under the drawing (views.know)', () => {
+describe.if(hasDom)('views.know is not shown (approval shape-know-removed)', () => {
   const bar = () => [...document.querySelectorAll<HTMLElement>('.shp-dock [aria-label="Views"] .shp-tbtn')].map((b) => b.title);
   const shown = () => document.querySelector('.shp-view:not(.leaving)')!;
+  const WORDS = 'Sent anyway, never shown [^1].\n\nA second paragraph.';
 
-  test('its words are paragraphs under the drawing, each one a part, with references live', async () => {
-    await mount({ picture: PICTURE, know: 'First **point** [^1].\n\nSecond **uses `code` here**.' });
-    const know = document.querySelector('.shp-know')!;
-    // Directly under the drawing, in the view that scrolls: not a tab, not a panel.
-    expect(know.parentElement === shown()).toBe(true);
-    expect(know.previousElementSibling?.classList.contains('shp-drawn')).toBe(true);
-    // The frame gives up the view's height, or the words sit a whole screen below.
-    expect(know.previousElementSibling?.classList.contains('followed')).toBe(true);
-    expect(shown().classList.contains('v-picture')).toBe(true);
-    expect([...know.querySelectorAll('p')].map((p) => p.getAttribute('data-mark'))).toEqual(['know-1', 'know-2']);
-    expect(know.querySelector('b')?.textContent).toBe('point');
-    expect(know.querySelector('.shp-rb')?.textContent).toBe('1');
-    expect(know.querySelector('b code')?.textContent).toBe('code');
-    expect(dock('Shape')?.getAttribute('aria-pressed')).toBe('true');
-    expect(document.querySelector('.shp-dock')?.textContent).not.toContain('Requirements');
-  });
-
-  // Agents are no longer asked for views.know, but one that sends it anyway is not refused, and its words still show.
-  test('a board an agent sends with views.know passes the check and draws its words under the drawing', async () => {
-    const sent = checkShapeBoard({ title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, know: 'Sent anyway [^1].' }, refs: REFS });
+  // Agents are no longer asked for views.know, but one that sends it anyway is not refused: nothing draws its words.
+  test('a board an agent sends with views.know passes the check, and its words are nowhere on the board', async () => {
+    const sent = checkShapeBoard({ title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, know: WORDS }, refs: REFS });
     expect('errors' in sent ? sent.errors : []).toEqual([]);
     if (!('value' in sent)) return;
+    expect(sent.value.views.know).toBe(WORDS);
     await mount(sent.value.views);
-    const know = document.querySelector('.shp-know')!;
-    expect(know.previousElementSibling?.classList.contains('shp-drawn')).toBe(true);
-    expect(know.textContent).toBe('Sent anyway 1.');
-    expect(bar()).not.toContain('What to know');
-  });
-
-  test('a number keeps the word before it and the punctuation after it, and no word is lost or doubled', async () => {
-    const words = 'Lift it off the base [^1]. Then **pour** [^1], see `src/a.ts:1`[^1]; done [^1][^1]! And the rest.';
-    await mount({ picture: PICTURE, know: words });
-    const know = document.querySelector('.shp-know')!;
-    const groups = [...know.querySelectorAll('.shp-rb-with')];
-    // Each number with its neighbours.
-    expect(groups.map((g) => g.textContent)).toEqual(['base 1.', 'pour 1,', 'src/a.ts:11;', 'done 11!', 'done 1']);
-    // The space before a number and the punctuation after it sit in the part that cannot break.
-    expect([...know.querySelectorAll('.shp-rb-end')].map((e) => e.textContent)).toEqual([' 1.', ' 1,', '1;', ' 1', '1!']);
-    // What a copy takes: the words as written, with plain spaces.
-    expect(know.textContent).toBe('Lift it off the base 1. Then pour 1, see src/a.ts:11; done 11! And the rest.');
-    expect(know.querySelectorAll('.shp-rb').length).toBe(5);
+    expect(document.querySelector('.shp-know')).toBeNull();
+    expect(document.querySelector('[data-mark="know-1"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('never shown');
+    expect(document.body.textContent).not.toContain('second paragraph');
+    // The drawing is as it is with no words.
+    expect(shown().classList.contains('v-picture')).toBe(true);
+    expect(inDrawing('[data-mark="whistle"]')).not.toBeNull();
+    expect(bar()).toEqual(['Shape']);
   });
 
   // On purpose: the owner's words for the bar (Picture became Shape, What to know went).
@@ -326,169 +300,66 @@ describe.if(hasDom)('the words under the drawing (views.know)', () => {
     }
   });
 
-  test('a board with no words keeps its drawing as it is: no followed frame, nothing under it', async () => {
-    await mount({ picture: PICTURE });
-    expect(document.querySelector('.shp-know')).toBeNull();
-    expect(document.querySelector('.shp-drawn')?.classList.contains('followed')).toBe(false);
-    expect(bar()).toEqual(['Shape']);
-  });
-
-  test('with no drawing the words are the Shape view; with How it works beside them, both tabs stay and it opens on the words', async () => {
-    await mount({ know: 'Only this.' });
-    expect(bar()).toEqual(['Shape']);
-    expect(shown().classList.contains('v-picture')).toBe(true);
-    expect(shown().querySelector('.shp-know')?.textContent).toContain('Only this.');
-    expect(document.querySelector('.shp-drawn')).toBeNull();
-    act(() => root!.unmount());
-    root = null;
-    document.body.innerHTML = '';
-    await mount({ how: PICTURE, know: 'Only this.' });
-    await wait();
-    expect(bar()).toEqual(['Shape', 'How it works']);
-    expect(shown().querySelector('.shp-know')?.textContent).toContain('Only this.');
-    expect(shown().querySelector('.shp-drawn')).toBeNull();
-  });
-
-  for (const old of ['know', 'reqs']) {
-    test(`an old #view=${old} link opens the Shape view at the words, and the address moves on`, async () => {
-      const scrolled: string[] = [];
-      const was = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.className); };
-      const seen: string[] = [];
-      try {
-        await mount({ picture: PICTURE, know: 'First.' }, { initialView: old as ShapeViewId, onNavigate: (s) => { seen.push(s.view); } });
-        for (let i = 0; i < 40 && !scrolled.length; i++) await wait();
-        expect(shown().classList.contains('v-picture')).toBe(true);
-        expect(document.querySelector('.shp-view.v-know')).toBeNull();
-        expect(scrolled).toEqual(['shp-know']);
-        expect(seen.at(-1)).toBe('picture');
-      } finally {
-        Element.prototype.scrollIntoView = was;
-      }
-    });
-  }
-
-  test('opened with no old link, the board stays at its top', async () => {
-    const scrolled: string[] = [];
-    const was = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.className); };
-    try {
-      await mount({ picture: PICTURE, know: 'First.' });
-      for (let i = 0; i < 5; i++) await wait();
-      expect(scrolled).toEqual([]);
-    } finally {
-      Element.prototype.scrollIntoView = was;
+  test('a board whose only view is views.know, or old Requirements, opens with its title and claim, no tab and nothing drawn', async () => {
+    for (const views of [{ know: 'Only this.' }, { reqs: { groups: [{ id: 'g', label: 'Who', items: [{ id: 'r-1', text: 'Line one' }] }] } }] as ShapeVersion['views'][]) {
+      await mount(views);
+      expect(document.querySelector('.shp-head h1')?.textContent).toContain('Kettle');
+      expect(document.querySelector('.shp-claim')?.textContent).toBe('Built.');
+      expect(bar()).toEqual([]);
+      // No empty Views group left in the dock.
+      expect(document.querySelector('.shp-dock [aria-label="Views"]')).toBeNull();
+      expect(shown().textContent).toBe('');
+      expect(document.body.textContent).not.toContain('Only this.');
+      expect(document.body.textContent).not.toContain('Line one');
+      act(() => root!.unmount());
+      root = null;
+      document.body.innerHTML = '';
     }
   });
 
-  test('under a drawing, a paragraph can still be pointed at, and its box says Shape', async () => {
-    await mount({ picture: PICTURE, know: 'Only this.' });
-    await click(dock('Annotate')!);
-    await click(document.querySelector('[data-mark="know-1"]')!);
-    expect(popover()?.textContent).toContain('Shape · “Only this.”');
+  test('with How it works beside the words and no drawing, the bar has How it works alone and opens on it', async () => {
+    await mount({ how: PICTURE, know: 'Only this.' });
+    await wait();
+    expect(bar()).toEqual(['How it works']);
+    expect(shown().classList.contains('v-how')).toBe(true);
+    expect(document.body.textContent).not.toContain('Only this.');
   });
 
-  test('with words under it, the drawing still picks its own parts', async () => {
-    await mount({ picture: PICTURE, know: 'Only this.' });
-    await click(dock('Annotate')!);
-    await click(inDrawing('[data-mark="whistle"]')!);
-    expect(popover()?.textContent).toContain('One whistle');
+  for (const old of ['know', 'reqs']) {
+    test(`an old #view=${old} link opens the Shape view, and the address moves on`, async () => {
+      const seen: string[] = [];
+      await mount({ picture: PICTURE, how: PICTURE, know: 'First.' }, { initialView: old as ShapeViewId, onNavigate: (s) => { seen.push(s.view); } });
+      await wait();
+      expect(shown().classList.contains('v-picture')).toBe(true);
+      expect(dock('Shape')?.getAttribute('aria-pressed')).toBe('true');
+      expect(document.querySelector('.shp-view.v-know')).toBeNull();
+      expect(seen.at(-1)).toBe('picture');
+    });
+  }
+
+  test('opened on a view the board does not have, it lands on one it does', async () => {
+    await mount({ how: PICTURE }, { initialView: 'know' });
+    await wait();
+    expect(dock('How it works')?.getAttribute('aria-pressed')).toBe('true');
   });
 
-  test('a new version that changes the words marks them here, and leaves no dot on another tab', async () => {
+  test('a new version that changes only the words lights no dot and names no view', async () => {
     let send: ((e: Parameters<Parameters<ShapeHost['events']>[1]>[0]) => void) | null = null;
     const h = host({ picture: PICTURE, how: PICTURE, know: 'First.' });
     h.events = (_id, listener) => {
       send = listener;
       return () => {};
     };
-    await mount({}, { host: h });
+    await mount({}, { host: h, initialView: 'how' });
     const data = await h.load(ID);
     const nextBoard: ShapeBoard = { title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, how: PICTURE, know: 'First, changed.' }, refs: REFS };
-    await act(async () => send!({ type: 'version', shape: data.shape, version: { ...nextBoard, n: 2, at: data.version.at, base: 1, through: null, by: null, parts: shapeParts(nextBoard) } }));
+    // A version saved while the words were parts still carries them: they light nothing either.
+    const oldParts = [...shapeParts(nextBoard), { view: 'know' as const, id: 'know-1', text: 'First, changed.' }];
+    await act(async () => send!({ type: 'version', shape: data.shape, version: { ...nextBoard, n: 2, at: data.version.at, base: 1, through: null, by: null, parts: oldParts } }));
     for (let i = 0; i < 40 && !document.querySelector('.shp-pill'); i++) await wait();
-    expect(document.querySelector('.shp-pill')?.textContent).toContain('Board updated · Shape');
+    expect(document.querySelector('.shp-pill')?.textContent).toContain('Board updated · v2');
     expect(document.querySelector('.shp-tdot')).toBeNull();
-    expect(document.querySelector('.shp-know')?.textContent).toContain('First, changed.');
-    expect(document.querySelector('[data-mark="know-1"]')?.classList.contains('fresh')).toBe(true);
-  });
-
-  test('from How it works, a number that lives in the words brings the Shape view up', async () => {
-    const was = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = () => {};
-    try {
-      await mount({ picture: { html: '<p>No number here</p>' }, how: { html: '<p>Nor here</p>' }, know: 'See this [^1].' }, { initialView: 'how', initialPanel: 'refs' });
-      expect(shown().classList.contains('v-how')).toBe(true);
-      await click(document.querySelector('.shp-ref-row')!);
-      for (let i = 0; i < 40 && !document.querySelector('.shp-view.v-picture:not(.leaving)'); i++) await wait();
-      expect(shown().classList.contains('v-picture')).toBe(true);
-      expect(document.querySelector('.shp-view.v-know')).toBeNull();
-    } finally {
-      Element.prototype.scrollIntoView = was;
-    }
-  });
-
-  test('a paragraph can be pointed at once annotating', async () => {
-    await mount({ know: 'Only this.' });
-    await click(dock('Annotate')!);
-    await click(document.querySelector('[data-mark="know-1"]')!);
-    expect(popover()?.textContent).toContain('Only this.');
-  });
-
-  test('a note on the words under the drawing is sent as one on the words, and one on the drawing as one on the drawing', async () => {
-    const sent: ShapeNoteInput[] = [];
-    const base = host({ picture: PICTURE, know: 'Only this.' });
-    const at = '2026-11-04T10:00:00.000Z';
-    base.note = async (_id, input) => {
-      sent.push(input);
-      return { id: `n${sent.length}`, at, v: 1, view: input.view, part: input.part, quote: input.quote, kind: 'change', text: input.text, from: 'you', re: null, delivered: null } as ShapeNote;
-    };
-    await mount({}, { host: base });
-    await click(dock('Annotate')!);
-    const send = async (words: string) => {
-      const box = popover()!.querySelector<HTMLTextAreaElement>('textarea')!;
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-      await act(async () => {
-        setter.call(box, words);
-        box.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      await act(async () => { box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })); });
-      await wait();
-    };
-    await click(document.querySelector('[data-mark="know-1"]')!);
-    await send('shorter');
-    await click(inDrawing('[data-mark="whistle"]')!);
-    await send('louder');
-    expect(sent.map((n) => [n.view, n.part, n.quote])).toEqual([['know', 'know-1', 'Only this.'], ['picture', 'whistle', 'One whistle']]);
-  });
-
-  test('an old board opens: heading, group names, every line, the foot, with no crash', async () => {
-    const reqs = {
-      heading: 'What I understand',
-      groups: [
-        { id: 'who', label: 'Who gets it', items: [{ id: 'r-who', text: 'You, **never** a guest [^1]', code: { path: 'src/who.ts', line: 10 } }, { id: 'r-two', text: 'Second line' }] },
-        { id: 'none', label: 'Empty group', items: [] },
-      ],
-      foot: [{ label: 'Open', text: 'Nothing.' }],
-    };
-    await mount({ reqs });
-    const know = document.querySelector('.shp-know')!;
-    for (const words of ['What I understand', 'Who gets it', 'You, never a guest', 'Second line', 'Open:', 'Nothing.']) expect(know.textContent).toContain(words);
-    expect(know.textContent).not.toContain('Empty group');
-    expect(know.querySelector('[data-mark="r-two"]')).not.toBeNull();
-    expect(bar()).toEqual(['Shape']);
-  });
-
-  test('an old board with both a drawing and Requirements reads them under it', async () => {
-    await mount({ picture: PICTURE, reqs: { groups: [{ id: 'g', label: 'Who', items: [{ id: 'r-1', text: 'Line one' }] }] } });
-    expect(shown().querySelector('.shp-drawn + .shp-know')?.textContent).toContain('Line one');
-    expect(bar()).toEqual(['Shape']);
-  });
-
-  test('opened on the view a board does not have, it lands on one it does', async () => {
-    await mount({ how: PICTURE }, { initialView: 'know' });
-    await wait();
-    expect(dock('How it works')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.body.textContent).not.toContain('First, changed.');
   });
 });
 
@@ -623,14 +494,14 @@ describe.if(hasDom)('a host\'s control beside a file (fileAction)', () => {
     document.body.appendChild(el);
     root = createRoot(el);
     const wrap = (text: string, code: React.ReactNode) => <span data-host-span={text}>{code}</span>;
-    act(() => root!.render(<CodeSpanContext.Provider value={wrap}><ShapeSurface host={host({ know: 'The rows go through `src/a.ts`.' })} id={ID} readFirst /></CodeSpanContext.Provider>));
+    act(() => root!.render(<CodeSpanContext.Provider value={wrap}><ShapeSurface host={host({ picture: PICTURE }, REFS, 'The rows go through `src/a.ts`.')} id={ID} readFirst /></CodeSpanContext.Provider>));
     for (let i = 0; i < 50 && !document.querySelector('.shp-dock'); i++) await wait();
     await wait();
-    const spans = () => document.querySelectorAll('.shp-know [data-host-span="src/a.ts"]').length;
+    const spans = () => document.querySelectorAll('.shp-claim [data-host-span="src/a.ts"]').length;
     expect(spans()).toBe(1);
     await click(dock('Annotate')!);
     expect(spans()).toBe(0);
-    expect(document.querySelector('.shp-know code')?.textContent).toBe('src/a.ts');
+    expect(document.querySelector('.shp-claim code')?.textContent).toBe('src/a.ts');
     await click(dock('Annotate')!);
     expect(spans()).toBe(1);
   });

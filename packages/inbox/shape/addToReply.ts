@@ -8,7 +8,7 @@ import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 export interface ShapeReplyPart {
   /** The words the reply takes, after any it already holds. */
   words: string;
-  /** The picture, or null when the box has none (`views.know`'s words, a capture that failed). */
+  /** The picture, or null when the box has none (a capture that failed). */
   file: File | null;
 }
 
