@@ -32,7 +32,7 @@ import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { opensInWindow, sizeLine } from './AttachmentTiles';
 import { FileName } from './FileName';
 import { ReuseButton } from '../reuse';
-import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
+import { TileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
 import { gridStep, isGridKey, type GridKey } from '../gridMove';
 import { inboxArtifactsShortcuts } from '../shortcuts/grid.shortcuts';
@@ -420,20 +420,28 @@ function Tile({
       </button>
     );
   }
+  if (artifact.type === 'guide') {
+    return (
+      <li className="ib-art-cell" ref={ref}>
+        <div className="ib-art-w">{tile}</div>
+      </li>
+    );
+  }
   return (
     <li className="ib-art-cell" ref={ref}>
-      <div className={`ib-art-w${openIn === 'apps' ? ' ib-art-w-more' : ''}`}>
-        {tile}
-        {artifact.type === 'file' && <ReuseButton file={artifact.attachment} surface="card" />}
-        {/* The tile's ⋯ "Open in" is its sibling (a button in a button is invalid): the next tab stop after the tile. */}
-        {artifact.type === 'file' && openIn === 'apps' && (
-          <OpenInTileMenu
-            attachment={artifact.attachment}
-            version={readableVersion(artifact.attachment)}
-            onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
-          />
+      {/* The card's ⋯ is its sibling (a button in a button is invalid): the next tab stop after the card. A right-click on the card opens the same list (TileMenu). */}
+      <TileMenu
+        attachment={artifact.attachment}
+        surface={openIn}
+        onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
+        render={(more) => (
+          <div className={`ib-art-w${more ? ' ib-art-w-more' : ''}`}>
+            {tile}
+            <ReuseButton file={artifact.attachment} surface="card" />
+            {more}
+          </div>
         )}
-      </div>
+      />
     </li>
   );
 }

@@ -7,7 +7,7 @@ import { useInboxFileSource } from '../fileSource';
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
-import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
+import { TileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
 import { ReuseButton, useReuse } from '../reuse';
 
@@ -258,16 +258,26 @@ export function AttachmentTiles({
             </span>
           );
           // The ⋯ is the tile button's sibling (a button inside a button is invalid), in a wrapper the grid lays out.
-          const withMenu = (tile: React.ReactElement) =>
-            openIn === 'apps' || reuse ? (
-              <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${openIn === 'apps' ? ' ib-att-w-more' : ''}`} key={attachment.id} data-open-in-tile={openIn === 'apps' ? attachment.id : undefined}>
-                {tile}
-                <ReuseButton file={attachment} surface="tile" />
-                {openIn === 'apps' && <OpenInTileMenu attachment={attachment} version={readableVersion(attachment)} onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined} />}
-              </div>
-            ) : (
-              tile
-            );
+          // A right-click anywhere on the tile opens the ⋯'s list (Download in it), with or without the ⋯ (TileMenu).
+          const withMenu = (tile: React.ReactElement) => (
+            <TileMenu
+              key={attachment.id}
+              attachment={attachment}
+              surface={openIn}
+              onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined}
+              render={(more) =>
+                more || reuse ? (
+                  <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${more ? ' ib-att-w-more' : ''}`} data-open-in-tile={more ? attachment.id : undefined}>
+                    {tile}
+                    <ReuseButton file={attachment} surface="tile" />
+                    {more}
+                  </div>
+                ) : (
+                  tile
+                )
+              }
+            />
+          );
           if (!opensInWindow(attachment)) {
             // A download: the whole tile is the link, never a viewer on this origin.
             return withMenu(
