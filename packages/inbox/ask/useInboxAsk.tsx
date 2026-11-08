@@ -27,14 +27,15 @@ export interface InboxAskParts {
    * words, quoted, open the thread's chat. Undefined wherever the icon is null (this thread cannot ask, Ask off),
    * and in the phone layout (`phone`, App's usePhone), where the owner keeps the selection bar without it.
    */
-  side: ((selected: string) => void) | undefined;
+  side: ((selected: string, source?: string) => void) | undefined;
   /** The window. Outside the thread's section: see AskChat. */
   layer: ReactNode;
   /**
    * Open the open thread's chat with these words in its box, after any words
-   * already there (code review's Ask on selected lines). Nothing while Ask is off.
+   * already there (code review's Ask on selected lines). Nothing while Ask is off. `source` (a Side's): where the
+   * words came from, which the agent gets ahead of the question (AskChat, useAIChat's `contextPreamble`) and the box never shows.
    */
-  askWith: (words: string) => void;
+  askWith: (words: string, source?: string) => void;
 }
 
 /**
@@ -69,7 +70,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
-  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number } | null>(null);
+  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number; source?: string } | null>(null);
   /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
   const wantsFocus = useRef<string | null>(null);
   const askForFocus = (threadId: string) => {
@@ -163,13 +164,13 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
 
   // One function for the window's life (a review's selection actions hold it): the thread on screen through its ref.
   const askWith = useCallback(
-    (words: string) => {
+    (words: string, source?: string) => {
       const thread = onScreen.current;
       if (!thread) return;
       openChats.current.add(thread);
       store.setMinimized(false);
       seedCount += 1;
-      setSeed({ threadId: thread, words, token: seedCount });
+      setSeed({ threadId: thread, words, token: seedCount, ...(source ? { source } : {}) });
       wantsFocus.current = thread;
       setFocusRequest((count) => count + 1);
     },
@@ -177,7 +178,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   );
 
   const canAsk = model?.can_ask === true;
-  const side = useCallback((selected: string) => askWith(sideQuote(selected)), [askWith]);
+  const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
 
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 

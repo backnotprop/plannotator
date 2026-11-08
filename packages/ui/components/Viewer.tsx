@@ -85,7 +85,7 @@ import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages'
 import type { HtmlEmbedHost } from './html-embed/HtmlEmbedBlock';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
-import type { SelectionAction } from '../utils/selectionActions';
+import type { SelectionAction, SelectionActionContext } from '../utils/selectionActions';
 import type { MentionSource } from '../utils/mentions';
 import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
@@ -131,10 +131,10 @@ export interface ViewerProps {
   selectionActionsIcon?: React.ReactNode;
   /**
    * Opt-in host capability, passed to the text-selection toolbar only: its
-   * "Side" button, which hands the host the selected text (AnnotationToolbar
-   * `onSide`). Absent → no button: unchanged.
+   * "Side" button, which hands the host the selected text and its context
+   * (AnnotationToolbar `onSide`). Absent → no button: unchanged.
    */
-  onSide?: (text: string) => void;
+  onSide?: (text: string, context: SelectionActionContext) => void;
   /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label

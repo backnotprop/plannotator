@@ -304,10 +304,11 @@ in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
   picker and makes the Alt+digit label shortcuts inert on that toolbar. The
   one-click 👍 is unaffected, and mode state is still yours to clamp.
 - **`AnnotationToolbar` `onSide`** (forwarded by `Viewer` to its text-selection
-  toolbar only, and by `HtmlViewer`): `(text) => void`. A "Side" button (two
-  speech bubbles and the word) after the reactions, with a divider before it
-  and the usual one before ×. Pressing it passes the selected text (what Copy
-  reads) and closes the toolbar; what Side opens is yours. Absent renders no
+  toolbar only, and by `HtmlViewer`): `(text, context) => void`. A "Side"
+  button (two speech bubbles and the word) after the reactions, with a divider
+  before it and the usual one before ×. Pressing it passes the selected text
+  (what Copy reads) and the same context `selectionActions` get (`blockId`,
+  offsets, `element`), and closes the toolbar; what Side opens is yours. Absent renders no
   button and no extra divider. The Plannotator Inbox uses it for Ask AI.
 - **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
   and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before

@@ -30,7 +30,7 @@ import {
   type VimHudCommand,
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
-import type { SelectionAction } from "../../utils/selectionActions";
+import type { SelectionAction, SelectionActionContext } from "../../utils/selectionActions";
 import type { MentionSource } from "../../utils/mentions";
 import { AttachmentsButton } from "../AttachmentsButton";
 import {
@@ -328,9 +328,9 @@ export interface HtmlViewerProps {
    *  Absent → the package's own wand. */
   selectionActionsIcon?: ReactNode;
   /** Opt-in host capability: the selection toolbar's "Side" button, which
-   *  hands the host the selected text (AnnotationToolbar `onSide`).
-   *  Absent → no button: unchanged. */
-  onSide?: (text: string) => void;
+   *  hands the host the selected text and its context (AnnotationToolbar
+   *  `onSide`). Absent → no button: unchanged. */
+  onSide?: (text: string, context: SelectionActionContext) => void;
   /** Opt-in host capability, forwarded to BOTH comment composers this viewer
    *  mounts (the pinpoint/selection composer and the global one): the `@`
    *  mention source for the composer's picker. The picked ids ride onto the

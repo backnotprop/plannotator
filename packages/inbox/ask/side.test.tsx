@@ -5,6 +5,10 @@
  * thread's chat with the words quoted in its box. The thread's top bar keeps
  * one Ask icon; a full-screen file's bar has none.
  *
+ * The question the agent gets says where the words came from (sideSource.ts),
+ * as useAIChat's contextPreamble ahead of it, while the box and the saved
+ * question keep only the clean quote.
+ *
  * Failures to catch: Side missing from a thread that can ask, or showing in
  * one that cannot (no live agent: a guest's or a linked machine's thread
  * reads `can_ask: false` too), or in the phone layout (the owner hides it
@@ -25,11 +29,12 @@ import type { Annotation } from '@plannotator/ui/types';
 const hasDom = typeof document !== 'undefined';
 const { MessageBody, ThreadPane } = (hasDom ? await import('../components/Thread') : {}) as typeof import('../components/Thread');
 const { useInboxAsk } = (hasDom ? await import('./useInboxAsk') : {}) as typeof import('./useInboxAsk');
+const { sideTime } = (hasDom ? await import('./sideSource') : {}) as typeof import('./sideSource');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'retry-abcdef', name: 'retry', root: '/work/retry', created_at: '2026-11-08T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
 const ROOT = 'msg_01K7SIDESIDESIDESIDESIDE01';
-const BODY = 'I moved the retry loop into the client.\n\nThe backoff is two, four and eight seconds, and a 429 waits for Retry-After.';
+const BODY = 'I moved the retry loop into the client.\n\n## Backoff\n\nThe backoff is two, four and eight seconds, and a 429 waits for Retry-After.';
 const WORDS = 'and a 429 waits for Retry-After';
 
 const MESSAGE = {
@@ -88,11 +93,28 @@ afterEach(async () => {
   }
 });
 
-/** The Inbox's answers: the thread's Ask model (`can_ask` as given), its files, the file's text. */
+/** What the window sent: POST â€¦/ask bodies (the saved turn) and /api/ai/query bodies (what the agent gets). */
+let asks: Record<string, unknown>[] = [];
+let queries: Record<string, unknown>[] = [];
+
+/** The Inbox's answers: the thread's Ask model (`can_ask` as given), its files, the file's text, and a question taken. */
 function serve(canAsk: boolean) {
+  asks = [];
+  queries = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    if (method === 'POST' && url.endsWith(`/threads/${ROOT}/ask`)) {
+      asks.push(body);
+      const turn = { id: body.turn_id, at: '2026-11-08T12:00:00.000Z', session: 'ses_a', host: 'claude-code', question: body.question, ...(body.source ? { source: body.source } : {}) };
+      return Response.json({ conversation: { v: 1, thread_id: ROOT, seen_at: null, turns: [turn] }, turn, provider_id: 'provider-1' });
+    }
+    if (url.endsWith('/api/ai/session')) return Response.json({ sessionId: 'session-1' });
+    if (url.endsWith('/api/ai/query')) {
+      queries.push(body);
+      return new Response('', { headers: { 'Content-Type': 'text/event-stream' } });
+    }
     if (method === 'GET' && url.endsWith(`/threads/${ROOT}/ask`)) {
       return Response.json({ subject: 'Retry budget', project: PROJECT.name, conversation: null, running: null, can_ask: canAsk, agent: { host: 'claude-code', name: 'Claude Code' } });
     }
@@ -186,6 +208,19 @@ async function select(scope: HTMLElement, phrase: string) {
   await settle();
 }
 
+/** Words after the quote in the box, then Enter: the question goes. */
+async function ask(words: string) {
+  const box = askBox()!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, `${box.value}${words}`);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => {
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+  });
+  await until(() => queries.length > 0, 'the question to reach the agent');
+}
+
 const askIcon = () => document.querySelector<HTMLButtonElement>('[data-ask-open]');
 const askBox = () => document.querySelector<HTMLTextAreaElement>('[data-chat-window] textarea');
 const side = () => document.querySelector<HTMLButtonElement>('.annotation-toolbar [data-annotation-side]');
@@ -214,6 +249,14 @@ test.skipIf(!hasDom)("an agent's message in a thread that can ask: Side after ðŸ
   // The bar closed; the chat's box has the focus, for the question.
   expect(document.querySelectorAll('.annotation-toolbar')).toHaveLength(0);
   await until(() => document.activeElement === askBox(), 'focus in the box');
+
+  // The question carries where the words came from; the saved question, as the transcript shows it, is the person's alone.
+  await ask('Why five?');
+  const source = `[Quoted from Claude Code's message ${ROOT} (${sideTime(MESSAGE.created_at)}), under "Backoff".]`;
+  expect(asks).toHaveLength(1);
+  expect(asks[0]!.question).toBe(`> ${WORDS}\n\nWhy five?`);
+  expect(asks[0]!.source).toBe(source);
+  expect(queries[0]!.prompt).toBe(`${source}\n\n> ${WORDS}\n\nWhy five?`);
 });
 
 test.skipIf(!hasDom)('a thread that cannot ask (no live agent): no Ask icon, and the selection bar has no Side', async () => {
@@ -250,6 +293,12 @@ test.skipIf(!hasDom)('a full-screen file: its bar has no Ask icon (none on the p
   await act(async () => side()!.click());
   await until(() => askBox() !== null, 'the Ask window');
   expect(askBox()!.value).toBe('> five attempts\n\n');
+
+  // The file, the path the agent sent, which version, the line and the heading.
+  await ask('Why five?');
+  const source = '[Quoted from notes.md (/work/retry/notes.md, attached to this thread; the version sent, unchanged), line 3, under "Notes".]';
+  expect(asks[0]!.source).toBe(source);
+  expect(queries[0]!.prompt).toBe(`${source}\n\n> five attempts\n\nWhy five?`);
 });
 
 test.skipIf(!hasDom)('the file beside the thread: the one Ask icon is in the thread top bar', async () => {

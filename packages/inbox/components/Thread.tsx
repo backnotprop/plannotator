@@ -8,6 +8,7 @@ import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import type { Annotation, Block } from '@plannotator/ui/types';
+import { messageSideSource } from '../ask/sideSource';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -472,8 +473,8 @@ export function MessageBody({
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
     revealed?: string | null;
-    /** Ask AI's Side in the selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat. Absent: no Side. */
-    onSide?: (selected: string) => void;
+    /** Ask AI's Side in the selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat, with where they came from (ask/sideSource.ts). Absent: no Side. */
+    onSide?: (selected: string, source?: string) => void;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -980,7 +981,11 @@ export function MessageBody({
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
-        onSide={comments?.onSide}
+        onSide={
+          comments?.onSide
+            ? (text, context) => comments.onSide!(text, messageSideSource(message, { selected: text, blockId: context.blockId, blocks, annotations: commentList }))
+            : undefined
+        }
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
@@ -1187,7 +1192,7 @@ export interface ThreadPaneProps {
    * Ask AI's Side for the selection bars of the agents' messages and of the open file (ask/useInboxAsk.tsx `side`).
    * Absent while this thread cannot ask: no Side. A full-screen file's bar has no Ask icon (approval "inbox-ask-ai-flow").
    */
-  onSide?: (selected: string) => void;
+  onSide?: (selected: string, source?: string) => void;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;

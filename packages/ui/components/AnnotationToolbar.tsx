@@ -8,7 +8,7 @@ import { copyRichSelection, richCopyOutcomeLabel, type RichCopyOutcome, type Ric
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 import { FloatingSelectionActionsPicker } from "./SelectionActionsDropdown";
-import { buildSelectionActionContext, type SelectionAction } from "../utils/selectionActions";
+import { buildSelectionActionContext, type SelectionAction, type SelectionActionContext } from "../utils/selectionActions";
 import { HostTitle } from './HostTitle';
 import { TOUCH_PRIMARY_QUERY } from "../utils/touchSelection";
 import {
@@ -106,10 +106,12 @@ interface AnnotationToolbarProps {
    * Opt-in host capability: a "Side" button (two speech bubbles and the word
    * "Side") after the reactions, between a divider and the one before ×.
    * Pressing it hands the host the selected text, the same text Copy reads,
-   * and closes the toolbar; the host opens its side conversation with it.
+   * with the selection's context (the same one `selectionActions` get: block
+   * and offsets, so the host can say where the words came from), and closes
+   * the toolbar; the host opens its side conversation with it.
    * Absent → no button and no divider: today's toolbar. No shortcut.
    */
-  onSide?: (text: string) => void;
+  onSide?: (text: string, context: SelectionActionContext) => void;
   /**
    * Whether the package's own quick labels are offered (default true).
    * `false` hides the Zap picker button and the Alt+digit label shortcuts on
@@ -541,7 +543,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               data-annotation-side=""
               onClick={() => {
                 // Read at press time, as the selection actions read it.
-                onSide(copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '');
+                const text = copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '';
+                onSide(text, buildSelectionActionContext(element, text));
                 onClose();
               }}
               className="flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-md text-foreground hover:bg-muted transition-colors text-[12.5px] font-medium whitespace-nowrap"

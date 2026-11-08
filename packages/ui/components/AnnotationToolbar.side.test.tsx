@@ -3,8 +3,8 @@
  * Failures to catch: Side showing for a host that did not ask for it (plan
  * review, Workspaces), or its divider left behind; Side drifting out of its
  * place after the reactions, between its own divider and the one before ×;
- * a press that does not hand the host the selected words or leaves the
- * toolbar open; Side losing the touch-target marker theme.css sizes to 44px
+ * a press that does not hand the host the selected words and their context,
+ * or leaves the toolbar open; Side losing the touch-target marker theme.css sizes to 44px
  * on a phone.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -87,10 +87,13 @@ describe.if(hasDom)('AnnotationToolbar Side', () => {
 
   test('a press hands the host the selected words and closes the toolbar', async () => {
     const sides: string[] = [];
+    const anchors: boolean[] = [];
     let closes = 0;
-    await mount({ onSide: (text) => sides.push(text), onClose: () => (closes += 1) });
+    await mount({ onSide: (text, context) => (sides.push(text), anchors.push(context.element === anchor && context.text === text)), onClose: () => (closes += 1) });
     await act(async () => sideButton()!.click());
     expect(sides).toEqual(['the backoff is two, four and eight seconds']);
+    // The selection's context too, as the selection actions get it: the host says where the words came from.
+    expect(anchors).toEqual([true]);
     expect(closes).toBe(1);
   });
 

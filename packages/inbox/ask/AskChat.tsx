@@ -10,7 +10,7 @@ import { isTouchPhone } from '../phone';
 import { errorText } from '../toastError';
 import { AskChatMenu } from './AskChatMenu';
 import { askAnswerId, askChatName, askMessages, askShownQuestion, askStopped, askTurnNote, askUnanswered, askUnseen, askUserId } from './askModel';
-import { readAskWords, saveAskWords } from './askWords';
+import { askSourceFor, readAskSources, readAskWords, saveAskSources, saveAskWords, type AskSource } from './askWords';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -25,8 +25,8 @@ export interface AskChatProps {
   phone: boolean;
   /** Moves with each press that asks for the box's focus; `takeFocus` says whether it was for this chat. */
   focusRequest: number;
-  /** Words to put in the box (a new token each time): after the words already there. */
-  seed?: { words: string; token: number } | null;
+  /** Words to put in the box (a new token each time): after the words already there. `source`: where a Side's quote came from. */
+  seed?: { words: string; token: number; source?: string } | null;
   takeFocus: () => boolean;
   onPick: (chat: InboxAskChat) => void;
   onLeave: () => void;
@@ -52,6 +52,8 @@ const seedsApplied = new Set<number>();
 export function AskChat({ threadId, store, model, picked, phone, focusRequest, seed, takeFocus, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
   const chat = useAIChat({ context: ASK_CONTEXT });
   const [words, setWords] = useState(() => readAskWords(threadId));
+  /** Where the box's Side quotes came from: they go to the agent with the question, never into the box. */
+  const sources = useRef<AskSource[]>(readAskSources(threadId));
   const [posting, setPosting] = useState(false);
   const postingRef = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -83,6 +85,10 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   useEffect(() => {
     if (!seed || seedsApplied.has(seed.token)) return;
     seedsApplied.add(seed.token);
+    if (seed.source && seed.words.trim()) {
+      sources.current = [...sources.current, { quote: seed.words.trim(), line: seed.source }];
+      saveAskSources(threadId, sources.current);
+    }
     setWords((box) => (box.trim() ? `${box.trimEnd()}\n${seed.words}` : seed.words));
   }, [seed?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -128,13 +134,14 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   };
 
   /** Start, or restart, the answer of a turn POST /ask accepted. */
-  const answer = (posted: InboxAskPosted, question: string, providerId: string, policy?: SessionAskAction) => {
+  // `source` (a Side's): where the quoted words came from, as useAIChat's contextPreamble, which leads the message the agent gets.
+  const answer = (posted: InboxAskPosted, question: string, providerId: string, policy?: SessionAskAction, source?: string) => {
     setLive({ turnId: posted.turn.id, index: chat.messages.length, session: posted.turn.session });
-    void chat.ask({ prompt: question, ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
+    void chat.ask({ prompt: question, ...(source ? { contextPreamble: source } : {}), ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
   };
 
-  const post = async (turnId: string, question: string, showMe?: InboxShowMeAsk): Promise<InboxAskPosted> => {
-    const posted = await inboxApi.askSend(threadId, turnId, question, showMe);
+  const post = async (turnId: string, question: string, showMe?: InboxShowMeAsk, source?: string): Promise<InboxAskPosted> => {
+    const posted = await inboxApi.askSend(threadId, turnId, question, showMe, source);
     onConversation(posted.conversation);
     return posted;
   };
@@ -148,11 +155,14 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     // The kept copy goes now: a switch before the answer lands must not bring back words already sent.
     saveAskWords(threadId, '');
     const turnId = generateId('ask');
+    const source = askSourceFor(question, sources.current);
     try {
-      const posted = await post(turnId, question);
+      const posted = await post(turnId, question, undefined, source);
       // Only now: a refused question keeps its words, and words added meanwhile stay.
       setWords((box) => (box.trim() === question ? '' : box));
-      if (posted.provider_id) answer(posted, question, posted.provider_id);
+      sources.current = sources.current.filter((s) => !question.includes(s.quote));
+      saveAskSources(threadId, sources.current);
+      if (posted.provider_id) answer(posted, question, posted.provider_id, undefined, source);
     } catch (cause) {
       if (!readAskWords(threadId)) saveAskWords(threadId, question);
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
@@ -180,10 +190,11 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
         turn.kind === 'show_me' && turn.show_me
           ? { kind: 'show_me', show_me: turn.show_me, ...(turn.again_shape !== undefined ? { again_shape: turn.again_shape } : {}) }
           : undefined,
+        turn.source,
       );
       // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and
       // after a hand-off that one gets its own note: it is never interrupted on a choice made about another.
-      if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined);
+      if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined, turn.source);
       else if (posted.reason) setProblem(`${name} can't take this right now. Try again, or reply in the thread.`);
     } catch (cause) {
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
