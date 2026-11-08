@@ -917,29 +917,16 @@ const openReply = async (p: Page) => {
 const idOf = async (threadId: string, name: string) =>
   ((await (await fetch(`${studio.url}/api/inbox/threads/${threadId}`)).json()) as { thread: { messages: { attachments?: { id: string; name: string }[] }[] } }).thread.messages.flatMap((m) => m.attachments ?? []).find((a) => a.name === name)!.id;
 
-test("New message over a thread offers that thread's files; the next thread's agent gets the same bytes and no word of the first", async () => {
+test("New message with a file: the next thread's agent gets the same bytes and no word of the first", async () => {
   const { thread_id } = await threadWithFiles();
+  expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
   await open(page, thread_id);
-  await openNewMessage(page);
-  const row = composeDialog(page).locator('[data-compose-from]');
-  await expect(row.locator('[data-compose-from-file]')).toHaveCount(3);
   const before = blobsOf(studio);
-  const thumb = (name: string) => row.getByRole('button', { name: new RegExp(name) });
-  await thumb(REF_A).click();
-  await thumb(SHEET).click();
-  await expect(composeDialog(page).locator('[data-compose-file="done"]')).toHaveCount(2);
-  await expect(thumb(REF_A)).toHaveAttribute('aria-pressed', 'true');
-  // A file with no picture: the check takes the icon's place, not one drawn over the other; a picture keeps showing under its check.
-  await expect(thumb(SHEET).locator('svg')).toHaveCount(1);
-  await expect(thumb(SHEET).locator('.ib-cp-from-c')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(thumb(REF_A).locator('img')).toBeVisible();
-  // A second click takes it out.
-  await thumb(SHEET).click();
-  await expect(composeDialog(page).locator('[data-compose-file]')).toHaveCount(1);
-  await thumb(SHEET).click();
-  await expect(composeDialog(page).locator('[data-compose-file="done"]')).toHaveCount(2);
+  await tile(page, REF_B).hover();
+  await button(page, 'tile', REF_B).click();
+  await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
 
-  await composeDialog(page).locator('textarea').first().fill('Use these for the invoice header.');
+  await composeDialog(page).locator('textarea').first().fill('Use this for the invoice header.');
   await composeDialog(page).locator('.ib-cp-tobtn').click();
   await composeDialog(page).locator('[data-compose-session="ses-billing"]').click();
   await composeDialog(page).locator('[data-compose-send]').click();
@@ -948,7 +935,7 @@ test("New message over a thread offers that thread's files; the next thread's ag
   const wake = billingSession.commands.at(-1)!.body!;
   expect(blobsOf(studio)).toEqual(before);
   const attached = [...wake.matchAll(/Attached: (\S+) \((.+)\)/g)].map((m) => [m[1]!, m[2]!] as const);
-  expect(attached.map(([name]) => name).sort()).toEqual([REF_A, SHEET].sort());
+  expect(attached.map(([name]) => name)).toEqual([REF_B]);
   for (const [name, path] of attached) {
     // A fake agent, a process of its own and on a Mac inside a sandbox that can write nothing: it reads the path it was
     // given and its own copy is read-only.
@@ -962,60 +949,6 @@ test("New message over a thread offers that thread's files; the next thread's ag
   expect(wake).not.toContain(thread_id);
 });
 
-test("a phone's keyboard hides the row, as it hides the tiles; down again, the row is back", async ({ browser, browserName }) => {
-  test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
-  const { thread_id } = await threadWithFiles();
-  expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-  const phone = await context.newPage();
-  try {
-    await open(phone, thread_id);
-    await preview(phone, REF_A).tap();
-    await phone.locator('[data-reuse-surface="bar"]').first().tap();
-    const row = composeDialog(phone).locator('[data-compose-from]');
-    await expect(row).toBeVisible();
-    // The keyboard as the phone-shell specs play it: the visual viewport loses its height.
-    const viewport = (height: number | null) =>
-      phone.evaluate((height) => {
-        const vv = window.visualViewport!;
-        if (height === null) delete (vv as unknown as Record<string, unknown>).height;
-        else Object.defineProperty(vv, 'height', { configurable: true, get: () => height });
-        vv.dispatchEvent(new Event('resize'));
-      }, height);
-    await viewport(844 - 336);
-    await expect(phone.locator('html')).toHaveAttribute('data-ib-keyboard', '');
-    await expect(row).toBeHidden();
-    await viewport(null);
-    await expect(phone.locator('html')).not.toHaveAttribute('data-ib-keyboard', /.*/);
-    await expect(row).toBeVisible();
-  } finally {
-    await context.close();
-  }
-});
-
-test('the row: each file\'s bytes once, newest first, at most 8; no thread open, no row', async () => {
-  const names = Array.from({ length: 10 }, (_, i) => `note-${i}.txt`);
-  const first = await threadWithFiles({ attachments: names.map((name) => art(name, `words of ${name}`)) });
-  // A later message: a new file, and an old file's bytes under another name.
-  await agent.send({ project_path: harbor, reply_to: first.thread_id, body: 'And these.', attachments: [art('newest.txt', 'the newest words'), art('again.txt', 'words of note-0.txt')] });
-  await open(page, first.thread_id);
-  await openNewMessage(page);
-  const row = composeDialog(page).locator('[data-compose-from] [data-compose-from-file]');
-  await expect(row).toHaveCount(8);
-  await expect(row.first()).toHaveAttribute('aria-label', 'Add newest.txt to this message');
-  await expect(row.nth(1)).toHaveAttribute('aria-label', 'Add again.txt to this message');
-  const labels = await row.evaluateAll((all) => all.map((b) => b.getAttribute('aria-label')));
-  expect(labels).not.toContain('Add note-0.txt to this message');
-  await page.keyboard.press('Escape');
-  await expect(composeDialog(page)).toHaveCount(0);
-  await page.goto(`${studio.url}/#`);
-  await expect(page.locator('section.ib-pane')).toHaveCount(0);
-  await openNewMessage(page);
-  await expect(composeDialog(page).locator('[data-compose-from]')).toHaveCount(0);
-  await page.keyboard.press('Escape');
-  await expect(composeDialog(page)).toHaveCount(0);
-});
-
 test("an archived thread's button opens New message with the file, To empty", async () => {
   const { thread_id } = await threadWithFiles();
   expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
@@ -1027,7 +960,6 @@ test("an archived thread's button opens New message with the file, To empty", as
   await expect(composeDialog(page)).toBeVisible();
   await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
   await expect(composeDialog(page).locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
-  await expect(composeDialog(page).locator('[data-compose-from]')).toBeVisible();
   // The archived thread itself did not change.
   await expect(replyTiles(page)).toHaveCount(0);
   await discardCompose(page);
@@ -1081,24 +1013,17 @@ test('paste falls back to a plain paste: no <img>, words around it, or a file th
   await expect(page.locator(`[data-reply-files] [data-compose-file-name="${REF_A}"]`)).toHaveCount(0);
 });
 
-test("a linked machine's thread: no row in New message, and a paste there is a plain paste", async () => {
+test("a linked machine's thread: a paste there is a plain paste", async () => {
   const seen: string[] = [];
   const watch = (request: { url: () => string }) => {
     if (request.url().includes('/uploads/reuse')) seen.push(request.url());
   };
   page.on('request', watch);
-  // First a local thread, so the row would be there to leak across.
+  // A local thread's file, so a paste there would have something to point at.
   const { thread_id } = await threadWithFiles();
   await open(page, thread_id);
-  await openNewMessage(page);
-  await expect(composeDialog(page).locator('[data-compose-from]')).toBeVisible();
-  await page.keyboard.press('Escape');
   await page.goto(`${studio.url}/#thread=${macbookThread}`);
   await expect(page.locator('[data-attachment-name="away.png"]').first()).toBeVisible();
-  await openNewMessage(page);
-  await expect(composeDialog(page)).toBeVisible();
-  await expect(composeDialog(page).locator('[data-compose-from]')).toHaveCount(0);
-  await page.keyboard.press('Escape');
   await openReply(page);
   await paste(page, REPLY_FIELD, `<img src="ORIGIN/api/inbox/attachments/${await idOf(thread_id, REF_A)}/image">`);
   await expect(page.locator('[data-reply-files] [data-compose-file]')).toHaveCount(1);

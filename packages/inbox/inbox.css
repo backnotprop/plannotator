@@ -4580,7 +4580,6 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
-  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-from { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
   /* The home bar is under the keyboard, and the foot must stay on screen in the little room left: what is over it gives way and scrolls. */
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] { padding-bottom: 0; }
@@ -9019,20 +9018,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-cp-file.ib-cp-flash { animation: ib-cp-flash 900ms ease-out; }
 @keyframes ib-cp-flash { 0%, 40% { border-color: var(--ib-calm-s, var(--primary)); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ib-calm-s, var(--primary)) 30%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .ib-cp-file.ib-cp-flash { animation-duration: 1ms; border-color: var(--ib-calm-s, var(--primary)); } }
-/* New message over a thread: that thread's files, one click each. */
-.ib-cp-from { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
-.ib-cp-from-l { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-cp-from-row { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 2px; }
-.pn-inbox .ib-cp-from-t { position: relative; flex: none; width: 34px; height: 34px; border-radius: 7px; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); background: var(--muted); border: 1px solid var(--border); }
-.ib-cp-from-t img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-.pn-inbox .ib-cp-from-t:hover { border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
-.pn-inbox .ib-cp-from-t.ib-on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
-/* A scrim over the thumbnail, the same in both looks, so the check reads on any picture and the picture still shows. */
-.ib-cp-from-c { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgb(0 0 0 / 0.5); }
-/* A file with no picture: nothing to keep showing, so the check takes the icon's place. */
-.ib-cp-from-c.ib-cp-from-c-file { color: var(--primary); background: none; }
-.pn-inbox .ib-cp-from-t:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-@media (hover: none) { .pn-inbox .ib-cp-from-t { width: 44px; height: 44px; } }
 @media print { .pn-inbox .ib-reuse, .ib-reuse-layer { display: none; } }
 
 /* "Session ended" on a row: quiet, beside the row's own words. */
