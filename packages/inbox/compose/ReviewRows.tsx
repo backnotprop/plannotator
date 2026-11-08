@@ -1,9 +1,9 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import type { InboxReviewChanges } from '@plannotator/core/inbox-types';
+import { inboxPullLabel, inboxReviewLinkOf, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { plural } from '@plannotator/core/inbox-format';
-import type { ReviewBoxPull, ReviewKind, ReviewPullsRead, ReviewSummary } from './reviewBox';
+import { reviewLinkWords, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewSummary } from './reviewBox';
 
 
 function Choices<T extends string>({ label, value, options, onChange, name }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (next: T) => void; name: string }) {
@@ -20,12 +20,8 @@ function Choices<T extends string>({ label, value, options, onChange, name }: { 
   );
 }
 
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="ib-cp-to ib-cp-rvrow">
-    <span className="ib-cp-tol">{label}</span>
-    {children}
-  </div>
-);
+/** No visible label: each control says what it asks. */
+const Row = ({ children }: { children: ReactNode }) => <div className="ib-cp-to ib-cp-rvrow">{children}</div>;
 
 function SummaryLine({ summary }: { summary: ReviewSummary }) {
   if (!summary) return null;
@@ -38,10 +34,31 @@ function SummaryLine({ summary }: { summary: ReviewSummary }) {
   );
 }
 
-/** The picker over what Reviews lists: FolderMenu's look and keys. Not reviewed comes first; a PR in review opens its thread. */
-function PullMenu({ pulls, read, selected, phone, onPick, onClose }: { pulls: readonly ReviewBoxPull[]; read: ReviewPullsRead; selected: string | null; phone: boolean; onPick: (pull: ReviewBoxPull) => void; onClose: () => void }) {
-  const [query, setQuery] = useState('');
+/** Text that means a link, whatever it turns out to be: the search reads it instead of filtering the list. */
+const isLinkText = (text: string) => inboxReviewLinkOf(text) !== null || /^\s*https?:\/\//i.test(text);
+
+/** What a pull request's link was read as. */
+function LinkReadLine({ read, inReview }: { read: InboxReviewLinkAnswer; inReview: boolean }) {
+  return (
+    <p className={read.ok ? 'ib-cp-rvreadok' : undefined} role="status" data-review-link-read={read.ok ? 'ok' : read.reason}>
+      {read.ok && <Icon name="check" size={13} />}
+      {reviewLinkWords(read)}
+      {inReview ? ' · Already in review' : ''}
+    </p>
+  );
+}
+
+const linkStateWord = (read: Extract<InboxReviewLinkAnswer, { ok: true }>) => (read.pull.state === 'merged' || read.pull.state === 'closed' ? read.pull.state : null);
+
+/**
+ * The picker over what Reviews lists: FolderMenu's look and keys. Not reviewed comes first; a PR in review opens its
+ * thread. Its search also takes a pasted link, for a PR that isn't listed, or to go straight to one that is.
+ */
+function PullMenu({ pulls, read, link, linkRead, linkInReview, onLink, onUseLink, selected, phone, onPick, onClose }: { pulls: readonly ReviewBoxPull[]; read: ReviewPullsRead; link: string; linkRead: InboxReviewLinkAnswer | null; linkInReview: boolean; onLink: (text: string) => void; onUseLink: () => void; selected: string | null; phone: boolean; onPick: (pull: ReviewBoxPull) => void; onClose: () => void }) {
+  const [query, setQuery] = useState(link);
+  const asLink = isLinkText(query);
   const options = useMemo(() => {
+    if (isLinkText(query)) return [];
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return pulls.filter((pull) => words.every((word) => `${pull.label} ${pull.title} ${pull.project ?? ''}`.toLowerCase().includes(word)));
   }, [pulls, query]);
@@ -55,6 +72,11 @@ function PullMenu({ pulls, read, selected, phone, onPick, onClose }: { pulls: re
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       setHl((at + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % Math.max(options.length, 1));
+    } else if (event.key === 'Enter' && asLink) {
+      event.preventDefault();
+      event.stopPropagation();
+      // Before its read lands too: the row then says what it finds. A link that failed says so right here.
+      if (!linkRead || linkRead.ok) onUseLink();
     } else if (event.key === 'Enter' && options[at]) {
       event.preventDefault();
       event.stopPropagation();
@@ -87,19 +109,41 @@ function PullMenu({ pulls, read, selected, phone, onPick, onClose }: { pulls: re
           aria-autocomplete="list"
           aria-controls={`ib-cp-plist-${uid}`}
           aria-activedescendant={at >= 0 ? optionId(at) : undefined}
-          aria-label="Find a pull request"
-          placeholder="Find a pull request"
+          aria-label="Find a pull request, or paste a link"
+          placeholder="Find a pull request, or paste a link"
           autoComplete="off"
           spellCheck={false}
           value={query}
+          data-review-link=""
           onChange={(event) => {
             setQuery(event.target.value);
             setHl(0);
+            onLink(isLinkText(event.target.value) ? event.target.value : '');
           }}
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-plist-${uid}`} aria-label="Pull requests">
-        {options.length === 0 && (
+        {asLink && !linkRead && <div className="ib-cp-none" data-review-link-reading="">Reading the link…</div>}
+        {asLink && linkRead && !linkRead.ok && <div className="ib-cp-none"><LinkReadLine read={linkRead} inReview={false} /></div>}
+        {asLink && linkRead?.ok && (
+          <>
+            <div
+              role="option"
+              aria-selected
+              className="ib-cp-opt ib-cp-rvopt ib-hl"
+              data-review-link-option={linkRead.pull.key}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onUseLink}
+            >
+              <RefMarkIcon kind="pr" state={linkStateWord(linkRead) ?? 'open'} size={14} />
+              <span className="ib-cp-rvlabel">{inboxPullLabel(linkRead.pull)}</span>
+              <span className="ib-cp-op" dir="auto">{linkRead.pull.title}</span>
+              <span className="ib-cp-rvwhere">{linkInReview ? 'open it' : (linkStateWord(linkRead) ?? linkRead.pull.repo)}</span>
+            </div>
+            <div className="ib-cp-rvread"><LinkReadLine read={linkRead} inReview={linkInReview} /></div>
+          </>
+        )}
+        {!asLink && options.length === 0 && (
           <div className="ib-cp-none" data-review-pulls-none={read}>
             {pulls.length > 0 ? 'No pull request matches.' : read === 'reading' ? 'Reading your pull requests…' : read === 'failed' ? "Couldn't read your pull requests." : 'No open pull requests.'}
           </div>
@@ -148,47 +192,77 @@ export function ReviewRows(props: {
   phone: boolean;
   menu: boolean;
   onMenu: (open: boolean) => void;
+  link: string;
+  /** The search holds a link, or stopped holding one (''). */
+  onLink: (text: string) => void;
+  linkRead: InboxReviewLinkAnswer | null;
+  /** The link's PR already has a review thread. */
+  linkInReview: boolean;
+  /** The link was chosen from the search: it's what is reviewed. */
+  linkChosen: boolean;
+  onUseLink: () => void;
 }) {
-  const { kind, pick, menu, onMenu } = props;
+  const { kind, pick, menu, onMenu, linkRead: read, linkChosen } = props;
+  const linkPull = linkChosen && read?.ok ? read : null;
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <Row label="Review">
-        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local changes'], ['pr', 'Open pull request']]} />
+      <Row>
+        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local'], ['pr', 'Pull request']]} />
       </Row>
       {kind === 'local' ? (
-        <Row label="Changes">
+        <Row>
           <Choices label="Changes" name="changes" value={props.changes} onChange={props.onChanges} options={[['uncommitted', 'Uncommitted'], ['last', 'Last commit'], ['branch', 'Whole branch']]} />
           <SummaryLine summary={props.summary} />
         </Row>
       ) : (
-        <Row label="Pull request">
-          <button ref={button} type="button" className="ib-cp-tobtn" aria-haspopup="listbox" aria-expanded={menu} data-review-pick={pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
-            {pick ? (
-              <>
-                <RefMarkIcon kind="pr" state="open" size={14} />
-                <span className="ib-cp-tod">{pick.label}</span>
-                <b dir="auto">{pick.title}</b>
-              </>
-            ) : (
-              <span className="ib-cp-tod">Choose a pull request</span>
+        <>
+          <Row>
+            <button ref={button} type="button" className="ib-cp-tobtn ib-cp-rvpick" aria-haspopup="listbox" aria-expanded={menu} aria-label={`Pull request: ${linkPull ? `${linkPull.pull.repo} ${inboxPullLabel(linkPull.pull)} ${linkPull.pull.title}` : linkChosen ? props.link : pick ? `${pick.label} ${pick.title}` : 'none chosen'}`} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
+              {linkPull ? (
+                <>
+                  <RefMarkIcon kind="pr" state={linkStateWord(linkPull) ?? 'open'} size={14} />
+                  <span className="ib-cp-tod">{linkPull.pull.repo}</span>
+                  <span className="ib-cp-rvnum">{inboxPullLabel(linkPull.pull)}</span>
+                  <b dir="auto">{linkPull.pull.title}</b>
+                  {linkStateWord(linkPull) && <span className="ib-cp-tod">· {linkStateWord(linkPull)}</span>}
+                </>
+              ) : linkChosen ? (
+                <span className="ib-cp-tod">{props.link}</span>
+              ) : pick ? (
+                <>
+                  <RefMarkIcon kind="pr" state="open" size={14} />
+                  <span className="ib-cp-tod">{pick.label}</span>
+                  <b dir="auto">{pick.title}</b>
+                </>
+              ) : (
+                <span className="ib-cp-tod">Choose or paste a pull request</span>
+              )}
+              <Icon name="chevD" size={15} />
+            </button>
+            {menu && (
+              <PullMenu
+                pulls={props.pulls}
+                read={props.pullsRead}
+                link={props.link}
+                linkRead={read}
+                linkInReview={props.linkInReview}
+                onLink={props.onLink}
+                onUseLink={props.onUseLink}
+                selected={pick?.id ?? null}
+                phone={props.phone}
+                onPick={props.onPick}
+                onClose={() => {
+                  onMenu(false);
+                  button.current?.focus();
+                }}
+              />
             )}
-            <Icon name="chevD" size={15} />
-          </button>
-          {menu && (
-            <PullMenu
-              pulls={props.pulls}
-              read={props.pullsRead}
-              selected={pick?.id ?? null}
-              phone={props.phone}
-              onPick={props.onPick}
-              onClose={() => {
-                onMenu(false);
-                button.current?.focus();
-              }}
-            />
+          </Row>
+          {linkChosen && read && !menu && (
+            <div className="ib-cp-rvread ib-cp-rvreadrow"><LinkReadLine read={read} inReview={props.linkInReview} /></div>
           )}
-        </Row>
+        </>
       )}
     </>
   );

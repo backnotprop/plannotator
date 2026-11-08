@@ -953,13 +953,13 @@ test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with
 test.skipIf(!hasDom)('the box: a kept pick that has gone into review since is dropped, and its words stay; one that has not stays picked', async () => {
   const started: StartThreadInput[] = [];
   const open = (pull: ReviewBoxPull) => mount(<ComposeDialog request={{ review: {} }} reviewPulls={[pull]} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open(boxPick());
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe(boxPick().id);
   act(() => root!.unmount());
   root = null;
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open({ ...boxPick(), thread: { id: 'msg_elsewhere', agent: 'Claude Code' } });
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe('choose');

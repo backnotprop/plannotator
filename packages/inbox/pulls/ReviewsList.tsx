@@ -16,7 +16,7 @@ import { pullFilterEmptyWords, pullNounWord, stackTitle, type PullFilter } from 
 import { initials, repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { chainMarks } from './topology';
-import { readReviewFolds, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
+import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 
 /** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
 const failedAvatars = new Set<string>();
@@ -160,8 +160,8 @@ function ReviewRowItem({
         {line.kind === 'stack' && stack ? (
           <Chain stack={stack} />
         ) : line.kind === 'pr' ? (
-          <span className="ib-bc-mark" data-card-mark={focusPull?.state ?? row.landed[0]?.state ?? 'open'} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={focusPull?.state ?? row.landed[0]?.state ?? 'open'} size={13} />
+          <span className="ib-bc-mark" data-card-mark={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} data-card-mark-kind="pr" aria-hidden="true">
+            <RefMarkIcon kind="pr" state={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} size={13} />
           </span>
         ) : (
           <Icon name="laptop" size={14} />
