@@ -10,8 +10,9 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
-import { inboxUrl, machineOf } from './inboxUrl';
+import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -23,13 +24,12 @@ import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/componen
 import { TIP_DELAY_MS } from './components/Tip';
 import { configStore } from '@plannotator/ui/config';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
-import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAttachmentState, InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
@@ -78,6 +78,7 @@ import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
+import { ActivityChart } from './components/ActivityChart';
 import { AccountsProvider, useAccounts } from './useAccounts';
 import { InitiativeTagsContext, type InitiativeTags } from './hashtags';
 import { SidebarShell } from './shell/SidebarShell';
@@ -107,6 +108,9 @@ import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { ConnectLine } from './components/ConnectLine';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { SystemSetupHost } from './system/SetupHost';
+import { systemShown } from './system/gate';
+import { useSystemProjects } from './system/projects';
+import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -126,7 +130,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -162,6 +166,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
@@ -175,6 +180,7 @@ import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { BroIntro } from './components/BroIntro';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
@@ -183,11 +189,13 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
@@ -198,7 +206,9 @@ import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
-import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
+import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
+import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
@@ -231,11 +241,7 @@ configurePlannotatorUI({
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  refCardTransport: async (href, _ref, signal) => {
-    const res = await fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } });
-    if (!res.ok) return null;
-    return (await res.json()) as ForgeRefCardResult;
-  },
+  refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
@@ -340,6 +346,14 @@ interface Route {
   /** Reviews' view (`&view=mine|review|others`; absent: All), beside `project`. */
   view?: PullFilter;
   /**
+   * System in Reviews (approval "system-inbox", screens 4a and 4b): the project whose drawing is open in the pane
+   * (`&system=prj_…`), the sheet on screen (`&sheet=C-001`) and the full window (`&full=1`). A stack opened over it
+   * (`&stack=`) closes back to it.
+   */
+  system?: string | null;
+  sheet?: string | null;
+  full?: boolean;
+  /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
    */
@@ -381,8 +395,8 @@ interface Route {
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
-   * Where that review opens (a Shape board's link, approval "shape-whats-changed"): `&code=path:line`, `&step=N`
-   * or `&files`. Dropped from the address once the review is there.
+   * Where that review opens (a Shape board's place in code, such as a drawn part's `data-code`): `&code=path:line`,
+   * `&step=N` or `&files`. Dropped from the address once the review is there.
    */
   guideAt?: ShapeReviewAt | null;
   /**
@@ -390,6 +404,8 @@ interface Route {
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
    */
   artifacts?: boolean;
+  /** The Artifacts view on its links (`#thread=…&artifacts&links`). Means nothing without `artifacts`. */
+  links?: boolean;
   /**
    * A message to land on (`#thread=…&msg=msg_…`, a search result): the thread
    * opens there, the message unfolded, centred, focused and ringed. Dropped
@@ -423,7 +439,17 @@ function routeOf(fullHash: string): Route {
   if (fromReviews && !params.get('thread')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'reviews', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
+    return {
+      page: 'reviews',
+      project: params.get('project') || null,
+      view: pullFilterOf(params.get('view')),
+      thread: null,
+      stack,
+      layer,
+      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      new: params.has('new'),
+      ...systemRouteOf(params),
+    };
   }
   if (params.has('board'))
     return {
@@ -448,6 +474,7 @@ function routeOf(fullHash: string): Route {
     shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
+    links: thread ? params.has('artifacts') && params.has('links') : false,
     card: thread ? params.get('card') : null,
     // The Board list the card was opened from (Done, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
@@ -475,6 +502,7 @@ function hashOf(route: Route): string {
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
+      systemHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
@@ -488,6 +516,7 @@ function hashOf(route: Route): string {
     if (route.thread) params.set('thread', route.thread);
     if (route.thread && route.msg) params.set('msg', route.msg);
     if (route.thread && route.artifacts) params.set('artifacts', '');
+    if (route.thread && route.artifacts && route.links) params.set('links', '');
     if (route.thread && route.file) {
       params.set('file', route.file.id);
       if (route.file.version === 'sent') params.set('v', 'sent');
@@ -506,8 +535,8 @@ function hashOf(route: Route): string {
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts` and `&files`, flags: written without their empty `=`.
-    hash = params.toString().replace(/(^|&)(artifacts|files)=(?=&|$)/g, '$1$2');
+    // `&artifacts`, `&links` and `&files`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(artifacts|links|files)=(?=&|$)/g, '$1$2');
     if (route.reviews) hash = hash ? `reviews&${hash}` : 'reviews';
   }
   return hash ? `#${hash}` : '';
@@ -862,6 +891,8 @@ function Inbox() {
     });
   }, []);
   const [thread, setThread] = useState<InboxThread | null>(null);
+  /** The open thread's files as its pane read them, for New message over it (null: no thread, or another machine's). */
+  const [threadFiles, setThreadFiles] = useState<readonly InboxAttachmentState[] | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
   // A launched thread's run line (the thread route's `run`; launch only): null while the agent rests.
@@ -1602,9 +1633,11 @@ function Inbox() {
   const refreshSettings = useCallback(async () => {
     try {
       const mark = listLookReadMark();
+      const reactionsMark = reactionsReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
+      adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
@@ -2096,6 +2129,7 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
           // Code review and Shape move the "/" list: the next box reads the catalog again.
@@ -2492,6 +2526,17 @@ function Inbox() {
         pageBackRef.current();
         return;
       }
+      // System's drawing in Reviews (approval "system-inbox", 4b: "Reviews, top left, or Esc goes back"): one layer per
+      // press, the full window, then the drawing. The drawing's own Escape (a card, a sheet inside) runs first and marks
+      // the key used. A PR's pane open over it owns the screen.
+      // While System does not show, a leftover `&system=` is not on the ladder: Escape is today's.
+      const systemBack = event.key === 'Escape' ? systemEscapeTo(routeRef.current, systemShown(settingsRef.current) && !tailnetGuest(settingsRef.current)) : null;
+      if (systemBack) {
+        const from = keyTarget(event);
+        if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"]')))) return;
+        closeTo(systemBack);
+        return;
+      }
       // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
       // (its panel, its draw-in) runs first and marks the key used.
       if (event.key === 'Escape' && routeRef.current.page === 'shapes') {
@@ -2647,6 +2692,17 @@ function Inbox() {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
   };
+  // A failed clone's Change the URL (E5, from its run line): New message with the URL in the folder menu's filter.
+  useEffect(() => {
+    const onClone = (event: Event) => {
+      const detail = (event as CustomEvent<ComposeCloneRequest>).detail;
+      if (!detail?.url) return;
+      composeOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setCompose({ clone: detail, body: detail.body });
+    };
+    window.addEventListener(COMPOSE_CLONE_EVENT, onClone);
+    return () => window.removeEventListener(COMPOSE_CLONE_EVENT, onClone);
+  }, []);
   /**
    * The draft after this one in the Drafts list (else the one before), for
    * focus once it leaves the list: sent, deleted or discarded.
@@ -3019,8 +3075,16 @@ function Inbox() {
     }, ms);
   };
   const showToast = (next: Omit<InboxToastModel, 'id'>, ms = MARK_READ_UNDO_MS) => {
+    // An unseen toast (a reaction's Undo for `Z`) never takes the place of one on screen (an error, another Undo): the
+    // live region still says it.
+    if (next.hidden && toastNow.current && !toastNow.current.hidden) {
+      say(toastSpeech(next, isTouchPhone()));
+      return;
+    }
     toastLeft.current = null;
-    setToast({ ...next, id: Date.now() });
+    const model = { ...next, id: Date.now() };
+    toastNow.current = model;
+    setToast(model);
     // A narrow desktop window (the phone layout, a mouse and keys) keeps Z, so it hears "Press Z to undo".
     say(toastSpeech(next, isTouchPhone()));
     armToastTimer(ms);
@@ -3047,6 +3111,11 @@ function Inbox() {
    * machine takes it, and says so, without the warning.
    */
   const showError = (cause: unknown) => showToast(errorToast(cause, 'The thread did not change.'));
+  // A tray change the server refused (approval "inbox-reaction-tray"): already taken back on screen; the toast says why.
+  useEffect(() => {
+    onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
+    return () => onSavedReactionsFailed(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -3280,10 +3349,22 @@ function Inbox() {
    * is marked read; once the Undo window passes the Inbox sends it to the
    * agent. The held-order rules of Mark read apply: with the thread open its
    * row changes in place.
+   *
+   * `reaction` (approval "inbox-reaction-tray"): the emoji picked in the 👍's
+   * tray, null for 👍 Looks good, undefined for the plain button (today's call).
+   * The agent gets the one the Undo window closes on. A reaction draws no toast: the
+   * emoji flies to the message; the toast is kept unseen, so `Z` still undoes it
+   * and the live region still says it. Taking one back, `reaction` is the one
+   * taken back, for the words only.
+   *
+   * `was` (defined only when the message already had the person's mark): the
+   * reaction it had (null: 👍 Looks good). Then only the emoji changes (the
+   * store keeps the ack, its time and whether it went), so `Z` puts the one it
+   * had back, never takes the mark away, and nothing says it goes in 10 s.
    */
-  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string) => {
+  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => {
     try {
-      await inboxApi.ack(messageId, on);
+      await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
       showError(cause);
       await afterWrite();
@@ -3291,8 +3372,43 @@ function Inbox() {
     }
     await afterWrite([threadId]);
     if (!on) {
-      dismissToast();
-      say('Looks good taken back.');
+      // Only a 👍's own toast goes with it; an error or another Undo on screen stays.
+      if (toastNow.current && (toastNow.current.hidden || toastNow.current.icon === 'thumb')) dismissToast();
+      say(`${reaction ? reactionSpeech(reaction) : 'Looks good'} taken back.`);
+      return;
+    }
+    if (was !== undefined && reaction !== undefined) {
+      const words = reaction ? reactionSpeech(reaction) : 'Looks good';
+      const before = was ? reactionSpeech(was) : 'Looks good';
+      showToast({
+        hidden: true,
+        icon: 'thumb',
+        lead: words,
+        speech: `Changed to ${words}.`,
+        onUndo: () =>
+          void (async () => {
+            try {
+              await inboxApi.ack(messageId, true, was);
+            } catch (cause) {
+              showError(cause);
+              await afterWrite();
+              return;
+            }
+            await afterWrite([threadId]);
+            say(`Back to ${before}.`);
+          })(),
+      });
+      return;
+    }
+    if (reaction !== undefined) {
+      const words = reaction ? reactionSpeech(reaction) : 'Looks good';
+      showToast({
+        hidden: true,
+        icon: 'thumb',
+        lead: words,
+        speech: `${words}. Goes to ${agent} in 10 seconds and moves to Quiet.`,
+        onUndo: () => void acknowledge(threadId, messageId, false, agent, reaction),
+      });
       return;
     }
     // Only the open thread's foot offers 👍, so the toast always speaks of that thread.
@@ -4233,6 +4349,19 @@ function Inbox() {
     }
   };
 
+  // Bro mode (approval "bro-mode"): every other window hears `event: capabilities`.
+  const toggleBro = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, bro: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveBro(next);
+      setSettings((current) => (current ? { ...current, bro: saved.bro } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
   const toggleSteps = async (next: boolean) => {
     setSettingsError(null);
@@ -4254,6 +4383,19 @@ function Inbox() {
       const saved = await inboxApi.saveCodeReview(next);
       reloadSkillCatalog();
       setSettings((current) => (current ? { ...current, code_review: saved.code_review } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
+  // System (approval "system-inbox", screen 1): under Code review; every other window hears `event: capabilities`.
+  const toggleSystem = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, system: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveSystem(next);
+      setSettings((current) => (current ? { ...current, system: saved.system ?? { on: next } } : current));
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
       void refreshSettings();
@@ -4324,6 +4466,8 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
+  /** Settings → Activity reads this Inbox's own store: its own projects only (not a linked machine's). */
+  const activityProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
   // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
   const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
   useEffect(() => {
@@ -4645,6 +4789,25 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // The Bro mode offer (approval "bro-mode"), registered with the line (approval "inbox-one-time-dialogs"; reveal.ts
+  // `useLineReveal`): the queue gives it to heavy use only, never on day 0 or 1. Its moment: back on the list from a
+  // thread whose last agent message has 150 words or more, after 20 s or more on it (`broRevealLeaveCounts`). The claim
+  // only stamps it; BroIntro offers it.
+  const broReveal = useLineReveal({
+    id: 'bro',
+    due: snoozeIntroLatch.current?.next === 'bro',
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
+    mayClaim: () => true,
+    // Turned on meanwhile (Settings, another window): nothing to offer.
+    holds: () => settingsRef.current?.bro?.on !== true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open, once the list is taller than the screen, on Smart groups.
@@ -4683,7 +4846,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4704,7 +4867,9 @@ function Inbox() {
           ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
           : feature === 'steps'
             ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
-            : () =>
+            : feature === 'bro'
+              ? () => inboxApi.saveBro(true).then((saved) => saved.bro)
+              : () =>
                 inboxApi.saveCodeReview(true).then((saved) => {
                   // As Settings' switch: the "/" list gains the review skills.
                   reloadSkillCatalog();
@@ -4761,6 +4926,8 @@ function Inbox() {
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
     stepsReveal.stage !== 'claimed' &&
+    broReveal.stage !== 'open' &&
+    broReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
     starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
@@ -4803,6 +4970,17 @@ function Inbox() {
     }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
     return () => clearTimeout(timer);
   }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
+  // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
+  const systemOnHere = systemShown(settings) && !guestPage;
+  const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
+  // A drawing's address while System does not show (turned off, Code review off, a guest's page): dropped in place,
+  // so Reviews is today's. Not before the settings are read: System may be on.
+  useEffect(() => {
+    if (settings === null) return;
+    const clean = systemDropped(route, systemOnHere);
+    if (clean) writeRoute(clean, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings === null, systemOnHere, route.page, route.system, route.sheet, route.full]);
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
     // In place: Back from the Inbox must not land on #reviews and be sent back again.
@@ -5417,6 +5595,20 @@ function Inbox() {
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // Every guide or review opens the full-window review (ReviewPane, approval "inbox-one-review-screen").
   const reviewPaneOpen = !!guideMessage;
+  // Show me from a thread's board, above the board: one closed while another draws keeps its wait and the presses
+  // behind it, and the new board opens when it lands: over the grid or its own thread, else in its own thread.
+  const showMeThreadRef = useRef<string | null>(null);
+  const threadShowMe = useThreadShowMe({
+    shapes,
+    board: shapeLayerId && !reviewPaneOpen ? shapeLayerId : null,
+    onBoard: (id) => {
+      const now = routeRef.current;
+      const home = showMeThreadRef.current;
+      go(showMeBoardOpensIn(now, home) === 'here' ? { ...now, shape: id } : { page: 'inbox', project: null, thread: home, shape: id });
+    },
+    say,
+  });
+  showMeThreadRef.current = threadShowMe.threadId;
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -5605,6 +5797,30 @@ function Inbox() {
   }, [stack.thread, view, route.thread, phone]);
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
+  const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
+  // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
+  // when the projects change; never on a timer.
+  const plusOn = projectPlusOn(settings?.launch?.enabled, guestPage);
+  const [plusHere, setPlusHere] = useState<InboxComposeLaunch | null>(null);
+  const projectCount = projects.length;
+  useEffect(() => {
+    if (!plusOn) return;
+    let live = true;
+    const read = () => {
+      if (document.visibilityState === 'hidden') return;
+      inboxApi.composeSessions(null, null).then(
+        (got) => live && setPlusHere(got.launch ?? null),
+        () => {},
+      );
+    };
+    read();
+    document.addEventListener('visibilitychange', read);
+    return () => {
+      live = false;
+      document.removeEventListener('visibilitychange', read);
+    };
+  }, [plusOn, projectCount]);
   const composeLaunched = useMemo(() => launchHistory(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   // The project compose treats as current: the list's filter, else the open thread's.
   const composeCurrent = (() => {
@@ -5688,7 +5904,10 @@ function Inbox() {
         })
       : null;
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
-  const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => (
+  const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
+    // A PR opened from a project's drawing closes back to it (its own page only).
+    const drawingKept = systemKept(route, systemOnHere && !threadId);
+    return (
     <PullsPage
       state={pulls}
       stackId={route.stack ?? null}
@@ -5699,14 +5918,30 @@ function Inbox() {
       projectNames={projectNames}
       phone={phone}
       onNew={() => openCompose({ review: {} })}
-      onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null }))}
-      onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null })}
-      onReview={(stack, layer, scope) => go({ page: 'reviews', project, view, thread: null, stack, layer, scope })}
+      onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null, ...drawingKept }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null, ...drawingKept }))}
+      onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null, ...drawingKept })}
+      onReview={(stack, layer, scope) => go({ page: 'reviews', project, view, thread: null, stack, layer, scope, ...drawingKept })}
+      system={
+        systemOnHere && !threadId
+          ? {
+              projects: systemProjects.projects,
+              open: route.system ?? null,
+              sheet: route.sheet ?? null,
+              full: route.full === true,
+              // Picking a project opens its drawing in place of a PR's pane; the list keeps its filter.
+              onOpen: (system) => (system ? go({ ...route, stack: null, layer: null, system, sheet: null, full: false }) : close({ ...route, system: null, sheet: null, full: false })),
+              onSheet: (sheet) => writeRoute({ ...route, sheet }, { replace: true }),
+              onFull: (full) => (full ? go({ ...route, full: true }) : close({ ...route, full: false })),
+              onMenu: systemProjects.reload,
+            }
+          : null
+      }
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
       onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
     />
-  );
+    );
+  };
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -5741,8 +5976,11 @@ function Inbox() {
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleBro={(next) => void toggleBro(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
+        onToggleSystem={(next) => void toggleSystem(next)}
+        systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5764,6 +6002,16 @@ function Inbox() {
         onReadStore={readStore}
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
+        activity={
+          <ActivityChart
+            projects={activityProjects}
+            names={projectNames}
+            project={routeOf(settingsReturn.current).project ?? null}
+            phone={phone}
+            refreshKey={latest?.cursor ?? null}
+            onOpenThread={(thread, project) => go({ page: 'inbox', project, thread })}
+          />
+        }
         archivedTotal={archivedTotal}
         aboutDot={pageUpdate ? true : pageCheckFailing ? 'check-failing' : false}
         updateRow={
@@ -6127,6 +6375,8 @@ function Inbox() {
               </>
             }
             thread={thread}
+            onThreadFiles={setThreadFiles}
+            onNewMessageWith={(source) => openCompose({ reuse: [source] })}
             codeReview={settings?.code_review?.on === true}
             inReviews={!!route.reviews}
             reviewView={reviewView}
@@ -6159,7 +6409,7 @@ function Inbox() {
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}
-            onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
+            onAck={(messageId, on, agent, reaction, was) => void acknowledge(thread.thread_id, messageId, on, agent, reaction, was)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
@@ -6178,7 +6428,7 @@ function Inbox() {
             shapeButton={(() => {
               const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
               if (!board) return null;
-              const open = route.shape === board.id;
+              const open = !!route.shape;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
             askFileButton={ask.fileButton}
@@ -6243,7 +6493,10 @@ function Inbox() {
             fullExitFile={fullExitFile(window.history.state)}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             artifacts={route.artifacts === true}
-            onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
+            onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
+            links={route.artifacts === true && route.links === true}
+            // Between the view's two sides: the same screen, so Back still returns to the thread.
+            onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
             // sitting is tucked into its pill (the pill's Resume is the way back to it).
             decide={decideInThread(thread.thread_id)}
@@ -6388,6 +6641,10 @@ function Inbox() {
             onProjectRename={renameProject}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
+            // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
+            onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}
+            // Hidden on a row that can't start anything: no agent on that machine, launch off there, or its folder gone.
+            projectCanStart={(project, machine, machineLaunch) => projectCanStart(project, machine ? machineLaunchesKept().get(machine)?.launch : plusHere, machineLaunch)}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
@@ -6441,11 +6698,14 @@ function Inbox() {
         <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
           {main}
           {shapeLayerId && !reviewPaneOpen && (
-            <ShapeLayer
+            <ThreadShapeLayer
               host={shapeHost}
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+              shapes={shapes}
+              threadShowMe={threadShowMe}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              onBoard={(id) => go({ ...routeRef.current, shape: id })}
               // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
               onOpenReview={(messageId, at) => {
                 setBoardLink(messageId);
@@ -6458,6 +6718,7 @@ function Inbox() {
               onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
             />
           )}
+          {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}
         </main>
       </SidebarShell>
       <UsagePeek
@@ -6557,6 +6818,17 @@ function Inbox() {
             stepsReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
+        />
+      )}
+      {broReveal.stage === 'open' && (
+        <BroIntro
+          phone={phone}
+          onClose={() => {
+            // Not now (Escape, a click outside): the line's next dialog waits three days.
+            void inboxApi.revealNotNow('bro');
+            broReveal.close();
+          }}
+          onTurnOn={() => turnOnFromReveal('bro', broReveal.close)}
         />
       )}
       {starReveal.stage === 'open' && (
@@ -6752,7 +7024,7 @@ function Inbox() {
         </div>
       )}
       {ask.layer}
-      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
+      {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
         mounted={searchMounted}
         open={searchOpen}
@@ -6773,6 +7045,7 @@ function Inbox() {
         <ComposeDialog
           request={compose}
           phone={phone}
+          threadFiles={threadFiles}
           current={composeCurrent}
           lastSent={lastSent}
           home={settings?.home ?? null}
@@ -6888,6 +7161,7 @@ function Inbox() {
           }}
           at={route.guideAt ?? null}
           onLanded={landGuide}
+          onSay={say}
         />
       )}
     </div>

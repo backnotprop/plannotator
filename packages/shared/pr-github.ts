@@ -163,7 +163,7 @@ export function reconstructGhPatch(files: GitHubFileEntry[]): string {
  * always have withheld non-rename entries too, so the flag (and the local
  * recompute that fixes everything) still triggers.
  */
-function entryMissingContent(f: GitHubFileEntry): boolean {
+export function entryMissingContent(f: GitHubFileEntry): boolean {
   return !f.patch && f.status !== "renamed" && f.status !== "copied" && f.status !== "unchanged";
 }
 

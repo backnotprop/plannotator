@@ -14,7 +14,11 @@ type Toast = Omit<InboxToastModel, 'id'>;
  * runs. `show` replaces the window's one toast; `dismiss` closes it.
  */
 export function heldLaunchToast(held: ComposeHeld, show: (toast: Toast, ms: number) => void, dismiss: () => void, kept?: () => void): { toast: Toast; ms: number } {
-  const lead = held.asleep ? `${held.agentName} starts on ${held.machineName} when it's back` : `Sending to ${held.machineName}…`;
+  const lead = !held.asleep
+    ? `Sending to ${held.machineName}…`
+    : held.first
+      ? `Waiting for ${held.machineName}. It ${held.first} and starts ${held.agentName} when it's back.`
+      : `${held.agentName} starts on ${held.machineName} when it's back`;
   if (!held.queued) return { toast: { icon: 'clock', lead }, ms: 7000 };
   return {
     toast: {

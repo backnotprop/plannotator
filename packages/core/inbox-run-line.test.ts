@@ -97,6 +97,14 @@ describe("inboxRunOf", () => {
     expect(inboxRunOf(evidence({ launch: { ...evidence().launch, error: { code: "missing", text: "gone", at } } }))?.state).toBe("missing");
   });
 
+  test("a folder the Send made says it stays when the agent didn't start (E8); no other line says so", () => {
+    const at = new Date(T0).toISOString();
+    const failed = { ...evidence().launch, made_folder: true as const, error: { code: "failed" as const, text: "It isn't signed in.", at } };
+    expect(inboxRunOf(evidence({ launch: failed, shownFolder: "~/code/pricing-page" }))).toMatchObject({ state: "failed", made_folder: "~/code/pricing-page" });
+    expect(inboxRunOf(evidence({ launch: { ...failed, made_folder: undefined } }))).not.toHaveProperty("made_folder");
+    expect(inboxRunOf(evidence({ launch: { ...evidence().launch, made_folder: true }, shownFolder: "~/code/pricing-page" }))).not.toHaveProperty("made_folder");
+  });
+
   test("the CLI gone from PATH while the session is not live is missing", () => {
     expect(inboxRunOf(evidence({ cliAvailable: false, turnWaiting: true }))?.state).toBe("missing");
     // Nothing waits for it (the reply went to another session): no line.

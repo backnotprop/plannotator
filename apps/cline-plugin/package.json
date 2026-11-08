@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/cline",
-  "version": "0.28.52",
+  "version": "0.28.53",
   "type": "module",
   "description": "Plannotator plugin for Cline - the Plannotator Inbox in Cline sessions",
   "author": "backnotprop",

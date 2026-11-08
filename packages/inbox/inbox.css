@@ -263,6 +263,9 @@
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
+  --ib-fs-84: max(11px, calc(84px * var(--ib-type) / 14));
+  --ib-fs-104: max(11px, calc(104px * var(--ib-type) / 14));
+  --ib-fs-132: max(11px, calc(132px * var(--ib-type) / 14));
   --ib-fs-16-in: max(16px, calc(16px * var(--ib-type) / 14));
   /* Hovers and fades (--ib-soft-hover). Today's fade is ui's global one (packages/ui/theme.css `*`). */
   --ib-ui-fade: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -558,6 +561,14 @@ button.ib-mut { border-radius: 6px; }
 .ib-projrow[data-menu] .ib-proj:not(.ib-on) { background: var(--ib-side-menu); color: var(--foreground); }
 .ib-projrow[data-menu] .ib-pmore { color: var(--foreground); }
 /* Shown only because the list shows it (nothing of it is listed): it leaves when the person goes elsewhere. */
+/* "+" beside ⋯ (approval "launch-create-clone", F1-F2): a new session in this project, shown with ⋯ (hover, keyboard
+   focus, the menu open), the count giving way to both. */
+.pn-inbox .ib-pplus { position: absolute; right: 29px; top: 3px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r7-s, 6px); color: var(--muted-foreground); opacity: 0; }
+.ib-pplus .ib-ic { width: 16px; height: 16px; stroke-width: 2.2; }
+.pn-inbox .ib-pplus:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 90%, transparent)); color: var(--foreground); }
+.pn-inbox .ib-pplus:focus-visible { outline-offset: 0; }
+.ib-projrow:hover .ib-pplus, .ib-projrow:has(:focus-visible) .ib-pplus, .ib-projrow[data-menu] .ib-pplus { opacity: 1; }
+.ib-projrow[data-plus]:hover .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) .ib-proj, .ib-projrow[data-plus][data-menu] .ib-proj { padding-right: 58px; }
 .ib-projrow[data-held] .ib-proj { color: var(--muted-foreground); }
 .ib-projrow[data-held] .ib-name { opacity: 0.7; }
 /* Rename… in the project menu: the row's name as a field, in the row's own place and size, with the window's
@@ -1576,6 +1587,79 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Capabilities → Experimental's heading takes focus when `#settings/experimental` lands there, like a section's h1. */
 .pn-inbox .ib-sgroup > h2[tabindex]:focus, .pn-inbox .ib-sgroup > h2[tabindex]:focus-visible { outline: none; }
 .ib-sgroup > .ib-callout { margin-bottom: 10px; }
+/* Settings → Activity (components/ActivityChart.tsx): the threads hour by hour, one SVG of a few paths. Every colour is
+   the theme's: the accent (--ib-act-ink) mixed toward the surface the chart sits on (--ib-act-ground), so each
+   palette, light or dark, draws its own ramp. Moving the chart onto another surface sets --ib-act-ground there.
+   activityInk.ts sets --ib-act-ink (and --ib-act-strand) on the section when a palette's accent sits too close to
+   its card: the accent with just enough of the text colour that the faintest mark keeps 2:1. */
+.ib-activity { --ib-act-ground: var(--card); --ib-act-ink: var(--primary); }
+.ib-activity-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.ib-activity-sum { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-activity-box { position: relative; min-width: 0; }
+.ib-activity-scroll { position: relative; overflow-x: clip; border-radius: 6px; }
+.ib-activity-scroll[data-scrolls] { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.ib-activity-svg { display: block; touch-action: pan-x pan-y; }
+/* The day labels over the chart (the SVG's own top band); in the full screen they stick to its top as it scrolls down. */
+.ib-activity-days { position: relative; z-index: 1; pointer-events: none; }
+.ib-activity-day { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 6px 6px; overflow: hidden; white-space: nowrap; }
+.ib-activity-day + .ib-activity-day::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 0; width: 1px; background: var(--ib-hair); }
+.ib-activity-wd { font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); line-height: 1.2; }
+.ib-activity-dt { font-size: var(--ib-fs-13, 13px); color: var(--foreground); font-weight: 550; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ib-activity-dline { stroke: var(--ib-hair); stroke-width: 1; fill: none; shape-rendering: crispEdges; }
+.ib-activity-band { fill: var(--ib-hover); }
+/* Blend: a faint strand along each thread, then each run of hours as one translucent shape, a little more opaque
+   for busier runs. Mixed in oklab, which never turns the hue on its way to the surface (oklch's hue arc does). */
+.ib-activity-strand { stroke: color-mix(in oklab, var(--ib-act-ink) var(--ib-act-strand, 34%), var(--ib-act-ground)); stroke-width: 1; fill: none; }
+.ib-activity-t0, .ib-activity-t1, .ib-activity-t2 { fill: var(--ib-act-ink); }
+.ib-activity-t0 { fill-opacity: 0.62; }
+.ib-activity-t1 { fill-opacity: 0.76; }
+.ib-activity-t2 { fill-opacity: 0.9; }
+/* Dots (dev comparison, ?activity-look=dots): five steps from the accent near the surface to the accent toward the
+   text colour, so the brightest step stands out in light and dark alike. */
+.ib-activity-s0 { fill: color-mix(in oklab, var(--ib-act-ink) 56%, var(--ib-act-ground)); }
+.ib-activity-s1 { fill: color-mix(in oklab, var(--ib-act-ink) 70%, var(--ib-act-ground)); }
+.ib-activity-s2 { fill: color-mix(in oklab, var(--ib-act-ink) 85%, var(--ib-act-ground)); }
+.ib-activity-s3 { fill: var(--ib-act-ink); }
+.ib-activity-s4 { fill: color-mix(in oklab, var(--ib-act-ink) 55%, var(--foreground)); }
+.ib-activity-ring { fill: none; stroke: var(--foreground); stroke-width: 1.5; pointer-events: none; }
+.ib-activity-key { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 12px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+.ib-activity-key svg { display: block; }
+.ib-activity-note { margin: 0; padding: 18px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-activity-wait { height: 160px; }
+.ib-activity-tip { position: fixed; z-index: 90; max-width: 300px; padding: 9px 11px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); pointer-events: none; font-size: var(--ib-fs-12, 12px); line-height: 1.45; }
+.ib-activity-tip-n { font-weight: 600; font-size: var(--ib-fs-13, 13px); margin-bottom: 4px; overflow-wrap: anywhere; }
+.ib-activity-tip-v { font-variant-numeric: tabular-nums; }
+.ib-activity-tip-v b { font-weight: 600; }
+.ib-activity-tip-m { margin-top: 4px; color: var(--muted-foreground); }
+/* The slim preview: one dense picture, a click opens the full screen. */
+.ib-activity-bar .ib-activity-sum { flex: 1 1 0; min-width: 0; }
+.ib-activity-expand { margin-left: auto; flex: none; }
+.ib-activity-preview { cursor: zoom-in; border-radius: 6px; transition: background-color 120ms ease; }
+.ib-activity-preview:hover { background: var(--ib-hover); }
+.ib-activity-plot[data-size="preview"] .ib-activity-day { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 4px; padding: 0 0 6px 5px; }
+.ib-activity-plot[data-size="preview"] .ib-activity-dt { font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-activity-day[data-narrow] { padding-left: 4px; }
+.ib-activity-plot[data-size="preview"] .ib-activity-day[data-narrow] { gap: 2px; }
+/* The full screen: the window's modal, sized to the window, on the card's colour (the fitted ink's ground). */
+.pn-inbox dialog.ib-dlg.ib-activity-lb, dialog.ib-dlg.ib-activity-lb { width: calc(100vw - 48px); height: calc(100vh - 48px); max-height: none; overflow: hidden; background: var(--card); }
+dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
+.ib-activity-lb .ib-dlg-in { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px 12px; }
+.ib-activity-full { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ib-activity-lbhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.ib-activity-lbhead h2 { margin: 0 4px 0 0; }
+.ib-activity-full .ib-activity-sum { margin-left: auto; }
+.ib-activity-lbbody { position: relative; flex: 1; min-height: 0; }
+.ib-activity-plot[data-size="full"] { position: absolute; inset: 0; }
+.ib-activity-plot[data-size="full"] .ib-activity-scroll { height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ib-activity-plot[data-size="full"] .ib-activity-days { position: sticky; top: 0; background: var(--ib-act-ground); }
+.ib-activity-full .ib-activity-key { margin-top: 8px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox dialog.ib-dlg.ib-activity-lb, dialog.ib-dlg.ib-activity-lb { width: 100vw; height: var(--ib-vvh, 100dvh); max-width: none; margin: 0; border: 0; border-radius: 0; }
+  .ib-activity-lb .ib-dlg-in { padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)); }
+  .ib-activity-lbhead .ib-activity-close { order: 1; margin-left: auto; }
+  .ib-activity-lbhead .ib-seg { order: 2; }
+  .ib-activity-lbhead .ib-activity-sum { order: 3; margin-left: 0; width: 100%; }
+}
 .ib-spg > .ib-callout { margin-top: 16px; }
 .ib-card { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; background: var(--card); }
 .ib-card-pad { padding: 4px 16px 12px; }
@@ -1995,6 +2079,30 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-contents-phone .ib-contents-list { padding: 0 6px 16px; }
 .ib-contents-phone nav button { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding-top: 10px; padding-bottom: 10px; }
 .ib-htmlframe { position: absolute; inset: 0; }
+/* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one small icon in the page's top right corner (the
+   owner's pick: "Just the icon no words"), a phone at Phone size, a laptop at Desktop size. It floats like the other
+   tools and gathers with them. Desktop size lays the page out at a laptop's width and scales it to the phone's; pinch
+   zoom then zooms the window, and the page redraws sharp at the new zoom. */
+.ib-sizecorner { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 4; pointer-events: none; }
+.ib-sizebtn { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); border-radius: 10px; background: color-mix(in oklch, var(--popover) 90%, transparent); color: color-mix(in oklch, var(--popover-foreground) 82%, transparent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+:root.light .ib-sizebtn { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.08); }
+.ib-sizebtn:active { background: var(--muted); }
+/* It gets out of the way (sizeIconFade.ts): faded after about 3 seconds, and faded it takes no taps, so they reach the
+   page. It stays in the accessibility tree; keyboard focus holds it shown. Back quickly, away slowly. */
+.ib-sizebtn { pointer-events: auto; transition: opacity 160ms ease-out; }
+.ib-sizecorner[data-faded] .ib-sizebtn { opacity: 0; pointer-events: none; transition: opacity 400ms ease; }
+@media (prefers-reduced-motion: reduce) { .ib-sizebtn, .ib-sizecorner[data-faded] .ib-sizebtn { transition: none; } }
+.ib-sizebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Keyboard focus keeps it shown whatever the fade timer does. */
+.ib-sizecorner[data-faded] .ib-sizebtn:focus-visible { opacity: 1; pointer-events: auto; }
+/* 44 px to press, the button drawn at 34. */
+.ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+.ib-htmlframe.ib-fitdesk { overflow: hidden; }
+.ib-htmlframe.ib-fitdesk > div:first-child { position: absolute; top: 0; left: 0; width: var(--ib-fit-width) !important; height: calc(100% / var(--ib-fit-scale)) !important; transform: scale(var(--ib-fit-scale)); transform-origin: 0 0; }
+/* The bridge-failure banner (HtmlViewer's [data-bridge-error]) stays readable: drawn at the window's size, not the page's. */
+.ib-htmlframe.ib-fitdesk [data-bridge-error] { width: calc(100% * var(--ib-fit-scale)); transform: scale(calc(1 / var(--ib-fit-scale))); transform-origin: 0 0; }
+/* The pen's armed ring keeps its 2 px on screen. */
+.ib-htmlframe.ib-fitdesk [data-annotate-armed-ring] { box-shadow: inset 0 0 0 calc(2px / var(--ib-fit-scale)) color-mix(in srgb, var(--primary) 45%, transparent) !important; }
 /* A page the attached page links to, not attached: read-only over the attached page, which stays mounted under it (htmlLinks.ts). */
 .ib-htmlframe.ib-covered, .ib-docscroll.ib-covered { visibility: hidden; }
 .ib-linked { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--background); }
@@ -3499,6 +3607,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
   .pn-inbox .ib-pmore { opacity: 1; top: 0; right: 0; width: 44px; height: 44px; border-radius: 8px; }
   .ib-pmore .ib-ic { width: 20px; height: 20px; }
+  /* F6: "+" always shown too, its own 44 px target before ⋯. */
+  .ib-projrow[data-plus] > .ib-proj, .ib-projrow[data-plus]:hover > .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) > .ib-proj, .ib-projrow[data-plus][data-menu] > .ib-proj { padding-right: 90px; }
+  .pn-inbox .ib-pplus { opacity: 1; top: 0; right: 44px; width: 44px; height: 44px; border-radius: 8px; }
+  .ib-pplus .ib-ic { width: 20px; height: 20px; }
   /* Pinned rows on a phone: 44 px, ⋯ always shown (a 44 px target after the state), the state always visible. */
   .ib-pin { height: 44px; font-size: var(--ib-fs-15, 15px); flex: none; }
   .ib-pinrow > .ib-pin, .ib-pinrow:hover > .ib-pin, .ib-pinrow:has(:focus-visible) > .ib-pin, .ib-pinrow[data-menu] > .ib-pin { padding-right: 46px; }
@@ -4468,6 +4580,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-from { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
   /* The home bar is under the keyboard, and the foot must stay on screen in the little room left: what is over it gives way and scrolls. */
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] { padding-bottom: 0; }
@@ -5798,15 +5911,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-artbtn-n { font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-iconbtn.ib-artbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .ib-phead .ib-artbtn + .ib-iconbtn, .ib-phead .ib-artbtn + span + .ib-iconbtn { margin-left: 2px; }
-.ib-art-ph-title { margin-left: 4px; font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }
-.ib-art-ph-n { margin-left: 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
 .ib-art { padding: 2px 0 28px; }
-.ib-art-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 16px; }
-.pn-inbox .ib-art-back { align-self: center; display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 9px 0 4px; margin-left: -6px; border-radius: var(--ib-lr-xs); color: var(--primary); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; white-space: nowrap; }
-.pn-inbox .ib-art-back:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
-.ib-art-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; outline: none; }
-.ib-art-sum { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-art-load { margin: 24px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-art-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; }
 .ib-pane.ib-withfile .ib-art-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
@@ -5858,10 +5964,38 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-art-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 72px 20px; text-align: center; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
 .ib-art-empty b { font-size: var(--ib-fs-15, 15px); color: var(--foreground); }
 .ib-art-empty-ic { width: 52px; height: 52px; margin-bottom: 6px; display: grid; place-items: center; border-radius: var(--ib-lr-xl); background: var(--muted); color: var(--foreground); }
+/* The view's header: a row under the bar, with no line of its own. The way back, then the switch. */
+.ib-artbar { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 30px 0 22px; }
+.ib-pane.ib-withfile .ib-artbar { padding-left: 12px; padding-right: 20px; }
+.pn-inbox .ib-pane[data-full] .ib-artbar { padding-left: max(22px, calc((100% - 760px) / 2 - 8px)); }
+.pn-inbox .ib-iconbtn.ib-artbar-back { color: var(--muted-foreground); }
+.pn-inbox .ib-iconbtn.ib-artbar-back:hover { color: var(--foreground); }
+.ib-pbody.ib-artbody { padding-top: 12px; }
+.ib-artswitch-n { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ib-artswitch-one { display: inline-flex; align-items: baseline; gap: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 550; white-space: nowrap; }
+/* The Links side of the view (ThreadLinksView.tsx): rows and space, no boxes, no lines. */
+.ib-tl-rows { list-style: none; margin: 0; padding: 0; }
+.ib-tl-repo { margin: 0 0 18px; }
+.ib-tl-rh { margin: 0; font: inherit; }
+.ib-tl-repo > .ib-tl-rows { padding-left: 24px; }
+.ib-tl-others { margin-top: 2px; }
+.pn-inbox a.ib-tl-a { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 0 -8px; padding: 3px 8px; border-radius: var(--ib-lr-xs); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.35; text-decoration: none; }
+.pn-inbox a.ib-tl-a:hover { background: var(--muted); }
+.pn-inbox a.ib-tl-a:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ib-tl-ic { flex: none; width: 16px; height: 16px; color: var(--muted-foreground); }
+.ib-tl-rh .ib-tl-ic { color: var(--foreground); }
+.ib-tl-lead { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-tl-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-tl-name { font-weight: 600; }
+.ib-tl-tail { flex: none; max-width: 45%; margin-left: auto; padding-left: 12px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-art-tile { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-art-grid, .ib-pane.ib-withfile .ib-art-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .ib-art-top { margin-bottom: 12px; }
+  .pn-inbox a.ib-tl-a { min-height: 40px; font-size: var(--ib-fs-14, 14px); }
+  .ib-tl-repo > .ib-tl-rows { padding-left: 20px; }
+  .pn-inbox .ib-artswitch { margin: 0 6px 0 auto; flex: none; }
+  .pn-inbox .ib-artswitch .ib-seg-o { height: 34px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); }
+  .ib-artswitch-one { margin-left: 4px; font-size: var(--ib-fs-15, 15px); font-weight: 650; }
   .ib-art-who { display: none; }
   .pn-inbox .ib-iconbtn.ib-artbtn { min-width: 44px; height: 44px; }
   /* The header's icons keep their 44 px. Short of room for the subject it gives way (headFit.ts, `data-fit`): the
@@ -6814,6 +6948,42 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-text .ib-bi-q { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); margin-top: 10px; }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
+/* BRO-CARD-START Bro mode's card (the owner's pick, "poster"): the name as the picture on sneaker navy, the same in
+   both themes; the sidebar's Tater sits on the e. */
+dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 77px; --bro-h: 88px; width: min(480px, calc(100vw - 32px)); border: 0; border-radius: 16px; background: #27345a; color: #fbfaf5; box-shadow: 0 18px 50px oklch(0 0 0 / 0.4); }
+dialog.ib-dlg.ib-bi.ib-bro::before { content: ""; position: absolute; inset: 0 0 auto; height: 62%; border-radius: inherit; background: radial-gradient(circle at center, #fbfaf533 0 1.2px, transparent 1.5px) 0 0 / 8px 8px; -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent); mask-image: linear-gradient(to bottom, #000 30%, transparent); pointer-events: none; }
+dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; font-size: var(--ib-fs-132, 132px); font-weight: 800; line-height: 0.84; letter-spacing: -0.055em; color: #fbfaf5; }
+/* The sprite as the sidebar plays it (TaterMark): 24 frames, 3.5 s, mirrored; the first frame under reduced motion. */
+.ib-bro .ib-bro-tater { position: absolute; left: 292px; top: 80px; display: block; width: var(--bro-w); height: var(--bro-h); overflow: hidden; transform: scaleX(-1); }
+.ib-bro .ib-bro-strip { display: block; width: calc(var(--bro-w) * 24); height: var(--bro-h); background: left center / 100% 100% no-repeat; animation: ib-bro-strip 3.5s steps(24) infinite; }
+@keyframes ib-bro-strip { to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-bro .ib-bro-strip { animation: none; }
+}
+.ib-bro .ib-bi-text { position: relative; padding: 24px 26px 0; }
+.ib-bro .ib-bi-text p { margin: 0; font-size: var(--ib-fs-15, 15px); line-height: 1.45; text-wrap: pretty; }
+.ib-bro .ib-bi-acts { position: relative; padding: 20px 22px 22px 16px; }
+.pn-inbox .ib-bro .ib-btn.ib-ghost { color: #fbfaf5; }
+.pn-inbox .ib-bro .ib-btn.ib-ghost:hover { background: #fbfaf51f; }
+.pn-inbox .ib-bro .ib-btn.ib-pri { background: #f69d25; border-color: #f69d25; color: #222222; font-weight: 650; }
+.pn-inbox .ib-bro .ib-btn:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; }
+/* Where it came from: small and quiet, under the line. */
+.ib-bro .ib-bi-text .ib-bro-credit { margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.5; color: #fbfaf58c; }
+.ib-bro .ib-bro-credit code { padding: 1px 5px; border-radius: 4px; background: #fbfaf51a; color: #fbfaf5c7; font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-bro .ib-bro-credit a { color: inherit; text-decoration: underline; text-decoration-color: #fbfaf54d; text-underline-offset: 2px; }
+.ib-bro .ib-bro-credit a:hover { color: #fbfaf5; text-decoration-color: currentColor; }
+.ib-bro .ib-bro-credit a:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; border-radius: 2px; }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 63px; --bro-h: 72px; }
+  dialog.ib-dlg.ib-bro h2 { font-size: var(--ib-fs-104, 104px); }
+  .ib-bro .ib-bro-tater { left: 233px; top: 64px; }
+}
+@media (max-width: 350px) {
+  dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 52px; --bro-h: 60px; }
+  dialog.ib-dlg.ib-bro h2 { padding: 16px 18px 0; font-size: var(--ib-fs-84, 84px); }
+  .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
+}
+/* BRO-CARD-END */
 /* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
    small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
    name and tags, one line, and its button (Smart groups' the primary one). */
@@ -7169,11 +7339,11 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fbk-sent h2 { margin-top: 10px; }
 .ib-fbk-sent .ib-acts-row { justify-content: center; align-self: stretch; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-fbk.ib-fbk-phone {
+  .pn-inbox dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-riskd {
     inset: auto 0 calc(100% - var(--ib-vvh, 100%)) 0; margin: 0; width: 100vw; max-width: 100vw; max-height: calc(var(--ib-vvh, 100dvh) - 24px);
     border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
   }
-  .ib-fbk-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ib-fbk-phone .ib-dlg-in, .ib-riskd .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
   /* The whole row is a 44 px target. Three lines, so Send stays on screen on a small phone. */
   .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
@@ -7381,14 +7551,14 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    chip stays: it is a fact about the file. GATHERED in FullViewBar.tsx is the same list. The rail's box holds its
    panel to the left of its ticks: it flies by the ticks (the pane measures its dock), scaled about them. */
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
-.ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transition: var(--ib-gather-back); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
+.ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transition: var(--ib-gather-back); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transform: none; }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
 }
 
@@ -8688,6 +8858,48 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
 .ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
 .ib-pr-notice a:hover { text-decoration: underline; }
+
+/* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
+.ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-risk[data-risk="failed"] { font-style: italic; }
+.ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
+.ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
+.ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
+.ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-pr-l1 .ib-risk { margin-left: 2px; }
+.ib-vhead .ib-risk { margin-left: 4px; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-l { position: static; width: auto; height: auto; clip-path: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) { flex: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf { margin-left: auto; }
+.ib-prlist .ib-lhead .ib-pf-slot:has(+ .ib-pr-riskf) { margin-right: 0; }
+.ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 6px; }
+/* A narrow phone (320 px): the head's 44 px targets keep their size and the chip its word; the space between them
+   narrows so New review stays inside the edge. */
+@media (max-width: 374px) {
+  .ib-prlist .ib-lhead { gap: 4px; }
+  .ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 0; }
+  .pn-inbox .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-btn { padding: 0 8px; }
+}
+.ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
+.ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
+.ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+/* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
+.ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
+.ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A sheet at the bottom of the screen, as the feedback dialog (its rule is above): the list opens upward, inside it, and the sheet can still scroll. */
+  .ib-riskd:has(.ib-riskd-row .absolute) { overflow-y: auto; }
+  .ib-riskd-row > div { width: 100%; }
+  .ib-riskd-row button { width: 100%; min-height: 44px; font-size: var(--ib-fs-14, 14px); }
+  .ib-riskd-row button > span:nth-child(2) { flex: 1; min-width: 0; max-width: none; text-align: left; }
+  .ib-riskd-row input { font-size: var(--ib-fs-16-in, 16px); }
+  .ib-riskd-row .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
+  .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
+  /* A short phone keeps Save and Cancel on screen: the box gives up its height first. */
+  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(88px, 16dvh, 140px); }
+}
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */
@@ -8851,6 +9063,20 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-cp-file.ib-cp-flash { animation: ib-cp-flash 900ms ease-out; }
 @keyframes ib-cp-flash { 0%, 40% { border-color: var(--ib-calm-s, var(--primary)); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ib-calm-s, var(--primary)) 30%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .ib-cp-file.ib-cp-flash { animation-duration: 1ms; border-color: var(--ib-calm-s, var(--primary)); } }
+/* New message over a thread: that thread's files, one click each. */
+.ib-cp-from { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
+.ib-cp-from-l { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-cp-from-row { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 2px; }
+.pn-inbox .ib-cp-from-t { position: relative; flex: none; width: 34px; height: 34px; border-radius: 7px; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); background: var(--muted); border: 1px solid var(--border); }
+.ib-cp-from-t img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+.pn-inbox .ib-cp-from-t:hover { border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
+.pn-inbox .ib-cp-from-t.ib-on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+/* A scrim over the thumbnail, the same in both looks, so the check reads on any picture and the picture still shows. */
+.ib-cp-from-c { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgb(0 0 0 / 0.5); }
+/* A file with no picture: nothing to keep showing, so the check takes the icon's place. */
+.ib-cp-from-c.ib-cp-from-c-file { color: var(--primary); background: none; }
+.pn-inbox .ib-cp-from-t:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+@media (hover: none) { .pn-inbox .ib-cp-from-t { width: 44px; height: 44px; } }
 @media print { .pn-inbox .ib-reuse, .ib-reuse-layer { display: none; } }
 
 /* "Session ended" on a row: quiet, beside the row's own words. */
@@ -8872,11 +9098,27 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-sm-send .ib-sm-peb.shp-pebble path { stroke: currentColor; fill: color-mix(in oklab, currentColor 28%, transparent); }
 .ib-sm-box, .ib-sm-pip { position: absolute; right: 18px; bottom: 18px; z-index: 12; display: flex; flex-direction: column; overflow: hidden; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: var(--ib-float-shadow); }
 .ib-sm-box { width: 380px; max-width: calc(100% - 20px); border-radius: 14px; }
+/* A Show me from a board waits on the board, not behind it. */
+.ib-sm-box[data-over-board] { z-index: 21; bottom: 72px; }
+/* A thread's boards: the way back beside the title, the list at its right (the chapter menu's look). */
+.ib-shape-layer .shp-head-start { display: flex; align-items: center; gap: 2px; }
+.ib-shape-back { flex: none; }
+[data-shape-boards-menu] .ib-rj-row { padding-left: calc(8px + min(var(--ib-board-depth, 0), 6) * 14px); }
+/* A phone with the way back or the list: they and the close share the top line, and the title takes the line under
+   them, the full width, two lines at most (the list has every title in full). */
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) { flex-wrap: wrap; row-gap: 6px; }
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) > h1 {
+  order: 3; flex-basis: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+}
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) > .shp-head-side { margin-left: auto; }
+.ib-shape-layer .shp-root.phone .shp-head:has(.ib-shape-back, [data-shape-boards]) .shp-claim { margin-left: 0; }
 .ib-sm-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-sm-h b { font-weight: 650; }
+.ib-sm-h b { font-weight: 650; flex: none; white-space: nowrap; }
+/* A narrow box (a 320 phone): the agent's line wraps between words, never cut. */
 .ib-sm-by { color: var(--muted-foreground); }
 .ib-sm-b { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
 .ib-sm-at { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+.ib-sm-box[data-over-board] .ib-sm-at { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pn-inbox .ib-sm-field { min-height: 60px; resize: vertical; border: 0; border-radius: 9px; background: color-mix(in oklch, var(--muted) 45%, var(--card)); box-shadow: inset 0 0 0 1px var(--ib-line); padding: 8px 10px; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.45; color: var(--foreground); }
 .pn-inbox .ib-sm-field:focus { outline: none; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 60%, var(--border)), 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent); }
 .ib-sm-fine { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
@@ -9611,12 +9853,40 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .pn-inbox .ib-hfb-back:hover { background: var(--muted); color: var(--foreground); }
 .ib-hfb-field > svg.ib-ic { flex: none; }
 .ib-hfb-start .ib-cp-op b { font-weight: 600; }
-.ib-hfb-start > svg.ib-ic { color: var(--foreground); }
 .ib-hfb .ib-cp-none.ib-hfb-note { line-height: 1.45; overflow-wrap: anywhere; }
+/* Create a folder (approval "launch-create-clone", A1-A12): a lead row's mark is the accent (Start, Create, Go to); a
+   Create that waits behind a matching folder stays quiet; a folder that can't be opened is dimmed with its lock and
+   "no access"; the quiet line after a leading Create; the new-folder mark in To's folder button. */
+.ib-hfb-start > svg.ib-ic { color: var(--primary); }
+.ib-hfb-quiet .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+.ib-hfb-noaccess, .ib-hfb-noaccess .ib-cp-op { color: var(--muted-foreground); cursor: default; }
+.ib-hfb-noaccess-word { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-hfb-after { grid-column: 2 / -1; padding: 2px 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-hfb-sub { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
+.ib-cp-tobtn[data-compose-folder-new] > svg.ib-ic:first-child { color: var(--muted-foreground); }
+/* Clone from a git URL (approval "launch-create-clone", C1-C17, E1-E2): the clone rows lead with the git mark; a
+   machine whose git can't sign in is dimmed and still pickable (C11); "Checking git.acme.dev…" with the run line's
+   spinner; the line under the clone rows; the git mark in To's folder button; the clone's thin progress bar. */
+.ib-cp-clone-cant, .ib-cp-clone-cant .ib-cp-op { color: var(--muted-foreground); }
+.ib-cp-clone-cant > svg.ib-ic { color: var(--muted-foreground); }
+.ib-cp-none.ib-cp-checking { display: flex; align-items: center; gap: 9px; }
+.ib-cp-none.ib-cp-checking .ib-run-spin { margin-top: 0; }
+.ib-cp-explain { grid-column: 1 / -1; padding: 6px 10px 8px 34px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-cp-tobtn[data-compose-folder-clone] > svg.ib-ic:first-child { color: var(--muted-foreground); }
+.ib-run-bar { display: block; height: 3px; margin-top: 6px; max-width: 280px; border-radius: 2px; background: var(--muted); overflow: hidden; }
+.ib-run-bar > i { display: block; height: 100%; background: var(--primary); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-run-bar > i { transition: width 0.4s ease-out; }
+}
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-cp-picker[data-phone] .ib-cp-explain { font-size: var(--ib-fs-13-5, 13.5px); padding-left: 36px; }
   .ib-cp-picker[data-phone] .ib-hfb-head { min-height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
   .ib-cp-picker[data-phone] .ib-hfb .ib-cp-none { font-size: var(--ib-fs-14, 14px); padding: 14px 8px; }
   .ib-cp-picker[data-phone] .ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+  /* G6: a phone hides the path column, so a new folder's place is the row's second line. */
+  .ib-cp-picker[data-phone] .ib-hfb-two { padding-top: 7px; padding-bottom: 7px; }
+  .ib-cp-picker[data-phone] .ib-hfb-two .ib-cp-op { white-space: normal; }
+  .ib-cp-picker[data-phone] .ib-hfb-after { font-size: var(--ib-fs-13-5, 13.5px); }
 }
 
 /* System → Set up a project (packages/inbox/system/SetupDialog.tsx; approval "system-inbox", screens 2b to 2d):
@@ -9693,6 +9963,238 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .ib-sys-phone .ib-sys-inp { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
+}
+
+/* System in Settings and Reviews (approval "system-inbox", screens 1, 3, 4a and 4b; packages/inbox/system).
+   A picked row or a project that is open takes the filled highlight (--ib-cur-bg, --ib-sel), never a border or outline. */
+.ib-prow.ib-sysrow { flex-direction: column; align-items: stretch; gap: 10px; }
+.ib-sysrow-top { display: flex; align-items: center; gap: 14px; }
+.ib-sysrow-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ib-sysrow-p { display: flex; align-items: center; gap: 14px; min-height: 40px; padding: 4px 4px 4px 12px; border-radius: var(--ib-r8-s, 8px); background: var(--ib-fill); font-size: var(--ib-fs-13, 13px); }
+.ib-sysrow-n { flex: none; max-width: 40%; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysrow-s { flex: 1; min-width: 0; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysrow-p .ib-btn { flex: none; }
+.ib-prlist .ib-lhead .ib-pf-slot { gap: 2px; align-items: center; }
+.pn-inbox .ib-sysb { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-sysb:hover, .pn-inbox .ib-sysb[data-popup-open] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-sysb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-sysb[data-set] { padding: 0 10px 0 8px; background: var(--ib-cur-bg); color: var(--ib-cur-fg); }
+.ib-sysb-in { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.pn-inbox .ib-sysb svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.8; flex: none; }
+.ib-sysb-n { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.ib-sysm-h { padding: 6px 8px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-sysm-none { margin: 0; padding: 4px 8px 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pane.ib-syspane { display: flex; flex-direction: column; overflow-y: auto; }
+.ib-syspane-draw { flex: none; }
+.ib-sysp-note { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 64px 24px; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-sysp-note p { margin: 0; }
+.ib-sysprs { padding: 18px 22px 28px; }
+.ib-sysprs-h { margin: 0 0 6px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--muted-foreground); }
+.ib-sysprs-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ib-sysprs-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 9px 12px; border: 0; border-radius: var(--ib-r10-s, 10px); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-sysprs-row:hover { background: var(--ib-hover); }
+.ib-sysprs-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-sysprs-num { flex: none; min-width: 44px; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-sysprs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-sysprs-t { font-size: var(--ib-fs-14, 14px); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysprs-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-sysprs-parts { color: color-mix(in oklab, var(--warning) 88%, var(--foreground)); }
+.ib-sysprs-go { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: var(--ib-fs-13, 13px); color: var(--primary); }
+.ib-sysprs-quiet { margin: 4px 0 0; padding: 0 12px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-sysfull { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--card); color: var(--foreground); }
+.ib-sysfull-top { flex: none; display: flex; align-items: center; height: 44px; padding: 0 12px 0 max(12px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--ib-hair); }
+.pn-inbox .ib-sysfull-back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 0; border-radius: var(--ib-r10-s, 7px); background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.pn-inbox .ib-sysfull-back:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-sysfull-back:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-sysfull-body { flex: 1; min-height: 0; display: flex; }
+.ib-sysfull-draw { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ib-sysfull-draw > .sys-view { flex: 1; min-height: 0; }
+.ib-sysfull-aside { flex: none; width: 340px; overflow-y: auto; border-left: 1px solid var(--ib-hair); }
+.ib-sysfull-aside .ib-sysprs { padding: 16px 10px 24px; }
+.ib-sysfull-aside .ib-sysprs-row { flex-wrap: wrap; row-gap: 4px; }
+.ib-sysfull-aside .ib-sysprs-t { white-space: normal; }
+.ib-sysfull-aside .ib-sysprs-go { flex-basis: 100%; padding-left: 58px; }
+.ib-sysfull.ib-sysfull-phone { position: static; flex: 1; min-width: 0; z-index: auto; background: var(--background); }
+.ib-sysfull-phone .ib-sysfull-top { height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+.ib-sysfull-phone .ib-sysfull-body { flex-direction: column; overflow-y: auto; }
+.ib-sysfull-phone .ib-sysfull-draw { flex: none; }
+.ib-sysfull-phone .ib-sysfull-aside { width: auto; overflow: visible; border-left: 0; }
+.ib-sysfull-phone .ib-sysprs { padding: 14px 6px 24px; }
+.ib-sysfull-phone .ib-sysprs-go { display: none; }
+.ib-sysfull-phone .ib-sysprs-row { min-height: 56px; }
+/* A phone is too narrow for the drawing's one-line bar: the sheets take their own row under the name and the tools. */
+.ib-sysfull-phone .sys-bar { height: auto; grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding-block: 8px; }
+.ib-sysfull-phone .sys-bar > .sys-chips, .ib-sysfull-phone .sys-bar > .sys-kind { grid-row: 2; grid-column: 1 / -1; justify-self: start; max-width: 100%; overflow-x: auto; }
+/* A phone's sheet fills the pane's width, so its bottom row runs into the zoom group at the bottom left: on a phone
+   the group (and the Key it opens) sit at the top right, over the sheet's title band, which leaves that corner empty. */
+.ib-sysfull-phone .sys-zoom { top: 8px; right: 8px; bottom: auto; left: auto; }
+.ib-sysfull-phone .sys-card-pop { top: 48px; right: 8px; bottom: auto; left: auto; max-width: calc(100% - 16px); }
+.ib-sysfull-phone .sys-bar > .sys-tools { grid-row: 1; grid-column: 2; }
+/* The drawing's pane and full window take the focus only as a last resort (the way back when "Open full window" is gone). */
+.ib-syspane:focus, .ib-sysfull:focus { outline: none; }
+/* ===== The reaction tray on 👍 Looks good (approval "inbox-reaction-tray"; ReactionTray.tsx, EmojiPicker.tsx). =====
+   👍, the saved emoji, the free +, then …: 46 px cells, 2 px apart, 6 px around; at most 7 cells (5 saved) is 346 px,
+   so it fits a 390 px phone inside its 12 px margins. Entries ease out (cubic-bezier(0.23, 1, 0.32, 1)), exits are
+   faster, all transitions so a re-hover mid-exit turns back; reduced motion keeps only the fades. */
+.ib-react { position: relative; display: inline-flex; align-items: center; }
+.pn-inbox .ib-react .ib-btn.ib-ack .ib-ack-emoji { display: inline-block; }
+/* A hold is the tray's, not the browser's: no text selection, callout or pan starting on the 👍. */
+.pn-inbox .ib-react .ib-btn.ib-ack { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+/* The keyboard's and screen reader's way in: hidden until it has keyboard focus, then a small round chip. */
+.pn-inbox .ib-react-more { position: absolute; left: calc(100% + 4px); top: 50%; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); opacity: 0; pointer-events: none; }
+.pn-inbox .ib-react-more:focus-visible { opacity: 1; pointer-events: auto; outline: 2px solid var(--ring); outline-offset: 1px; }
+
+.ib-react-pos { z-index: 80; outline: none; }
+.ib-react-pop { position: relative; padding: 6px; border-radius: 16px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); outline: none; transform-origin: var(--transform-origin, bottom left); transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-starting-style] { opacity: 0; transform: translateY(6px) scale(0.94); }
+.ib-react-pop[data-ending-style] { opacity: 0; transform: translateY(3px) scale(0.97); transition-duration: 110ms; }
+.ib-react-cells { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; gap: 2px; }
+.ib-react-cell { position: relative; display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 10px; outline: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.ib-react-e { display: inline-block; font-size: var(--ib-fs-24, 24px); line-height: 1; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e { animation: ib-react-cell-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both; animation-delay: calc(var(--i, 0) * 28ms); }
+@keyframes ib-react-cell-in { from { opacity: 0; transform: translateY(8px) scale(0.6); } }
+/* Back after a name was kept: the row is already where the field leaves it, so it is just there (no fade, no stagger). */
+.ib-react-pop[data-instant][data-starting-style] { opacity: 1; transform: none; }
+.ib-react-pop[data-reaction-tray][data-instant] .ib-react-cell .ib-react-e { animation: none; }
+.ib-react-pop .ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 85%, transparent); }
+.ib-react-pop .ib-react-cell:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
+.ib-react-pop .ib-react-cell[data-current] { background: color-mix(in oklch, var(--success) 16%, transparent); }
+.ib-react-pop .ib-react-cell:active .ib-react-e { transform: scale(0.9); transition-duration: 80ms; }
+/* A free + and …: a quiet hollow; it wakes under the pointer. */
+.ib-react-hole { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: color-mix(in oklch, var(--muted) 45%, transparent); color: color-mix(in oklch, var(--muted-foreground) 60%, transparent); transition: background-color 140ms ease-out, color 140ms ease-out, transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop .ib-react-cell[data-highlighted] .ib-react-hole { background: var(--muted); color: var(--foreground); }
+.ib-react-dots { color: var(--muted-foreground); }
+.ib-react-dots, .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-dots { background: transparent; }
+:is(.ib-react-pop, .ib-emo) svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* A name is a small tooltip over its emoji, after a short rest (a sweep along the row shows none). */
+.ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 3px); padding: 3px 8px; border-radius: 7px; background: var(--foreground); color: var(--background); font-size: var(--ib-fs-12, 12px); font-weight: 550; line-height: 1.35; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip][data-highlighted]::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 380ms; }
+@media (hover: hover) and (pointer: fine) {
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-highlighted] .ib-react-e:not(.ib-react-hole) { transform: translateY(-3px) scale(1.18); }
+}
+@media (hover: none) {
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { display: none; }
+}
+/* An emoji just saved: a little spring (overshoot, then settle), in the name field's row. */
+.ib-react-pop .ib-react-cell[data-fresh] .ib-react-e { animation: ib-react-spring 460ms 60ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes ib-react-spring { from { opacity: 0; transform: scale(0.35) rotate(-14deg); } 60% { opacity: 1; } to { opacity: 1; transform: none; } }
+/* The keyboard's pen, beside the tray's end: out of sight (and of the pointer's way) until the arrows reach it. */
+.ib-react-kedit { position: absolute; top: 50%; left: calc(100% + 6px); width: 32px; height: 32px; margin-top: -16px; display: flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--popover); color: var(--foreground); box-shadow: var(--ib-float-shadow); outline: none; opacity: 0; transform: scale(0.8); pointer-events: none; transition: opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-kedit[data-highlighted] { opacity: 1; transform: none; pointer-events: auto; }
+
+/* The light name field, and a saved emoji's editor: the tray with a field over it; the row stays where the tray was. */
+.ib-react-namer, .ib-react-ed { min-width: 202px; clip-path: inset(-60px round 16px); transition: clip-path 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease-out; }
+.ib-react-ed { width: 268px; }
+.ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { opacity: 1; transform: none; clip-path: inset(calc(100% - 56px) 0 0 0 round 16px); }
+.ib-react-namer[data-ending-style], .ib-react-ed[data-ending-style] { opacity: 0; transform: none; transition-duration: 140ms, 100ms; }
+.ib-react-namer .ib-react-cell, .ib-react-fixed { cursor: default; }
+.ib-react-ed .ib-react-fixed { opacity: 0.45; }
+.ib-react-ed .ib-react-cells { grid-auto-columns: 34px; }
+.ib-react-ed .ib-react-e { font-size: var(--ib-fs-20, 20px); }
+.ib-react-ed button.ib-react-cell { border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.ib-react-ed button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-react-ed button.ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 95%, transparent); }
+.ib-react-ed button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* Under the name field the row is the tray itself: the emoji just saved reacts from it at once. */
+.ib-react-namer button.ib-react-cell { border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-react-namer button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-react-namer button.ib-react-cell:active .ib-react-e { transform: scale(0.9); transition-duration: 80ms; }
+.ib-react-namer[data-ending-style] { pointer-events: none; }
+@media (hover: hover) and (pointer: fine) {
+  .ib-react-namer button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+}
+/* A phone's Reply opens the tray when held (holdPress.ts): the hold is ours, not the browser's (no selection or
+   callout), and the button sinks a little while the finger rests on it. */
+.pn-inbox .ib-btn[data-reply-hold] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease-out; }
+.pn-inbox .ib-btn[data-reply-hold][data-holding] { transform: scale(0.95); background: var(--muted); transition: transform 450ms cubic-bezier(0.23, 1, 0.32, 1), background-color 450ms ease-out; }
+.ib-namer-in { display: block; width: 100%; height: 30px; margin: 0 0 6px; padding: 0 10px; border: 0; border-radius: 9px; background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); outline: none; animation: ib-react-in 160ms 70ms cubic-bezier(0.23, 1, 0.32, 1) both; transition: box-shadow 140ms ease-out, background-color 140ms ease-out; }
+.ib-namer-in::placeholder { color: var(--muted-foreground); }
+.ib-namer-in:focus { background: color-mix(in oklch, var(--muted) 45%, transparent); box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ring) 75%, transparent); }
+@keyframes ib-react-in { from { opacity: 0; } }
+.ib-react-form { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--ib-hair, var(--border)); }
+.ib-react-form .ib-namer-in { margin: 0; }
+.ib-react-acts { display: flex; align-items: center; gap: 2px; padding-top: 4px; }
+.ib-react-sp { flex: 1; }
+.ib-react-a, .ib-react-done { height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out; }
+.ib-react-a:hover { background: color-mix(in oklch, var(--muted) 80%, transparent); color: var(--foreground); }
+.ib-react-done { padding: 0 12px; background: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+.ib-react-done:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+:is(.ib-react-a, .ib-react-done):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:is(.ib-react-a, .ib-react-done):active { transform: scale(0.97); }
+
+/* The emoji picker: it grows out of the tray's own rectangle (bottom left), so the tray reads as opening up. */
+.ib-emo-pos { z-index: 81; outline: none; }
+.ib-emo { width: 352px; background: var(--popover); color: var(--popover-foreground); border-radius: 14px; box-shadow: var(--ib-float-shadow); outline: none; overflow: hidden; clip-path: inset(-60px round 14px); transform-origin: var(--transform-origin, bottom left); transition: clip-path 260ms cubic-bezier(0.23, 1, 0.32, 1), opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 150ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-emo[data-starting-style] { clip-path: inset(calc(100% - 56px) calc(100% - 202px) 0 0 round 16px); opacity: 0.4; }
+.ib-emo[data-side="bottom"][data-starting-style] { clip-path: inset(0 calc(100% - 202px) calc(100% - 56px) 0 round 16px); }
+.ib-emo[data-ending-style] { opacity: 0; transform: translateY(3px) scale(0.98); transition-duration: 110ms; }
+.ib-emo-in { display: flex; flex-direction: column; }
+.ib-emo-in > * { animation: ib-react-in 180ms 70ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.ib-emo-search { display: flex; align-items: center; gap: 8px; margin: 10px 10px 6px; height: 34px; padding: 0 10px; border-radius: 9px; background: color-mix(in oklch, var(--muted) 75%, transparent); color: var(--muted-foreground); }
+.ib-emo-search:focus-within { box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ring) 75%, transparent); background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.ib-emo-search input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: transparent; outline: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
+.ib-emo-search input:focus-visible { outline: none; }
+.ib-emo-search input::placeholder { color: var(--muted-foreground); }
+.ib-emo-tabs { display: flex; gap: 2px; padding: 0 8px 4px; }
+.ib-emo-tab { flex: 1; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-15, 15px); line-height: 1; cursor: pointer; filter: grayscale(1); opacity: 0.55; transition: opacity 140ms ease-out, filter 140ms ease-out, background-color 140ms ease-out; }
+.ib-emo-tab:hover, .ib-emo-tab[aria-current] { filter: none; opacity: 1; }
+.ib-emo-tab[aria-current] { background: color-mix(in oklch, var(--muted) 75%, transparent); }
+.ib-emo-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-emo-body { height: 264px; overflow-y: auto; padding: 0 8px 6px; overscroll-behavior: contain; scrollbar-width: thin; }
+.ib-emo-h { position: sticky; top: 0; z-index: 1; padding: 8px 4px 4px; font-size: var(--ib-fs-12, 12px); font-weight: 550; color: var(--muted-foreground); background: var(--popover); }
+.ib-emo-grid { display: grid; grid-template-columns: repeat(8, 1fr); }
+.ib-emo-cell { height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: var(--ib-fs-22, 22px); line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.ib-emo-cell[data-active] { background: color-mix(in oklch, var(--muted) 95%, transparent); }
+.ib-emo-cell:active { transform: scale(0.9); transition: transform 80ms ease-out; }
+.ib-emo-none { margin: 0; padding: 22px 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-emo-foot { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 12px; border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-emo-big { flex: none; width: 32px; text-align: center; font-size: var(--ib-fs-30, 30px); line-height: 1; }
+.ib-emo-say { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; font-size: var(--ib-fs-12, 12px); }
+.ib-emo-say b { font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-emo-say span { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-emo-hint { padding-left: 2px; }
+.ib-emo-close { flex: none; width: 44px; height: 44px; margin: -6px -8px -6px 0; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--muted-foreground); }
+/* A touch phone: a bottom sheet with 44 px cells. */
+.ib-emo-pos[data-phone] { position: fixed !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; transform: none !important; width: auto !important; }
+.ib-emo-pos[data-phone] .ib-emo { width: auto; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); clip-path: none; transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-emo-pos[data-phone] .ib-emo[data-starting-style] { clip-path: none; opacity: 1; transform: translateY(100%); }
+.ib-emo-pos[data-phone] .ib-emo[data-ending-style] { transform: translateY(100%); opacity: 1; transition-duration: 180ms; }
+.ib-emo-pos[data-phone] .ib-emo-body { height: 40vh; }
+.ib-emo-pos[data-phone] .ib-emo-cell { height: 44px; font-size: var(--ib-fs-24, 24px); }
+.ib-emo-pos[data-phone] .ib-emo-search { height: 40px; }
+.ib-emo-pos[data-phone] .ib-emo-tab { height: 36px; }
+
+/* The sent moment: the emoji in flight (ReactionTray.tsx flyReaction), and the line it lands on. */
+.ib-react-flight { position: fixed; left: 0; top: 0; z-index: 200; width: 0; height: 0; pointer-events: none; will-change: transform; }
+.ib-react-flight > span { position: absolute; left: 0; top: 0; font-size: var(--ib-fs-20, 20px); line-height: 1; }
+.ib-ackemoji { display: inline-block; }
+.ib-ackpill[data-ack-fresh] { animation: ib-react-in 160ms ease-out; }
+/* An emoji with no name: the emoji alone on the line. */
+.ib-ackchip[data-bare] { padding: 0 8px; }
+
+@media (pointer: coarse) {
+  .ib-react-cell { height: 48px; }
+  .ib-namer-in { height: 40px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-emo-pos[data-phone] .ib-emo-search input { font-size: var(--ib-fs-16-in, 16px); }
+  .ib-react-ed .ib-react-cells { grid-auto-columns: 40px; }
+  .ib-react-ed[data-phone] { width: min(320px, calc(100vw - 24px)); }
+  :is(.ib-react-a, .ib-react-done) { height: 40px; font-size: var(--ib-fs-14, 14px); }
+  .ib-emo[data-starting-style] { clip-path: inset(calc(100% - 60px) calc(100% - 202px) 0 0 round 16px); }
+  .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { clip-path: inset(calc(100% - 60px) 0 0 0 round 16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ib-react-pop[data-starting-style], .ib-react-pop[data-ending-style] { transform: none; }
+  .ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e, .ib-namer-in, .ib-emo-in > * { animation: none; }
+  .ib-react-pop .ib-react-cell[data-fresh] .ib-react-e { animation: ib-react-in 160ms ease-out both; }
+  .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-e, .ib-react-pop .ib-react-cell:active .ib-react-e, .ib-emo-cell:active, :is(.ib-react-a, .ib-react-done):active { transform: none; }
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { transition: opacity 110ms ease-out; transform: translate(-50%, 0); }
+  .ib-react-kedit { transform: none; }
+  .pn-inbox .ib-btn[data-reply-hold][data-holding], .ib-react-namer button.ib-react-cell:active .ib-react-e { transform: none; }
+  .ib-react-namer, .ib-react-ed, .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { clip-path: none; transition: opacity 120ms ease-out; }
+  .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { opacity: 0; }
+  .ib-emo, .ib-emo-pos[data-phone] .ib-emo { clip-path: none; transition: opacity 120ms ease-out; }
+  .ib-emo[data-starting-style], .ib-emo[data-ending-style], .ib-emo-pos[data-phone] .ib-emo[data-starting-style], .ib-emo-pos[data-phone] .ib-emo[data-ending-style] { clip-path: none; transform: none; opacity: 0; }
 }
 
 /* ── Letter marks (approval "inbox-letter-marks", 2026-11-07; letterMarks.tsx), all off by default ──

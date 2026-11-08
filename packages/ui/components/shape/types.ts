@@ -41,6 +41,19 @@ export type ShapeEvent =
   | { type: 'state'; shape: ShapeRecord }
   | { type: 'session'; session: ShapeSessionStatus };
 
+/** What the Annotate box was opened on, and the optional words. */
+export interface ShapeShowMeInput {
+  /** What the person calls it: the part's heading, the words they selected, or the file and lines. */
+  name: string;
+  /** Its `data-code` value, when it has one. */
+  code?: string;
+  words: string;
+  /** A dragged box over several parts: their names (`name` is then "A part of the board"). */
+  parts?: string[];
+  /** A dragged box's picture, the box drawn on it (a PNG data: URL; null when there is none). */
+  picture?: Promise<string | null>;
+}
+
 export interface ShapeHost {
   load(id: string): Promise<ShapeLoaded>;
   /** One older version ("what changed since you looked"). */
@@ -54,6 +67,8 @@ export interface ShapeHost {
   /** Subscribe; returns the unsubscribe. */
   events(id: string, listener: (event: ShapeEvent) => void): () => void;
 
+  /** Show me on a part, from the Annotate box: the agent draws a new board of it, and this one stays. Absent: no button. */
+  showMe?(id: string, input: ShapeShowMeInput): void;
   /** "Bring it up to date": a quiet request to the agent. Absent: no button. */
   refresh?(id: string): Promise<void>;
   /** The refresh button's words, when a host has its own. Absent: "Bring it up to date". */
@@ -87,8 +102,6 @@ export interface ShapeHost {
 export interface ShapeBoxOptions {
   /** A same-site image or font as a data: URL, for the box's picture. Absent: the picture has no images and the system's font. */
   readAsset?: ShapeReadAsset;
-  /** The box's Show me: the same object a comment is made from, and whatever was typed. Absent: no Show me. */
-  onShowMe?: (selection: ShapeBoxSelection, text: string) => void;
   /**
    * The box's Add to reply: the same object and whatever was typed, for the host's reply to the board's thread (the
    * Inbox: the picture as a file, the label and words as text). Absent: no Add to reply.
@@ -153,8 +166,10 @@ export interface ShapeReviewNarrow {
 }
 
 /**
- * The review a board is part of (the host found it: the Inbox, a review's thread). What's changed shows its facts,
- * Guided review, Full review and its guide-step links, and with no Code view the board's `file:line` links open it.
+ * The review a board is part of (the host found it: the Inbox, a review's thread). With no Code view, a place in code
+ * the board opens (a drawn part's `data-code`, a file reference) opens there through `open`. The board draws none of
+ * its facts or buttons: What's changed, which showed them, is gone (approval shape-whats-changed-removed), so `label`,
+ * `files`, `additions`, `deletions` and `steps` are read by nothing now; they stay so a host's code still checks.
  */
 export interface ShapeSurfaceReview {
   /** What names it on the facts line (a pull request's "#2661"). */
@@ -210,12 +225,14 @@ export interface ShapeSurfaceProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
   headStart?: ReactNode;
+  /** In the group at the title's right, first (the Inbox's list of a thread's boards). */
+  headSide?: ReactNode;
   /**
    * False: no Code view in the dock, even on a board that has one (Plannotator's board: a review's guided review is
    * its own place). A part's `file:line` then opens the review there (`review`), else the file viewer. Absent: true.
    */
   codeView?: boolean;
-  /** The review this board is part of. Absent: What's changed shows no review facts, buttons or guide-step links. */
+  /** The review this board is part of: where a place in code opens with no Code view. Absent: the file viewer. */
   review?: ShapeSurfaceReview | null;
   /**
    * While annotating with the pointer, a mouse drag draws a box and comments on what is inside it (the Inbox, by

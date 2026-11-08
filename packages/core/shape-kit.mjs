@@ -80,12 +80,12 @@ export const svg = (w, h, body, { x = 0, y = 0, label } = {}) => ({
 });
 
 /** Writes the board's JSON. picture: svg(…); tall (a phone), more (Show more): svg(…) too. */
-export function board({ out = 'board.json', title, claim, note, picture, tall, more, css, how, know, refs = [] }) {
+export function board({ out = 'board.json', title, claim, note, picture, tall, more, css, how, refs = [] }) {
   const pic = { ...picture };
   if (css) pic.css = css;
   if (tall) pic.tall = { html: tall.html };
   if (more) pic.more = { html: more.html };
-  writeFileSync(out, JSON.stringify({ title, claim, ...(note ? { note } : {}), views: { picture: pic, ...(how ? { how } : {}), ...(know ? { know } : {}) }, refs }, null, 1));
+  writeFileSync(out, JSON.stringify({ title, claim, ...(note ? { note } : {}), views: { picture: pic, ...(how ? { how } : {}) }, refs }, null, 1));
 }
 
 /** Drawn things that belong to these paths. Drawn with no `on`, a thing never fades. */

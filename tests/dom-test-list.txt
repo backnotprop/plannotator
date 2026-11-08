@@ -16,6 +16,7 @@ packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
@@ -127,6 +128,7 @@ packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
 packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
+packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
@@ -144,6 +146,7 @@ packages/inbox/decisionData.test.tsx
 packages/inbox/composeTrust.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
+packages/inbox/runLineClone.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/sessionLabels.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
@@ -171,6 +174,8 @@ packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
+packages/inbox/reactionTray.test.tsx
+packages/inbox/replyHoldTray.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/keyboardKeys.test.tsx
 packages/inbox/actionDraftSend.test.tsx
@@ -217,6 +222,7 @@ packages/inbox/componentTooltips.test.tsx
 packages/inbox/toast.test.tsx
 packages/inbox/attachmentsHeader.test.tsx
 packages/inbox/threadArtifacts.test.tsx
+packages/inbox/threadLinksDrawn.test.tsx
 packages/inbox/sentQuestionLocked.test.tsx
 packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
@@ -537,6 +543,8 @@ packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
 packages/inbox/boardReveal.test.tsx
+packages/inbox/broReveal.test.tsx
+packages/inbox/broRevealApp.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
@@ -554,6 +562,7 @@ packages/inbox/pulls/pullAllFiles.test.tsx
 packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
+packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
@@ -568,6 +577,7 @@ packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
+packages/inbox/shape/boardFocus.test.ts
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
@@ -582,12 +592,14 @@ packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
+packages/ui/components/CommentPopover.extraAction.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
 packages/ui/components/shape/ShapeSurface.stack.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
+packages/inbox/system/systemInReviews.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/Viewer.reopenComment.test.tsx
 packages/ui/components/CodeFilePopout.reopen.test.tsx
@@ -598,3 +610,7 @@ packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
+packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx
+packages/inbox/activityChart.test.tsx
+packages/inbox/composeClone.test.tsx
+packages/inbox/projectPlus.test.tsx

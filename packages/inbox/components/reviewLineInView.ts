@@ -1,5 +1,5 @@
 /**
- * A link that opens the review at a line (a Shape board's What's changed item or `file:line`, a part of a picture)
+ * A link that opens the review at a line (a Shape board's place in code, a part of a picture)
  * brings that line into view: its file opens, its lines are painted, and the review scrolls so the first painted line
  * sits in the upper part of the room the corner card leaves (approval "review-show-me", q-db7db55f: a link shows the code).
  *

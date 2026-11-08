@@ -68,6 +68,7 @@ import {
   inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
   INBOX_HELD_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
@@ -714,7 +715,7 @@ export async function discoverInboxTools(host: Host, dataDir: string): Promise<I
       return tools
     }
   }
-  const remembered = parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null))
+  const remembered = inboxToolsWithoutBro(parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null)))
   return remembered.length > 0 ? remembered : INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool }))
 }
 

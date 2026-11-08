@@ -65,6 +65,8 @@ import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
+import { RiskMark } from './RiskMark';
+import { usePullRisk } from './usePullRisk';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -414,6 +416,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   // A diff that could not be read (too large, a refused compare) takes no verdict: there is nothing on screen to judge.
   const canDecide = !!link?.last && !diffError;
+  const riskAnswer = usePullRisk(model).answer;
+  const judged = riskAnswer?.judgments[layer?.key ?? ''];
+  const riskFailure = riskAnswer?.failed[layer?.key ?? ''];
   // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
   // teammate's, with or without an agent. The person chooses at the end where the review goes.
   // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
@@ -791,6 +796,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </button>
         </Tip>
         {!phone && title}
+        {judged && <RiskMark judgment={judged} />}
+        {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         {!phone && readOnlyNote}
         {!phone && (
           <Tip content="Description, comments, checks and reviewers">
