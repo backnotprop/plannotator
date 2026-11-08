@@ -13,7 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GuideArtifact } from './artifacts';
 import { gridStep, laneStep, type Box } from './gridMove';
-import { archiveTarget, newPageKeys, refreshKey, type AppKeyPages } from './keyboard/appKeys';
+import { archiveTarget, newPageKeys, refreshAction, refreshKey, refreshKind, type AppKeyPages, type RefreshView } from './keyboard/appKeys';
 import type { InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
@@ -353,6 +353,43 @@ test.skipIf(!hasDom)('Shift+F10 in a text field inside a message’s head is the
   await frames();
   expect(document.querySelector('[data-message-menu="msg_1"]')).toBeNull();
   expect(document.activeElement).toBe(field);
+});
+
+test('Shift+R runs the refresh of the page on screen, route by route; none where the page has no refresh', () => {
+  const base: RefreshView = { page: 'inbox', thread: null, fromReviews: false, fromCard: false, pullReview: false, fileOpen: false, tourOn: false, boardOn: true, pullsShown: true, listReady: true };
+  const rows: [string, Partial<RefreshView>, ReturnType<typeof refreshKind>][] = [
+    ['the Inbox list', {}, 'inbox'],
+    ['a project’s list', {}, 'inbox'],
+    ['a thread beside the list', { thread: 'thr_1' }, 'inbox'],
+    ['a file open from a thread', { thread: 'thr_1', fileOpen: true }, 'inbox'],
+    ['a thread opened from a Board card', { thread: 'thr_1', fromCard: true }, 'board+thread'],
+    ['a file open in a thread from a card', { thread: 'thr_1', fromCard: true, fileOpen: true }, 'board+thread'],
+    ['a thread beside the Reviews list', { thread: 'thr_1', fromReviews: true }, 'reviews+thread'],
+    ['a file open in a thread from Reviews', { thread: 'thr_1', fromReviews: true, fileOpen: true }, 'inbox'],
+    ['a thread from Reviews with Reviews hidden', { thread: 'thr_1', fromReviews: true, pullsShown: false }, 'inbox'],
+    ['the list still loading, first run, the tour’s entry', { listReady: false }, null],
+    ['the Board', { page: 'board' }, 'board'],
+    ['the Board turned off or loading', { page: 'board', boardOn: false }, null],
+    ['the Reviews list', { page: 'reviews' }, 'reviews'],
+    ['a pull request’s review', { page: 'reviews', pullReview: true }, null],
+    ['Reviews hidden (Code review off, a tailnet guest)', { page: 'reviews', pullsShown: false }, null],
+    ['Drafts', { page: 'drafts' }, null],
+    ['Settings', { page: 'settings' }, null],
+    ['What’s new', { page: 'whats-new' }, null],
+    ['Shapes', { page: 'shapes' }, null],
+    ['the tour', { page: 'tour', tourOn: true }, null],
+  ];
+  for (const [where, over, kind] of rows) expect([where, refreshKind({ ...base, ...over })]).toEqual([where, kind]);
+
+  // Each kind runs the window's own refreshes, the thread's beside the Board's or Reviews'.
+  const ran: string[] = [];
+  const act = { inbox: () => ran.push('inbox'), board: () => ran.push('board'), reviews: () => ran.push('reviews'), thread: () => ran.push('thread') };
+  for (const [kind, runs] of [['inbox', ['inbox']], ['board', ['board']], ['board+thread', ['board', 'thread']], ['reviews', ['reviews']], ['reviews+thread', ['reviews', 'thread']]] as const) {
+    ran.length = 0;
+    refreshAction(kind, act)!();
+    expect([kind, ran]).toEqual([kind, [...runs]]);
+  }
+  expect(refreshAction(null, act)).toBeNull();
 });
 
 function RefreshKeys({ on }: { on: () => { page: string; run: (() => void) | null } }) {

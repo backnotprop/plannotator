@@ -7378,6 +7378,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-lhead :is(.ib-lhead-search, .ib-lhead-compose)[data-sidebar-closed] ~ .ib-lhead-more { margin-left: 0; }
 .ib-bhead .ib-bhead-more { margin-left: 0; }
 .ib-pmi .ib-pmi-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* A menu item's keycap (the ⋮ Refresh's ⇧R): at the item's far right, as a count sits. */
+.ib-pmi .ib-pmi-kbd { margin-left: auto; }
 .ib-tidy-pos { z-index: 80; outline: none; }
 .ib-tidy { width: 288px; max-width: calc(100vw - 16px); padding: 6px; border-radius: var(--ib-rl-lg-s, 10px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); transform-origin: var(--transform-origin, top right); animation: ib-pm-in 120ms cubic-bezier(0.23, 1, 0.32, 1); outline: none; font-size: var(--ib-fs-13, 13px); }
 @media (prefers-reduced-motion: reduce) { .ib-tidy { animation: none; } }

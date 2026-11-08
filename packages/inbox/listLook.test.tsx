@@ -519,6 +519,24 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(lookClasses(el)).toEqual(['ib-lk-small']);
   });
 
+  test('Refresh carries Shift+R’s keycap and key name (approval "inbox-refresh-key"), both gone with single keys off', async () => {
+    const prefs = await import('./shortcuts/prefs');
+    const refresh = () => document.querySelector<HTMLElement>('[data-tidy-menu-popup] [data-tidy-refresh]')!;
+    let el = render('narrow');
+    await openMenu(el);
+    expect(refresh().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
+    expect(refresh().querySelector('kbd[data-shortcut-hint="inbox-app.refresh"]')).not.toBeNull();
+    act(() => prefs.setSingleKeys(false));
+    try {
+      el = remount('narrow');
+      await openMenu(el);
+      expect(refresh().hasAttribute('aria-keyshortcuts')).toBe(false);
+      expect(refresh().querySelector('kbd[data-shortcut-hint]')).toBeNull();
+    } finally {
+      act(() => prefs.setSingleKeys(true));
+    }
+  });
+
   test('a tick changes the list at once, keeps the menu open, and survives a reload', async () => {
     const el = render('narrow');
     await openMenu(el);
