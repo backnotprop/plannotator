@@ -63,6 +63,7 @@ import {
   hasHostThemeOptIn,
   injectIntoHead,
   injectPrintDefaults,
+  injectSandboxShim,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -592,7 +593,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      // Inline path: history and storage are safe before the page's own head
+      // scripts run. The URL path gets the same shim from the bridge.
+      return bridgeUrl ? page : injectSandboxShim(page);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     useLayoutEffect(() => {
