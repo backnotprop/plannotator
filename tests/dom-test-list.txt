@@ -155,6 +155,7 @@ packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listViewMenu.test.tsx
 packages/inbox/listViewReveal.test.tsx
+packages/inbox/idleClock.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
 packages/inbox/letterMarksRows.test.tsx
