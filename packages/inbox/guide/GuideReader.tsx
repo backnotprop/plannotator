@@ -50,6 +50,7 @@ import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-e
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
+import { withOverviewMermaid } from './overviewMermaid';
 import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
@@ -434,6 +435,8 @@ function Reader({
     // Only a new target moves the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTarget]);
+  // Every guide the Inbox opens draws its Mermaid overview diagram, whatever the host draws itself.
+  const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
   const host = useMemo(
     () => ({
       files,
@@ -441,7 +444,7 @@ function Reader({
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
       ...(phone || hostDiffControls ? {} : { renderSectionTab }),
-      ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
+      renderOverviewDiagram: drawOverviewDiagram,
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
@@ -450,7 +453,7 @@ function Reader({
       opensWholeFiles: !!fetchFileContent,
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
