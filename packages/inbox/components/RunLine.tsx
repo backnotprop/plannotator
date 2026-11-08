@@ -37,7 +37,8 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * (`tailnetGuest`), which gets no Stop or Try again (the server answers both `owner_only`), and whose stopped line
  * never says a reply starts it again.
  */
-export function RunLine({ run, canOpen, canReaddress = false, guest = false, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; guest?: boolean; onChanged: () => void }) {
+/** `machine`: another machine's thread (remote launch): Stop, Try again and Trust folder go to that machine. */
+export function RunLine({ run, canOpen, canReaddress = false, guest = false, machine = null, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; guest?: boolean; machine?: string | null; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -50,9 +51,9 @@ export function RunLine({ run, canOpen, canReaddress = false, guest = false, onC
     setBusy(what);
     setError(null);
     try {
-      if (what === 'stop') await inboxApi.launchStop(run.launch_id);
-      else if (what === 'retry') await inboxApi.launchRetry(run.launch_id);
-      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null);
+      if (what === 'stop') await inboxApi.launchStop(run.launch_id, machine);
+      else if (what === 'retry') await inboxApi.launchRetry(run.launch_id, machine);
+      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null, machine);
       else await inboxApi.launchOpen(run.launch_id);
       onChanged();
     } catch (cause) {
