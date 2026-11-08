@@ -1218,19 +1218,28 @@ test('each file\'s name sits on the page above its code box: no fill at rest, un
   expect(world.errors).toEqual([]);
 });
 
-test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the diff controls before Close', async () => {
+test('Code review off: the same review opens in the full-window review, with no verdict, Viewed ticks or Show me, and Write the reply back to the thread', async () => {
   const { page, claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
-    await expect(page.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('[data-review-message]')).toHaveCount(0);
-    await expect(page.locator('[data-review-nav]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-section-tab]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-message] .ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
-    await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
+    const pane = page.locator(`[data-review-message="${review.message_id}"]`);
+    await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(pane.locator('[data-review-nav]')).toBeVisible();
+    await expect(pane.locator('[data-review-title]')).toHaveText('Retry failed payouts');
+    // The diff controls sit in the bar (approval "diff-controls-headers"), no card has a tab.
+    await expect(pane.locator('[data-guide-section-tab]')).toHaveCount(0);
+    await expect(pane.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+    // None of Code review's own parts.
+    await expect(pane.locator('[data-review-decision]')).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: /^Approve/ })).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: 'Show me' })).toHaveCount(0);
+    // The way out: the thread, its reply box open.
+    await pane.locator('[data-review-write-reply]').click();
+    await expect(pane).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /^Reply to / })).toBeFocused();
   } finally {
     await setCodeReview(true);
   }

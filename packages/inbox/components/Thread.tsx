@@ -1,6 +1,6 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
-import { inboxUrl, machineOf } from '../inboxUrl';
+import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -1502,7 +1502,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
   // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
-  const openTerminal = launched && !phone && remote !== true && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
+  // Not for another machine's thread either (remote launch): its Terminal is on that machine; Copy attach command is the way in.
+  const openTerminal = launched && !phone && remote !== true && !machine && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
@@ -1513,7 +1514,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
           stop:
             !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
-              ? () => void launchAct(() => inboxApi.launchStop(launched.id))
+              ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
           // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
           remove: phone || guest ? null : () => setConfirmDelete(true),
@@ -5697,6 +5698,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
             <span>
               You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
+              {/* Started from another linked machine's window (remote launch): which one. */}
+              {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
             </span>
             {launched.full_permissions && (
               <>
@@ -5731,7 +5734,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     setConfirmDelete(false);
                     // A scratch folder that was not the one the Inbox made (a link, another folder, gone) is kept: the toast says so.
                     void launchAct(
-                      () => inboxApi.launchDelete(launched.id),
+                      () => inboxApi.launchDelete(launched.id, machine?.id ?? null),
                       (result) => (result.scratch_removed === false ? { lead: 'Session deleted', detail: 'its scratch folder was kept' } : { lead: 'Session deleted' }),
                     );
                   }}
@@ -5921,7 +5924,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -5929,7 +5932,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -6254,7 +6257,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     ))}
                   </ul>
                 )}
-                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />}
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />}
                 {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>

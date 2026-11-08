@@ -344,6 +344,7 @@ export function PermissionCard({
   terminal,
   fullUsed,
   guest = false,
+  machine = null,
   onChanged,
 }: {
   message: InboxMessageWire;
@@ -363,6 +364,8 @@ export function PermissionCard({
   fullUsed: boolean;
   /** A tailnet guest's page (`tailnetGuest`): no Stop in the header, as the server answers it `owner_only`. */
   guest?: boolean;
+  /** Another machine's thread (remote launch): its Stop goes there, and Claude's own dialog is on that machine's screen. */
+  machine?: { id: string; name: string } | null;
   onChanged: () => void | Promise<void>;
 }) {
   const q = message.questions?.[0] ?? null;
@@ -491,7 +494,7 @@ export function PermissionCard({
             onClick={() => {
               setStopping(true);
               void inboxApi
-                .launchStop(run.launch_id)
+                .launchStop(run.launch_id, machine?.id ?? null)
                 .then(() => onChanged())
                 .catch(() => setError('Stop did not work; try again.'))
                 .finally(() => setStopping(false));
@@ -526,6 +529,12 @@ export function PermissionCard({
           </div>
         ) : terminalOnly ? (
           <>
+            {/* Another machine's agent: only its own dialog, on that machine's screen, can approve. No Terminal from here. */}
+            {machine && (
+              <p className="pc-modes" data-perm-elsewhere="">
+                Only {agentNameOf(message.author)} can approve this, on {machine.name}'s screen. Deny it here, or approve it at {machine.name}.
+              </p>
+            )}
             <div className="pc-row">
               <button type="button" className="ib-btn" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_DENY))} data-perm="deny">
                 Deny
@@ -533,9 +542,17 @@ export function PermissionCard({
               <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={act(() => setMode('reason'))} data-perm="reason">
                 Deny with a reason
               </button>
-              <button type="button" className="ib-btn" disabled={busy} onClick={handOff} data-perm="terminal">
-                Approve in Terminal
-              </button>
+              {!machine ? (
+                <button type="button" className="ib-btn" disabled={busy} onClick={handOff} data-perm="terminal">
+                  Approve in Terminal
+                </button>
+              ) : (
+                terminal?.copyAttach && (
+                  <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={terminal.copyAttach} data-perm="copy-attach">
+                    Copy attach command
+                  </button>
+                )
+              )}
             </div>
             {read.note && (
               <p className="pc-modes" data-perm-note="">
@@ -577,7 +594,7 @@ export function PermissionCard({
                 )}
               </p>
             )}
-            {toTerminal && (
+            {toTerminal && !machine && (
               <p className="pc-modes">
                 <button type="button" className="pc-link pc-quiet" disabled={busy} onClick={handOff} data-perm="terminal">
                   Approve in Terminal
