@@ -14,6 +14,7 @@
  */
 import type { ShapeExample } from '@plannotator/core/shape';
 import type { FollowDir } from './followState';
+import { outlineOf } from './litLine';
 
 /** One ease-out for everything the card and the board do together; an in-out for the dot that travels. */
 export const FOLLOW_EASE = 'cubic-bezier(.22, 1, .36, 1)';
@@ -43,6 +44,10 @@ export const FOLLOW_DRAWN_CSS = `
 .shp-ex-ring .halo { box-shadow: 0 0 0 2px var(--mark), 0 0 0 7px var(--mark-soft); opacity: 0; transition: opacity .26s ease var(--ex-d, 0ms); }
 .shp-ex-ring[data-s="now"] .halo { opacity: 1; }
 .shp-ex-ring .pulse { box-shadow: 0 0 0 2px var(--mark); opacity: 0; }
+.shp-ex-ring.own { box-shadow: none; }
+.shp-ex-ring.own .halo { box-shadow: 0 0 0 6px var(--mark-soft); }
+.board.shp-ex-on [data-ex-own] { transition: stroke .22s ease var(--ex-d, 0ms), border-color .22s ease var(--ex-d, 0ms); }
+.board.shp-ex-on [data-ex-own]:is([data-ex-s="on"], [data-ex-s="now"]) { stroke: var(--mark) !important; border-color: var(--mark) !important; }
 .shp-ex-tag { position: absolute; pointer-events: none; appearance: none; border: 0; margin: 0; cursor: pointer; transform-origin: 100% 50%;
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 8px;
   background: var(--raise); color: var(--ink); white-space: nowrap;
@@ -161,6 +166,15 @@ function scaleOf(board: HTMLElement) {
   return { b, k: board.offsetWidth && b.width ? b.width / board.offsetWidth : 1 };
 }
 
+/** An element's corner radius in the drawing's coordinates: an HTML box's border-radius, an SVG rect's rx on screen. */
+function radiusOf(el: Element, k: number): string {
+  if (!(el instanceof SVGElement)) return getComputedStyle(el).borderRadius;
+  if (el.localName !== 'rect') return '';
+  const rx = parseFloat(getComputedStyle(el).getPropertyValue('rx')) || parseFloat(el.getAttribute('rx') ?? '') || 0;
+  const m = (el as SVGGraphicsElement).getScreenCTM?.();
+  return rx && m ? `${(rx * Math.hypot(m.a, m.b)) / k}px` : '';
+}
+
 const byAttr = (name: string, value: string) => `[${name}="${value.replace(/["\\]/g, '\\$&')}"]`;
 
 type StepState = 'on' | 'now' | 'later';
@@ -175,7 +189,8 @@ export class FollowPainter {
   private touched: Element[] = [];
   private dimmed: Element[] = [];
   private lit: { i: number; el: SVGElement }[] = [];
-  private rings = new Map<number, { el: HTMLElement; mark: HTMLElement }>();
+  /** `own`: the part's own border or stroke, which takes the mark colour when lit in place of the ring's line (one border, not two). */
+  private rings = new Map<number, { el: HTMLElement; mark: HTMLElement; own: Element | null }>();
   private tags: { tag: HTMLButtonElement; i: number; el: Element; kind: 'mark' | 'edge' }[] = [];
   private ro: ResizeObserver | null = null;
   private moving: Animation[] = [];
@@ -218,8 +233,13 @@ export class FollowPainter {
         const ring = doc.createElement('div');
         ring.className = 'shp-ex-ring';
         ring.innerHTML = '<i class="halo"></i><i class="pulse"></i>';
+        const own = outlineOf(mark);
+        if (own) {
+          ring.classList.add('own');
+          own.setAttribute('data-ex-own', '');
+        }
         this.layer.appendChild(ring);
-        this.rings.set(i, { el: ring, mark });
+        this.rings.set(i, { el: ring, mark, own });
       }
       const line = edges.find((e) => e instanceof SVGElement) ?? edges[0];
       const anchor: { el: Element; kind: 'mark' | 'edge' } | null = mark ? { el: mark, kind: 'mark' } : line ? { el: line, kind: 'edge' } : null;
@@ -300,9 +320,11 @@ export class FollowPainter {
     const placed: Box[] = [];
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
-    for (const { el, mark } of this.rings.values()) {
-      const r = mark.getBoundingClientRect();
-      const radius = typeof getComputedStyle === 'function' ? getComputedStyle(mark).borderRadius : '';
+    for (const { el, mark, own } of this.rings.values()) {
+      // A part with its own line: the halo and the pulse follow that line's box and corners.
+      const at = own ?? mark;
+      const r = at.getBoundingClientRect();
+      const radius = typeof getComputedStyle === 'function' ? radiusOf(at, k) : '';
       Object.assign(el.style, { left: `${x(r.left)}px`, top: `${y(r.top)}px`, width: `${r.width / k}px`, height: `${r.height / k}px`, borderRadius: radius });
     }
     for (const { tag, i, el, kind } of this.tags) {
@@ -434,9 +456,10 @@ export class FollowPainter {
     this.stopMoving();
     const arrive = dir === 'fwd' && step !== null && step > 0 && !reduce ? this.travel(step - 1, step) : 0;
     const delay = (i: number) => (arrive && i === step ? Math.round(arrive * 0.82) : 0);
-    for (const [i, { el }] of this.rings) {
+    for (const [i, { el, own }] of this.rings) {
       el.style.setProperty('--ex-d', `${delay(i)}ms`);
       el.setAttribute('data-s', this.stateOf(i, step));
+      own?.setAttribute('data-ex-s', this.stateOf(i, step));
     }
     for (const { tag, i } of this.tags) {
       const state = this.stateOf(i, step);
@@ -569,6 +592,10 @@ export class FollowPainter {
     this.layer.remove();
     this.board.classList.remove('shp-ex-on');
     for (const { el } of this.lit) el.remove();
+    for (const { own } of this.rings.values()) {
+      own?.removeAttribute('data-ex-own');
+      own?.removeAttribute('data-ex-s');
+    }
     for (const el of this.touched) {
       el.removeAttribute('data-ex-s');
       el.removeAttribute('data-ex-i');
