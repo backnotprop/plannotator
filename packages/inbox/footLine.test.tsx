@@ -3,10 +3,11 @@
  * thread text scrolls under it. The thread all fits, or is scrolled to its end: no line. Scrolled anywhere above
  * the end, or grown past the view with no scroll (a message arrives, the reply box opens): the line. Also the
  * window's stylesheet: no line and no shadow without `data-under`, both with it, and what is open (the open
- * questions, the checklist) pushed to the bar's right.
+ * questions, the checklist) right after the actions, never pushed to the bar's far end.
  *
  * What regresses: a line drawn over nothing at the end of a thread, a line missing while text runs under the
- * bar, a line that never comes back after the thread grows, and the open things falling back beside Reply.
+ * bar, a line that never comes back after the thread grows, and the open things pushed away from Reply to the
+ * bar's far end (the owner, 2026-11-08: "I want them next to the button").
  *
  * happy-dom has no layout: the thread's body gets its scroll sizes from the test, and a stand-in
  * ResizeObserver reports a size change when the test says so.
@@ -248,7 +249,7 @@ describe.skipIf(!hasDom)('the bar in the thread pane', () => {
 });
 
 // The window's stylesheet: happy-dom computes the cascade, not the layout.
-test.skipIf(!hasDom)('the stylesheet: no line or shadow without text under the bar, both with it; the open things start the right group', async () => {
+test.skipIf(!hasDom)('the stylesheet: no line or shadow without text under the bar, both with it; the open things sit next to the actions', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
   style.textContent = css;
@@ -276,14 +277,15 @@ test.skipIf(!hasDom)('the stylesheet: no line or shadow without text under the b
     expect(under.borderTopColor).not.toBe('transparent');
     expect(['', 'none']).toContain(end.boxShadow);
     expect(under.boxShadow).toContain('18px');
-    // The buttons fill the row, so an auto margin can push the open things to its right end.
-    expect(getComputedStyle(at('end').querySelector('[data-foot-buttons]')!).flexGrow).toBe('1');
+    // Nothing pushes the open things away from the actions: the buttons do not stretch across the row on a computer,
+    // and no auto margin opens a gap before the open questions or the checklist (the buttons' 8 px gap is the space).
+    expect(getComputedStyle(at('end').querySelector('[data-foot-buttons]')!).flexGrow).not.toBe('1');
     const startOf = (k: string, sel: string) => getComputedStyle(at(k).querySelector(sel)!).marginInlineStart;
-    expect(startOf('both', '[data-open-questions]')).toBe('auto');
-    expect(startOf('both', '[data-steps-button]')).not.toBe('auto');
-    expect(startOf('steps', '[data-steps-button]')).toBe('auto');
-    expect(startOf('steps', '[data-reply-button]')).not.toBe('auto');
-    expect(startOf('steps', '.ib-react')).not.toBe('auto');
+    for (const [k, sel] of [['both', '[data-open-questions]'], ['both', '[data-steps-button]'], ['steps', '[data-steps-button]']] as const) {
+      expect(startOf(k, sel)).not.toBe('auto');
+      expect(getComputedStyle(at(k).querySelector(sel)!).marginLeft).not.toBe('auto');
+    }
+    expect(getComputedStyle(at('both').querySelector('[data-foot-buttons]')!).getPropertyValue('gap')).toBe('8px');
   } finally {
     box.remove();
     style.remove();
