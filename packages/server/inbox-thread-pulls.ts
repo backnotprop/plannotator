@@ -33,6 +33,7 @@
 import { forgeRefKey, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import {
   inboxThreadPullGroups,
+  inboxThreadPullText,
   inboxThreadPullWire,
   INBOX_THREAD_PULLS_REMOVED_MS,
   parseInboxThreadPullRefs,
@@ -45,6 +46,7 @@ import {
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, CARD_MARKS_BATCH, CARD_MARKS_MAX_CONCURRENT } from "./inbox-card-marks";
+import { sessionLastSawThread } from "./inbox-session-reads";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
 
 /** What the reader learns about one PR. */
@@ -327,4 +329,26 @@ export function createThreadPullsRoute(options: {
       return json({ serverSession: options.serverSession, ...threadPullsAnswer(store, states, threadId, now()) });
     },
   };
+}
+
+/**
+ * What the person changed on a thread's PRs since its owner last saw the
+ * thread (the session's reads, its deliveries and its own messages, and its
+ * own PR changes), as the wake says it (`pulls_changed`, inboxPullsWakeLine):
+ * net, so a PR the person added and took off again is not named. Null for any
+ * session but the thread's owner, or with nothing to say. Never throws.
+ */
+export function threadPullsChangedForWake(store: InboxStore, threadId: string, session: string): { added: string[]; removed: string[] } | null {
+  try {
+    if (store.threadOwner(threadId)?.session !== session) return null;
+    let since = sessionLastSawThread(store, session, threadId) ?? "";
+    for (const event of store.threadPullEvents(threadId)) {
+      if (event.by.kind === "agent" && event.by.session === session && event.at > since) since = event.at;
+    }
+    const { added, removed } = store.personPullChangesSince(threadId, since);
+    if (added.length + removed.length === 0) return null;
+    return { added: added.map((pull) => inboxThreadPullText(pull)), removed: removed.map((pull) => inboxThreadPullText(pull)) };
+  } catch {
+    return null;
+  }
 }

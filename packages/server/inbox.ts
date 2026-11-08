@@ -266,12 +266,11 @@ import { createProjectPictures, type ProjectPictureOptions } from "./inbox-proje
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
 import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull } from "@plannotator/core/inbox-types";
-import { inboxThreadPullsSummary, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
+import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
-import { createThreadPullStates, createThreadPullsRoute, type ThreadPullFixture } from "./inbox-thread-pulls";
-import { sessionLastSawThread } from "./inbox-session-reads";
+import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
@@ -3292,20 +3291,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * message, its own PR change), for a wake to the thread's owner only; null when nothing, or another session. An edit
    * alone never wakes anyone: it rides the next wake, and once that is delivered it is seen.
    */
-  const pullsChangedFor = (threadId: string, session: string): { added: string[]; removed: string[] } | null => {
-    try {
-      if (store.threadOwner(threadId)?.session !== session) return null;
-      let since = sessionLastSawThread(store, session, threadId) ?? "";
-      for (const event of store.threadPullEvents(threadId)) {
-        if (event.by.kind === "agent" && event.by.session === session && event.at > since) since = event.at;
-      }
-      const { added, removed } = store.personPullChangesSince(threadId, since);
-      if (added.length + removed.length === 0) return null;
-      return { added: added.map((pull) => inboxThreadPullText(pull)), removed: removed.map((pull) => inboxThreadPullText(pull)) };
-    } catch {
-      return null;
-    }
-  };
+  const pullsChangedFor = (threadId: string, session: string) => threadPullsChangedForWake(store, threadId, session);
   /** Words for the wake, never a condition of it: with no context, the reply goes as it would from an older Inbox. */
   const wakeContextOf = (reply: InboxMessage, receiver: string | null): Pick<InboxReplyCommand, "context"> => {
     try {

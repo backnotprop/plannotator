@@ -512,7 +512,11 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
         data-pr-button={shown?.headline.state ?? 'none'}
         data-pr-n={shown?.count ?? 0}
         {...hover}
-        onClick={(e) => setOpen((now) => (now?.pinned ? null : { anchor: e.currentTarget, sheet: coarse(), pinned: true }))}
+        onClick={(e) => {
+          // Read now: React clears currentTarget once the handler returns, before the update runs.
+          const anchor = e.currentTarget;
+          setOpen((now) => (now?.pinned ? null : { anchor, sheet: coarse(), pinned: true }));
+        }}
       >
         {shown ? <PullsMarkIcon summary={shown} size={17} /> : <RefMarkIcon kind="pr" state="unknown" size={17} />}
       </button>
