@@ -199,10 +199,13 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
     if (!row || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => fit());
     observer.observe(row);
+    // The chips too: a larger text size grows them inside a row that keeps its width (stacked, the row is the foot's
+    // whole width), and only a refit gives their words up. A fit that changes a chip refits once to the same result.
+    for (const chip of row.children) observer.observe(chip);
     // Words measured in a fallback font fit differently once the real one loads.
     void document.fonts?.ready.then(() => fit());
     return () => observer.disconnect();
-  }, [fit]);
+  }, [fit, n, a, reply.picks, reply.actions, reply.annotations]);
   return (
     <span className="ib-fcomp-chips" ref={chips}>
       {reply.picks > 0 && (
