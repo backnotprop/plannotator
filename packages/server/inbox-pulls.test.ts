@@ -30,7 +30,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REPO_TTL_MS, inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -59,6 +59,7 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
 import type { PRRuntime } from "@plannotator/shared/pr-provider";
 import type { PullAvatarOptions } from "./inbox-pull-avatars";
+import type { PullRiskOptions, RiskRun } from "./inbox-pull-risk";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -202,7 +203,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions> } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -226,8 +227,12 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     ...(options.tailscale ? { tailscale: options.tailscale } : {}),
     ...(options.board === undefined ? {} : { board: options.board }),
     ...(options.avatars ? { pullAvatars: options.avatars } : {}),
+    ...(options.pullRisk ? { pullRisk: options.pullRisk } : {}),
     refRunner: f.run,
-    readProjectRepo: async () => repo,
+    readProjectRepo: async () => {
+      if (options.repoDelayMs) await Bun.sleep(options.repoDelayMs);
+      return repo;
+    },
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -299,6 +304,91 @@ function gitlabForge(): Forge {
   };
   return f;
 }
+
+describe("a second list read while the first waits on git", () => {
+  test("gets the same PRs, not an empty list", async () => {
+    const w = await world({ codeReview: true, repoDelayMs: 300 });
+    await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
+    const answers = await Promise.all([w.pulls(), Bun.sleep(50).then(() => w.pulls())]);
+    for (const answer of answers) {
+      const body = (await answer.json()) as InboxPullsAnswer;
+      expect(body.pulls.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("risk ranking", () => {
+  const riskWorld = async (run: PullRiskOptions["run"]) =>
+    world({ codeReview: true, pullRisk: { run, agents: () => [{ id: "pi-sdk", label: "Pi" }], listModels: async () => [{ id: "a/claude-sonnet-5", label: "Sonnet 5" }, { id: "a/opus", label: "Opus" }] } });
+  const save = (base: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/risk`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const settings = { rules: "Anything in billing.", provider: "pi-sdk", model: "a/claude-sonnet-5" };
+
+  test("the Reviews page's read starts judgments too", async () => {
+    const runs: RiskRun[] = [];
+    const w = await riskWorld(async (run) => {
+      runs.push(run);
+      return { text: '{"risk":"high","why":"It changes the retry schedule."}' };
+    });
+    await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
+    expect((await save(w.base, settings)).status).toBe(200);
+    expect((await fetch(`${w.base}/api/inbox/reviews?refresh=1`)).status).toBe(200);
+    await Bun.sleep(100);
+    expect(runs.length).toBeGreaterThan(0);
+  });
+
+  test("the list read starts judgments only once rules exist, and the window reads them back for the current heads", async () => {
+    const runs: RiskRun[] = [];
+    const w = await riskWorld(async (run) => {
+      runs.push(run);
+      return { text: '{"risk":"high","why":"It changes the retry schedule."}' };
+    });
+    await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
+    await w.pulls();
+    const before = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+    expect(before).toMatchObject({ rules: "", provider: null, judgments: {}, pending: 0 });
+    expect(runs).toEqual([]);
+
+    expect((await save(w.base, settings)).status).toBe(200);
+    // Saving alone starts nothing: the window reads the list next.
+    expect(runs).toEqual([]);
+    await w.pulls();
+    const started = Date.now();
+    let answer: InboxPullRiskAnswer;
+    do {
+      answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+    } while (answer.pending > 0 && Date.now() - started < 5_000);
+    expect(answer.rules).toBe("Anything in billing.");
+    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule." });
+    expect(runs.length).toBe(3);
+  });
+
+  test("Code review off: refused before anything runs", async () => {
+    const runs: RiskRun[] = [];
+    const w = await world({ pullRisk: { run: async (run) => (runs.push(run), null), agents: () => [{ id: "pi-sdk", label: "Pi" }] } });
+    expect((await fetch(`${w.base}/api/inbox/pulls/risk`)).status).toBe(409);
+    expect((await save(w.base, settings)).status).toBe(409);
+    expect((await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=pi-sdk`)).status).toBe(409);
+    expect(runs).toEqual([]);
+  });
+
+  test("another site can't change the rules or read them", async () => {
+    const w = await riskWorld(async () => null);
+    expect((await save(w.base, settings, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await fetch(`${w.base}/api/inbox/pulls/risk`, { headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer).rules).toBe("");
+  });
+
+  test("the models of an installed agent; any other agent is refused", async () => {
+    const w = await riskWorld(async () => null);
+    const list = (await (await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=pi-sdk`)).json()) as InboxPullRiskModels;
+    // Pi starts on the person's own default, as the guided review does.
+    expect(list.default_model).toBeNull();
+    expect(list.models.map((m) => m.id)).toEqual(["a/claude-sonnet-5", "a/opus"]);
+    expect((await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=codex-sdk`)).status).toBe(422);
+    expect((await fetch(`${w.base}/api/inbox/pulls/risk`, { method: "DELETE" })).status).toBe(405);
+  });
+});
 
 describe("off", () => {
   test("Code review off (unset): the routes refuse and nothing runs: no gh, no glab", async () => {
@@ -1699,6 +1789,15 @@ describe("who may read it", () => {
       const guest = await through(GUEST);
       expect(guest.status).toBe(403);
       expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      // Nor may a guest read the risk rules, change them, or ask for an agent's models.
+      for (const [path, init] of [
+        ["/api/inbox/pulls/risk", {}],
+        ["/api/inbox/pulls/risk/models?provider=pi-sdk", {}],
+        ["/api/inbox/pulls/risk", { method: "POST", body: JSON.stringify({ rules: "x", provider: null, model: null }) }],
+      ] as const) {
+        const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
+        expect(((await answer.json()) as { code: string }).code).toBe("local_only");
+      }
       // Nor read a project's files through a guide's expand arrows.
       const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
       expect(guestFile.status).toBe(403);

@@ -35,7 +35,7 @@ afterEach(() => {
   else process.env.PLANNOTATOR_INBOX_PREVIEW = savedPreview;
 });
 
-type Frame = { board?: { on: boolean }; steps?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } };
+type Frame = { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } };
 
 async function world(config: Record<string, unknown> | null, preview: boolean, version?: string) {
   if (preview) process.env.PLANNOTATOR_INBOX_PREVIEW = "1";
@@ -110,7 +110,7 @@ test("off, no preview: the settings read and a Checklist save's event leave Code
     expect("code_review" in saved).toBe(false);
     expect("shape" in saved).toBe(false);
     await stream.next(1);
-    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true } }]);
+    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false } }]);
     await stream.stop();
   }
 });
@@ -128,7 +128,7 @@ test("already on: both rows' keys are there; turning each off answers off, tells
   expect(stream.frames[0]!.shape).toEqual({ on: true });
   expect((await w.save({ shape: { on: false } })).shape).toEqual({ on: false });
   await stream.next(2);
-  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, shape: { on: false } });
+  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, shape: { on: false } });
   await stream.stop();
 
   const after = await w.read();
@@ -145,7 +145,7 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and in 
   const stream = await windowCapabilities(w.base);
   await w.save({ steps: { on: true } });
   await stream.next(1);
-  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, code_review: { on: false }, shape: { on: false } }]);
+  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, shape: { on: false } }]);
   await stream.stop();
 });
 

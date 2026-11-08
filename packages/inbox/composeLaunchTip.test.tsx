@@ -38,6 +38,8 @@ let savedTimes = { delayMs: 0, leaveMs: 0 };
 let launch: InboxComposeLaunch | null = CAN_START;
 let claims = 0;
 let claimAnswer = true;
+/** When set, the claim's answer waits for this (the Inbox is slow to answer). */
+let claimHeld: Promise<void> | null = null;
 let closed = 0;
 
 beforeEach(() => {
@@ -51,6 +53,7 @@ beforeEach(() => {
   launch = CAN_START;
   claims = 0;
   claimAnswer = true;
+  claimHeld = null;
   closed = 0;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -88,7 +91,13 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-const claim = { claim: async () => (claims++, claimAnswer) };
+const claim = {
+  claim: async () => {
+    claims++;
+    if (claimHeld) await claimHeld;
+    return claimAnswer;
+  },
+};
 
 async function open(request: Record<string, unknown> = {}, opts: { phone?: boolean; tip?: typeof claim | null; tour?: boolean } = {}) {
   host = document.createElement('div');
@@ -239,13 +248,41 @@ test.skipIf(!hasDom)('no claim offered (a guest, stamped already), the tour, or 
   expect(claims).toBe(0);
 });
 
-test.skipIf(!hasDom)('the Inbox refuses the claim (another window or the phone showed it): nothing drawn', async () => {
+test.skipIf(!hasDom)('the Inbox refuses the claim (another window or the phone showed it): the card goes at once, never announced', async () => {
   claimAnswer = false;
   await open();
   await settle();
   expect(claims).toBe(1);
   expect(tip() !== null).toBe(false);
   expect(toButton().hasAttribute('aria-describedby')).toBe(false);
+  expect(inDialog('[data-compose-paste-live]')!.textContent).toBe('');
+});
+
+test.skipIf(!hasDom)('the claim goes as the card shows: To opened while the answer is on its way finds the tip seen, not used up unseen', async () => {
+  let answer!: () => void;
+  claimHeld = new Promise<void>((done) => (answer = done));
+  await open();
+  await until(() => tip() !== null, 'the tip');
+  // Drawn in the same render the claim was sent: a stamp never lands for a card nobody saw.
+  expect(claims).toBe(1);
+  act(() => toButton().click());
+  await until(() => tip() === null, 'the tip gone');
+  await act(async () => answer());
+  await settle();
+  expect(tip() !== null).toBe(false);
+  expect(claims).toBe(1);
+});
+
+test.skipIf(!hasDom)('Escape on Got it: the tip leaves and focus goes to To, never to the page', async () => {
+  await openWithTip();
+  const ok = inDialog('[data-launch-tip-ok]') as HTMLButtonElement;
+  act(() => ok.focus());
+  expect(document.activeElement === ok).toBe(true);
+  key(ok, 'Escape');
+  expect(document.activeElement === toButton()).toBe(true);
+  await until(() => tip() === null, 'the tip gone');
+  expect(document.activeElement === toButton()).toBe(true);
+  expect(closed).toBe(0);
 });
 
 test.skipIf(!hasDom)('To opened before the tip came: not shown and not claimed, so the next New message still has it', async () => {

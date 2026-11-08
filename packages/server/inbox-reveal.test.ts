@@ -122,14 +122,15 @@ async function world(options: Options = {}) {
   for (let i = 0; i < (options.threads ?? 6); i++) {
     store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
   }
+  let launchedThread: string | null = null;
   if (options.launched) {
-    store.startPersonThread({
+    launchedThread = store.startPersonThread({
       project_id: project.id,
       body: "Fix the totals.",
       to: null,
       idempotency_key: "launched-1",
       launch: { id: "lch_seeded", agent: "claude-code", session_ref: null, folder: join(root, "docs"), scratch: false, started_at: then.toISOString() },
-    });
+    }).message.thread_id;
   }
   const home = join(root, "home");
   mkdirSync(home);
@@ -183,7 +184,7 @@ async function world(options: Options = {}) {
     return JSON.stringify({ instructions: init.instructions, list, tool: inboxAgentTool(parseInboxToolList(list)) });
   };
   const toolNames = async () => parseInboxToolList(await rpc("tools/list", {})).map((tool) => tool.name);
-  return { server, base, post, viaTailnet, settings, next, claim, saved, agentText, toolNames, dataDir };
+  return { server, base, post, viaTailnet, settings, next, claim, saved, agentText, toolNames, dataDir, launchedThread };
 }
 
 describe("the Board reveal at day 4", () => {
@@ -760,13 +761,17 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect(w.saved().inboxReveals.launch_tip.shownAt).toBe(saved.launch_tip.shownAt);
   });
 
-  test("never with Launch off, once an agent was started here, for a guest, or as a Not now", async () => {
+  test("never once an agent was started here, even after its thread is deleted; never for a guest, or as a Not now", async () => {
+    // Launch off here: still due (a linked machine may start agents; compose claims only when To can start one).
     const off = await world();
-    expect((await off.settings()).reveal.launch_tip).toBe(false);
-    expect((await off.claim("launch_tip", KEY)).show).toBe(false);
-    expect(off.saved().inboxReveals?.launch_tip).toBeUndefined();
+    expect((await off.settings()).reveal.launch_tip).toBe(true);
 
     const launched = await world({ config: LAUNCH_ON, launched: true });
+    expect((await launched.settings()).reveal.launch_tip).toBe(false);
+    expect(launched.saved().inboxReveals.launch_tip.launchedAt).toMatch(/^\d{4}-/);
+    expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
+    // The only launched thread deleted: the mark keeps the tip from coming back.
+    expect((await launched.post(`/api/inbox/threads/${launched.launchedThread}/delete`)).status).toBe(200);
     expect((await launched.settings()).reveal.launch_tip).toBe(false);
     expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
 

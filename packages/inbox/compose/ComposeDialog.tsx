@@ -18,7 +18,7 @@
  * - A reopened draft keeps the session it was for, struck through when that
  *   session has ended: it is never re-addressed on its own.
  * - Files: the paperclip, a drop or a paste (paste.ts), uploaded at once (ComposeFiles.tsx).
- * - Launch on (`inboxLaunch.enabled`, docs/agent-guides/inbox-launch.md): To can
+ * - Launch on (`inboxLaunch.enabled`, on unless Settings → Agents turned it off; docs/agent-guides/inbox-launch.md): To can
  *   also name a new session ("New Claude Code session ▾ in <project> ▾"); Send
  *   writes the thread, then the Inbox starts the agent in the project's folder.
  *   A folder that is gone turns Send off and says so (UX screen 13).
@@ -29,10 +29,12 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAttachmentState, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
+import type { ReuseSource } from '../reuse';
+import { ThreadFilesStrip } from './ThreadFilesStrip';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
@@ -86,11 +88,13 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
 
+/** How long after the last keystroke a pasted link is read. */
+const REVIEW_LINK_PAUSE_MS = 300;
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
 
@@ -116,6 +120,8 @@ export interface ComposeRequest {
   pulls?: InboxDraft['pulls'] | null;
   /** The thread's name as compose opens (Launch an agent: `pullHandoffThreadName`), as if the person had typed it. */
   threadName?: string;
+  /** Files already in the Inbox this message starts with (an archived thread's reuse button). */
+  reuse?: readonly ReuseSource[];
   /** New review: the box's rows above To (`reviewBox.ts`), filled in with a PR from its own page. */
   review?: ReviewBoxRequest | null;
   /** A failed clone's Change the URL (E5): To the same agent and machine, the folder menu open with the URL in its filter. */
@@ -184,6 +190,8 @@ export interface ComposeTransport {
 export interface ComposeDialogProps {
   request: ComposeRequest;
   phone: boolean;
+  /** The files of the thread behind the dialog, offered one click each. Absent or null: no row. */
+  threadFiles?: readonly InboxAttachmentState[] | null;
   /** The project the person is looking at: the list's filter, or the open thread's. */
   current: { id: string | null; root: string | null; name: string | null } | null;
   /** The session the person last sent to: listed first in the picker while it is live; never put in To by itself. */
@@ -262,6 +270,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
   const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
+  // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
+  const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
+  const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
+  const linkKept = useRef(typed.link ?? '');
+  const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
@@ -271,7 +284,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewPick?.id, props.reviewPulls]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
-  const boxPull = box && reviewKind === 'pr' ? reviewPick : null;
+  // A link: the picker's own way when the list has that PR, else a PR the Inbox knows only from this link.
+  const linkFound = box && reviewKind === 'pr' && linkChosen && linkRead?.ok ? linkRead : null;
+  const linkListed = linkFound ? reviewLinkListed(linkFound, props.reviewPulls ?? []) : null;
+  // Its review thread, chosen or not: the search's row says so, and choosing it opens the thread.
+  const linkThreadOf = (read: InboxReviewLinkAnswer | null) => (read?.ok ? (reviewLinkListed(read, props.reviewPulls ?? [])?.thread?.id ?? read.thread_id ?? null) : null);
+  const linkThread = linkFound ? linkThreadOf(linkFound) : null;
+  const linkOnly = linkFound && !linkListed && !linkThread ? linkFound : null;
+  const boxPull = !box || reviewKind !== 'pr' ? null : linkChosen ? (linkListed && !linkThread ? linkListed : null) : reviewPick;
   const pulls = request.pulls ?? request.draft?.pulls ?? (boxPull ? { keys: handoffKeys(boxPull.stack), projects: [...boxPull.projects], ask_line: pullHandoffAskLine(boxPull.stack, { kind: 'guide' }) } : null);
   // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
   // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
@@ -290,11 +310,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
     onPasted: (names) => say(attachedAnnouncement(names)),
+    onAlready: (name) => say(`${name} is already in this message`),
     onPutBack: () => say('The pasted text is back in your message.'),
     text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
+  const reuseStarted = useRef(false);
+  useEffect(() => {
+    if (reuseStarted.current) return;
+    reuseStarted.current = true;
+    for (const source of request.reuse ?? []) files.addExisting(source);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
   // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project; `create`: the Send
   // makes it (Create a folder); `clone`: the Send clones a repo into it first (Clone from a git URL). A draft's own
@@ -337,7 +365,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
     await Promise.all([loadHere(), startPick?.machine ? there.readOne(startPick.machine) : null]);
   };
   const voice = useVoiceSession();
-  const projects = useMemo(() => (model?.projects ?? []).filter((g) => !pulls || (g.project.id !== null && pulls.projects.includes(g.project.id))), [model, pulls]);
+  const onlyProjects = pulls?.projects ?? (linkOnly && linkOnly.projects.length > 0 ? linkOnly.projects : null);
+  // A link's PR in no project: nowhere is wrong, and a new scratch folder is the default where launching can.
+  const linkScratch = !!linkOnly && linkOnly.projects.length === 0;
+  const projects = useMemo(() => (model?.projects ?? []).filter((g) => !onlyProjects || (g.project.id !== null && onlyProjects.includes(g.project.id))), [model, onlyProjects?.join()]);
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
@@ -365,9 +396,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const launch = useMemo(() => {
     const offered = model?.launch;
     if (!grouped) {
-      if (!offered || (!pulls && !box)) return offered;
+      // A link's PR in no project keeps the scratch folder (`linkScratch`).
+      if (!offered || (!onlyProjects && !box) || linkScratch) return offered;
       // New review reviews a project's changes, which a new scratch folder has none of.
-      return { agents: offered.agents, projects: pulls ? offered.projects.filter((p) => pulls.projects.includes(p.id)) : offered.projects };
+      return { agents: offered.agents, projects: onlyProjects ? offered.projects.filter((p) => onlyProjects.includes(p.id)) : offered.projects };
     }
     // Every machine's projects in the menu's order, each with its machine; the agents any of them can start.
     const agents = [...(offered?.agents ?? [])];
@@ -376,7 +408,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // awake one has projects: those come last here, and the folder menu keeps its own order.
     const projects: MachineLaunchProject[] = [...machineGroups.groups.filter((g) => !g.asleep), ...machineGroups.groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
     return { agents, projects, ...(offered?.scratch && !pulls ? { scratch: offered.scratch } : {}) };
-  }, [model?.launch, pulls, box, grouped, machineGroups, there.reads]);
+  }, [model?.launch, pulls, onlyProjects?.join(), box, linkScratch, grouped, machineGroups, there.reads]);
   const canStart = !!launch && launch.agents.length > 0 && (launch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
@@ -397,11 +429,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       };
     }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
-    if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && !pulls && !box) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
-    const project = block?.projects.find((p) => p.id === startPick.projectId && (!pulls || pulls.projects.includes(p.id)));
+    if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && ((!pulls && !box) || linkScratch)) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
+    const project = block?.projects.find((p) => p.id === startPick.projectId && (!onlyProjects || onlyProjects.includes(p.id)));
     return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startPick, model?.launch, there.reads, pulls, box]);
+  }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
   // "+" on a project row: an agent that machine doesn't have (or none started yet) becomes its first, once its block is read.
   useEffect(() => {
     if (!request.start || !startPick || startPick.folder) return;
@@ -443,7 +475,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent);
+    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -457,6 +489,25 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setError(null);
   };
   const reviewProject = target?.project ?? start?.project ?? null;
+  // What a pasted link is, a moment after the typing stops.
+  useEffect(() => {
+    setLinkRead(null);
+    if (!box || reviewKind !== 'pr' || !reviewLink.trim()) return;
+    const read = new AbortController();
+    const pause = setTimeout(() => {
+      inboxApi.reviewLink(reviewLink.trim(), read.signal).then(
+        setLinkRead,
+        () => {
+          if (!read.signal.aborted) setLinkRead({ ok: false, reason: 'failed' });
+        },
+      );
+    }, REVIEW_LINK_PAUSE_MS);
+    return () => {
+      clearTimeout(pause);
+      read.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!box, reviewKind, reviewLink]);
   useEffect(() => {
     if (!box || reviewKind !== 'local' || !reviewProject?.id) {
       setReviewSummary(null);
@@ -527,7 +578,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [footCovered, question, voice.session]);
 
   // ── the Launch tip (launchTip.ts): once, at a plain New message whose To can start an agent ──
-  const [tip, setTip] = useState<'wait' | 'claiming' | 'shown' | 'leaving' | 'done'>(() => (props.launchTip && !transport && !box && launchTipPlainOpen(request) ? 'wait' : 'done'));
+  const [tip, setTip] = useState<'wait' | 'shown' | 'leaving' | 'done'>(() => (props.launchTip && !transport && !box && launchTipPlainOpen(request) ? 'wait' : 'done'));
   const [tipTime, setTipTime] = useState(false);
   const [tipPlace, setTipPlace] = useState<LaunchTipPlace | null>(null);
   const tipLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -541,28 +592,43 @@ export function ComposeDialog(props: ComposeDialogProps) {
   useEffect(() => () => {
     if (tipLeaveTimer.current) clearTimeout(tipLeaveTimer.current);
   }, []);
-  // To opened, or something in To, before the tip came: not needed this time, and not used up.
+  // To opened, or something in To, before the tip came: not needed this time, and not used up (no claim was made).
   const toTouched = picker || !!chosen || !!startPick;
   useEffect(() => {
-    if (toTouched && (tip === 'wait' || tip === 'claiming')) setTip('done');
+    if (toTouched && tip === 'wait') setTip('done');
   }, [toTouched, tip]);
+  // The Inbox's answer to the claim: null while it is on its way.
+  const [tipClaimed, setTipClaimed] = useState<boolean | null>(null);
+  // It shows in the same render the claim is sent, so a stamp always means it was on screen (opening To while the
+  // answer is on its way never uses it up unseen). Refused (another window or the phone showed it): it goes at once.
   useEffect(() => {
     if (tip !== 'wait' || !tipTime || !model || !canStart || toTouched || busy) return;
-    setTip('claiming');
+    setTip('shown');
     tipClaim.current?.().then(
-      (show) => setTip((now) => (now === 'claiming' ? (show ? 'shown' : 'done') : now)),
-      () => setTip((now) => (now === 'claiming' ? 'done' : now)),
+      (show) => {
+        setTipClaimed(show);
+        if (!show) setTip((now) => (now === 'shown' || now === 'leaving' ? 'done' : now));
+      },
+      // A lost answer (retried once already): it stays for this open; the Inbox may not have kept it.
+      () => setTipClaimed(true),
     );
   }, [tip, tipTime, model, canStart, toTouched, busy]);
-  // Said once, in compose's own polite region (the window's is outside the modal dialog).
+  // Said once the Inbox kept it, in compose's own polite region (the window's is outside the modal dialog).
   useEffect(() => {
-    if (tip === 'shown') say(LAUNCH_TIP_SAID);
+    if (tip === 'shown' && tipClaimed === true) say(LAUNCH_TIP_SAID);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tip === 'shown']);
+  }, [tip === 'shown' && tipClaimed === true]);
   const leaveTip = () => {
     if (tip !== 'shown') return false;
     setTip('leaving');
     tipLeaveTimer.current = setTimeout(() => setTip('done'), LAUNCH_TIP_TIMES.leaveMs);
+    return true;
+  };
+  // Escape on the tip: it leaves, and focus on its Got it (which is going) moves to To, as Got it from the keyboard does.
+  const escapeTip = () => {
+    const onTip = !!(document.activeElement as Element | null)?.closest?.('.ib-lt');
+    if (!leaveTip()) return false;
+    if (onTip) (toRef.current ?? textRef.current)?.focus();
     return true;
   };
   // Opening To is what it asked for: it leaves.
@@ -595,16 +661,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => clearTimeout(timer);
   }, [body, fileNames]);
   // New review names its thread from what it reviews, not from the words.
-  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : reviewKind === 'pr' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
+  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
   const threadName = draftThreadName(nameState);
   // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
   const keptAny = useRef(false);
   useEffect(() => {
     if (!box) return;
-    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' ? reviewPick : null });
+    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' && !linkChosen ? reviewPick : null, link: reviewKind === 'pr' && linkChosen ? reviewLink : '' });
     keptAny.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!box, body, nameState, reviewKind, reviewPick]);
+  }, [!!box, body, nameState, reviewKind, reviewPick, reviewLink, linkChosen]);
   useEffect(() => {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, start?.machine, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
@@ -686,12 +752,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError("Nothing sent: the pull request's agent works in its own project.");
       return;
     }
+    if (linkThread) {
+      props.onClose();
+      props.onOpenReviewThread?.(linkThread);
+      return;
+    }
     if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
       setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : box ? 'Nothing sent: no live agent is chosen.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (box && reviewKind === 'pr' && !boxPull) {
+    if (box && reviewKind === 'pr' && !boxPull && !linkOnly) {
       setError('Nothing sent: choose a pull request first.');
       return;
     }
@@ -727,8 +798,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
-        : boxPull
-          ? pullHandoffMessage(boxPull.stack, body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
+        : boxPull || linkOnly
+          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
           : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
@@ -755,7 +826,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
-        ...(box && !boxPull ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && !boxPull && !linkOnly ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
@@ -944,7 +1016,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       event.preventDefault();
       event.stopPropagation();
       // The Launch tip up: the first Escape closes only the tip (a popover's own dismissal, not a new shortcut).
-      if (!leaveTip()) requestClose();
+      if (!escapeTip()) requestClose();
       return;
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !question) {
@@ -956,7 +1028,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = (!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull) && !noChanges;
+  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull && !linkOnly) && !noChanges);
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -1110,7 +1182,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </button>
         </span>
       )}
-      {boxPull && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
+      {(boxPull || (linkOnly && !linkScratch)) && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
   );
@@ -1137,15 +1209,41 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setReviewPick(pull);
+        linkKept.current = '';
+        toFollowsReview();
+        textRef.current?.focus();
+      }}
+      linkChosen={linkChosen}
+      onUseLink={() => {
+        setReviewMenu(false);
+        if (linkThreadOf(linkRead)) {
+          props.onClose();
+          props.onOpenReviewThread?.(linkThreadOf(linkRead)!);
+          return;
+        }
+        setLinkChosen(true);
+        linkKept.current = reviewLink;
         toFollowsReview();
         textRef.current?.focus();
       }}
       phone={phone}
       menu={reviewMenu}
+      link={reviewLink}
+      onLink={(text) => {
+        setReviewLink(text);
+        setLinkChosen(false);
+      }}
+      linkRead={linkRead}
+      linkInReview={!!linkThreadOf(linkRead)}
       onMenu={(open) => {
         setPicker(false);
         setFolderMenu(false);
         setReviewMenu(open);
+        // Closed without choosing: the link already chosen stays, as a list pick does.
+        if (!open && !linkChosen && linkKept.current) {
+          setReviewLink(linkKept.current);
+          setLinkChosen(true);
+        }
       }}
     />
   );
@@ -1163,7 +1261,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
-        if (!leaveTip()) requestClose();
+        if (!escapeTip()) requestClose();
       }}
       // A phone's tip covers Thread and the message: a tap into either lets it go (it was stamped when it showed).
       onFocus={(event) => {
@@ -1430,6 +1528,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             }}
           />
         </div>
+        {takesFiles && <ThreadFilesStrip threadFiles={props.threadFiles} files={files} />}
         <ComposeFileTiles
           files={files.files}
           onRemove={(key) => {

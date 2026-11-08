@@ -78,7 +78,7 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
  * `https://github.com-evil.example/o/r/pull/1` as github.com. A host that only starts like a
  * public forge (`github.com-…`, `github.com.…`) is no forge at all.
  */
-function webForgeHost(hostname: string): string | null {
+export function webForgeHost(hostname: string): string | null {
   const h = hostname.toLowerCase();
   if (!/^[a-z0-9.-]+$/.test(h) || !h.includes(".")) return null;
   if (/^(github|gitlab)\.com[.-]/.test(h)) return null;

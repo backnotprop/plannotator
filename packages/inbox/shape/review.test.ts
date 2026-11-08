@@ -54,3 +54,39 @@ test('open goes to the review at a file it changes or a step it has, and answers
   // The review's files are read once.
   expect(reads).toBe(1);
 });
+
+test("a stack badge's narrowing survives the address with its place, and a forged one is dropped", () => {
+  const narrow = { part: 'The dialog', pr: 2547, title: 'What it shows', url: 'https://github.com/acme/kettle/pull/2547', hue: 357, files: ['src/a.ts', 'src/b.ts'] };
+  for (const at of [{ step: 3, narrow }, { path: 'src/a.ts', narrow }] as ShapeReviewAt[]) {
+    const params = new URLSearchParams('thread=msg_1&guide=msg_2');
+    writeShapeReviewAt(params, at);
+    expect(shapeReviewAtOf(new URLSearchParams(params.toString()))).toEqual(at);
+  }
+  // No place, no narrowing: All files stays All files.
+  const files = new URLSearchParams('thread=msg_1&guide=msg_2');
+  writeShapeReviewAt(files, { files: true, narrow });
+  expect(files.has('narrow')).toBe(false);
+  for (const forged of ['{', '[]', JSON.stringify({ ...narrow, files: [] }), JSON.stringify({ ...narrow, pr: 'x' })]) {
+    const at = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: forged }));
+    expect(at).toEqual({ step: 3 });
+  }
+  const badLink = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, url: 'javascript:alert(1)' }) }));
+  expect(badLink?.narrow?.pr).toBe(2547);
+  expect(badLink?.narrow?.url).toBeUndefined();
+  // The hue becomes a CSS value: only a number of degrees from 0 up to 360 is kept, as a whole number below 360.
+  for (const hue of ['0;background:url(x)', '72', 999, -1, 360, null, Number.NaN]) {
+    const at = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, hue }) }));
+    expect(at?.narrow?.pr).toBe(2547);
+    expect(at?.narrow?.hue).toBeUndefined();
+  }
+  const almost = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, hue: 359.6 }) }));
+  expect(almost?.narrow?.hue).toBe(0);
+});
+
+test("a stack badge's file reads the review's patch once", async () => {
+  let reads = 0;
+  const review = shapeReview(msg('msg_patch', guide(true)), () => {}, async () => (reads++, { snapshot }));
+  expect(await review.patch!()).toContain('src/kettle.ts');
+  await review.patch!();
+  expect(reads).toBe(1);
+});

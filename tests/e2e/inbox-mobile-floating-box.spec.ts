@@ -11,10 +11,11 @@
  *    takes the press.
  *  - A long agent's name is cut on one line, in the header and in "Sent to …".
  *  - The comments sheet covers the file: the box and its pill step aside from Write the reply. Write the reply closes
- *    the file and gives the thread's box focus; Keep writing and a refused Save it close the sheet to reach the words.
+ *    the file and gives the thread's box focus, a comment being written kept for the file (back in its row when it
+ *    opens again), never asked about.
  *  - A folded pill never lies under the toolbar: it shares the row when both fit, else it sits above (360 px overlapped by 24).
  *  - A desktop window's foot takes none of this. A window too narrow for a view beside the thread leaves the file as a
- *    phone does: R and Write the reply close it, and R asks about an unsaved comment first.
+ *    phone does: R and Write the reply close it at once (an unsaved comment waits as the file's draft).
  *
  * Voice is on but not ready in this sandbox, so the box also carries its note: the mic shows, dimmed, as it does on a
  * phone that cannot record. Build the binary first (see inbox.spec.ts).
@@ -410,42 +411,36 @@ for (const phone of PHONES) {
       await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
       const box = page.locator('section.ib-pane textarea.ib-rtext');
       await expect(box).toBeFocused();
-      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(2);
-      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight > el.clientHeight)).toBe(true);
+      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: the region
+      // scrolls, and the field's end (the caret's line) is inside what it shows.
+      const region = page.locator('section.ib-pane [data-reply-scroll]');
+      await expect.poll(() => region.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await expect
+        .poll(() =>
+          region.evaluate((el) => {
+            const shown = el.getBoundingClientRect();
+            const end = el.querySelector('textarea')!.getBoundingClientRect().bottom;
+            return end <= shown.bottom + 2 && end > shown.top + 20;
+          }),
+        )
+        .toBe(true);
     });
 
-    test('Keep writing, and a refused Save it, from under the sheet: the sheet closes and the words have focus', async () => {
+    test('from under the sheet, Write the reply closes the file at once with a comment being written in its row', async () => {
       await page.setViewportSize({ width: 390, height: 844 });
       const t = await seed(short, 2);
       const words = 'Not saved yet.';
       const field = card(page).locator('[data-image-composer] textarea');
-      const ask = async () => {
-        await page.locator('[data-full-view-bar] .ib-fvcount').tap();
-        await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
-        await page.locator('[data-step-guard]').waitFor();
-      };
-      const reached = async () => {
-        await expect(page.locator('[data-full-view-foot]')).toBeHidden();
-        await expect(field).toBeVisible();
-        await expect(field).toBeFocused();
-        await expect(field).toHaveValue(words);
-      };
       await page.goto('about:blank');
       await page.goto(fileUrl(t, 'shot.png'));
       await card(page).waitFor();
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await field.fill(words);
-      await ask();
-      await page.locator('[data-guard-keep]').tap();
-      await reached();
-      await page.route('**/api/inbox/annotations**', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"refused"}' }));
-      try {
-        await ask();
-        await page.locator('[data-guard-save]').tap();
-        await reached();
-      } finally {
-        await page.unroute('**/api/inbox/annotations**');
-      }
+      await page.locator('[data-full-view-bar] .ib-fvcount').tap();
+      await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
+      await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+      await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+      await expect(page.locator('section.ib-pane textarea.ib-rtext')).toBeFocused();
     });
 
     test('with motion on: the pill holds the toolbar’s row through Hide tools and back, and moves if the width changed meanwhile', async () => {
@@ -505,7 +500,7 @@ for (const phone of PHONES) {
 }
 
 for (const width of [500, 768, 900]) {
-  test(`a window ${width} px wide with no room beside the thread: R and Write the reply close the file, an unsaved comment asked about first`, async ({ browser }: { browser: Browser }) => {
+  test(`a window ${width} px wide with no room beside the thread: R and Write the reply close the file at once, an unsaved comment kept for it`, async ({ browser }: { browser: Browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 800 } });
     const page = await context.newPage();
     const box = page.locator('section.ib-pane textarea.ib-rtext');
@@ -526,17 +521,11 @@ for (const width of [500, 768, 900]) {
     await field.fill('Not saved yet.');
     await field.blur();
     await page.keyboard.press('r');
-    await page.locator('[data-step-guard]').waitFor();
-    await expect(page.locator('[data-attachment-pane]')).toHaveCount(1);
-    await page.locator('[data-guard-keep]').click();
-    await expect(field).toHaveValue('Not saved yet.');
-    await field.blur();
-    await page.keyboard.press('r');
-    await page.locator('[data-guard-discard]').click();
     await left();
+    await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     await page.keyboard.press('Escape');
 
-    // The address may say beside the thread; this window still shows the file alone, so R asks all the same.
+    // The address may say beside the thread; this window still shows the file alone, so R closes it all the same.
     await page.goto('about:blank');
     await page.goto(fileUrl(thread, 'shot.png').replace('view=full', 'view=side'));
     await card(page).waitFor();
@@ -544,8 +533,6 @@ for (const width of [500, 768, 900]) {
     await field.fill('Not saved yet.');
     await field.blur();
     await page.keyboard.press('r');
-    await page.locator('[data-step-guard]').waitFor();
-    await page.locator('[data-guard-discard]').click();
     await left();
     await page.keyboard.press('Escape');
 

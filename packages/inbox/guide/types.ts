@@ -58,6 +58,8 @@ export interface GuideReaderProps {
   highlight?: { path: string; start: number; end: number; token: number } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
+  controlsHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
@@ -65,6 +67,11 @@ export interface GuideReaderProps {
    * thread's (GuideView `threadHeading`). Absent: as before.
    */
   threadHeading?: boolean;
+  /**
+   * Sign each new comment with the person's name, as the review app does (the full-window review while Code review is
+   * on). The PR page (`bare`) always signs. Absent: unsigned, as on main.
+   */
+  signComments?: boolean;
   /**
    * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
    * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.

@@ -110,6 +110,7 @@ async function renderView(
     state?: GuideHostValue<Record<string, unknown>>;
     onFocusFile?: (path: string) => void;
     bare?: boolean;
+    actionsHost?: HTMLElement | null;
     threadHeading?: boolean;
     sourceLine?: string;
     engineLabel?: string;
@@ -132,6 +133,7 @@ async function renderView(
           onFocusFile={handleFocusFile}
           onRegenerate={options.onRegenerate}
           bare={options.bare}
+          actionsHost={options.actionsHost}
           threadHeading={options.threadHeading}
           sourceLine={options.sourceLine}
           engineLabel={options.engineLabel}
@@ -596,6 +598,19 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(latestCodeViewProps.at(-1)!.scrollsWithPage).toBe(true);
   });
 
+  // Guards the PR page's seam (approval pr-view-one-surface): a flush host's box holds the renderer's height and nothing
+  // more, so the next file's header meets the last code row with no strip of box padding between.
+  test.skipIf(!hasDom)('a flush host: the box is exactly what the renderer reports, with no border or padding', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
+    await renderView(guide, { bare: true, state: { ...makeState({ files: [addedFile('m.sql', 5)] }), flushFiles: true } });
+    // Before a measure: 5 rows of 20px and the 33px header, without the bordered box's 18px.
+    expect(boxHeight('m.sql')).toBe('133px');
+    const report = latestCodeViewProps.at(-1)!.onContentHeightChange as (h: number) => void;
+    await act(async () => report(300));
+    expect(boxHeight('m.sql')).toBe('300px');
+    expect(box('m.sql').className).not.toMatch(/\b(border|py-2|rounded-lg)\b/);
+  });
+
   // Guards the Inbox's guided review in a thread (not bare) getting the fit through the opt-in.
   test.skipIf(!hasDom)('a host opts in without bare: the box fits, the heading stays', async () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'm.sql' }] }] });
@@ -940,5 +955,19 @@ describe('GuideView bare (the Inbox PR page)', () => {
     await renderView(guide, { state: withTab });
     expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
     expect(host!.querySelector('[data-guide-section-tab-lead]')).toBeNull();
+  });
+
+  // Guards the PR review's strip: its controls leave the files' column, and the host's element is all they need.
+  test.skipIf(!hasDom)('bare with a host element, the actions are drawn there, no row above the content', async () => {
+    const guide = makeGuide();
+    const strip = document.createElement('div');
+    document.body.appendChild(strip);
+    try {
+      await renderView(guide, { bare: true, actionsHost: strip, state: { ...makeState({ files: [makeFile('a.ts')] }), globalComments: { comments: [], onAdd: () => {} } } });
+      expect(strip.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
+      expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
+    } finally {
+      strip.remove();
+    }
   });
 });

@@ -8,7 +8,8 @@
  *    palette's New message). Never + on a project row, a reopened draft, Message <host>, a Board card's Create thread,
  *    a pull request's Launch an agent, the review box or the tour; none of those uses it up.
  *  - It comes `delayMs` after the box opens, once To has read that it can start an agent (`canStart`), and only while
- *    nothing is in To yet and To was never opened. The claim stamps it when it shows.
+ *    nothing is in To yet and To was never opened. It shows in the same render the claim is sent (a stamp always means
+ *    it was on screen); a refused claim takes it away at once.
  *  - It leaves on Got it, Escape (the first Escape closes only the tip), opening To, Send, or closing the box; on a
  *    phone also when the person taps into Thread or the message, which it covers there. No timer.
  *  - Focus never moves to it; To is described by its line (`aria-describedby`), and compose's polite region says it once.

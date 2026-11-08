@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { launchOff, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -91,6 +91,7 @@ test.describe.configure({ mode: 'serial' });
 
 async function inbox(name: string, debug: boolean) {
   const dataDir = join(root, name);
+  launchOff(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,

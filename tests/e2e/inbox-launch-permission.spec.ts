@@ -549,30 +549,27 @@ test('only the window answers: a local call with no page Origin is refused, and 
   expect(result.outcome).toBe('denied');
 });
 
-test('launch turned off while a question waits: the question is withdrawn, and nothing draws as a permission card', async () => {
+test('launch turned off while a question waits: the switch governs new starts only, so the card stays and its answer still reaches the agent', async () => {
   const { page, fake } = world;
   fake.configure({ prompts: [BUILD] });
   const { threadId } = await launch(page, 'A build before the switch goes off.');
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   const read = await readThread(page, threadId);
   const question = read.thread.messages.find((m) => m.author.session?.startsWith('perm:'))!;
+  const before = fake.permissions().length;
   writeConfig({ inboxLaunch: { enabled: false } });
   try {
-    await expect
-      .poll(
-        async () => {
-          const now = await readThread(page, threadId);
-          return (now.thread.messages.find((m) => m.id === question.id) as { questions?: { state: string }[] } | undefined)?.questions?.[0]?.state;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe('superseded');
+    // Several sweeps go by: the question is still open (before 0.29 turning launch off withdrew it).
+    await page.waitForTimeout(4_000);
+    const now = await readThread(page, threadId);
+    expect((now.thread.messages.find((m) => m.id === question.id) as { questions?: { state: string }[] } | undefined)?.questions?.[0]?.state).not.toBe('superseded');
     await page.reload();
-    await expect(pane(page).locator('article.ib-message').first()).toBeVisible();
-    await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
+    await expect(card(page)).toBeVisible({ timeout: 15_000 });
+    await answer(page, { choice: 'Deny' });
+    const result = await waitFor('the prompt decided with the switch off', () => fake.permissions()[before]);
+    expect(result.outcome).toBe('denied');
   } finally {
     writeConfig({ inboxLaunch: { enabled: true } });
-    fake.configure({ localAnswer: await sessionOf(page, threadId) });
   }
 });
 

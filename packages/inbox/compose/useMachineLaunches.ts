@@ -19,11 +19,14 @@ export function resetMachineLaunchesForTests(): void {
   kept.clear();
 }
 
-/** A linked machine whose sessions are worth reading now: online, and launch not off or unknown there. */
-const readable = (m: MachineView) => !m.self && m.state === 'online' && m.launch === true;
+/**
+ * A linked machine whose sessions are worth reading now: online, and its Inbox says whether launch is on there (not an
+ * older one). Off there too: its switch may have been turned on since the link last connected, and the read says so.
+ */
+const readable = (m: MachineView) => !m.self && m.state === 'online' && (m.launch === true || m.launch === false);
 
 /**
- * Remote launch: every machine (`GET /api/inbox/machines`) and, for each linked one that is online with launch on,
+ * Remote launch: every machine (`GET /api/inbox/machines`) and, for each linked one that is online and says whether launch is on,
  * its sessions read through the forward (`/api/inbox/m/<id>/sessions`), while `active` and every few seconds after
  * (never while the tab is hidden). Each machine is read on its own, so a slow one holds up only its own rows, and
  * nothing waits on them: this computer's read is `useComposeSessions`, as always. `trust`: the folder To names on a

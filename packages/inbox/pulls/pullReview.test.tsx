@@ -17,7 +17,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
@@ -228,12 +228,13 @@ async function settle() {
   }
 }
 
+
 function mount(node: React.ReactNode) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox">{node}</div>);
+    root.render(<SidebarProvider><div className="pn-inbox">{node}</div></SidebarProvider>);
   });
 }
 
@@ -278,14 +279,15 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   await settle();
   expect(asked).toEqual([{ key: stack[0]!.key, scope: 'layer' }]);
   expect(shown.at(-1)).toEqual({ patch: expect.stringContaining('layer-412.ts') as unknown as string, title: 'Layer 412' });
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 1 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[0]!.key);
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
-  expect(asked.at(-1)).toEqual({ key: stack[0]!.key, scope: 'stack' });
-  expect(shown.at(-1)!.patch).toContain('stack-412.ts');
+  // All means all: the diff up to the top, from the bottom layer as from any.
+  expect(asked.at(-1)).toEqual({ key: stack[2]!.key, scope: 'stack' });
+  expect(shown.at(-1)!.patch).toContain('stack-414.ts');
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  await act(async () => el(`[data-pull-layer-row="${stack[0]!.key}"]`).click());
   await settle();
   // Back to the layer: drawn from what was read, not asked again.
   expect(asked).toHaveLength(2);
@@ -295,7 +297,7 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   expect(asked.at(-1)).toEqual({ key: stack[1]!.key, scope: 'layer' });
   expect(shown.at(-1)!.patch).toContain('layer-413.ts');
   expect(el('[data-pull-review]').getAttribute('data-pull-review')).toBe(stack[1]!.key);
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 2 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[1]!.key);
 });
 
 test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its last message, naming the layer", async () => {
@@ -316,7 +318,7 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
   expect(asked).toEqual([{ key: teammate.key, scope: 'layer' }]);
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(teammate.url);
-  expect(document.querySelector('[data-pull-scope-choice]')).toBeNull();
+  expect(document.querySelector('[data-pull-layer-all]')).toBeNull();
 });
 
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
@@ -343,7 +345,6 @@ test.skipIf(!hasDom)('a PR with no agent offers posting only: the comments go on
   expect(document.querySelector('[data-review-destination]')).toBeNull();
   expect(document.querySelector('[data-pull-review-forge]')).toBeNull();
   expect(el('[data-review-posts]').getAttribute('data-review-posts')).toBe('github');
-  expect(el('[data-pull-review-foot]').textContent).toContain('your review goes on the GitHub PR');
   await act(async () => el('[data-review-posts] [data-decision-primary]').click());
   await settle();
   await act(async () => dialogButton('Post Comments').click());
@@ -593,13 +594,64 @@ test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is t
   expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
 });
 
+describe('All N layers', () => {
+  const merged = pull(411, { head: 'retry/base', state: 'merged', additions: 500, deletions: 500 });
+  const bottom = { ...stack[0]!, base: 'retry/base', additions: 3, deletions: 1 };
+  const middle = { ...stack[1]!, additions: 5, deletions: 2 };
+  const top = { ...stack[2]!, additions: 7, deletions: 3 };
+  const whole = [merged, bottom, middle, top];
+  const moved: { key: string; scope: string }[] = [];
+  const draw = async (pulls: InboxPull[], key: string, scope: 'layer' | 'stack') => {
+    moved.length = 0;
+    mount(<PullReview model={{ ...model, pulls }} modelError={null} stackId={inboxPullStacks(pulls)[0]!.id} layerKey={key} scope={scope} onLayer={(k, s) => moved.push({ key: k, scope: s })} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    return el<HTMLButtonElement>('[data-pull-layer-all]');
+  };
+
+  test.skipIf(!hasDom)('from a layer in the middle: the open layers, not the merged one, and the row goes to the top', async () => {
+    const row = await draw(whole, middle.key, 'layer');
+    expect(row.textContent).toBe('All 3 layers+15 -6');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("an address naming a lower layer's whole stack is not all: the row is not lit, and goes to the top", async () => {
+    const row = await draw(whole, middle.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("on the top, the row is lit and its counts are the diff's own", async () => {
+    const row = await draw(whole, top.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.textContent).toBe('All 3 layers+1 -1');
+  });
+
+  test.skipIf(!hasDom)('one open layer over a merged one: no row, as there is nothing more to read than the layer', async () => {
+    mount(<PullReview model={{ ...model, pulls: [merged, bottom] }} modelError={null} stackId={inboxPullStacks([merged, bottom])[0]!.id} layerKey={bottom.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    expect(document.querySelector('[data-pull-layer-row]')).not.toBeNull();
+    expect(document.querySelector('[data-pull-layer-all]')?.textContent ?? null).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('two PRs on one branch: it counts the chain its diff reads, not the sibling', async () => {
+    const sibling = { ...top, number: 415, key: top.key.replace('#414', '#415'), head: 'retry/other', base: bottom.head };
+    const row = await draw([bottom, middle, sibling], middle.key, 'layer');
+    expect(row.textContent).toMatch(/^All 2 layers/);
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: sibling.key, scope: 'stack' }]);
+  });
+});
+
 test.skipIf(!hasDom)("a Whole stack goes to the stack's one review thread, its lowest linked layer's, though another agent linked a layer above", async () => {
   // Claude has #412 (the bottom), Codex #413: the stack up to #413 covers both.
   const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
   const two: InboxPullsAnswer = { ...model, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
   mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
   await settle();
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   // No note about several agents: the verdict has one place to go.
   expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
@@ -901,13 +953,13 @@ test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with
 test.skipIf(!hasDom)('the box: a kept pick that has gone into review since is dropped, and its words stay; one that has not stays picked', async () => {
   const started: StartThreadInput[] = [];
   const open = (pull: ReviewBoxPull) => mount(<ComposeDialog request={{ review: {} }} reviewPulls={[pull]} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open(boxPick());
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe(boxPick().id);
   act(() => root!.unmount());
   root = null;
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open({ ...boxPick(), thread: { id: 'msg_elsewhere', agent: 'Claude Code' } });
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe('choose');
@@ -1502,12 +1554,9 @@ test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading
   expect(document.body.textContent).not.toContain('Reading the diff');
 });
 
-// The cut itself is measured in tests/e2e/inbox-pull-requests.spec.ts (happy-dom lays nothing out).
-test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover', async () => {
-  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
-  const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
-  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);
+// The bar's height and the sidebar's fill hang on this class: without it both jump when the list arrives.
+test.skipIf(!hasDom)('while the list is read the page already has the wide frame', async () => {
+  mount(<PullReview model={null} modelError={null} stackId={STACK_ID} layerKey={stack[0]!.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
   await settle();
-  expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
+  expect(el('[data-pull-review]').classList.contains('ib-prr-wide')).toBe(true);
 });
-

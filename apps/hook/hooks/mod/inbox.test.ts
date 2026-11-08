@@ -355,7 +355,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const noteId = /\((msg_[0-9A-Z]+)\)$/.exec(lines[0]!)![1]!
     const subject = (await thread(w, sent.thread_id)).subject
     expect(lines[0]).toBe(`Plannotator Inbox: ${subject} (${noteId})`)
-    expect(lines[1]).toBe(`The person marked your message 👍 Looks good (${sent.message_id}). No reply needed unless you have a question.`)
+    expect(lines[1]).toBe(`The person reacted 👍 Looks good to your message (${sent.message_id}).`)
     expect(text).toBe(inboxWakeText({ id: noteId, thread_id: sent.thread_id, subject, body: lines[1]!, ack_of: sent.message_id }))
     w.proof(`turn.start ${turn.id}:\n${turn.text}\n`)
 

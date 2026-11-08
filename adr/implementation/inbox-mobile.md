@@ -1032,7 +1032,7 @@ curl -sS "$INBOX/api/inbox/device/sessions?session=ses_01K7000000000000000000000
 }
 ```
 
-A folder the Inbox has not seen yet has `project.id: null`. `session` is present only with `?session=`.
+A folder the Inbox has not seen yet has `project.id: null`. `session` is present only with `?session=`. `launch` (additive) is the window's launch block (`InboxComposeLaunch`: the agents To can start, the folder menu's projects); it is there while starting agents is on, which since 0.29 is the default on macOS and Linux (Settings → Agents' switch), and a phone that does not start agents ignores it.
 
 ### 7.40 Start a thread (compose)
 

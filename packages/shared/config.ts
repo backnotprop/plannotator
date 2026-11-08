@@ -412,6 +412,16 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * The Inbox reaction tray's saved emoji (approval "inbox-reaction-tray"):
+   * up to 5, each with the person's name for it (optional), in the order
+   * saved. Unset: none saved. Written by the tray's + through POST
+   * /api/inbox/settings `{ reactions }`; an entry that is not an emoji is
+   * dropped on read.
+   */
+  inboxReactions?: { emoji: string; label?: string }[];
+  /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
+  inboxReactionsRev?: number;
+  /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
    * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮
@@ -494,6 +504,13 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): something the person turns on, off by default. On: send_message's
+   * `body` field carries the owner's line, so agents write to the Inbox in plain words. Off or unset: agent text as
+   * before. Unset is also "not decided", the only state the one-time offer opens in. Written by Settings →
+   * Capabilities and the offer (`POST /api/inbox/settings` `{ bro: { on } }`), read on every request.
+   */
+  inboxBro?: boolean;
+  /**
    * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
    * every surface (packages/shared/star-ask.ts reads and writes it, nothing
    * else does). `shownAt`: a surface showed it, so none shows it again.
@@ -524,6 +541,14 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4),
+   * under Code review: the person's "no slop zone rules" and the agent that judges
+   * each new pull request against them. Empty or unset `rules`: nothing runs.
+   * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
+   * The rules are the person's own words: never logged, never sent in telemetry.
+   */
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
@@ -546,7 +571,8 @@ export interface PlannotatorConfig {
    * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
-   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * `steps.shownAt`: the Checklist reveal was claimed. `bro.shownAt`: the Bro
+   * mode offer was claimed. `key` beside any of them:
    * the claiming page's own key, so that page's retry after a lost answer is
    * shown it again (any other key is not). The schedule (approval
    * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
@@ -564,16 +590,18 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; board?: string; steps?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
+    bro?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
-    launch_tip?: { shownAt?: string; key?: string };
+    launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -595,8 +623,13 @@ export interface PlannotatorConfig {
      * now, Don't add a note, or `plannotator inbox --notes`). Absent before
      * 0.28.19: `offered` alone then counts for the agents that could take a
      * note when it is first read (notesAsked in inbox-agent-notes.ts).
+     * Since the note is written by itself (approval "inbox-agent-note-auto"),
+     * an agent it was written for is listed too, and one the person turned
+     * off in Settings → Agents, so neither is ever written again by itself.
      */
     asked?: string[];
+    /** Notes written by themselves that the window has not said yet (`{ agent, path }`, path with `~`); cleared when said. */
+    auto?: { agent: string; path: string }[];
   };
   /**
    * The Plannotator Inbox's phone surface: pairing, the device door
@@ -622,9 +655,10 @@ export interface PlannotatorConfig {
    */
   inboxTailscaleAllow?: string[];
   /**
-   * Launch agents from the Inbox (compose's "New Claude Code session";
-   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
-   * off, compose, the thread and every route are as before.
+   * Launch agents from the Inbox (New message's "New session" rows;
+   * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start
+   * agents from New message" switch, default on (absent is on); `false`
+   * turns it off: no New session rows, and every launch route answers 404.
    * `fullPermissions`: Settings → Agents' "Start new sessions with full
    * permissions" (bypass mode); never set, a launch follows the person's
    * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
@@ -1068,7 +1102,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges") => {
+    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1081,7 +1115,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges"] as const) nested(key);
+    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
     saved = true;
   } catch (e) {
@@ -1297,14 +1331,35 @@ export function resolveDefaultDiffTypeFor(
 /** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
 const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
+/** A hand-edited on/off: false, 0, "false", "0", "off", "no" are off; true, 1, "true", "1", "on", "yes" on; anything else says nothing. */
+function parseLaunchFlag(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (value === 0 || value === 1) return value === 1;
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "on" || v === "yes") return true;
+  if (v === "false" || v === "0" || v === "off" || v === "no") return false;
+  return undefined;
+}
+
 /**
- * config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name;
+ * config.inboxLaunch, coerced. `enabled`: Settings → Agents' "Start agents from New message" switch writes it. Absent,
+ * on, but off on Windows, where launch has no support (Claude Code's mod, which carries the messages, stands down
+ * there): only an explicit true turns it on. Any false-like value (`false`, `0`, `"false"`, `"0"`, `"off"`, `"no"`),
+ * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
+ * so as the default. `model` only when it is a plain model name;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
-export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
-  const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
+export function resolveInboxLaunch(
+  config: PlannotatorConfig,
+  platform: NodeJS.Platform = process.platform,
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
+  const raw: unknown = config.inboxLaunch;
+  const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
+  // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
+  const whole = raw === undefined || (typeof raw === "object" && raw !== null) ? undefined : parseLaunchFlag(raw);
   return {
-    enabled: coerceConfigBoolean(value.enabled, false),
+    enabled: whole ?? parseLaunchFlag(value.enabled) ?? platform !== "win32",
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
@@ -1774,17 +1829,6 @@ export function resolveInboxPhones(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.inboxPhones, false);
-}
-
-/**
- * Whether the Plannotator Inbox offers Ask AI: an environment switch, off by
- * default, until the owner has used it. Off, the ask routes answer 404, no
- * question can wait and no agent connects for one. Same words as
- * PLANNOTATOR_INBOX_PHONES; anything else counts as off.
- */
-export function resolveInboxAskAi(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.PLANNOTATOR_INBOX_ASK_AI?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "on";
 }
 
 /**
