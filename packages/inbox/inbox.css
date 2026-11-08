@@ -8661,6 +8661,14 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   /* A PR's title gives way further here (5rem, not 9rem): the switch and the jump keep their room. */
   .pn-inbox .ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { min-width: min(5rem, 100%); }
 }
+/* Under 800 px with a pull request's destination as well, the place still reads whole: the PR's title loses its
+   separator, the gaps narrow again, and the verdict is its check and its green (as under 768 px). The switch stays. */
+@media (min-width: 768px) and (max-width: 799px) {
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 4px; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) > .ib-rv-titlesep { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
+}
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
 .ib-rv-walk .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
