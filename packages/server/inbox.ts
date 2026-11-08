@@ -934,7 +934,8 @@ function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told
 /**
  * HELD UNTIL THE NEXT BIG RELEASE (0.29), with `heldSwitch`: the switches are held back from people who have them off
  * (no PLANNOTATOR_INBOX_PREVIEW=1), so nothing offers them either: Code review's one-time offer (approval
- * "code-review-offer-card") is never in the line while this says true. Delete it with `heldSwitch`.
+ * "code-review-offer-card") and Shape's (approval "shape-turn-on-dialog") are never in the line while this says true.
+ * Delete it with `heldSwitch`.
  */
 function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
@@ -2402,6 +2403,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const codeReviewUndecided = () => options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && !switchesHeld();
   /**
+   * Shape's offer (approval "shape-turn-on-dialog", 2026-11-08; its slot: `SHAPE_OFFER` in shared/inbox/reveals.ts):
+   * only while config.json `inboxShape` is unset (nobody decided; a Code review user who never set Shape included),
+   * and never while the switch is held back from this person (`switchesHeld`), as Code review's.
+   */
+  const shapeUndecided = () => options.shape === undefined && loadConfig().inboxShape === undefined && !switchesHeld();
+  /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
    * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
@@ -2421,6 +2428,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const lineOffers: Partial<Record<RevealId, () => boolean>> = {
     code_review: codeReviewUndecided,
     board: boardUndecided,
+    shape: shapeUndecided,
     steps: stepsUndecided,
     star: starUndecided,
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),

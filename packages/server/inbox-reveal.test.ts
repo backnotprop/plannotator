@@ -660,6 +660,65 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   });
 });
 
+describe("Shape's offer (approval shape-turn-on-dialog)", () => {
+  const KEY = "page-key-shape";
+  /** Day 4, six threads, the Board decided: Shape is the next offer while it was never decided. A Code review user. */
+  const day4 = (config: Record<string, unknown> = {}) => world({ days: 4, threads: 6, config: { inboxBoard: false, inboxCodeReview: true, ...config } });
+
+  test("next after 4 days and 5 threads for a Code review user who never set Shape; the claim stamps it and turns nothing on; Not now leaves it off", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    const w = await day4();
+    const before = await w.settings();
+    expect(before.reveal.next).toBe("shape");
+    expect(before.shape).toEqual({ on: false });
+    expect((await w.claim("shape", KEY)).show).toBe(true);
+    const config = w.saved();
+    expect(config.inboxShape).toBeUndefined();
+    expect(config.inboxReveals.shape).toEqual({ shownAt: config.inboxReveals.lastShownAt, key: KEY });
+    expect((await w.settings()).reveal.next).toBeNull();
+    // The same page's retry is shown it again; another tab never.
+    expect((await w.claim("shape", KEY)).show).toBe(true);
+    expect((await w.claim("shape", "page-key-other")).show).toBe(false);
+    expect((await w.post("/api/inbox/reveal", { id: "shape", answer: "not_now" })).ok).toBe(true);
+    expect(typeof w.saved().inboxReveals.notNowAt).toBe("string");
+    expect(w.saved().inboxShape).toBeUndefined();
+  });
+
+  test("Turn on Shape is the Shape switch's own save", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    const w = await day4();
+    expect((await w.claim("shape", KEY)).show).toBe(true);
+    const saved = (await (await w.post("/api/inbox/settings", { shape: { on: true } })).json()) as Json;
+    expect(saved.shape).toEqual({ on: true });
+    expect(w.saved().inboxShape).toBe(true);
+  });
+
+  test("Shape decided (on, or switched off by the person): never next, never claimed, the switch never touched", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    for (const decided of [false, true]) {
+      const w = await day4({ inboxShape: decided });
+      expect(await w.next()).toBeNull();
+      expect((await w.claim("shape", KEY)).show).toBe(false);
+      expect(w.saved().inboxShape).toBe(decided);
+      expect(w.saved().inboxReveals?.shape).toBeUndefined();
+    }
+  });
+
+  test("held (no PLANNOTATOR_INBOX_PREVIEW): never next, never claimed", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", undefined);
+    const w = await day4();
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("shape", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals?.shape).toBeUndefined();
+  });
+
+  test("before 4 days, or with fewer than 5 threads: not next", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    expect(await (await world({ days: 3, threads: 6, config: { inboxBoard: false, inboxCodeReview: true } })).next()).toBeNull();
+    expect(await (await world({ days: 4, threads: 4, config: { inboxBoard: false, inboxCodeReview: true } })).next()).toBeNull();
+  });
+});
+
 describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
   const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
   const asLoad = (load: string) => ({ "X-Plannotator-Load": load });

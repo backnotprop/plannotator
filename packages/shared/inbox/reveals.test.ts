@@ -9,7 +9,7 @@
  * being passed by an offer), or showing while the line is not free.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealAsideNow, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
+import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealAsideNow, revealLastShown, revealMayClaim, revealNext, revealNotNowAllowed, type RevealState } from "./reveals";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -25,7 +25,7 @@ describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
     // Code review's day-0 offer (approval "code-review-offer-card"), the update-day dialogs (approval
     // "inbox-one-time-dialogs"), then the offers.
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["code_review", "sound", "list_intro", "voice", "snooze", "board", "steps", "star", "list_view"]);
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["code_review", "sound", "list_intro", "voice", "snooze", "board", "shape", "steps", "star", "list_view"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();
@@ -45,6 +45,22 @@ describe("the order", () => {
     // A tab that armed the Checklist while the Board is next is refused.
     expect(revealMayClaim("steps", state({ ...day6, open: { board: true, steps: true } }), NOW)).toBe(false);
     expect(revealMayClaim("steps", state({ ...day6, open: { steps: true } }), NOW)).toBe(true);
+  });
+
+  test("Shape's offer (approval \"shape-turn-on-dialog\") sits between the Board and the Checklist: after 4 days and 5 threads, never ahead of the Board", () => {
+    const day6 = { firstUseAt: ago(6 * DAY) };
+    expect(revealNext(state({ ...day6, open: { board: true, shape: true, steps: true } }), NOW)).toBe("board");
+    expect(revealNext(state({ ...day6, open: { board: false, shape: true, steps: true } }), NOW)).toBe("shape");
+    expect(revealNext(state({ ...day6, open: { board: false, shape: false, steps: true } }), NOW)).toBe("steps");
+    // Its own need: exactly 4 days of first use and 5 threads (with the Checklist's 5 days not yet met, nothing else is next).
+    const shape = (over: Partial<RevealState>) => revealNext(state({ open: { shape: true }, ...over }), NOW);
+    expect(shape({ firstUseAt: ago(4 * DAY) })).toBe("shape");
+    expect(shape({ firstUseAt: ago(4 * DAY - 1) })).toBeNull();
+    expect(shape({ firstUseAt: ago(4 * DAY), threads: 4 })).toBeNull();
+    // Shape decided (on, or switched off by the person) or held back: not open, never next; its Not now is an offer's.
+    expect(shape({ firstUseAt: ago(6 * DAY), open: { shape: false } })).toBeNull();
+    expect(revealMayClaim("shape", state({ ...day6, open: { board: true, shape: true } }), NOW)).toBe(false);
+    expect(revealNotNowAllowed("shape")).toBe(true);
   });
 
   test("the Checklist keeps the one-day spacing after the Board", () => {

@@ -22,6 +22,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CODE_REVIEW_OFFER,
   INBOX_REVEALS,
+  SHAPE_OFFER,
   REVEAL_RETIRE_MS,
   REVEAL_LOADS_KEPT,
   revealAfterShowLoad,
@@ -85,6 +86,8 @@ interface User {
   notNow?: readonly RevealId[];
   /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
   codeReviewOff?: boolean;
+  /** Shape was never decided (config.json `inboxShape` unset) and is no longer held: its offer is open. */
+  shapeOff?: boolean;
 }
 
 interface Shown {
@@ -119,7 +122,7 @@ function simulate(user: User, days = 30): Shown[] {
         heavy: revealHeavyUse(reads, now),
         threads: user.threads(day),
         open: Object.fromEntries(
-          TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.kind === "offer" || user.update)]),
+          TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === SHAPE_OFFER.id ? user.shapeOff === true : entry.kind === "offer" || user.update)]),
         ),
         waitingSince: saved.waitingSince,
       });
@@ -279,6 +282,62 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
 
   test("Code review decided (on, or switched off by the person) or held: never offered", () => {
     expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
+  });
+});
+
+describe("Shape's offer (approval \"shape-turn-on-dialog\": once, after 4 days and 5 threads, between the Board and the Checklist)", () => {
+  test("a heavy user with Shape off: the Board on day 4, List view ahead on 5, Shape on 6, the Checklist on 7; one a day", () => {
+    const shown = simulate({ ...HEAVY, shapeOff: true });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      ["star", 1],
+      ["snooze", 2],
+      [BRO, 3],
+      ["board", 4],
+      [LIST_VIEW, 5],
+      ["shape", 6],
+      ["steps", 7],
+    ]);
+    expectOnePerDay(shown);
+  });
+
+  test("a Code review user (Code review off at first, then decided) who never set Shape still gets it, once", () => {
+    const shown = simulate({ ...HEAVY, codeReviewOff: true, shapeOff: true });
+    expect(shown.filter((s) => s.id === "shape")).toHaveLength(1);
+    expect(days(shown)).toMatchObject({ code_review: 0, board: 4, shape: 6, steps: 7 });
+  });
+
+  test("Not now on it is final, and the Checklist waits three days", () => {
+    const shown = simulate({ ...HEAVY, shapeOff: true, notNow: ["shape"] });
+    expect(shown.filter((s) => s.id === "shape")).toHaveLength(1);
+    expect(days(shown)).toMatchObject({ board: 4, shape: 6, steps: 9 });
+  });
+
+  test("its moment never comes (no long message read): it retires after 14 days next, and patience lets the Checklist pass it", () => {
+    const shown = simulate({ ...HEAVY, shapeOff: true, moment: (id, day) => id !== "shape" && HEAVY.moment(id, day) });
+    expect(shown.some((s) => s.id === "shape")).toBe(false);
+    expect(days(shown).steps).toBeDefined();
+    expectOnePerDay(shown);
+  });
+
+  test("a light user after 0.29 (Shape open): Shape on their first free load once the Board's patience lets it pass (day 14); the Checklist keeps its day", () => {
+    const shown = simulate({ ...LIGHT, shapeOff: true, moment: (id, day) => (id === "shape" ? day >= 9 : LIGHT.moment(id, day)) });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      ["star", 4],
+      ["snooze", 7],
+      ["shape", 14],
+      ["steps", 25],
+    ]);
+    expect(days(shown).steps).toBe(days(simulate(LIGHT)).steps);
+    expectOnePerDay(shown);
+  });
+
+  test("a light user who never reads a long agent message: never offered, still one a day", () => {
+    const shown = simulate({ ...LIGHT, shapeOff: true, moment: (id, day) => id !== "shape" && LIGHT.moment(id, day) });
+    expect(shown.some((s) => s.id === "shape")).toBe(false);
+    expect(days(shown)).toMatchObject({ agent_note: 0, star: 4, snooze: 7 });
+    expectOnePerDay(shown);
   });
 });
 

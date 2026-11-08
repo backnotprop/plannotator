@@ -10,10 +10,10 @@ import { describe, expect, test } from 'bun:test';
 import type { InboxToastModel } from './components/Toast';
 import { REVEAL_TURN_ON_FAILED_MS, turnOnFromReveal, type RevealFeature } from './revealTurnOn';
 
-type Settings = { serverSession: string; board?: { on: boolean }; steps?: { on: boolean } };
+type Settings = { serverSession: string; board?: { on: boolean }; steps?: { on: boolean }; shape?: { on: boolean } };
 
 function world(save: () => Promise<{ on: boolean }>) {
-  let settings: Settings | null = { serverSession: 's', board: { on: false }, steps: { on: false } };
+  let settings: Settings | null = { serverSession: 's', board: { on: false }, steps: { on: false }, shape: { on: false } };
   const log: string[] = [];
   const toasts: { toast: Omit<InboxToastModel, 'id'>; ms: number }[] = [];
   let seenBeforeSave: Settings | null = null;
@@ -45,6 +45,7 @@ describe('Turn it on', () => {
   for (const [feature, lead] of [
     ['board', 'The Board isn’t on'],
     ['steps', 'The Checklist isn’t on'],
+    ['shape', 'Shape isn’t on'],
   ] as const) {
     test(`${feature}: a save that fails puts the switch back off before the re-read, and the toast says so with Open Settings`, async () => {
       const w = world(() => Promise.reject(new TypeError('Load failed')));

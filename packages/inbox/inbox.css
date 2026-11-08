@@ -6843,6 +6843,17 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .ib-cro-phone .ib-cro-acts .ib-bsp { display: none; }
 .pn-inbox .ib-cro-phone .ib-cro-acts .ib-btn, dialog.ib-cro-phone .ib-cro-acts .ib-btn { height: 44px; }
 
+/* Shape's one-time offer (approval "shape-turn-on-dialog", C · The list; ShapeOffer.tsx): Code review's offer shell
+   (.ib-cro) with a close-up of a board in Shape's technical style on top, drawn by the real renderer on the board's own
+   paper (the theme's tokens, light and dark). The crop is a fixed window onto the board: the frame is wider than the
+   band and set off to its left and top. */
+.ib-sho-art { --shp-paper: color-mix(in oklab, var(--foreground) 2.5%, var(--background)); background: var(--shp-paper); }
+.ib-sho-board { position: absolute; left: -181px; top: -20px; width: 770px; height: 262px; }
+.ib-sho-board .shp-diagram { height: 100%; }
+.ib-sho-cmd { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-13, 13px); padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--muted) 80%, transparent); }
+.ib-cro-feats svg.ib-sho-pebble { fill: var(--muted-foreground); stroke: none; }
+.ib-cro-phone .ib-sho-board { left: -168px; top: -19px; width: 640px; height: 218px; }
+
 /* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
    ones (.ib-stp, .ib-st-btn). */

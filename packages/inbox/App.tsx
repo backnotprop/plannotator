@@ -175,6 +175,8 @@ import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
+import { ShapeOffer, preloadShapeOfferArt } from './components/ShapeOffer';
+import { useShapeOffer } from './shapeOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
@@ -4600,6 +4602,22 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // Shape's offer (approval "shape-turn-on-dialog"; shapeOffer.ts): between the Board and the Checklist in the line,
+  // back on the list from a long agent message read; the claim only stamps it, then ShapeOffer offers it.
+  const shapeOffer = useShapeOffer({
+    due: snoozeIntroLatch.current?.next === 'shape',
+    blocked: revealBlocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    on: settings?.shape?.on === true,
+    preload: preloadShapeOfferArt,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open, once the list is taller than the screen, on Smart groups.
@@ -4638,7 +4656,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, shapeOffer.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4659,7 +4677,14 @@ function Inbox() {
           ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
           : feature === 'steps'
             ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
-            : () =>
+            : feature === 'shape'
+              ? () =>
+                  inboxApi.saveShape(true).then((saved) => {
+                    // As Settings' switch: the "/" list gains /shape.
+                    reloadSkillCatalog();
+                    return saved.shape;
+                  })
+              : () =>
                 inboxApi.saveCodeReview(true).then((saved) => {
                   // As Settings' switch: the "/" list gains the review skills.
                   reloadSkillCatalog();
@@ -4714,6 +4739,8 @@ function Inbox() {
     snoozeIntro.stage !== 'claimed' &&
     boardReveal.stage !== 'open' &&
     boardReveal.stage !== 'claimed' &&
+    shapeOffer.stage !== 'open' &&
+    shapeOffer.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
     stepsReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -6452,6 +6479,17 @@ function Inbox() {
             codeReviewOffer.close();
           }}
           onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)}
+        />
+      )}
+      {shapeOffer.stage === 'open' && (
+        <ShapeOffer
+          phone={phone}
+          onClose={() => {
+            // Not now (Escape, a click outside): final, Shape stays off, and the line's next offer waits three days.
+            void inboxApi.revealNotNow('shape');
+            shapeOffer.close();
+          }}
+          onTurnOn={() => turnOnFromReveal('shape', shapeOffer.close)}
         />
       )}
       {stepsReveal.stage === 'open' && (
