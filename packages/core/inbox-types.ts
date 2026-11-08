@@ -993,6 +993,8 @@ export interface InboxLaunchRecord {
   made_folder?: true;
   /** With `made_folder`: the folder's identity when it was made (`<dev>:<ino>`), so only that folder is ever removed. */
   made_inode?: string;
+  /** Clone from a git URL (approval "launch-create-clone"): the repo cloned into `folder` before the agent starts. */
+  clone?: InboxLaunchClone;
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
   full_permissions?: true;
@@ -1011,6 +1013,29 @@ export interface InboxLaunchRecord {
   from?: InboxLaunchFrom;
 }
 
+/**
+ * A launch's clone (`InboxLaunchRecord.clone`): the repo, as the words name it and as git is given it, and where the
+ * clone stands. Its percent is never stored (the run line reads it from the running clone).
+ */
+export interface InboxLaunchClone {
+  /** What git is given (`parseInboxGitUrl`'s rebuilt URL): https or ssh, never a credential. */
+  url: string;
+  host: string;
+  /** "acme/billing-api". */
+  slug: string;
+  /** `…/tree/<branch>`: cloned on that branch (decision 8a). */
+  branch?: string;
+  state: "cloning" | "done" | "failed" | "cancelled";
+  /** `failed`: why, in the four the run line says (E4 sign-in, E5 no such repo, E6 network, else failed). */
+  error?: "auth" | "not_found" | "network" | "failed";
+  /** `failed` with `error: "failed"`: git's last words, for the line. */
+  error_text?: string;
+  /** E11: the folder the Send named was taken by then: that name, as the person knows it (`~/…`). */
+  renamed_from?: string;
+  /** After the clone, what the repo brings that needs the person's trust first (E10): "hooks", "MCP servers", "settings". */
+  brings?: string[];
+}
+
 /** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
 export interface InboxLaunchFrom {
   machine: string;
@@ -1018,7 +1043,7 @@ export interface InboxLaunchFrom {
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
-export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing";
+export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing" | "cloning" | "clone_failed" | "clone_cancelled";
 
 /** What a launched thread's run line shows (the thread route's `run`). */
 export interface InboxRun {
@@ -1048,6 +1073,8 @@ export interface InboxRun {
   attach_command: string | null;
   /** `failed`, in a folder the Send made (Create a folder): that folder as the person knows it (`~/…`); the line says it was made and stays (E8). */
   made_folder?: string;
+  /** A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings. */
+  clone?: { url: string; host: string; slug: string; branch: string | null; pct: number | null; error: "auth" | "not_found" | "network" | "failed" | null; error_text: string | null; renamed_from: string | null; brings: string[] | null; folder_shown: string | null };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -1613,7 +1640,7 @@ export interface InboxListRow extends InboxThreadSummary {
    * the agent's mark ("Starting", "Working"). Absent otherwise and from an
    * older Inbox.
    */
-  run?: "starting" | "working" | null;
+  run?: "starting" | "working" | "cloning" | null;
   /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
@@ -2794,6 +2821,8 @@ export interface InboxDraftStart {
   folder: string;
   name: string;
   create?: true;
+  /** Clone from a git URL: the repo the Send clones into `folder` (D8, D9). */
+  clone?: { url: string; branch?: string };
 }
 
 /** A draft's chip: its chosen session is live, has ended, or none was chosen. */
@@ -2869,6 +2898,11 @@ export interface InboxComposeLaunch {
   not_ready?: { agent: InboxLaunchAgent; name: string; code: InboxLaunchNotReady; over_ssh?: true }[];
   /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
   scratch?: { root: string };
+  /**
+   * Clone from a git URL (approval "launch-create-clone"): where a clone goes on this machine with no other choice
+   * (its real path): the folder last cloned into here, else where most of its projects live, else home. Absent from an older Inbox.
+   */
+  clone?: { into: string };
 }
 
 /**

@@ -143,7 +143,24 @@ export type FolderRow =
   /** A folder to go into. */
   | { kind: 'folder'; path: string; name: string }
   /** A folder that can't be opened: dimmed, with a lock and "no access", never picked (A9). */
-  | { kind: 'noaccess'; path: string; name: string };
+  | { kind: 'noaccess'; path: string; name: string }
+  /** Clone into a folder that is there (C14, C15): "Clone <repo> here", into `path` (its repo name, or the next free one). */
+  | { kind: 'cloneHere'; path: string; name: string; repo: string; taken: string | null }
+  /** That folder holds a clone of the same repo already (C9): "Start in <name> · already cloned". */
+  | { kind: 'cloneStart'; path: string; name: string }
+  /** A name that isn't there becomes the clone's own folder (C15b). `quiet`: a folder still matches the name. */
+  | { kind: 'cloneInto'; path: string; name: string; quiet: boolean };
+
+/** Where a clone into one folder goes, as that machine answered (`GET /api/inbox/launch/clone`). */
+export interface CloneTargetRead {
+  /** The folder it was asked for, `~/…`. */
+  into: string;
+  path: string;
+  name: string;
+  state: 'clone' | 'already';
+  taken: string | null;
+  writable: boolean;
+}
 
 /** The browser's line (in place of or above the folders), its rows, and a quiet line after a row (`after.at`: its index). */
 export interface FolderBrowserView {
@@ -174,8 +191,27 @@ export function folderRefusalWords(code: string | null, message: string): string
  * it; only the last folder in a path can be made). Pure: `read` is the listing of the typed path's parent (null: not
  * read yet), `nameRead` the listing of the full path when the name typed is no folder read there (null: not read yet).
  */
-export function folderBrowserView(input: { typed: string; read: FolderRead | null; nameRead: FolderRead | null; error?: string | null }): FolderBrowserView {
+export function folderBrowserView(input: {
+  typed: string;
+  read: FolderRead | null;
+  nameRead: FolderRead | null;
+  error?: string | null;
+  /**
+   * Clone into another folder (C14-C15c): the repo's name, and where a clone into the folder that is there (`cloneAt`)
+   * goes (null: not read yet). A folder that is there is where the clone goes, never a stop on the way down; home too.
+   */
+  clone?: { repo: string; target: CloneTargetRead | null } | null;
+}): FolderBrowserView {
   const view: FolderBrowserView = { note: null, rows: [], after: null };
+  const clone = input.clone ?? null;
+  /** The clone's lead into a folder that is there: Clone here, Start in (already cloned), or the line that it can't be written. */
+  const cloneLead = (at: string): void => {
+    const target = clone?.target;
+    if (!target || target.into !== at) return;
+    if (target.state === 'already') view.rows.push({ kind: 'cloneStart', path: target.path, name: target.name });
+    else if (!target.writable) view.note = `Can't clone into ${at}: no permission.`;
+    else view.rows.push({ kind: 'cloneHere', path: target.path, name: target.name, repo: clone!.repo, taken: target.taken });
+  };
   const path = normalizeFolderPath(input.typed);
   const { parent, tail } = splitFolderPath(path);
   if (!parent.startsWith('~')) return { ...view, note: 'Only folders inside your home folder.' };
@@ -192,8 +228,9 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     const names = folderSuggestions(read.folders, tail);
     const near = (n: number) => closestFirst(open, tail).slice(0, n).map(row);
     if (tail === '') {
-      // Home itself is never started in (A1): its first folder leads instead.
-      if (parent !== '~') view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
+      // Home itself is never started in (A1): its first folder leads instead. A clone may go in home.
+      if (clone) cloneLead(parent);
+      else if (parent !== '~') view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       view.rows.push(...names.map(row));
       if (view.rows.length === 0) view.note = `${parent} has no folders.`;
       return view;
@@ -202,6 +239,7 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     const typedPath = child(parent, tail);
     if (exact) {
       if (locked.has(exact)) view.note = `Can't open ${typedPath}: no permission.`;
+      else if (clone) cloneLead(typedPath);
       else view.rows.push({ kind: 'start', path: typedPath, name: tail });
       view.rows.push(...names.map(row));
       return view;
@@ -209,7 +247,9 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     const named = input.nameRead ? (input.nameRead.state ?? (input.nameRead.exists ? 'folder' : 'missing')) : null;
     if (named === 'folder') {
       // A folder the listing spells another way (a case-blind disk): it is there, so it leads.
-      view.rows.push({ kind: 'start', path: typedPath, name: tail }, ...names.map(row));
+      if (clone) cloneLead(typedPath);
+      else view.rows.push({ kind: 'start', path: typedPath, name: tail });
+      view.rows.push(...names.map(row));
       return view;
     }
     if (named === 'locked') {
@@ -218,7 +258,7 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     }
     if (named === 'file') {
       // A path to a file (A7): its folder leads. A name a file has (A8): pick another.
-      if (/\.\w+$/.test(tail) && parent !== '~') {
+      if (/\.\w+$/.test(tail) && parent !== '~' && !clone) {
         view.note = `${tail} is a file.`;
         view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       } else view.note = `There's already a file named ${tail}. Pick another name.`;
@@ -227,7 +267,7 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     }
     view.rows.push(...names.map(row));
     if (read.writable === false) {
-      view.note = `Can't make a folder in ${parent}: no permission.`;
+      view.note = clone ? `Can't clone into ${parent}: no permission.` : `Can't make a folder in ${parent}: no permission.`;
       if (names.length === 0) view.rows.push(...near(NEAR_MAX));
       return view;
     }
@@ -237,14 +277,14 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     }
     // Not checked yet: no Create row until the name is known not to be a file's.
     if (named === null) return view;
-    const create: FolderRow = { kind: 'create', name: tail, path: typedPath, quiet: names.length > 0 };
+    const create: FolderRow = clone ? { kind: 'cloneInto', name: tail, path: typedPath, quiet: names.length > 0 } : { kind: 'create', name: tail, path: typedPath, quiet: names.length > 0 };
     if (names.length > 0) {
       view.rows.push(create);
       return view;
     }
     const others = near(NEAR_MAX);
     view.rows.unshift(create);
-    if (others.length > 0) view.after = { at: 1, text: "A new, empty folder. Or pick one that's there:" };
+    if (others.length > 0 && !clone) view.after = { at: 1, text: "A new, empty folder. Or pick one that's there:" };
     view.rows.push(...others);
     return view;
   }
@@ -258,7 +298,7 @@ export function folderBrowserView(input: { typed: string; read: FolderRead | nul
     // A file in the middle of the path (~/code/notes.md/x): its folder leads (never home).
     view.note = `${folderName(parent)} is a file.`;
     if (nearest) {
-      if (nearest.path !== '~') view.rows.push({ kind: 'start', path: nearest.path, name: folderName(nearest.path) });
+      if (nearest.path !== '~' && !clone) view.rows.push({ kind: 'start', path: nearest.path, name: folderName(nearest.path) });
       view.rows.push(...nearRows(nearest.path, nearest.folders, folderName(parent), 0, 3));
     }
     return view;
@@ -287,4 +327,21 @@ export function needsNameRead(read: FolderRead | null, tail: string): boolean {
   if (!read || tail === '' || tail.startsWith('.')) return false;
   const state = read.state ?? (read.exists ? 'folder' : 'missing');
   return state === 'folder' && !read.folders.includes(tail);
+}
+
+/**
+ * Clone into another folder: the folder that is there that the typed path names (where "Clone <repo> here" clones
+ * into), or null while the path names none (a new name, a file, a folder that can't be opened, not read yet).
+ */
+export function cloneAt(typed: string, read: FolderRead | null, nameRead: FolderRead | null): string | null {
+  if (!read) return null;
+  const { parent, tail } = splitFolderPath(normalizeFolderPath(typed));
+  const state = read.state ?? (read.exists ? 'folder' : 'missing');
+  if (state !== 'folder') return null;
+  if (tail === '') return parent;
+  if (tail.startsWith('.')) return null;
+  const locked = new Set(read.locked ?? []);
+  if (read.folders.includes(tail)) return locked.has(tail) ? null : folderChild(parent, tail);
+  const named = nameRead ? (nameRead.state ?? (nameRead.exists ? 'folder' : 'missing')) : null;
+  return named === 'folder' ? folderChild(parent, tail) : null;
 }

@@ -17,6 +17,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import {
   INBOX_CARD_TITLE_MAX,
   INBOX_DRAFT_BODY_MAX,
@@ -172,11 +173,30 @@ function checkStart(value: unknown): InboxDraft["start"] | null {
     !text(start.folder, 4096) ||
     !(start.folder as string).startsWith("~/") ||
     !text(start.name, 255) ||
-    !(start.create === undefined || start.create === true)
+    !(start.create === undefined || start.create === true) ||
+    !checkStartClone(start.clone)
   ) {
-    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\", name, create? } or null.", { field: "start" });
+    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\", name, create?, clone?: { url, branch? } } or null.", { field: "start" });
   }
-  return { agent: start.agent as string, machine: start.machine as string | null, folder: start.folder as string, name: start.name as string, ...(start.create === true ? { create: true as const } : {}) };
+  const clone = start.clone as { url: string; branch?: string } | undefined;
+  return {
+    agent: start.agent as string,
+    machine: start.machine as string | null,
+    folder: start.folder as string,
+    name: start.name as string,
+    ...(start.create === true ? { create: true as const } : {}),
+    ...(clone ? { clone: { url: clone.url, ...(clone.branch ? { branch: clone.branch } : {}) } } : {}),
+  };
+}
+
+/** A draft's clone pick: a git URL the launch reads (checked again at Send), and a branch that can't read as an option. */
+function checkStartClone(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const clone = value as Record<string, unknown>;
+  const repo = typeof clone.url === "string" && clone.url.length <= 2048 ? parseInboxGitUrl(clone.url) : null;
+  if (!repo || repo.kind !== "repo") return false;
+  return clone.branch === undefined || (typeof clone.branch === "string" && clone.branch.length > 0 && clone.branch.length <= 255 && !clone.branch.startsWith("-") && !/[\s\x00-\x1f]/.test(clone.branch));
 }
 
 /** A long paste's place in a draft's words (`InboxDraftPasted`), checked; null when the file is not one. */

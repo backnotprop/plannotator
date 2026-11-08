@@ -217,8 +217,8 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
-/** Another machine's folder names, for "Another folder on <machine>…" (remote launch). */
-const FOLDERS_ROUTE = "launch/folders";
+/** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
+const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
 const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
 /** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
@@ -654,7 +654,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const search = forwardedReadSearch(url.search, context.isGuest(req, via));
       const headers = pick(req.headers, PASS_REQUEST);
       // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
-      if (route === FOLDERS_ROUTE) {
+      if (FOLDERS_ROUTES.has(route)) {
         if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";

@@ -179,7 +179,7 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
@@ -2633,6 +2633,17 @@ function Inbox() {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
   };
+  // A failed clone's Change the URL (E5, from its run line): New message with the URL in the folder menu's filter.
+  useEffect(() => {
+    const onClone = (event: Event) => {
+      const detail = (event as CustomEvent<ComposeCloneRequest>).detail;
+      if (!detail?.url) return;
+      composeOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setCompose({ clone: detail, body: detail.body });
+    };
+    window.addEventListener(COMPOSE_CLONE_EVENT, onClone);
+    return () => window.removeEventListener(COMPOSE_CLONE_EVENT, onClone);
+  }, []);
   /**
    * The draft after this one in the Drafts list (else the one before), for
    * focus once it leaves the list: sent, deleted or discarded.

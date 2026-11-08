@@ -4,6 +4,7 @@
  * React and no requests here, so each rule is tested alone.
  */
 
+import { parseInboxGitUrl } from '@plannotator/core/inbox-git-url';
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
@@ -373,6 +374,38 @@ export interface ComposeStart {
   folder?: string;
   /** With `folder`: Create a folder (approval "launch-create-clone"): the Send makes it. */
   create?: true;
+  /** With `folder`: Clone from a git URL (approval "launch-create-clone"): the Send clones the repo into it, then starts. */
+  clone?: ComposeClone;
+}
+
+/** A clone pick: the URL as pasted (the server reads it again), and what the words name (`acme/billing-api` on github.com). */
+export interface ComposeClone {
+  url: string;
+  host: string;
+  slug: string;
+  branch?: string;
+}
+
+/**
+ * A failed clone's Change the URL (E5): the run line asks the window for New message with the URL in the folder
+ * menu's filter, To the same agent and machine, and the same words (`ComposeRequest.clone`).
+ */
+export const COMPOSE_CLONE_EVENT = 'plannotator-inbox:compose-clone';
+export interface ComposeCloneRequest {
+  url: string;
+  agent: string;
+  machine: string | null;
+  /** The folder the clone was going to (`~/…`). */
+  folder: string | null;
+  body: string;
+}
+
+/** A draft's clone pick as compose holds it, its words read from the URL again (null: the URL is no repo's now). */
+export function cloneOfUrl(url: string, branch?: string): ComposeClone | null {
+  const repo = parseInboxGitUrl(url);
+  if (!repo || repo.kind !== 'repo') return null;
+  const pickedBranch = branch ?? repo.branch;
+  return { url, host: repo.host, slug: repo.slug, ...(pickedBranch ? { branch: pickedBranch } : {}) };
 }
 
 /** A folder start's stand-in project: never a project id, so no project's facts or check marks are taken for it. */
@@ -450,7 +483,9 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
 
 /** The status line beside Send for a start: none, as for a message to a live session, unless the folder is gone (screen 13). */
 export function startStatusLine(start: ComposeStart): string {
-  return start.project.exists ? '' : 'Pick a folder to start in.';
+  if (!start.project.exists) return 'Pick a folder to start in.';
+  // C13, decision 11a: what the Send does first.
+  return start.clone ? `Clones ${start.clone.slug}, then starts ${start.name}.` : '';
 }
 
 // ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──

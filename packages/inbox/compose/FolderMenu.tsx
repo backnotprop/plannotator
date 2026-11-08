@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { parseInboxGitUrl, type InboxGitRepo } from '@plannotator/core/inbox-git-url';
+import { inboxApi, type CloneReach, type CloneTargetAnswer } from '../api';
 import { Icon } from '../icons';
 import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
@@ -38,6 +40,14 @@ import { cleanPastedPath, homeRelative, looksLikePath } from './homeFolders';
  * A path in the filter (approval "launch-create-clone", B4: typed or pasted, `~/…`, `/…`, quoted or `file://`): only
  * the projects under that path stay, and each machine's "Another folder…" row carries the path and opens its browser
  * there. The browser's path is kept per machine while compose is open (`kept`), so going back and in again keeps it (D2).
+ *
+ * A git URL in the filter (approval "launch-create-clone", C1-C17, `onClone`): each machine offers "Clone <repo> and
+ * start" into the folder where that machine would clone it (asked of it: its last clone folder, else where its
+ * projects live, else home; the repo's name, or the next free one), or "Start in <name> · already cloned" where that
+ * repo is there already, then "Clone into another folder…" (its folder browser in clone mode). Under them one line
+ * says how. A quiet check after the paste dims a machine whose git can't sign in to the host, still pickable (C11). An
+ * unknown host is checked before it is offered ("Checking git.acme.dev…"); an account or a page that isn't a repo is
+ * said in one line. An asleep machine's row is still offered, with no "another folder" row (its folders can't be read).
  */
 /** "New scratch folder" in one place: the folder a Send would make, its root, and whether the agent trusts the root. */
 export interface ScratchRow {
@@ -63,15 +73,82 @@ export interface FolderGroup {
   notice: { line: string; command: string | null } | null;
   /** That machine is asleep: its folder browser reads nothing. */
   asleep?: boolean;
+  /** Where that machine clones a repo with no setting (`~/…`, from its launch block), for its row while it can't be asked. */
+  cloneInto?: string | null;
+}
+
+/** A clone picked: the URL as pasted, the repo it names, and its own folder on that machine (`~/…`). */
+export interface ClonePick {
+  url: string;
+  repo: InboxGitRepo;
+  folder: string;
+  name: string;
+  machine: string | null;
 }
 
 /** The folder browser's pick key in the keys' walk: never a project id (`prj_…`) or the scratch pick. */
 const OTHER_PICK = '~other';
+/** A machine's clone row, and its "Clone into another folder…", in the keys' walk. */
+const CLONE_PICK = '~clone';
+const CLONE_OTHER_PICK = '~clone-other';
+
+/** One machine's clone row: where it would clone the repo (`target`), or a guess while it can't be asked. */
+interface CloneRow {
+  path: string;
+  name: string;
+  already: boolean;
+  taken: string | null;
+  /** Its quiet check: that machine's git can't sign in to the host (C11). */
+  cantSignIn: boolean;
+}
 
 type Row =
   | { key: string; kind: 'project'; project: LaunchProject; group: FolderGroup }
   | { key: string; kind: 'scratch'; scratch: ScratchRow; group: FolderGroup }
-  | { key: string; kind: 'other'; group: FolderGroup };
+  | { key: string; kind: 'other'; group: FolderGroup }
+  | { key: string; kind: 'clone'; clone: CloneRow; group: FolderGroup }
+  | { key: string; kind: 'cloneOther'; group: FolderGroup };
+
+/** How long a pasted URL settles before each machine is asked where it would clone it. */
+const CLONE_ASK_MS = 150;
+
+/**
+ * Each awake machine's answers for a pasted repo: where it would clone it, and the quiet check (C11). Keyed by machine
+ * (`''`: this computer); an answer for another URL is dropped.
+ */
+function useCloneReads(repo: InboxGitRepo | null, url: string, machines: readonly (string | null)[]) {
+  const [reads, setReads] = useState<{ url: string; targets: Map<string, CloneTargetAnswer>; reach: Map<string, CloneReach> }>({ url: '', targets: new Map(), reach: new Map() });
+  const key = machines.map((m) => m ?? '').join(',');
+  useEffect(() => {
+    if (!repo) return;
+    const controller = new AbortController();
+    let live = true;
+    setReads({ url, targets: new Map(), reach: new Map() });
+    const timer = setTimeout(() => {
+      for (const machine of machines) {
+        const id = machine ?? '';
+        // An unknown host is only checked (C8): where it would go is asked once it reads as a repo.
+        if (!repo.unchecked) {
+          inboxApi.cloneTarget(url, null, machine, controller.signal).then(
+            (answer) => live && setReads((was) => (was.url === url ? { ...was, targets: new Map(was.targets).set(id, answer) } : was)),
+            () => {},
+          );
+        }
+        inboxApi.cloneCheck(url, machine, controller.signal).then(
+          (answer) => live && setReads((was) => (was.url === url ? { ...was, reach: new Map(was.reach).set(id, answer.reach) } : was)),
+          () => {},
+        );
+      }
+    }, CLONE_ASK_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo?.url, url, key]);
+  return reads.url === url ? reads : { url, targets: new Map<string, CloneTargetAnswer>(), reach: new Map<string, CloneReach>() };
+}
 
 const rowKey = (machine: string | null, id: string) => `${machine ?? ''}:${id}`;
 
@@ -89,6 +166,11 @@ export function FolderMenu({
   onFolder,
   folderPicked = null,
   kept,
+  onClone,
+  agentName = null,
+  cloneInto = null,
+  initialQuery = '',
+  clonePicked = null,
 }: {
   projects: readonly LaunchProject[];
   selected: string | null;
@@ -115,20 +197,59 @@ export function FolderMenu({
   kept?: Map<string, string>;
   /** The folder To names now, when it is one of these: the browser opens there on its machine. */
   folderPicked?: { folder: string; machine: string | null } | null;
+  /** A git URL's clone row picked (C1-C17). Absent: a URL is words to find a project by. */
+  onClone?: (pick: ClonePick) => void;
+  /** The agent To names, for the line under the clone rows ("Claude Code starts when the clone is done."). */
+  agentName?: string | null;
+  /** Without linked machines: where this computer clones a repo with no setting (`~/…`). */
+  cloneInto?: string | null;
+  /** The filter as it opens: a clone pick's URL, so switching machine is one press (D4, D7). */
+  initialQuery?: string;
+  /** The clone To names now: ✓ on its machine's clone row. */
+  clonePicked?: { folder: string; machine: string | null } | null;
 }) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   // The folder browser open in place of the list, for one machine's group: by its id (null: this computer), so the
   // browser always sees that machine as it is now (asleep since, or gone).
   const [otherId, setOtherId] = useState<string | null | undefined>(undefined);
   const grouped = !!groups;
   // Without linked machines: one group with no caption, so the menu is exactly what it was.
   const all = useMemo<readonly FolderGroup[]>(
-    () => groups ?? [{ machine: null, name: '', quiet: null, home, projects, last: null, scratch: scratch && onScratch ? scratch : null, notice: null }],
-    [groups, home, projects, scratch, onScratch],
+    () => groups ?? [{ machine: null, name: '', quiet: null, home, projects, last: null, scratch: scratch && onScratch ? scratch : null, notice: null, cloneInto }],
+    [groups, home, projects, scratch, onScratch, cloneInto],
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
   // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
   const typedPath = looksLikePath(query) ? cleanPastedPath(query) : null;
+  // A git URL in the filter (C1-C17): each machine's clone row. A bare `acme/billing-api` stays a project search (C3).
+  const git = onClone && typedPath === null ? parseInboxGitUrl(query) : null;
+  const repo = git?.kind === 'repo' ? git : null;
+  const askable = useMemo(() => (repo ? all.filter((g) => !g.notice && !g.asleep).map((g) => g.machine) : []), [repo, all]);
+  const cloneReads = useCloneReads(repo, query.trim(), askable);
+  // An unknown host (C7, C8): offered once a machine's git reads it as a repo; said when none can.
+  const checkedReach = repo?.unchecked ? (askable.length > 0 ? cloneReads.reach.get(askable[0] ?? '') : undefined) : 'ok';
+  const repoShown = !!repo && (checkedReach === 'ok' || checkedReach === 'auth');
+  const gitLine = !git
+    ? null
+    : git.kind === 'account'
+      ? `${git.host}/${git.owner} is an account, not a repo. Paste the repo's URL.`
+      : git.kind === 'notrepo'
+        ? `${git.text.replace(/^https?:\/\//, '')} isn't a git repo.`
+        : repo!.unchecked && checkedReach === undefined
+          ? null
+          : repoShown
+            ? null
+            : `${query.trim().replace(/^https?:\/\//, '')} isn't a git repo.`;
+  const checking = !!repo?.unchecked && checkedReach === undefined && askable.length > 0 ? `Checking ${repo.host}…` : null;
+  /** One machine's clone row: as it answered, else a guess from its clone folder (asleep, or not answered yet). */
+  const cloneRowOf = (group: FolderGroup): CloneRow => {
+    const id = group.machine ?? '';
+    const answer = cloneReads.targets.get(id);
+    const cantSignIn = cloneReads.reach.get(id) === 'auth';
+    if (answer) return { path: answer.path, name: answer.name, already: answer.state === 'already', taken: answer.taken, cantSignIn };
+    const into = (group.cloneInto ?? '~').replace(/\/+$/, '');
+    return { path: `${into}/${repo!.repo}`, name: repo!.repo, already: false, taken: null, cantSignIn };
+  };
   // Where "Another folder…" opened the browser from: a path in the filter, else the path kept for that machine.
   const [openAt, setOpenAt] = useState<string | null>(null);
   // Its machine left the menu (unlinked): back to the list.
@@ -141,6 +262,11 @@ export function FolderMenu({
       .map((group) => {
         // A machine's name picks its whole group ("mini").
         const named = grouped && words.length > 0 && words.every((w) => group.name.toLowerCase().includes(w));
+        if (git) {
+          // A git URL: each machine's clone row (an asleep one's too: it clones when it's back), never its projects.
+          const offered = repoShown && !group.notice;
+          return { group, projects: [], scratch: null, notice: repoShown ? group.notice : null, other: false, path: null as string | null, clone: offered ? cloneRowOf(group) : null, cloneOther: offered && !group.asleep && !cloneRowOf(group).already };
+        }
         if (typedPath !== null) {
           // A path: its projects (by where they are on that machine), and "Another folder…" carrying the path.
           const at = homeRelative(typedPath, group.home).replace(/\/+$/, '');
@@ -148,7 +274,7 @@ export function FolderMenu({
             const folder = tildePath(p.root, group.home);
             return folder === at || folder.startsWith(`${at}/`);
           });
-          return { group, projects: under, scratch: null, notice: null, other: !!onFolder && !group.notice && !group.asleep, path: homeRelative(typedPath, group.home) };
+          return { group, projects: under, scratch: null, notice: null, other: !!onFolder && !group.notice && !group.asleep, path: homeRelative(typedPath, group.home), clone: null, cloneOther: false };
         }
         return {
           group,
@@ -159,22 +285,31 @@ export function FolderMenu({
           // Not for an asleep machine: its folders can't be read, and its caption already says it is asleep.
           other: !!onFolder && !group.notice && !group.asleep && (named || otherFolderMatches(query)),
           path: null as string | null,
+          clone: null as CloneRow | null,
+          cloneOther: false,
         };
       })
-      .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other);
-  }, [all, grouped, query, onFolder, typedPath]);
+      .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other || g.clone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, grouped, query, onFolder, typedPath, git, repoShown, cloneReads]);
   const rows = useMemo<Row[]>(
     () =>
       shown.flatMap((g) => [
         ...g.projects.map((project) => ({ key: rowKey(g.group.machine, project.id), kind: 'project' as const, project, group: g.group })),
         ...(g.scratch ? [{ key: rowKey(g.group.machine, SCRATCH_PICK), kind: 'scratch' as const, scratch: g.scratch, group: g.group }] : []),
         ...(g.other ? [{ key: rowKey(g.group.machine, OTHER_PICK), kind: 'other' as const, group: g.group }] : []),
+        ...(g.clone ? [{ key: rowKey(g.group.machine, CLONE_PICK), kind: 'clone' as const, clone: g.clone, group: g.group }] : []),
+        ...(g.cloneOther ? [{ key: rowKey(g.group.machine, CLONE_OTHER_PICK), kind: 'cloneOther' as const, group: g.group }] : []),
       ]),
     [shown],
   );
   // The keys walk the projects, then the scratch row, then "Another folder…", group after group.
   const ids = useMemo(() => rows.map((row) => row.key), [rows]);
-  const [hlId, setHlId] = useState<string | null>(selected ? rowKey(selectedMachine, selected) : null);
+  const [hlId, setHlId] = useState<string | null>(clonePicked && initialQuery ? rowKey(clonePicked.machine, CLONE_PICK) : selected ? rowKey(selectedMachine, selected) : null);
+  // The row to highlight when the filter changes next, instead of its first (a URL back from the folder field: B5).
+  const nextHl = useRef<string | null>(null);
+  // The folder browser in clone mode ("Clone into another folder…"), or as "Another folder…".
+  const [browseClone, setBrowseClone] = useState<{ url: string; repo: InboxGitRepo; at: string } | null>(null);
   const found = ids.indexOf(hlId ?? '');
   const hl = ids.length === 0 ? -1 : found >= 0 ? found : 0;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
@@ -184,7 +319,10 @@ export function FolderMenu({
   const [copied, setCopied] = useState<string | null>(null);
 
   useLayoutEffect(() => {
-    if (query !== '') setHlId(ids[0] ?? null);
+    if (nextHl.current) {
+      setHlId(nextHl.current);
+      nextHl.current = null;
+    } else if (query !== '' && !(initialQuery && query === initialQuery)) setHlId(ids[0] ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   // Back from the folder browser too: the filter, with "Another folder…" still the highlighted row.
@@ -210,7 +348,29 @@ export function FolderMenu({
     setOpenAt(path);
     setOtherId(machine);
   };
-  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? openOther(row.group.machine) : onPick(row.project, row.group.machine));
+  /** "Clone into another folder…": that machine's folder browser in clone mode, at its clone folder (C14). */
+  const openCloneOther = (group: FolderGroup) => {
+    if (!repo) return;
+    const answer = cloneReads.targets.get(group.machine ?? '');
+    const into = (answer?.into ?? group.cloneInto ?? '~').replace(/\/+$/, '');
+    setBrowseClone({ url: query.trim(), repo, at: `${into}/` });
+    setOtherId(group.machine);
+  };
+  const pickClone = (group: FolderGroup, clone: CloneRow) => {
+    if (!repo) return;
+    // The same repo there already (C9): it starts in that folder, as any folder that is there.
+    if (clone.already) onFolder?.(clone.path, clone.name, group.machine, false);
+    else onClone?.({ url: query.trim(), repo, folder: clone.path, name: clone.name, machine: group.machine });
+  };
+  const choose = (row: Row) => {
+    if (row.kind === 'scratch') onScratch?.(row.group.machine);
+    else if (row.kind === 'other') {
+      setBrowseClone(null);
+      openOther(row.group.machine);
+    } else if (row.kind === 'clone') pickClone(row.group, row.clone);
+    else if (row.kind === 'cloneOther') openCloneOther(row.group);
+    else onPick(row.project, row.group.machine);
+  };
 
   // A path pasted into the filter reads as the person meant it (quotes, `file://`, Terminal's escapes); words paste as words.
   const onPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
@@ -259,19 +419,38 @@ export function FolderMenu({
     return (
       <div className="ib-cp-picker ib-cp-folders" ref={ref} data-compose-folders="" data-other-folder={other.machine ?? 'self'} data-phone={phone ? '' : undefined}>
         <HomeFolderBrowser
+          key={browseClone ? `clone:${browseClone.url}` : 'folder'}
           machine={{ id: other.machine, name: named, asleep: other.asleep === true, home: other.home }}
           phone={phone}
+          clone={browseClone ? { url: browseClone.url, repo: browseClone.repo.repo } : null}
           initialPath={
-            openAt ??
-            kept?.get(other.machine ?? '') ??
-            (folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined)
+            browseClone
+              ? browseClone.at
+              : (openAt ??
+                kept?.get(other.machine ?? '') ??
+                (folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined))
           }
-          onTyped={(typed) => kept?.set(other.machine ?? '', typed)}
+          onTyped={(typed) => !browseClone && kept?.set(other.machine ?? '', typed)}
           onBack={() => {
-            setHlId(rowKey(other.machine, OTHER_PICK));
+            setHlId(rowKey(other.machine, browseClone ? CLONE_OTHER_PICK : OTHER_PICK));
+            setBrowseClone(null);
             setOtherId(undefined);
           }}
-          onPick={(folder, name, create) => onFolder?.(folder, name, other.machine, create)}
+          onGitUrl={
+            onClone
+              ? (url) => {
+                  // A git URL in the folder field (B5): back to the list, on that machine's clone row.
+                  nextHl.current = rowKey(other.machine, CLONE_PICK);
+                  setQuery(url);
+                  setBrowseClone(null);
+                  setOtherId(undefined);
+                }
+              : undefined
+          }
+          onPick={(folder, name, how) => {
+            if (how === 'clone' && browseClone) onClone?.({ url: browseClone.url, repo: browseClone.repo, folder, name, machine: other.machine });
+            else onFolder?.(folder, name, other.machine, how === 'create');
+          }}
         />
       </div>
     );
@@ -297,8 +476,8 @@ export function FolderMenu({
           aria-autocomplete="list"
           aria-controls={`ib-cp-flist-${uid}`}
           aria-activedescendant={hl >= 0 ? optionId(hl) : undefined}
-          aria-label="Find a project"
-          placeholder="Find a project"
+          aria-label={onClone ? 'Find a project or paste a git URL' : 'Find a project'}
+          placeholder={onClone ? 'Find a project or paste a git URL' : 'Find a project'}
           autoComplete="off"
           spellCheck={false}
           value={query}
@@ -307,7 +486,7 @@ export function FolderMenu({
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-flist-${uid}`} aria-label="Projects">
-        {rows.length === 0 && !shown.some((g) => g.notice) && <div className="ib-cp-none">No project matches.</div>}
+        {rows.length === 0 && !shown.some((g) => g.notice) && !git && <div className="ib-cp-none">No project matches.</div>}
         {shown.map((g, gi) => {
           const group = g.group;
           const gHome = grouped ? group.home : home;
@@ -441,9 +620,103 @@ export function FolderMenu({
                     </>
                   );
                 })()}
+              {g.clone &&
+                (() => {
+                  const i = at++;
+                  const c = g.clone;
+                  const r = repo!;
+                  const place = `${c.path}${r.branch ? ` · ${r.branch}` : ''}`;
+                  const picked = !!clonePicked && clonePicked.machine === group.machine && clonePicked.folder === c.path;
+                  const machineName = grouped ? group.name : null;
+                  const cant = `${machineName ?? 'This computer'} can't sign in to ${r.host}`;
+                  const aria = c.already
+                    ? `Start in ${c.name}, ${c.path}, already cloned${machineName ? `, on ${machineName}` : ''}`
+                    : c.cantSignIn
+                      ? `Clone ${r.slug}${machineName ? ` on ${machineName}` : ''}. ${cant}.`
+                      : `Clone ${r.slug} and start, into ${c.path}${r.branch ? `, branch ${r.branch}` : ''}${machineName ? `, on ${machineName}` : ''}${c.taken ? `. ${c.taken} is another folder` : ''}${picked ? ', chosen' : ''}`;
+                  return (
+                    <div
+                      id={optionId(i)}
+                      role="option"
+                      aria-selected={hl === i}
+                      aria-label={aria}
+                      className={`ib-cp-opt ib-cp-fopt ib-cp-clone${c.cantSignIn ? ' ib-cp-clone-cant' : ' ib-hfb-start'}${phone ? ' ib-hfb-two' : ''}${hl === i ? ' ib-hl' : ''}`}
+                      data-compose-folder-clone={group.machine ?? 'self'}
+                      data-clone-path={c.path}
+                      data-clone-already={c.already ? '' : undefined}
+                      data-clone-cant={c.cantSignIn ? '' : undefined}
+                      onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, CLONE_PICK))}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => pickClone(group, c)}
+                    >
+                      <Icon name={c.already ? 'check' : c.cantSignIn ? 'warn' : 'gitBranch'} size={15} />
+                      <span className="ib-cp-op" dir="auto">
+                        {c.already ? (
+                          <>
+                            Start in <b>{c.name}</b>
+                            <span className="ib-cp-trust"> · already cloned</span>
+                          </>
+                        ) : c.cantSignIn ? (
+                          <>Clone {r.repo}</>
+                        ) : (
+                          <>
+                            Clone <b>{r.repo}</b> and start
+                          </>
+                        )}
+                        {/* A phone hides the path column: the clone's place goes on a second line (G5). */}
+                        {phone && <span className="ib-hfb-sub">{c.cantSignIn ? cant : place}</span>}
+                      </span>
+                      <FolderPath path={c.cantSignIn ? cant : place} />
+                      <span className="ib-cp-check" aria-hidden="true">
+                        {picked && <Icon name="check" size={15} />}
+                      </span>
+                    </div>
+                  );
+                })()}
+              {g.cloneOther &&
+                (() => {
+                  const i = at++;
+                  return (
+                    <div
+                      id={optionId(i)}
+                      role="option"
+                      aria-selected={hl === i}
+                      aria-label={grouped ? `Clone into another folder on ${group.name}` : 'Clone into another folder'}
+                      className={`ib-cp-opt ib-cp-fopt ib-cp-other${hl === i ? ' ib-hl' : ''}`}
+                      data-compose-folder-clone-other={group.machine ?? 'self'}
+                      onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, CLONE_OTHER_PICK))}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => openCloneOther(group)}
+                    >
+                      <Icon name="folder" size={15} />
+                      <span className="ib-cp-op">Clone into another folder…</span>
+                      <span />
+                      <span className="ib-cp-check" aria-hidden="true" />
+                    </div>
+                  );
+                })()}
             </Fragment>
           );
         })}
+        {checking && (
+          <div className="ib-cp-none ib-cp-checking" role="status" data-compose-clone-note="checking">
+            <span className="ib-run-spin" aria-hidden="true" />
+            {checking}
+          </div>
+        )}
+        {gitLine && (
+          <div className="ib-cp-none" role="status" data-compose-clone-note="line">
+            {gitLine}
+          </div>
+        )}
+        {repoShown && rows.some((row) => row.kind === 'clone') && (
+          <>
+            <div className="ib-cp-cap-line" role="presentation" />
+            <div className="ib-cp-explain" data-compose-clone-explain="">
+              Cloned with that machine's own git sign-in, into the folder where its other projects live.{agentName ? ` ${agentName} starts when the clone is done.` : ''}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

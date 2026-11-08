@@ -61,8 +61,10 @@
  */
 
 import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder } from "./inbox-home-folders";
+import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
+import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
+import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -76,7 +78,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
-import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
+import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
@@ -89,7 +91,11 @@ const HOST_TTL_MS = 10_000;
  * Compose's `to.launch`: a project's folder, or a new scratch folder. `trust`: the person pressed Trust and start on
  * this reading of it; the press is the consent, so the Send saves the trust ("Trusting a folder").
  */
-export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true }) & {
+export type InboxLaunchTarget = (
+  | { agent: InboxLaunchAgent; project_id: string }
+  | { agent: InboxLaunchAgent; scratch: true }
+  | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
+) & {
   trust?: InboxLaunchTrust;
 };
 
@@ -136,7 +142,14 @@ interface Memo {
    * would undo the Stop); the person's next reply does, and takes it along.
    */
   heldReply: string | null;
+  /** Clone from a git URL: the reply that started the clone again last (once per reply, as a respawn). */
+  cloneFor?: string | null;
+  /** When the running clone began: its percent shows only after a few seconds (E2). */
+  cloneStartedAt?: number;
 }
+
+/** The clone percent shows once a clone has run this long (E2: a big repo, not every clone). */
+const CLONE_PCT_AFTER_MS = 3_000;
 
 /** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
 interface HostState {
@@ -555,7 +568,13 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
-      ...(launch.made_folder ? { shownFolder: options.displayFolder(launch.folder) } : {}),
+      ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
+      ...(launch.clone?.state === "cloning"
+        ? {
+            cloneRunning: clones.has(launch.id) || starting.has(launch.id),
+            clonePct: now() - (memo.cloneStartedAt ?? now()) >= CLONE_PCT_AFTER_MS ? (clones.get(launch.id)?.pct() ?? null) : null,
+          }
+        : {}),
     });
   };
 
@@ -671,6 +690,138 @@ export function createInboxLaunch(options: {
     }
   };
 
+  // ── Clone from a git URL (approval "launch-create-clone", E1-E11) ──
+
+  /** The clones running now, by launch id: their percent for the line, and Cancel. */
+  const clones = new Map<string, CloneRun>();
+  /** The last percent the windows were told of, by launch: they hear again every 5 points, never on every line git writes. */
+  const clonePctSaid = new Map<string, number>();
+
+  /** What a cloned repo brings that the person trusts first (decision 4a): read from the trust reading's facts. */
+  const bringsOf = (facts: readonly string[]): string[] => {
+    const text = facts.join(" ");
+    const brings: string[] = [];
+    if (/\bhooks?\b/.test(text)) brings.push("hooks");
+    if (/MCP server/.test(text)) brings.push("MCP servers");
+    if (/helper command|env settings|without asking|outside folders|couldn't be read/.test(text)) brings.push("settings");
+    return brings;
+  };
+
+  /**
+   * Clone, then start (E1, E3): `git clone` into the folder the Send made, its percent on the line after a few seconds
+   * (E2). Done: a repo that brings no hooks, MCP servers or settings is trusted and started without asking; one that
+   * does waits for the person's trust (E10, decision 4a), as any untrusted folder's start does. Failed: the line says
+   * why (E4-E6) and the message is kept; the folder the Send made goes, as on Cancel (E7).
+   */
+  const cloneThenRun = async (root: InboxMessage, host: LaunchHost): Promise<void> => {
+    const launch = root.launch!;
+    const clone = launch.clone!;
+    const memo = memoOf(launch);
+    memo.startedAt = now();
+    memo.cloneStartedAt = now();
+    clonePctSaid.delete(launch.id);
+    starting.add(launch.id);
+    let started = false;
+    try {
+      const login = launchSpawnEnv(await readLogin());
+      const running = runGitClone({
+        url: clone.url,
+        ...(clone.branch ? { branch: clone.branch } : {}),
+        folder: launch.folder,
+        env: login,
+        onProgress: (pct) => {
+          const said = clonePctSaid.get(launch.id) ?? -100;
+          if (pct - said >= 5 || pct === 100) {
+            clonePctSaid.set(launch.id, pct);
+            options.onChange();
+          }
+        },
+      });
+      clones.set(launch.id, running);
+      options.onChange();
+      const result = await running.done;
+      clones.delete(launch.id);
+      const current = store.message(root.id);
+      if (!current?.launch || current.launch.deleted_at) return;
+      if (!result.ok) {
+        if (result.cancelled) {
+          // E7: nothing is kept on that machine (the folder the Send made, while it is still that folder).
+          removeClonedFolder(current.launch);
+          store.settleLaunch(root.id, { clone: { ...clone, state: "cancelled" } });
+        } else {
+          // E4-E6: git leaves the folder empty; it goes too, so Try again or a changed URL clones into that name again.
+          removeClonedFolder(current.launch);
+          startLog(launch.id, `clone ${clone.url}: ${result.error}
+${result.text}`);
+          store.settleLaunch(root.id, { clone: { ...clone, state: "failed", error: result.error, ...(result.error === "failed" && result.text ? { error_text: result.text.slice(0, 300) } : {}) } });
+        }
+        log(`Inbox launch ${launch.id}: clone ${result.cancelled ? "cancelled" : `failed (${result.error})`}`);
+        return;
+      }
+      // Done. What it brings decides whether it starts without asking (decision 4a).
+      let brings: string[] = [];
+      if (!host.trusts(launch.folder)) {
+        const offer = host.trustOffer?.({ folder: launch.folder, scratch: false }) ?? null;
+        if (offer) {
+          const reading = offer.read();
+          if (reading.warns) brings = bringsOf(reading.facts);
+          else {
+            try {
+              await offer.accept();
+            } catch (error) {
+              startLog(launch.id, `clone: trust not saved: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+        }
+      }
+      const settled = store.settleLaunch(root.id, { clone: { ...clone, state: "done", ...(brings.length > 0 ? { brings } : {}) } });
+      log(`Inbox launch ${launch.id}: cloned ${clone.slug}`);
+      starting.delete(launch.id);
+      started = true;
+      await run(settled, host, false);
+    } catch (error) {
+      clones.delete(launch.id);
+      const text = error instanceof Error ? error.message : String(error);
+      startLog(launch.id, `clone error: ${text}`);
+      if (store.message(root.id)?.launch && !store.message(root.id)!.launch!.deleted_at) store.settleLaunch(root.id, { clone: { ...clone, state: "failed", error: "failed", error_text: text.slice(0, 300) } });
+    } finally {
+      if (!started) {
+        starting.delete(launch.id);
+        stateOf(host).view = null;
+        options.onChange();
+      }
+    }
+  };
+
+  /** Cancel, or Delete, during a clone: the partly cloned folder goes while it is still the one the Send made (E7). */
+  const removeClonedFolder = (launch: InboxLaunchRecord): void => {
+    if (!launch.made_folder || !launch.made_inode) return;
+    try {
+      if (!lstatSync(launch.folder).isDirectory() || realpathSync(launch.folder) !== launch.folder || inodeOf(launch.folder) !== launch.made_inode) return;
+      rmSync(launch.folder, { recursive: true, force: true });
+    } catch {
+      // Gone already.
+    }
+  };
+
+  /** Try again, Clone again or a reply after a failed or cancelled clone: the folder made again (empty), and the clone run again. */
+  const cloneAgain = (root: InboxMessage, host: LaunchHost): void => {
+    const launch = root.launch!;
+    let madeInode: string | null = null;
+    if (!isFolder(launch.folder)) {
+      try {
+        mkdirSync(launch.folder);
+      } catch (error) {
+        throw new InboxError("folder_unavailable", `${options.displayFolder(launch.folder)} can't be made again: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      madeInode = inodeOf(launch.folder);
+    }
+    const { error: _error, error_text: _text, ...clone } = launch.clone!;
+    // The new folder's identity with it, so a later Cancel removes this one.
+    const settled = store.settleLaunch(root.id, { clone: { ...clone, state: "cloning" }, ...(madeInode ? { made_inode: madeInode } : {}) });
+    void cloneThenRun(settled, host);
+  };
+
   // ── Respawn on reply: a person's message for a launched session that is not live ──
   const respawning = new Set<string>();
   /** The host's `resume` once; a failure is kept (and the CLI looked at again, for screen 15). */
@@ -708,6 +859,23 @@ export function createInboxLaunch(options: {
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
+    // A clone that failed or was cancelled: the person's reply clones again (E7: "Your reply starts it again"), once per reply.
+    if (host && !launch.deleted_at && launch.clone && (launch.clone.state === "failed" || launch.clone.state === "cancelled") && root.to && !starting.has(launch.id)) {
+      const memo = memoOf(launch);
+      const newest = store
+        .pendingReplies(root.to.session, { tags: true })
+        .filter((reply) => !reply.by_guest)
+        .at(-1);
+      if (newest && memo.cloneFor !== newest.id) {
+        memo.cloneFor = newest.id;
+        try {
+          cloneAgain(root, host);
+        } catch (error) {
+          log(`Inbox launch ${launch.id}: a reply's clone did not start: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return;
+    }
     if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
     // A host that owns the process is the exception once that process ended (its line says a reply continues it).
@@ -762,6 +930,68 @@ export function createInboxLaunch(options: {
     return json(listed);
   };
 
+  /** The folder reads' guard (`homeFolders`): the owner's window only, here or through a linked machine's forward. */
+  const windowRead = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response | null => {
+    if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+    if (!owner || options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can read this.", code: "owner_only" }, 403);
+    const window = door ? door.window : req.headers.get("sec-fetch-site") === "same-origin";
+    if (!window) return json({ error: "Folders are read in the Inbox window only.", code: "window_only" }, 403);
+    return null;
+  };
+
+  /** Where a clone goes on this machine with no setting (C1, C1b, C1c). */
+  const defaultCloneInto = (): string =>
+    defaultCloneFolder({
+      home: realOrSelf(options.homeDir),
+      last: readLastCloneFolder(options.dataDir),
+      projectRoots: store.listProjects().map((p) => p.root),
+      isFolder,
+    });
+
+  /**
+   * Clone from a git URL: where `url` would be cloned on this machine (`GET /api/inbox/launch/clone?url=…&into=~/…`).
+   * `into` absent: the default clone folder. Answers `{ into, path, name, state: "clone" | "already", taken, writable }`,
+   * each path as `~/…`; a URL that isn't a repo `422 validation_error`, a folder the listing refuses its `422`.
+   */
+  const cloneTargetRoute = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response => {
+    const refused = windowRead(req, via, owner, door);
+    if (refused) return refused;
+    const query = new URL(req.url).searchParams;
+    const repo = parseInboxGitUrl(query.get("url") ?? "");
+    if (!repo || repo.kind !== "repo") return json({ error: "Not a git repo's URL.", code: "validation_error" }, 422);
+    const home = realOrSelf(options.homeDir);
+    const typedInto = query.get("into");
+    let into: string;
+    if (typedInto) {
+      const at = resolveHomeFolder(options.homeDir, typedInto);
+      if (!at.ok) return json(at.refused === "hidden" ? { error: "Hidden folders aren't listed.", code: "folder_hidden" } : { error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422);
+      if (!at.exists || !at.real) return json({ error: `${at.shown} isn't there.`, code: "folder_missing" }, 422);
+      into = at.real;
+    } else into = defaultCloneInto();
+    const key = `${repo.host}/${repo.slug}`.toLowerCase();
+    // The folder named is itself a clone of that repo (C9): it starts there.
+    const target = originKeyOf(into) === key ? { path: into, name: basename(into), state: "already" as const, taken: null } : cloneTarget({ into, repo: repo.repo, key, exists: existsSync, originOf: originKeyOf });
+    if (!target) return json({ error: `Every name for ${repo.repo} is taken in ${tildeOf(home, into)}.`, code: "folder_unavailable" }, 422);
+    let writable = true;
+    try {
+      accessSync(into, fsConstants.W_OK | fsConstants.X_OK);
+    } catch {
+      writable = false;
+    }
+    return json({ into: tildeOf(home, into), path: tildeOf(home, target.path), name: target.name, state: target.state, taken: target.taken ? tildeOf(home, target.taken) : null, writable });
+  };
+
+  /** The quiet check after a paste (`GET /api/inbox/launch/clone-check?url=…`): `{ reach: "ok" | "auth" | "not_found" | "network" | "failed" }`, from this machine's git. */
+  const cloneCheck = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
+    const refused = windowRead(req, via, owner, door);
+    if (refused) return refused;
+    const repo = parseInboxGitUrl(new URL(req.url).searchParams.get("url") ?? "");
+    if (!repo || repo.kind !== "repo") return json({ error: "Not a git repo's URL.", code: "validation_error" }, 422);
+    // The Inbox's own env, with the login PATH after it: no login shell is read for a check.
+    const env = launchPlainEnv(options.ownEnv(), loginPath);
+    return json({ reach: await checkGitRemote({ url: repo.url, env }) });
+  };
+
   /**
    * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
    * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
@@ -777,6 +1007,10 @@ export function createInboxLaunch(options: {
     if (path === "/api/inbox/launch/folders") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
       return homeFolders(req, via, owner, door);
+    }
+    if (path === "/api/inbox/launch/clone" || path === "/api/inbox/launch/clone-check") {
+      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+      return path.endsWith("check") ? await cloneCheck(req, via, owner, door) : cloneTargetRoute(req, via, owner, door);
     }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
@@ -832,6 +1066,15 @@ export function createInboxLaunch(options: {
       case "stop": {
         // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
         if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can stop an agent from this Inbox.");
+        // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
+        const cloning = clones.get(launch.id);
+        if (cloning) {
+          cloning.cancel();
+          await cloning.done;
+          // Its own end settles the record; wait for that, so the answer is the cancelled line.
+          for (let i = 0; i < 50 && store.message(root.id)?.launch?.clone?.state === "cloning"; i++) await new Promise((r) => setTimeout(r, 20));
+          return json({ run: runOfRoot(store.message(root.id)!) });
+        }
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
         // What waits now was written before the Stop: it stays for the person's next reply.
@@ -880,6 +1123,14 @@ export function createInboxLaunch(options: {
         // Deleted already (a second Delete, from a stale window): nothing more. Its folder path may be another launch's now.
         if (launch.deleted_at) return json({ ok: true });
         const done = (async (): Promise<Record<string, unknown>> => {
+          // Still cloning: the clone is called off and its folder goes (the record says deleted first, so it stays so).
+          const cloning = clones.get(launch.id);
+          if (cloning) {
+            store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
+            cloning.cancel();
+            await cloning.done;
+            removeClonedFolder(launch);
+          }
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
             const stop = await host.stop(launch.session_ref);
@@ -909,6 +1160,11 @@ export function createInboxLaunch(options: {
         // Try again starts the agent: the owner's, as a Send that starts one is (inbox-compose.ts).
         if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
         if (starting.has(launch.id) || respawning.has(launch.id) || trusting.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
+        // A clone that failed or was cancelled (or cut off by a restart): clone again, then start.
+        if (launch.clone && (launch.clone.state === "failed" || launch.clone.state === "cancelled" || (launch.clone.state === "cloning" && !clones.has(launch.id)))) {
+          cloneAgain(root, host);
+          return json({ run: runOfRoot(store.message(root.id)!) });
+        }
         if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
         tryAgain(root, host);
         return json({ run: runOfRoot(store.message(root.id)!) });
@@ -1002,6 +1258,14 @@ export function createInboxLaunch(options: {
     void run(store.settleLaunch(root.id, { error: null }), host, false);
   };
 
+  const realOrSelf = (path: string) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  };
+
   const isFolder = (path: string) => {
     try {
       return statSync(path).isDirectory();
@@ -1050,6 +1314,15 @@ export function createInboxLaunch(options: {
       // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
       // `create: true` (Create a folder): its last folder may not be there yet; the Send makes it.
       if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) {
+        // `clone` (Clone from a git URL): `{ url, branch? }`, the URL checked again here; the folder is where it goes.
+        const clone = value!.clone as { url?: unknown; branch?: unknown } | undefined;
+        if (clone !== undefined) {
+          const repo = clone && typeof clone === "object" && typeof clone.url === "string" ? parseInboxGitUrl(clone.url) : null;
+          if (!repo || repo.kind !== "repo" || (clone.branch !== undefined && (typeof clone.branch !== "string" || clone.branch.startsWith("-") || !/^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(clone.branch)))) {
+            throw new InboxError("validation_error", "to.launch.clone: { url: an https or ssh git URL, branch? }.", { field: "to.launch.clone" });
+          }
+          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!) };
+        }
         return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!) };
       }
       if (!host || typeof value!.project_id !== "string") {
@@ -1078,13 +1351,35 @@ export function createInboxLaunch(options: {
       if (typed && (!typed.ok || (typed.real && isHomeItself(options.homeDir, typed.real)))) {
         throw new InboxError("validation_error", typed.ok === false && typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
       }
-      // Create a folder (`create`): a path whose last folder isn't there is checked now and made last, after every check.
-      const creating = typed?.ok && typed.state !== "folder" && "folder" in target && target.create === true ? checkNewHomeFolder(options.homeDir, target.folder) : null;
+      // Clone from a git URL: the folder named is where the clone goes. The same repo there already is started in as it
+      // is (C9); a name taken by anything else since the pick moves to the next free one, and the line says so (E11).
+      const cloneOf = "folder" in target && target.clone ? (parseInboxGitUrl(target.clone.url) as import("@plannotator/core/inbox-git-url").InboxGitRepo) : null;
+      let cloneRenamedFrom: string | null = null;
+      let cloneFolder = "folder" in target ? target.folder : null;
+      if (cloneOf && typed?.ok && typed.state !== "missing") {
+        const key = `${cloneOf.host}/${cloneOf.slug}`.toLowerCase();
+        if (!(typed.state === "folder" && typed.real && originKeyOf(typed.real) === key)) {
+          const segments = typed.shown.split("/");
+          const parentShown = segments.slice(0, -1).join("/") || "~";
+          const parent = resolveHomeFolder(options.homeDir, parentShown);
+          const free = parent.ok && parent.real ? cloneTarget({ into: parent.real, repo: segments[segments.length - 1]!, key, exists: existsSync, originOf: originKeyOf }) : null;
+          if (!free) throw new InboxError("folder_unavailable", `${typed.shown} is taken. Pick another folder. Nothing was sent.`, { field: "to.launch" });
+          cloneRenamedFrom = typed.shown;
+          cloneFolder = tildeOf(realOrSelf(options.homeDir), free.path);
+        }
+      }
+      const cloneTyped = cloneOf && cloneFolder !== null && cloneRenamedFrom ? resolveHomeFolder(options.homeDir, cloneFolder) : null;
+      if (cloneTyped && !cloneTyped.ok) throw new InboxError("validation_error", "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      const pathTyped = (cloneTyped ?? typed) as Extract<NonNullable<typeof typed>, { ok: true }> | null;
+      const cloning = !!cloneOf && pathTyped?.ok === true && pathTyped.state !== "folder";
+      // Create a folder (`create`), or a clone's folder: a path whose last folder isn't there is checked now and made last, after every check.
+      const creating =
+        pathTyped?.ok && pathTyped.state !== "folder" && "folder" in target && (target.create === true || cloning) ? checkNewHomeFolder(options.homeDir, cloneFolder ?? target.folder) : null;
       if (creating && !creating.ok) throw new InboxError(creating.code, creating.message, { field: "to.launch" });
-      if (typed?.ok && typed.state === "locked") throw new InboxError("folder_unavailable", `Can't open ${typed.shown}: no permission. Nothing was sent.`, { field: "to.launch" });
-      if (typed && !creating && (!typed.exists || !typed.real)) throw new InboxError("folder_missing", `${typed.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
+      if (pathTyped?.ok && pathTyped.state === "locked") throw new InboxError("folder_unavailable", `Can't open ${pathTyped.shown}: no permission. Nothing was sent.`, { field: "to.launch" });
+      if (pathTyped && !creating && (!pathTyped.exists || !pathTyped.real)) throw new InboxError("folder_missing", `${pathTyped.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
       const toMake = creating?.ok && creating.real === null ? creating : null;
-      let folderTarget = typed?.ok && typed.real ? typed.real : null;
+      let folderTarget = pathTyped?.ok && pathTyped.real ? pathTyped.real : null;
       const chosen = "project_id" in target ? store.project(target.project_id) : folderTarget ? (store.listProjects().find((p) => p.root === folderTarget) ?? null) : null;
       if ("project_id" in target && !chosen) throw new InboxError("project_not_found", `No project ${target.project_id}.`);
       if (chosen && !isFolder(chosen.root)) {
@@ -1146,12 +1441,33 @@ export function createInboxLaunch(options: {
         ...(made ? { scratch_inode: made.inode } : {}),
         // Create a folder: the Send made it (the failed line says it stays; a thread never written removes it again).
         ...(createdFolder?.made ? { made_folder: true as const, made_inode: createdFolder.inode } : {}),
+        // Clone from a git URL: cloned into the folder just made, before the agent starts.
+        ...(cloneOf && createdFolder
+          ? {
+              clone: {
+                url: cloneOf.url,
+                host: cloneOf.host,
+                slug: cloneOf.slug,
+                ...("folder" in target && target.clone?.branch ? { branch: target.clone.branch } : {}),
+                state: "cloning" as const,
+                ...(cloneRenamedFrom ? { renamed_from: cloneRenamedFrom } : {}),
+              },
+            }
+          : {}),
         started_at: new Date(now()).toISOString(),
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
+      // C1c: the next clone on this machine goes where this one went.
+      if (launch.clone) {
+        try {
+          writeLastCloneFolder(options.dataDir, dirname(folder));
+        } catch {
+          // Only a default: the next clone offers the projects' folder instead.
+        }
+      }
       return { project, to: { host: host.agent, session: `launch:${id}` }, launch, trust };
     },
 
@@ -1180,7 +1496,9 @@ export function createInboxLaunch(options: {
     /** The thread is written: start the agent in the background. */
     begin(root: InboxMessage): void {
       const host = hostOf(root.launch!);
-      if (host) void run(root, host, false);
+      if (!host) return;
+      if (root.launch!.clone?.state === "cloning") void cloneThenRun(root, host);
+      else void run(root, host, false);
     },
 
     /**
@@ -1234,7 +1552,7 @@ export function createInboxLaunch(options: {
         const code = last.code ?? "unknown";
         return [{ agent: host.agent, name: host.name, code, ...(code === "signed_out" && options.startedOverSsh ? { over_ssh: true as const } : {}) }];
       });
-      return { agents: offered.flat(), projects, scratch: { root }, ...(notReady.length > 0 ? { not_ready: notReady } : {}) };
+      return { agents: offered.flat(), projects, scratch: { root }, clone: { into: defaultCloneInto() }, ...(notReady.length > 0 ? { not_ready: notReady } : {}) };
     },
 
     /**
@@ -1311,7 +1629,7 @@ export function createInboxLaunch(options: {
       if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
       // A permission question waits on the person: the session is blocked on them (screen 09).
       if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
-      const word = runLine?.state === "starting" || runLine?.state === "working" ? runLine.state : null;
+      const word = runLine?.state === "starting" || runLine?.state === "working" || runLine?.state === "cloning" ? runLine.state : null;
       // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
       // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).
       const pending = row.delivery && row.delivery.state !== "delivered" ? row.delivery : null;
