@@ -98,6 +98,7 @@ packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
 packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
@@ -533,6 +534,7 @@ packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
+packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
@@ -577,3 +579,5 @@ packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/inbox/composeRemoteLaunch.test.tsx
+packages/inbox/composeOtherFolder.test.tsx

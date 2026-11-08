@@ -4,7 +4,7 @@ import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { tildePath } from '../format';
 import { splitPath } from '../agents';
 import type { InboxComposeLaunch, InboxLaunchAgent } from '@plannotator/core/inbox-types';
-import { filterGroups, hostLabel, pickerRows, splitProjectName, startBlock, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
+import { filterGroups, hostLabel, pickerRows, splitProjectName, startBlock, type ComposeGroup, type ComposeStart, type ComposeTarget, type MachineLaunchProject } from './model';
 
 /** One row of the listbox: a live session, or (launch on) "<agent> New session". Keyed so a re-read never moves the highlight. */
 type PickerOption = { key: string; target: ComposeTarget; started: string | null; start?: undefined } | { key: string; start: ComposeStart; target?: undefined };
@@ -174,13 +174,15 @@ export function ToPicker({
                 {i === rows.length && (
                   <div className={`ib-cp-cap${rows.length ? ' ib-cp-cap-line' : ''}`} aria-hidden="true" data-compose-start-caption="">
                     Start a new session in <b dir="auto">{s.project.name}</b>
+                    {/* Another machine's project (remote launch) names its machine, as the list's rows do. */}
+                    {(s.project as MachineLaunchProject).machine_name ? <> · {(s.project as MachineLaunchProject).machine_name}</> : null}
                   </div>
                 )}
                 <div
                   id={optionId(i)}
                   role="option"
                   aria-selected={i === hl}
-                  aria-label={`New ${s.name} session in ${s.project.name}, ${tildePath(s.project.root, home)}`}
+                  aria-label={`New ${s.name} session in ${s.project.name}${(s.project as MachineLaunchProject).machine_name ? `, on ${(s.project as MachineLaunchProject).machine_name}` : `, ${tildePath(s.project.root, home)}`}`}
                   className={`ib-cp-opt ib-cp-start${i === hl ? ' ib-hl' : ''}`}
                   data-compose-start={s.agent}
                   onPointerMove={() => i !== hl && setHl(i)}
