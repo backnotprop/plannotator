@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -500,6 +501,10 @@ export interface SettingsModel {
   rows?: InboxRowsOption[] | null;
   /** How many times `rows` was saved (config.json `inboxRowsRev`): a window takes a look only when it is newer. */
   rows_rev?: number;
+  /** The sidebar's layout (config.json `inboxSidebar`, approval "inbox-sidebar-customize"): null until first saved; absent from an older Inbox. */
+  sidebar?: unknown;
+  /** How many times `sidebar` was saved (config.json `inboxSidebarRev`): a window takes a layout only when it is newer. */
+  sidebar_rev?: number;
   /** The name on this person's comments (config.json `displayName`): null when never set. Absent for a guest and from an older Inbox. */
   display_name?: string | null;
   /**
@@ -1597,6 +1602,8 @@ export const inboxApi = {
   changeReaction: (change: InboxReactionChange) => post<{ reactions: InboxReaction[]; reactions_rev: number }>(inboxUrl('/settings'), { reaction_change: change }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
   saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
+  /** The sidebar's layout, written to config.json `inboxSidebar`: every window open hears it (`event: sidebar`). */
+  saveSidebar: (sidebar: InboxSidebarLayout) => post<{ sidebar: unknown; sidebar_rev: number }>(inboxUrl('/settings'), { sidebar }),
   /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
   saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
     post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
@@ -2086,6 +2093,8 @@ export interface InboxEventHandlers {
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
+  /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
+  onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
@@ -2127,7 +2136,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2217,6 +2226,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
         handlers.onRows?.(data.rows, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'sidebar':
+      try {
+        const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
+        handlers.onSidebar?.(data.sidebar, data.rev);
       } catch {
         // A malformed frame changes nothing.
       }

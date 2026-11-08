@@ -1,0 +1,56 @@
+/**
+ * The window's side of the sidebar's items (the registry is core `INBOX_SIDEBAR_ITEMS`): each item's icon in the
+ * menu and the Customize panel, and which items this Inbox draws now. An item it does not draw (Board with the
+ * Board off, Reviews with Code review off, Shape, Usage without `cswap`, Copy prompt and the keyboard button on a
+ * phone) is left out of the menu and the panel, and keeps its place in the layout for when it comes back.
+ */
+import { INBOX_SIDEBAR_ITEMS, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
+import type { IconName } from './icons';
+
+export const SIDEBAR_ITEM_ICON: Record<InboxSidebarItem, IconName> = {
+  logo: 'photo',
+  search: 'search',
+  'new-message': 'compose',
+  inbox: 'inbox',
+  board: 'board',
+  shape: 'layers',
+  reviews: 'reviews',
+  drafts: 'doc',
+  'copy-prompt': 'copy',
+  feedback: 'comment',
+  usage: 'user',
+  settings: 'settings',
+  shortcuts: 'keyboard',
+  theme: 'moon',
+};
+
+export interface SidebarFeatures {
+  board: boolean;
+  reviews: boolean;
+  shape: boolean;
+  usage: boolean;
+  /** Search and New message (absent in a sidebar drawn without them). */
+  search?: boolean;
+  compose?: boolean;
+  feedback?: boolean;
+  drafts?: boolean;
+  shortcuts?: boolean;
+  copyPrompt?: boolean;
+  phone: boolean;
+}
+
+/** The items this Inbox draws now, in registry order. */
+export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxSidebarItem> {
+  const off = new Set<InboxSidebarItem>();
+  if (!features.board) off.add('board');
+  if (!features.reviews) off.add('reviews');
+  if (!features.shape) off.add('shape');
+  if (!features.usage) off.add('usage');
+  if (features.search === false) off.add('search');
+  if (features.compose === false) off.add('new-message');
+  if (features.feedback === false) off.add('feedback');
+  if (features.drafts === false) off.add('drafts');
+  if (features.phone || features.shortcuts === false) off.add('shortcuts');
+  if (features.phone || features.copyPrompt === false) off.add('copy-prompt');
+  return new Set(INBOX_SIDEBAR_ITEMS.map((spec) => spec.id).filter((id) => !off.has(id)));
+}

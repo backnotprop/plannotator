@@ -437,6 +437,16 @@ export interface PlannotatorConfig {
    */
   inboxRowsDefaults?: number;
   /**
+   * The Inbox sidebar's layout (approval "inbox-sidebar-customize"): `{ top, bottom, hidden }`, lists of item names
+   * (core `INBOX_SIDEBAR_ITEMS`): the order of the top and bottom stacks, and the items hidden. Unset: today's
+   * sidebar. Written by the sidebar's right-click menu and its Customize panel through POST /api/inbox/settings
+   * `{ sidebar }`. Read leniently (core `inboxSidebarRead`): a name this build does not know is dropped, and an item
+   * the layout does not name takes its default place.
+   */
+  inboxSidebar?: { top?: string[]; bottom?: string[]; hidden?: string[] };
+  /** How many times `inboxSidebar` was saved: windows take a layout only when it is newer than the last they took. */
+  inboxSidebarRev?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST

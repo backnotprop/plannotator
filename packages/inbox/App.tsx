@@ -136,6 +136,9 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
+import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark } from './sidebarLayout';
+import { SidebarCustomizer } from './components/SidebarCustomizer';
+import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -1634,11 +1637,13 @@ function Inbox() {
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
+      const sidebarMark = sidebarLayoutReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
+      adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
@@ -2129,6 +2134,7 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -6565,6 +6571,16 @@ function Inbox() {
       data-thread-full={full ? '' : undefined}
       data-tour={tourOn ? String(tourState.step) : undefined}
     >
+      {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
+      {!tourOn && (
+        <SidebarCustomizer
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
+          onOpen={() => {
+            if (!phone && routeRef.current.page === 'settings') setSettingsSidebar(true);
+          }}
+        />
+      )}
       {tourOn && (
         <TourBar
           step={tourFixture ? tourState.step : (route.step ?? 1)}
