@@ -62,7 +62,7 @@
 
 import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder } from "./inbox-home-folders";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -630,6 +630,31 @@ export function createInboxLaunch(options: {
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
 
+  /**
+   * Create a folder (q-d2512542): a folder the Send just made, still empty, is trusted as one the person trusted by
+   * hand (the same store, through the host's offer), so the agent starts at once, with no Trust folder step. Only while
+   * it is still that folder (a real folder at that path, the identity recorded when it was made) and still empty: a
+   * folder with anything in it is read and trusted by the person, as any other.
+   */
+  const trustMadeFolder = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<void> => {
+    if (!launch.made_folder || !launch.made_inode || launch.scratch || host.trusts(launch.folder)) return;
+    try {
+      if (!lstatSync(launch.folder).isDirectory() || realpathSync(launch.folder) !== launch.folder || inodeOf(launch.folder) !== launch.made_inode) return;
+      if (readdirSync(launch.folder).length > 0) return;
+    } catch {
+      return;
+    }
+    const offer = host.trustOffer?.({ folder: launch.folder, scratch: false });
+    if (!offer) return;
+    try {
+      await offer.accept();
+      log(`Inbox launch ${launch.id}: trusted ${launch.folder} (made by this Send, empty)`);
+    } catch (error) {
+      // Not saved: the start says it needs trust, with Trust folder, as before.
+      startLog(launch.id, `made folder: trust not saved: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
@@ -644,6 +669,7 @@ export function createInboxLaunch(options: {
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
+      await trustMadeFolder(launch, host);
       const name = root.thread_name ?? root.subject ?? "Inbox";
       const result = await host.start(launch, { name, login });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.

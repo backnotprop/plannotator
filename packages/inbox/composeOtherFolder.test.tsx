@@ -485,3 +485,30 @@ test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it c
     delete TREES.self!['~/code/pricing-page'];
   }
 });
+
+test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in as a shell does; with no folder highlighted, or Shift+Tab, focus moves as usual', async () => {
+  await open();
+  await startAndOpenMenu();
+  act(() => inDialog('[data-compose-folder-other="self"]')!.click());
+  await until(() => shownFolders().length === 3, "home's folders");
+  const tab = (shift = false) => {
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+    act(() => {
+      pathField().dispatchEvent(event);
+    });
+    return event;
+  };
+  // "no" suggests notes-local, highlighted: Tab fills it in, ready for the next name, and the field keeps the caret.
+  type(pathField(), '~/code/no');
+  await until(() => shownFolders().join() === 'notes-local', 'the suggestion');
+  expect(tab(true).defaultPrevented).toBe(false);
+  expect(pathField().value).toBe('~/code/no');
+  expect(tab().defaultPrevented).toBe(true);
+  expect(pathField().value).toBe('~/code/notes-local/');
+  await until(() => inDialog('[data-home-folder-start]') !== null, 'the folder filled in');
+  // No folder suggested (Create leads): Tab is the browser's, so focus moves on, and the field is as typed.
+  type(pathField(), '~/code/nope');
+  await until(() => inDialog('[data-home-folder-create]')?.getAttribute('aria-selected') === 'true', 'the Create row');
+  expect(tab().defaultPrevented).toBe(false);
+  expect(pathField().value).toBe('~/code/nope');
+});
