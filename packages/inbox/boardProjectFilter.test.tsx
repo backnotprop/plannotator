@@ -10,7 +10,9 @@
  * card opened from another project closing under the filter; New card not
  * starting in the filtered initiative; the opened card's Initiative not
  * writing; New initiative… not making one; the phone's tokens squeezed into
- * the header instead of their own row, or its menu not a bottom sheet.
+ * the header instead of their own row, or its menu not a bottom sheet; a card
+ * not naming its project while the Board spans projects, or still naming it
+ * once one project is picked or every card is in one project.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -231,9 +233,38 @@ test.if(hasDom)('a Board whose cards are all in one project: the filter offers i
   expect($('[data-board-filter-token]')).toBeNull();
   expect($('.ib-bfbar')).toBeNull();
   expect(shownCards()).toEqual(['web_backlog', 'web_design', 'web_look']);
+  expect($$('[data-card-project]')).toEqual([]);
   await press($('[data-board-filter-button]')!);
   expect(rows('data-board-project-option')).toEqual([]);
   expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All initiatives', 'Shape', 'Memory', 'No initiative']);
+});
+
+test.if(hasDom)('cards name their project while the Board spans projects, on a row above the title, and not once one is picked', async () => {
+  scriptFetch();
+  const drawn = draw();
+  await settle();
+  const projectOf = (id: string) => $(`.ib-bcard[data-card-id="${id}"] [data-card-project]`)?.textContent ?? null;
+  const cardButton = (id: string) => $(`.ib-bcard[data-card-id="${id}"] .ib-bc-main`)!;
+  // The sidebar's names; the marks and the age leave the title's button for the project's row.
+  expect(projectOf('web_design')).toBe('web');
+  expect(projectOf('api_build')).toBe('api');
+  expect($('.ib-bcard[data-card-id="api_build"] .ib-bc-head .ib-bc-meta')).not.toBeNull();
+  expect(cardButton('api_build').querySelector('.ib-bc-meta')).toBeNull();
+  // The title stays first in the card's name (it is the button's visible words), the project right after it.
+  expect(cardButton('api_build').getAttribute('aria-label')).toStartWith('api_build. api. In progress');
+
+  // Done lists every project too: its cards name theirs.
+  drawn.rerender({ view: 'done' });
+  await settle();
+  expect(projectOf('api_done')).toBe('api');
+  expect(projectOf('web_done')).toBe('web');
+
+  // One project picked: no names, and the card is the title row it always was.
+  drawn.rerender({ view: 'lanes', project: API });
+  await settle();
+  expect($$('[data-card-project]')).toEqual([]);
+  expect(cardButton('api_build').querySelector('.ib-bc-meta')).not.toBeNull();
+  expect(cardButton('api_build').getAttribute('aria-label')).toStartWith('api_build. In progress');
 });
 
 test.if(hasDom)('All projects shows every card; picking a project narrows the lanes, the counts and the links', async () => {
