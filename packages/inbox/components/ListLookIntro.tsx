@@ -2,8 +2,8 @@
  * "Choose how your list looks" (approval "inbox-rows-dialog", round 7b; it replaced the switches of approval
  * "inbox-list-options-intro", shipped in 0.28.42). A one-time dialog: the picture of an Inbox with example projects
  * plays a short demo of letter marks and logos and holds on the stacked look (RowsIntroPicture.tsx); under it three
- * looks, Minimal, Balanced and Detailed (Settings → Rows' presets, RowsSettings.tsx `ROWS_PRESETS`), each with a
- * sketch. Nothing is picked when it opens; the person's look is marked "Current". Picking a look raises a card over
+ * looks, Minimal, Balanced and Detailed (Settings → Rows' presets, RowsSettings.tsx `ROWS_PRESETS`), each its name
+ * alone. Nothing is picked when it opens; the person's look is marked "Current". Picking a look raises a card over
  * the blurred picture with the person's own rows in that look. Done (disabled until a pick) saves the look; Keep as it
  * is and Escape change nothing; "Customize rows" opens Settings → Rows. App retires it either way (the Inbox's claim).
  *
@@ -146,44 +146,6 @@ const CARD_MAX = { w: 372, h: 320 };
 /** The card's rows: the person's list, from the top. A denser look shows more of them; the card cuts the last. */
 const CARD_ROWS = 7;
 
-/** A sketch of each look's density, 40 × 32 (the mock's glyphs): Minimal two lines a thread, Balanced three, Detailed roomier with a mark beside each thread. */
-function LookSketch({ look }: { look: RowsPreset }) {
-  const bars =
-    look === 'minimal'
-      ? [4, 14, 24].map((y) => (
-          <g key={y}>
-            <rect x="4" y={y} width="24" height="2.6" rx="1.3" />
-            <rect x="31" y={y} width="5" height="2.6" rx="1.3" opacity=".4" />
-            <rect x="4" y={y + 4.2} width="3.2" height="3.2" rx="1" opacity=".55" />
-            <rect x="9" y={y + 4.8} width="12" height="2" rx="1" opacity=".4" />
-          </g>
-        ))
-      : look === 'balanced'
-        ? [3, 13.5, 24].map((y) => (
-            <g key={y}>
-              <rect x="4" y={y} width="11" height="2" rx="1" opacity=".4" />
-              <rect x="4" y={y + 3.3} width="24" height="2.6" rx="1.3" />
-              <rect x="4" y={y + 7} width="31" height="2" rx="1" opacity=".4" />
-            </g>
-          ))
-        : [3, 18].map((y) => (
-            <g key={y}>
-              <rect x="3" y={y + 1} width="7" height="7" rx="2" />
-              <rect x="13" y={y} width="9" height="2" rx="1" opacity=".4" />
-              <rect x="13" y={y + 3.4} width="20" height="4.6" rx="2.3" opacity=".75" />
-              <rect x="13" y={y + 9.2} width="24" height="2" rx="1" opacity=".4" />
-              <rect x="13" y={y + 12.2} width="17" height="2" rx="1" opacity=".4" />
-            </g>
-          ));
-  return (
-    <span className="ib-rl-gl" aria-hidden="true">
-      <svg width="40" height="32" viewBox="0 0 40 32" fill="currentColor">
-        {bars}
-      </svg>
-    </span>
-  );
-}
-
 /** The person's rows in one look, as the list draws them (its own rows, marks and classes). */
 function LookRows({ rows, look, phone, projectNames, awayMachines }: { rows: readonly { row: InboxListRow; drawn: InboxListGroupId }[]; look: ListLook; phone: boolean; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string> }) {
   return (
@@ -307,9 +269,9 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
         {ROWS_PRESETS.map((preset) => (
           <label key={preset.id} className="ib-rl-look" data-on={pick === preset.id ? '' : undefined} data-list-intro-look={preset.id}>
             <input type="radio" name="ib-rl-look" value={preset.id} checked={pick === preset.id} onChange={() => choose(preset.id)} />
-            <LookSketch look={preset.id} />
+            {/* The look's name alone (the owner: no icons), centred; "Current" under it never moves it, so the three line up. */}
             <span className="ib-rl-ln">
-              {preset.label}
+              <span className="ib-rl-name">{preset.label}</span>
               {current === preset.id && <span className="ib-rl-cur">Current</span>}
             </span>
           </label>

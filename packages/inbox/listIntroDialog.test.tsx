@@ -2,7 +2,7 @@
  * "Choose how your list looks" as drawn (components/ListLookIntro.tsx, approval "inbox-rows-dialog", round 7b). What
  * regresses: a look picked before the person picks one, Done saving with nothing picked, Keep as it is or Escape (or
  * "Customize rows") saving anything, Done saving something other than the picked look whole, "Current" on the wrong
- * look, the card not showing the person's own rows in the picked look, the demo not ending on the held picture (left
+ * look, a look drawn with a picture beside its name (the owner asked for the names alone), the card not showing the person's own rows in the picked look, the demo not ending on the held picture (left
  * alone, on a key or a click, or at once under reduced motion), and `lightScope`'s palette fallback for the dialogs
  * that still draw a light picture.
  *
@@ -104,6 +104,15 @@ describe.skipIf(!hasDom)('Choose how your list looks', () => {
     // The words, as approved.
     expect(dialog.querySelector('#ib-lo-title')!.textContent).toBe('Choose how your list looks');
     expect(dialog.querySelector('#ib-lo-desc')!.textContent).toBe('Pick a look. Fine-tune it any time in Customize rows, from ⋮ above the list.');
+  });
+
+  test('each look is its name alone, "Current" added under the person\'s look; no picture beside it (the owner: no icons)', () => {
+    motion(true);
+    const { dialog } = render(LIST_LOOK_DEFAULT);
+    const labels = [...dialog.querySelectorAll<HTMLElement>('[data-list-intro-look]')];
+    // What a screen reader names each radio by, and all a look draws.
+    expect(labels.map((label) => label.textContent)).toEqual(['Minimal', 'BalancedCurrent', 'Detailed']);
+    expect(labels.filter((label) => label.querySelector('svg, img, [role="img"]'))).toEqual([]);
   });
 
   test('"Current" follows the look: Minimal saved reads Minimal; a custom look marks none', () => {

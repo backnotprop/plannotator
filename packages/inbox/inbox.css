@@ -7664,25 +7664,25 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rl-card .ib-lbody { overflow: hidden; padding-top: 0; }
 .ib-rl-card .ib-lbody > .ib-group > :is(.ib-rw, .ib-mrow) { content-visibility: visible; }
 .ib-rl-card :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
-/* The words' link and the three looks: filled cards, each with a sketch of its density. */
+/* The words' link and the three looks: filled cards, each its name alone. */
 .ib-rl-link { font: inherit; color: var(--foreground); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 35%, transparent); text-underline-offset: 2px; }
 .ib-rl-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
 .ib-rl-looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 14px 22px 0; }
-.ib-rl-look { position: relative; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 12px; border-radius: 10px; cursor: pointer; background: var(--lo-well); transition: background-color 150ms ease-out; -webkit-tap-highlight-color: transparent; }
+.ib-rl-look { position: relative; display: flex; min-height: 60px; padding: 6px 12px; border-radius: 10px; cursor: pointer; background: var(--lo-well); transition: background-color 150ms ease-out; -webkit-tap-highlight-color: transparent; }
 @media (hover: hover) { .ib-rl-look:hover { background: color-mix(in oklch, var(--muted) 85%, var(--card)); } }
 .ib-rl-look[data-on], .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 20%, var(--popover)); }
 :root.light .ib-rl-look[data-on], :root.light .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 12%, var(--card)); }
 .ib-rl-look > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .ib-rl-look:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
-.ib-rl-gl { flex: none; width: 44px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: var(--popover); color: color-mix(in oklch, var(--foreground) 62%, var(--card)); box-shadow: 0 1px 2px oklch(0.2 0.02 260 / 0.1); transition: color 150ms ease-out; }
-:root.light .ib-rl-gl { background: var(--card); }
-.ib-rl-look[data-on] .ib-rl-gl { color: var(--primary); }
-.ib-rl-ln { display: flex; flex-direction: column; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; line-height: 1.3; }
-.ib-rl-cur { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; }
+/* The name sits in the card's middle row, "Current" in the row under it: the rows above and below share what is
+   left, so the name is centred whether or not "Current" shows, and the three names line up. */
+.ib-rl-ln { flex: 1; display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; min-width: 0; text-align: center; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; line-height: 1.3; }
+.ib-rl-name { grid-row: 2; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.ib-rl-cur { grid-row: 3; align-self: start; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; }
 .pn-inbox .ib-rl .ib-btn:disabled, dialog.ib-rl .ib-btn:disabled { opacity: 0.45; cursor: default; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A phone: the bottom sheet (.ib-lo-phone), the same window drawn smaller, the notes card at 0.7 tucked into the
-     corner; the three looks stay in one row, the sketch above the name. */
+     corner; the three looks stay in one row. */
   dialog.ib-dlg.ib-lo.ib-rl.ib-lo-phone { width: calc(100vw - 16px); }
   .ib-lo-phone .ib-rl-art { padding: 30px 14px 0; }
   :root:not(.light) .ib-lo-phone .ib-rl-art { padding-bottom: 14px; }
@@ -7691,12 +7691,12 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .ib-lo-phone.ib-rl .ib-lo-text h2 { font-size: var(--ib-fs-17, 17px); }
   .ib-lo-phone.ib-rl .ib-lo-text p { font-size: var(--ib-fs-14, 14px); }
   .ib-lo-phone .ib-rl-looks { gap: 6px; padding: 14px 14px 0; }
-  .ib-lo-phone .ib-rl-look { flex-direction: column; justify-content: center; gap: 7px; min-height: 84px; padding: 10px 4px; text-align: center; }
-  .ib-lo-phone .ib-rl-ln { align-items: center; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone .ib-rl-look { min-height: 64px; padding: 6px 4px; }
+  .ib-lo-phone .ib-rl-ln { font-size: var(--ib-fs-15, 15px); }
   .ib-lo-phone .ib-rl-cur { font-size: var(--ib-fs-12-5, 12.5px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ib-rl :is(.ib-rl-cap > span, .ib-rl-frame, .ib-rl-stack, .ib-rl-nrow, .ib-rl-stm, .ib-rl-veil, .ib-rl-card, .ib-rl-cl, .ib-rl-look, .ib-rl-gl, .ib-rl-flip, .ib-rl-logo, .ib-rl-logo > img) { transition: none !important; }
+  .ib-rl :is(.ib-rl-cap > span, .ib-rl-frame, .ib-rl-stack, .ib-rl-nrow, .ib-rl-stm, .ib-rl-veil, .ib-rl-card, .ib-rl-cl, .ib-rl-look, .ib-rl-flip, .ib-rl-logo, .ib-rl-logo > img) { transition: none !important; }
   .ib-rl :is(.ib-rl-pop, .ib-rl-sbm) { animation: none !important; }
 }
 
