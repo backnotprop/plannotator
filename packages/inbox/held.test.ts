@@ -598,7 +598,8 @@ describe('the Snoozed band', () => {
 });
 
 // The open row is drawn read as its look goes out (the owner, 2026-11-02: its hover action must be Mark unread at
-// once). Unbolding a row that still waits on the person (a question, picks not sent) would hide that it waits.
+// once), in the group it is drawn in. A row with questions open unbolds too (the owner, 2026-11-08) and keeps its
+// group; only picks not sent ("Answered, not sent") keep a row bold, since it waits on the person's Send.
 describe('markHeldRowLooked', () => {
   const news = (id: string, extra: Partial<InboxListRow> = {}) =>
     ({ ...row(id, 'docs-site', '2026-10-07T10:00:00Z', 'agent'), section: 'new', unseen: 1, unread: true, answered_not_sent: false, ...extra }) as InboxListRow;
@@ -611,12 +612,16 @@ describe('markHeldRowLooked', () => {
     expect(rowIn(looked, 'b')).toMatchObject({ unseen: 1, unread: true });
   });
 
-  test('a row that still waits on the person stays bold', () => {
+  test('a row with questions open reads seen and not bold where it is; picks not sent stay bold', () => {
     const list: InboxListSection[] = [
+      { id: 'stopped', label: 'Stopped on you', threads: [news('s', { section: 'stopped' })] },
+      { id: 'holding', label: 'Holding up work', threads: [news('h', { section: 'holding' })] },
       { id: 'waiting', label: 'Waiting on you', threads: [news('q', { section: 'waiting' })] },
       { id: 'new', label: 'New since you looked', threads: [news('p', { answered_not_sent: true })] },
     ];
-    expect(rowIn(markHeldRowLooked(list, new Set(['q'])), 'q')).toMatchObject({ unseen: 0, unread: true, section: 'waiting' });
-    expect(rowIn(markHeldRowLooked(list, new Set(['p'])), 'p')).toMatchObject({ unseen: 0, unread: true });
+    const looked = markHeldRowLooked(list, new Set(['s', 'h', 'q', 'p']));
+    expect(looked.map((s) => `${s.id}:${s.threads.map((r) => r.thread_id).join(',')}`)).toEqual(['stopped:s', 'holding:h', 'waiting:q', 'new:p']);
+    for (const id of ['s', 'h', 'q']) expect(rowIn(looked, id)).toMatchObject({ unseen: 0, unread: false });
+    expect(rowIn(looked, 'p')).toMatchObject({ unseen: 0, unread: true });
   });
 });
