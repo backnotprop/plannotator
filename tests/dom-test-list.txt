@@ -585,3 +585,4 @@ packages/system/test/render.test.tsx
 packages/inbox/fileRefs.dom.test.tsx
 packages/inbox/referencedFilePane.dom.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
+packages/inbox/composeOtherFolder.test.tsx
