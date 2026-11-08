@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { planFolds } from '@plannotator/core/inbox-folding';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
-import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewViewOf, saveReviewFolds } from './reviewsModel';
+import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewRowTitle, reviewViewOf, saveReviewFolds } from './reviewsModel';
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = fields.repo ?? 'northwind/web-app';
@@ -266,4 +266,18 @@ test('a walkthrough says Walkthrough, not a branch, from its start (Curating) an
   expect(reviewContextLine(ready, 'charges')).toBe('charges · Walkthrough');
   // A walkthrough an agent sent unasked (no New review start) reads the same.
   expect(reviewRowLine(row({ review: review({ walkthrough: true }) })).lead).toBe('Walkthrough');
+});
+
+test("the bar's name in Reviews is the row's title: the review's once it landed, none for a PR row or before a review", () => {
+  const view = (r: InboxReviewRow) => reviewViewOf(r, { messages: [], subject: 'q', thread_name: 'Webhook delivery' }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
+  const started = { kind: 'local', changes: null, branch: 'retry-jitter', base: 'main', ask: 'guide', host: 'claude-code', project_id: 'p', at: '', name: 'Webhook delivery' };
+  // A guided review and a walkthrough, both started in New review: the row and the bar say the guide's title.
+  for (const r of [row({ started } as unknown as Partial<InboxReviewRow>), row({ started: { ...started, kind: 'walkthrough' }, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>)]) {
+    expect(view(r).name).toBe(reviewRowTitle(r, () => 'PR title'));
+    expect(view(r).name).toBe('Retry failed charges');
+  }
+  // Curating: no name of its own, so the bar keeps the thread's, which is the row's.
+  expect(view(row({ review: null, reason: 'curating', started } as unknown as Partial<InboxReviewRow>)).name).toBeNull();
+  // A PR row's title is the PR's: the bar keeps its thread name.
+  expect(view(row({ stacks: [inboxPullStacks([pull(869)])[0]!] })).name).toBeNull();
 });

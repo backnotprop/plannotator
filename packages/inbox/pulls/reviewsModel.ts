@@ -180,6 +180,12 @@ export interface ReviewView {
   kind: 'local' | 'pr';
   /** The review's title, once one arrived. */
   title: string | null;
+  /**
+   * The name the thread's bar shows instead of the thread's own: the review's title, which the Reviews row and the
+   * heading show (`reviewRowTitle`), so the bar does not keep New review's name once the guide lands. Null for a PR
+   * row (its row is the PR's title) and before a review arrived (the row shows the thread's name then).
+   */
+  name: string | null;
   /** The first review: the messages before it stay out of this view (`reviewEarlierHidden`). Null when the thread was started for the review. */
   firstReviewId: string | null;
   /** The latest review: open in this view however long ago it was read. */
@@ -269,6 +275,7 @@ export function reviewViewOf(
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
+    name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
     curating: row.reason === 'curating',
