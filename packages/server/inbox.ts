@@ -238,6 +238,7 @@ import {
   type RevealLoads,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
+import { launchTipClaim, launchTipDue, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -2573,6 +2574,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saveConfig({ inboxReveals: { ...revealStamp(saved, at, { spaced: false, load }), ...(shownFor ? { agentNote: { shownFor } } : {}) } });
   };
   /**
+   * The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): the owner's, while Launch is on and no
+   * agent was ever started here, until it was shown once. Outside the line: its claim stamps only
+   * `inboxReveals.launch_tip`, never the line's day or spacing, and it waits for neither.
+   */
+  const launchTipState = (owner: boolean): LaunchTipState => ({
+    owner,
+    launchOn: launch.enabled(),
+    launched: store.launchedRoots().length > 0,
+    saved: loadConfig().inboxReveals?.launch_tip,
+  });
+  const claimLaunchTip = (owner: boolean, key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = launchTipClaim(launchTipState(owner), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, launch_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every New message.
+    return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -2587,6 +2607,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
       setup: via === "local" && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
+      // The Launch tip (outside the line): compose may claim it at the first plain New message.
+      launch_tip: launchTipDue(launchTipState(owner)),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -4594,8 +4616,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -4609,6 +4631,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.answer === "not_now") {
           revealNotNow(owner);
           return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Launch tip: outside the line, its own stamp only (packages/shared/inbox/launch-tip.ts).
+        if (id === "launch_tip") {
+          return json({ show: claimLaunchTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

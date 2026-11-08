@@ -584,3 +584,4 @@ packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
 packages/inbox/composeClone.test.tsx
 packages/inbox/projectPlus.test.tsx
+packages/inbox/composeLaunchTip.test.tsx

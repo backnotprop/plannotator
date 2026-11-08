@@ -87,6 +87,8 @@ interface Options {
   config?: Record<string, unknown>;
   /** Published over the tailnet: the owner's phone and a guest can reach it; `tagged`: a machine with no owner. */
   tailnet?: "owner" | "tagged";
+  /** An agent was already started from this Inbox: one launched thread root in the store. */
+  launched?: boolean;
 }
 
 type Json = Record<string, any>;
@@ -119,6 +121,15 @@ async function world(options: Options = {}) {
   // One session's messages make one thread: a session each.
   for (let i = 0; i < (options.threads ?? 6); i++) {
     store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
+  }
+  if (options.launched) {
+    store.startPersonThread({
+      project_id: project.id,
+      body: "Fix the totals.",
+      to: null,
+      idempotency_key: "launched-1",
+      launch: { id: "lch_seeded", agent: "claude-code", session_ref: null, folder: join(root, "docs"), scratch: false, started_at: then.toISOString() },
+    });
   }
   const home = join(root, "home");
   mkdirSync(home);
@@ -722,5 +733,50 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     const answer = await phone.viaTailnet(OWNER, "/api/inbox/reveal", { id: "agent_note", agents: ["pi"] });
     expect(((await answer.json()) as Json).show).toBe(false);
     expect(phone.saved().inboxReveals?.dayShownAt).toBeUndefined();
+  });
+});
+
+describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped once when shown", () => {
+  const LAUNCH_ON = { inboxLaunch: { enabled: true } };
+  const KEY = "launch-tip-key-1";
+
+  test("due for the owner while Launch is on; the claim stamps only inboxReveals.launch_tip; a second window gets no; the same key is shown it again", async () => {
+    const w = await world({ config: LAUNCH_ON });
+    expect((await w.settings()).reveal.launch_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("launch_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.launch_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // Not a dialog: the line's day, spacing and load stay as they were, and its next is untouched.
+    expect(saved.dayShownAt).toBeUndefined();
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.shownLoad).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.launch_tip).toBe(false);
+    // Another window or the phone: no. The same page's retry after a lost answer: yes, with no second write.
+    expect((await w.claim("launch_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("launch_tip")).show).toBe(false);
+    expect((await w.claim("launch_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.launch_tip.shownAt).toBe(saved.launch_tip.shownAt);
+  });
+
+  test("never with Launch off, once an agent was started here, for a guest, or as a Not now", async () => {
+    const off = await world();
+    expect((await off.settings()).reveal.launch_tip).toBe(false);
+    expect((await off.claim("launch_tip", KEY)).show).toBe(false);
+    expect(off.saved().inboxReveals?.launch_tip).toBeUndefined();
+
+    const launched = await world({ config: LAUNCH_ON, launched: true });
+    expect((await launched.settings()).reveal.launch_tip).toBe(false);
+    expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
+
+    const tailnet = await world({ config: LAUNCH_ON, tailnet: "owner" });
+    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(false);
+    expect(tailnet.saved().inboxReveals?.launch_tip).toBeUndefined();
+    // The owner's phone: shown, and stamped for every window.
+    expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(true);
+    expect(tailnet.saved().inboxReveals.launch_tip.shownAt).toMatch(/^\d{4}-/);
+
+    expect((await off.post("/api/inbox/reveal", { id: "launch_tip", answer: "not_now" })).status).toBe(422);
   });
 });

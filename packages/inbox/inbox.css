@@ -4146,13 +4146,43 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The To row: its label and the agent's name share one baseline (the button exports its text's baseline). */
 .ib-cp-to { position: relative; display: flex; align-items: baseline; gap: 10px; min-height: 48px; padding: 7px 14px 7px 16px; border-bottom: 1px solid var(--ib-line); flex: none; --ib-cp-tdlh: 20px; }
 .ib-cp-to .ib-cp-tol { line-height: var(--ib-cp-tdlh); }
+/*
+ * The Launch tip (approval "launch-tip", variant Beside; compose/launchTip.ts): the tour's coach card, drawn inside the
+ * To row (so inside the modal dialog), beside the box level with To, or under To when the window has no room (or on a
+ * phone). Its ring and arrow mix in srgb: oklch swings the primary's hue against the hueless popover.
+ */
+.ib-tour-coach.ib-lt { position: absolute; z-index: 6; right: auto; bottom: auto; width: 284px; max-width: none; max-height: none; padding: 12px 14px 10px; animation: none; text-align: left; --ib-lt-ring: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: 0 0 0 1px var(--ib-lt-ring), var(--ib-float-shadow, 0 16px 40px -12px rgb(0 0 0 / 0.45)); }
+.ib-tour-coach.ib-lt[data-phone] { right: 12px; width: auto; }
+.ib-tour-coach.ib-lt h2 { margin: 0 0 2px; font-size: var(--ib-fs-14-5, 14.5px); }
+.ib-tour-coach.ib-lt p { font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
+.ib-tour-coach.ib-lt .ib-tc-eb { margin-bottom: 1px; }
+.ib-tour-coach.ib-lt .ib-tc-acts { margin-top: 10px; }
+/* A desktop's Got it is the mock's 28 px; a phone keeps the coach card's 44 px tap target. */
+.pn-inbox .ib-tour-coach.ib-lt:not([data-phone]) .ib-tc-next { height: 28px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); }
+.ib-lt-arrow { position: absolute; width: 10px; height: 10px; background: var(--popover); transform: rotate(45deg); }
+.ib-lt-arrow[data-side="left"] { left: -5px; top: 21px; box-shadow: -1px 1px 0 0 var(--ib-lt-ring); }
+.ib-lt-arrow[data-side="up"] { top: -5px; left: 24px; box-shadow: -1px -1px 0 0 var(--ib-lt-ring); }
+/* Enter: a fade and a 4 px slide from the side it points at. Leave: shorter, a fade with a hair of scale. Reduced: fades only. */
+@media (prefers-reduced-motion: no-preference) {
+  .ib-tour-coach.ib-lt[data-side="right"] { animation: ib-lt-in-left 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-lt[data-side="below"] { animation: ib-lt-in-up 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-out 120ms ease-out both; }
+  @keyframes ib-lt-in-left { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-lt-in-up { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-lt-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.98); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-tour-coach.ib-lt { animation: ib-lt-fade 120ms linear both; }
+  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-fade 100ms linear reverse both; }
+  @keyframes ib-lt-fade { from { opacity: 0; } to { opacity: 1; } }
+}
 /* Create thread from a Board card: which card the new thread is for. */
 .ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
 .ib-cp-card b { color: var(--foreground); font-weight: 600; }
 .ib-cp-tol { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); flex: none; }
 .pn-inbox .ib-cp-tobtn { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; max-width: 100%; height: 34px; padding: 7px 8px; border-radius: 7px; border: 0; background: transparent; color: var(--foreground); font-size: var(--ib-fs-14, 14px); line-height: var(--ib-cp-tdlh, 20px); text-align: left; }
 .ib-cp-tobtn > .ib-mk, .ib-cp-tobtn > svg.ib-ic, .ib-cp-none-to > svg.ib-ic { align-self: center; }
-.pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"], .pn-inbox .ib-cp-tobtn[data-launch-tip] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
 .pn-inbox .ib-cp-tobtn:disabled { color: var(--muted-foreground); }
 /* To is one line at every width: the mark, the agent's name and the chevron never shrink; the detail takes the rest. */
 .ib-cp-tobtn b, .ib-cp-tobtn s { flex: none; white-space: nowrap; }

@@ -28,7 +28,7 @@
  *   circle beside it opens the facts, when there are any.
  */
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
@@ -88,6 +88,8 @@ import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
 import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
+import { LaunchTipCard } from './LaunchTipCard';
+import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -210,6 +212,12 @@ export interface ComposeDialogProps {
   reviewPullsRead?: ReviewPullsRead;
   /** New review: a PR already in review was picked, so its thread opens rather than a second one starting. */
   onOpenReviewThread?: (threadId: string) => void;
+  /**
+   * The Launch tip (approval "launch-tip"; launchTip.ts): the Inbox has it for this page (settings `reveal.launch_tip`).
+   * Compose shows it only at a plain New message whose To can start an agent, and `claim` stamps it as it shows (true:
+   * this page shows it). Absent: never.
+   */
+  launchTip?: { claim: () => Promise<boolean> } | null;
 }
 
 /**
@@ -240,10 +248,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
+  const toRowRef = useRef<HTMLDivElement>(null);
   const opening = useRef(composeOpening(request)).current;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const titleId = `ib-cp-title-${uid}`;
   const statusId = `ib-cp-status-${uid}`;
+  const tipLineId = `ib-cp-tip-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
   const [typed] = useState(() => unsentReview(box?.pick));
@@ -516,6 +526,64 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (voice.session.view().phase !== 'sending') voice.session.covered();
   }, [footCovered, question, voice.session]);
 
+  // ── the Launch tip (launchTip.ts): once, at a plain New message whose To can start an agent ──
+  const [tip, setTip] = useState<'wait' | 'claiming' | 'shown' | 'leaving' | 'done'>(() => (props.launchTip && !transport && !box && launchTipPlainOpen(request) ? 'wait' : 'done'));
+  const [tipTime, setTipTime] = useState(false);
+  const [tipPlace, setTipPlace] = useState<LaunchTipPlace | null>(null);
+  const tipLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipClaim = useRef(props.launchTip?.claim);
+  useEffect(() => {
+    if (tip !== 'wait') return;
+    const timer = setTimeout(() => setTipTime(true), LAUNCH_TIP_TIMES.delayMs);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => () => {
+    if (tipLeaveTimer.current) clearTimeout(tipLeaveTimer.current);
+  }, []);
+  // To opened, or something in To, before the tip came: not needed this time, and not used up.
+  const toTouched = picker || !!chosen || !!startPick;
+  useEffect(() => {
+    if (toTouched && (tip === 'wait' || tip === 'claiming')) setTip('done');
+  }, [toTouched, tip]);
+  useEffect(() => {
+    if (tip !== 'wait' || !tipTime || !model || !canStart || toTouched || busy) return;
+    setTip('claiming');
+    tipClaim.current?.().then(
+      (show) => setTip((now) => (now === 'claiming' ? (show ? 'shown' : 'done') : now)),
+      () => setTip((now) => (now === 'claiming' ? 'done' : now)),
+    );
+  }, [tip, tipTime, model, canStart, toTouched, busy]);
+  // Said once, in compose's own polite region (the window's is outside the modal dialog).
+  useEffect(() => {
+    if (tip === 'shown') say(LAUNCH_TIP_SAID);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tip === 'shown']);
+  const leaveTip = () => {
+    if (tip !== 'shown') return false;
+    setTip('leaving');
+    tipLeaveTimer.current = setTimeout(() => setTip('done'), LAUNCH_TIP_TIMES.leaveMs);
+    return true;
+  };
+  // Opening To is what it asked for: it leaves.
+  useEffect(() => {
+    if (picker) leaveTip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picker]);
+  const tipUp = tip === 'shown' || tip === 'leaving';
+  useLayoutEffect(() => {
+    if (!tipUp) return;
+    const measure = () => {
+      const dialog = dialogRef.current;
+      const row = toRowRef.current;
+      if (!dialog || !row) return;
+      setTipPlace(launchTipPlace({ phone, viewportWidth: window.innerWidth, dialog: dialog.getBoundingClientRect(), row: row.getBoundingClientRect(), to: toRef.current?.getBoundingClientRect() ?? null }));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [tipUp, phone]);
+
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(newUuid());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
@@ -602,6 +670,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
 
   // ── sending ──
   const send = async () => {
+    leaveTip();
     // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
     if (busy || !model || voice.busy) return;
     // The details just opened on a changed folder: a double press or a held key never answers what it hasn't shown.
@@ -874,7 +943,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // Never the window's Escape (it would close the thread under the dialog).
       event.preventDefault();
       event.stopPropagation();
-      requestClose();
+      // The Launch tip up: the first Escape closes only the tip (a popover's own dismissal, not a new shortcut).
+      if (!leaveTip()) requestClose();
       return;
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !question) {
@@ -930,7 +1000,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
   const toRow = (
-    <div className="ib-cp-to" data-start={start ? '' : undefined}>
+    <div ref={toRowRef} className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
       {model && !anyLive && !canStart && !endedNote ? (
         <span className="ib-cp-none-to" data-compose-to="none">
@@ -957,6 +1027,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
                   : 'To: choose an agent'
           }
           aria-disabled={loading || undefined}
+          // The Launch tip's line describes To while it is up; To wears its own hover fill, never a ring.
+          aria-describedby={tip === 'shown' ? tipLineId : undefined}
+          data-launch-tip={tip === 'shown' ? '' : undefined}
           data-loading={loading ? '' : undefined}
           // Focusable while the sessions are read (Tab still reaches it); it opens once they are.
           onClick={() => !loading && setPicker((open) => !open)}
@@ -988,6 +1061,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
           <Icon name="chevD" size={15} />
         </button>
+      )}
+      {tipUp && (
+        <LaunchTipCard
+          place={tipPlace}
+          phone={phone}
+          leaving={tip === 'leaving'}
+          titleId={`${titleId}-tip`}
+          lineId={tipLineId}
+          onOk={(keyboard) => {
+            leaveTip();
+            // From the keyboard, focus was on Got it, which is going: to To, the thing the tip was about.
+            if (keyboard) (toRef.current ?? textRef.current)?.focus();
+          }}
+        />
       )}
       {start && (
         <span className="ib-cp-startin">
@@ -1076,7 +1163,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
-        requestClose();
+        if (!leaveTip()) requestClose();
+      }}
+      // A phone's tip covers Thread and the message: a tap into either lets it go (it was stamped when it showed).
+      onFocus={(event) => {
+        if (phone && tip === 'shown' && (event.target as Element).matches?.('textarea, input') && (event.target as Element).closest('[data-compose-text], [data-compose-thread-row]')) leaveTip();
       }}
       onClick={(event) => {
         const dialog = dialogRef.current;

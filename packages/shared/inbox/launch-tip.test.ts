@@ -1,0 +1,45 @@
+/**
+ * The Launch tip's rule on the Inbox (approval "launch-tip"; launch-tip.ts), with no Inbox. What regresses: a guest
+ * shown it or stamping it; it shown with Launch off or to someone who already started an agent here; a second window
+ * or the phone shown it after the stamp; the claiming page's retry after a lost answer losing it, or writing again.
+ */
+import { describe, expect, test } from "bun:test";
+import { launchTipClaim, launchTipDue, type LaunchTipState } from "./launch-tip";
+
+const AT = "2026-11-08T10:00:00.000Z";
+const fresh: LaunchTipState = { owner: true, launchOn: true, launched: false, saved: undefined };
+
+describe("launchTipDue", () => {
+  test("the owner, Launch on, nothing started, never shown", () => {
+    expect(launchTipDue(fresh)).toBe(true);
+  });
+  test("never a guest, never with Launch off, never once an agent was started here, never once shown", () => {
+    expect(launchTipDue({ ...fresh, owner: false })).toBe(false);
+    expect(launchTipDue({ ...fresh, launchOn: false })).toBe(false);
+    expect(launchTipDue({ ...fresh, launched: true })).toBe(false);
+    expect(launchTipDue({ ...fresh, saved: { shownAt: AT } })).toBe(false);
+    // A key alone (no stamp) is not a show.
+    expect(launchTipDue({ ...fresh, saved: { key: "page-key-1" } })).toBe(true);
+  });
+});
+
+describe("launchTipClaim", () => {
+  test("the first claim shows it and stamps it with the page's key", () => {
+    expect(launchTipClaim(fresh, "page-key-1", AT)).toEqual({ show: true, save: { shownAt: AT, key: "page-key-1" } });
+    expect(launchTipClaim(fresh, null, AT)).toEqual({ show: true, save: { shownAt: AT } });
+  });
+  test("once stamped: the same key is shown it again with no write; any other claim gets no", () => {
+    const stamped: LaunchTipState = { ...fresh, saved: { shownAt: AT, key: "page-key-1" } };
+    expect(launchTipClaim(stamped, "page-key-1", "2026-11-08T10:00:02.000Z")).toEqual({ show: true, save: null });
+    expect(launchTipClaim(stamped, "phone-key-2", AT)).toEqual({ show: false, save: null });
+    expect(launchTipClaim(stamped, null, AT)).toEqual({ show: false, save: null });
+  });
+  test("a guest never claims it, even with the owner's key", () => {
+    expect(launchTipClaim({ ...fresh, owner: false }, null, AT)).toEqual({ show: false, save: null });
+    expect(launchTipClaim({ ...fresh, owner: false, saved: { shownAt: AT, key: "page-key-1" } }, "page-key-1", AT)).toEqual({ show: false, save: null });
+  });
+  test("Launch off or an agent already started: no, and nothing written", () => {
+    expect(launchTipClaim({ ...fresh, launchOn: false }, "page-key-1", AT)).toEqual({ show: false, save: null });
+    expect(launchTipClaim({ ...fresh, launched: true }, "page-key-1", AT)).toEqual({ show: false, save: null });
+  });
+});
