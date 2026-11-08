@@ -3015,6 +3015,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
    before it, and a long one still cuts at its logical end. */
 .ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; opacity: 0; transition: opacity 120ms ease-out; }
 .ib-phsubj[data-on] { opacity: 1; }
+/* The title's words, as wide as they are (at most the box): its tooltip's anchor, so the tip opens under the words. */
+.ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
    pressed over its grid; dimmed when nothing here waits on the person. */
 .pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }

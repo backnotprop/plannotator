@@ -467,8 +467,35 @@ for (const width of [320, 390]) {
  * subject as the thread's heading. Its tooltip is the whole subject. No name pill on the meta line.
  */
 const title = () => host!.querySelector<HTMLElement>('.ib-phead [data-header-subject]');
+/** The title's words inside its box: the tooltip's trigger. */
+const words = () => title()!.querySelector<HTMLElement>('[data-header-title]');
 const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
 const namePill = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
+
+// The owner, 2026-11-08: over a short name ("PRs") the tooltip opened far to the right, over the empty room after the
+// words, because it hung on the title's box, which takes all the bar's free room. It hangs on the words now.
+test.skipIf(!hasDom)("the title's tooltip opens over its words, not centred on the box's empty room", async () => {
+  await render(OPENED);
+  const box = title()!;
+  const tipped = words()!;
+  expect(tipped).not.toBe(box);
+  expect(box.contains(tipped)).toBe(true);
+  const rect = (left: number, width: number) => DOMRect.fromRect({ x: left, y: 10, width, height: 20 });
+  const saved = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    if (this === box) return rect(200, 800);
+    if (this === tipped) return rect(208, 40);
+    if (this.hasAttribute('data-pn-tooltip')) return rect(0, 120);
+    return saved.call(this);
+  };
+  restore.push(() => {
+    HTMLElement.prototype.getBoundingClientRect = saved;
+  });
+  expect(await tooltipOf(tipped)).toBe(SUBJECT);
+  const popup = [...document.querySelectorAll<HTMLElement>('[data-pn-tooltip]')].at(-1)!;
+  // Base UI's positioner names its anchor's size: the words' 40 px, not the box's 800.
+  expect(popup.parentElement!.style.getPropertyValue('--anchor-width')).toBe('40px');
+});
 
 test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its tooltip the whole subject; the heading is the subject; no name pill', async () => {
   await render(OPENED);
@@ -476,7 +503,7 @@ test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its toolti
   expect(title()!.hasAttribute('data-on')).toBe(true);
   expect(title()!.getAttribute('aria-hidden')).toBe('true');
   expect(heading()!.textContent).toBe(SUBJECT);
-  expect(await tooltipOf(title()!)).toBe(SUBJECT);
+  expect(await tooltipOf(words()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
   // Seen words only: the screen-reader line ("Thread name: …") is the one extra, on purpose (threadNameMeta.test).
   const seen = [...host!.querySelectorAll('.ib-sr')].reduce((t, el) => t.replace(el.textContent!, ''), host!.textContent!);
@@ -487,10 +514,10 @@ test.skipIf(!hasDom)('no name: the bar holds the subject (shown once the heading
   await render(OPENED, false, { ...THREAD, thread_name: null });
   expect(title()!.textContent).toBe(SUBJECT);
   expect(heading()!.textContent).toBe(SUBJECT);
-  expect(await tooltipOf(title()!)).toBeNull();
-  unhover(title()!);
-  sized(title()!, 900, 120);
-  expect(await tooltipOf(title()!)).toBe(SUBJECT);
+  expect(await tooltipOf(words()!)).toBeNull();
+  unhover(words()!);
+  sized(words()!, 900, 120);
+  expect(await tooltipOf(words()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
 });
 

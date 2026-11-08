@@ -97,6 +97,8 @@ async function render(t: InboxThread) {
 const meta = () => host!.querySelector<HTMLElement>('.ib-pbody > [data-thread-meta]');
 const pill = () => meta()?.querySelector<HTMLElement>('.ib-key') ?? null;
 const bar = () => host!.querySelector<HTMLElement>('[data-header-subject]');
+/** The bar title's words: its tooltip hangs on them, not on the box that takes the bar's free room. */
+const barWords = () => bar()!.querySelector<HTMLElement>('[data-header-title]');
 const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
 
 // The owner's call on approval "inbox-thread-header" (2026-11-02): the top bar shows the thread's name by the list's rule
@@ -166,7 +168,7 @@ test.skipIf(!hasDom)('the top bar always shows the thread name, its tooltip the 
   expect(bar()!.textContent).toBe('session-refresh');
   expect(bar()!.hasAttribute('data-on')).toBe(true);
   expect(bar()!.hasAttribute('title')).toBe(false);
-  expect(await tooltipOf(bar()!)).toBe(SUBJECT);
+  expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
   expect(heading()!.textContent).toBe(SUBJECT);
   // Unnamed, at the top: hidden, so the subject does not show twice; scrolled away: the subject, whole in its
   // tooltip only when cut.
@@ -177,8 +179,8 @@ test.skipIf(!hasDom)('the top bar always shows the thread name, its tooltip the 
   expect(bar()!.hasAttribute('data-on')).toBe(false);
   await scrollTo(20);
   expect(bar()!.hasAttribute('data-on')).toBe(true);
-  sized(bar()!, 900, 120);
-  expect(await tooltipOf(bar()!)).toBe(SUBJECT);
+  sized(barWords()!, 900, 120);
+  expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
 });
 
 // The bar's title is aria-hidden and the heading is the subject, so the name needs its own text for a screen reader.
