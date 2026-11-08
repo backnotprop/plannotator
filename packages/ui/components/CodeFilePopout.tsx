@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { File, type LineAnnotation } from '@pierre/diffs/react';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps } from '@pierre/diffs';
 import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
 import { basenameFromPath } from '@plannotator/core/source-save';
@@ -730,6 +731,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           } as React.CSSProperties}
           options={{
             themeType: pierreTheme.type,
+            preferredHighlighter: CODE_HIGHLIGHTER,
             unsafeCSS: extraCss ? `${pierreTheme.css}\n${extraCss}` : pierreTheme.css,
             overflow,
             disableFileHeader: true,

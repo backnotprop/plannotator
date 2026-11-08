@@ -10,8 +10,10 @@
          (the virtual origin the Android shell intercepts and never fetches).
          One file serves both: on iOS the web view blocks every https load, so
          the Android origin loads nothing there, and on Android nothing serves
-         plannotator-asset:. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' plannotator-asset: https://appassets.androidplatform.net; style-src 'unsafe-inline' plannotator-asset: https://appassets.androidplatform.net; img-src data: blob: plannotator-asset: https://appassets.androidplatform.net; font-src data: plannotator-asset: https://appassets.androidplatform.net; media-src data: blob: plannotator-asset: https://appassets.androidplatform.net; frame-src plannotator-asset: https://appassets.androidplatform.net about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset: https://appassets.androidplatform.net; form-action 'none'" />
+         plannotator-asset:. 'wasm-unsafe-eval' lets the code highlighter
+         (Pierre's Highlights) compile its WebAssembly, which is inlined in
+         this file; it allows no JavaScript eval. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' plannotator-asset: https://appassets.androidplatform.net; style-src 'unsafe-inline' plannotator-asset: https://appassets.androidplatform.net; img-src data: blob: plannotator-asset: https://appassets.androidplatform.net; font-src data: plannotator-asset: https://appassets.androidplatform.net; media-src data: blob: plannotator-asset: https://appassets.androidplatform.net; frame-src plannotator-asset: https://appassets.androidplatform.net about: data: blob:; worker-src blob:; connect-src 'none'; base-uri plannotator-asset: https://appassets.androidplatform.net; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Plannotator</title>
   </head>

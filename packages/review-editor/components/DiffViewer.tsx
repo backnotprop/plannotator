@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
@@ -114,6 +115,7 @@ const PierreDiffContent = React.memo(({
       fileDiff={fileDiff}
       options={{
         themeType: pierreTheme.type,
+        preferredHighlighter: CODE_HIGHLIGHTER,
         unsafeCSS: pierreTheme.css,
         ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
         // We render our own FileHeader above this view; suppress Pierre's

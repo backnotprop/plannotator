@@ -6,6 +6,7 @@ import type { WorkerInitializationRenderOptions, WorkerPoolOptions } from '@pier
 // asset URL to load a worker script from.
 // @ts-expect-error vite ?worker&inline virtual module (no ambient types here)
 import DiffsWorker from '@pierre/diffs/worker/worker.js?worker&inline';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 
 /**
  * Worker-pool syntax highlighting (diffshub parity). Without a pool, Pierre
@@ -13,9 +14,11 @@ import DiffsWorker from '@pierre/diffs/worker/worker.js?worker&inline';
  * during a few seconds of scrolling, the dominant cause of scroll chop.
  *
  * Pool sizing mirrors diffshub: min(cores - 1, 3), never 0.
- * `shiki-js` (pure JS regex engine) instead of `shiki-wasm`: the win is
- * moving tokenization OFF the main thread, and the JS engine avoids having
- * to smuggle a .wasm asset into the single-file bundle.
+ * The highlighter is `CODE_HIGHLIGHTER` (@plannotator/core/code-highlighter),
+ * the same one the main thread uses: Pierre allows one type per thread, and
+ * the pool's type also decides what main-thread fallbacks load. Highlights'
+ * WebAssembly is inlined in its JavaScript, so the single-file build needs
+ * no extra asset; `shiki-wasm` stays out (see build/shiki-wasm-stub.ts).
  */
 const poolOptions: WorkerPoolOptions = {
   poolSize: Math.min(Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1), 3),
@@ -24,7 +27,7 @@ const poolOptions: WorkerPoolOptions = {
 };
 
 const highlighterOptions: WorkerInitializationRenderOptions = {
-  preferredHighlighter: 'shiki-js',
+  preferredHighlighter: CODE_HIGHLIGHTER,
   // Wrap tokens with `data-char` so token-level interactions work (Cmd+click
   // code navigation, token hover). Highlighting runs in the worker, and the
   // worker's render options — NOT the per-component onToken*/useTokenTransformer

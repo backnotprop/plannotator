@@ -31,6 +31,7 @@ import { existsSync, readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { isCodeFilePath } from '../../packages/shared/code-file';
 import { preloadFile } from '@pierre/diffs/ssr';
+import { CODE_HIGHLIGHTER } from '../../packages/core/code-highlighter';
 
 // ─── Default plans (Real-time Collaboration) ─────────────────────────────
 // What every dev sees when running `bun run dev:hook` without any flag.
@@ -843,7 +844,7 @@ export function devMockApi(): Plugin {
             try {
               const result = await preloadFile({
                 file: { name: displayName, contents },
-                options: { disableFileHeader: true },
+                options: { disableFileHeader: true, preferredHighlighter: CODE_HIGHLIGHTER },
               });
               prerenderedHTML = result.prerenderedHTML;
             } catch { /* fall back to client-side rendering */ }

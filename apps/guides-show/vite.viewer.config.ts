@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { GUIDE_SNAPSHOT_VERSION } from '../../packages/core/guide-format';
 import { viewerManifestPlugin } from './build/manifest-plugin';
 import { readOnlyStubsPlugin } from './build/read-only-stubs-plugin';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
 /**
  * The portable Guided Review viewer — a MULTI-FILE build (never single-file):
@@ -36,6 +37,8 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: 'worker.[hash].js' } },
   },
   build: {

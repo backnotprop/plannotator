@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { FileDiff } from '@pierre/diffs/react';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import { getSingularPatch } from '@pierre/diffs';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -135,6 +136,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
           fileDiff={fileDiff}
           options={{
             themeType: pierreTheme.type,
+            preferredHighlighter: CODE_HIGHLIGHTER,
             unsafeCSS: pierreTheme.css,
             ...(syntaxTheme && { theme: syntaxTheme }),
             diffStyle: 'unified',

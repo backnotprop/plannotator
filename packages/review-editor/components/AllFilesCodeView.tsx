@@ -15,6 +15,7 @@ import type {
   VirtualFileMetrics,
 } from '@pierre/diffs';
 import { CodeView, EditProvider, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
@@ -3456,6 +3457,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
+      preferredHighlighter: CODE_HIGHLIGHTER,
       unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,

@@ -4,6 +4,7 @@
 // insights on tokens and line comments that go to the agent as Change it / Ask.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import type { CodeAnnotation } from '../../types';
 import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '../CodeFilePopout';
 import type { CommentExtraAction } from '../CommentPopover';
@@ -23,7 +24,7 @@ export interface ShapeFileTarget {
 /** One file's hunks, in Pierre's PatchDiff, in the app's theme. */
 export function ShapePatch({ patch }: { patch: string }) {
   const dark = useTheme().resolvedMode === 'dark';
-  return <PatchDiff patch={patch} options={{ themeType: dark ? 'dark' : 'light', diffStyle: 'unified', overflow: 'scroll' }} />;
+  return <PatchDiff patch={patch} options={{ themeType: dark ? 'dark' : 'light', preferredHighlighter: CODE_HIGHLIGHTER, diffStyle: 'unified', overflow: 'scroll' }} />;
 }
 
 /** Without the guide chain: the steps as text, so the view still says what the code does. */

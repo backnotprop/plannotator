@@ -20,9 +20,11 @@ export function readerCsp(cspSource: string, nonce: string): string {
     `img-src ${cspSource} data: blob:`,
     `style-src ${cspSource} 'unsafe-inline'`,
     `font-src ${cspSource} data:`,
-    // The entry by nonce, and what it loads itself ('strict-dynamic': its lazy chunks, Shiki's
-    // grammars and themes, the diagram engine). No host is listed, so no other script can run.
-    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
+    // The entry by nonce, and what it loads itself ('strict-dynamic': its lazy chunks, the
+    // highlighter and its themes, the diagram engine). No host is listed, so no other script can
+    // run. 'wasm-unsafe-eval' lets Pierre's Highlights compile its WebAssembly (inlined in its
+    // script, see @plannotator/core/code-highlighter); it allows no JavaScript eval.
+    `script-src 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
     // The highlight worker: its source is fetched from the extension's folder and started from a blob.
     `worker-src blob:`,
     `connect-src ${cspSource}`,

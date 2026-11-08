@@ -11,8 +11,8 @@ describe("the Guide tab's page", () => {
     const csp = readerCsp("https://file+.vscode-resource.vscode-cdn.net", "abc");
     const directives = Object.fromEntries(csp.split("; ").map((d) => [d.split(" ")[0], d.split(" ").slice(1)]));
     expect(directives["default-src"]).toEqual(["'none'"]);
-    expect(directives["script-src"]).toEqual(["'nonce-abc'", "'strict-dynamic'"]);
-    expect(csp).not.toContain("unsafe-eval");
+    expect(directives["script-src"]).toEqual(["'nonce-abc'", "'strict-dynamic'", "'wasm-unsafe-eval'"]);
+    expect(csp).not.toContain("'unsafe-eval'");
     expect(directives["script-src"]).not.toContain("'unsafe-inline'");
     expect(directives["connect-src"]).toEqual(["https://file+.vscode-resource.vscode-cdn.net"]);
     expect(directives["worker-src"]).toEqual(["blob:"]);

@@ -6,11 +6,12 @@ import type { WorkerInitializationRenderOptions, WorkerPoolOptions } from '@pier
 // of base64 back into the entry, and NOT a bare `?worker`: Vite would emit
 // `new Worker("<absolute cdn url>")`, which browsers reject cross-origin.
 import workerUrl from '@pierre/diffs/worker/worker.js?worker&url';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 
 /**
  * Worker-pool highlighting for the portable viewer, mirroring
- * `packages/review-editor/workerPool.tsx` (same sizing, same `shiki-js`
- * engine, same token transformer) with one difference: the worker script is
+ * `packages/review-editor/workerPool.tsx` (same sizing, same highlighter,
+ * `CODE_HIGHLIGHTER`, same token transformer) with one difference: the worker script is
  * fetched from guides.show and constructed locally, because a document opened
  * from disk (`file://`) or hosted elsewhere is a different origin from the CDN
  * and a cross-origin `new Worker(url)` throws.
@@ -109,7 +110,7 @@ export async function preparePortableWorkerFactory(): Promise<(() => Worker) | n
 }
 
 const highlighterOptions: WorkerInitializationRenderOptions = {
-  preferredHighlighter: 'shiki-js',
+  preferredHighlighter: CODE_HIGHLIGHTER,
   useTokenTransformer: true,
   langs: ['typescript', 'tsx', 'javascript', 'json', 'css', 'html', 'python', 'go', 'rust', 'sh', 'yaml', 'markdown'],
 };

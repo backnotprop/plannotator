@@ -22,6 +22,7 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ShapeExample, ShapeExampleCheck, ShapeExampleInput, ShapeExampleSource, ShapeExampleStep } from '@plannotator/core/shape';
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import { animate, FOLLOW_EASE, FollowPainter } from './followPainter';
 import {
   followCardCut,
@@ -76,7 +77,7 @@ type Tokenizer = { codeToTokens: (c: string, o: object) => { tokens: { content: 
 const tokCache = new Map<string, Tok[][]>();
 let hlP: Promise<Tokenizer> | null = null;
 const highlighter = () =>
-  (hlP ??= import('@pierre/diffs').then((m) => m.getSharedHighlighter({ themes: ['pierre-light', 'pierre-dark'], langs: ['typescript'] }) as unknown as Promise<Tokenizer>));
+  (hlP ??= import('@pierre/diffs').then((m) => m.getSharedHighlighter({ themes: ['pierre-light', 'pierre-dark'], langs: ['typescript'], preferredHighlighter: CODE_HIGHLIGHTER }) as unknown as Promise<Tokenizer>));
 
 function styleOf(tk: { htmlStyle?: unknown }): React.CSSProperties | undefined {
   let st = tk.htmlStyle as Record<string, string> | string | undefined;
@@ -90,7 +91,12 @@ function styleOf(tk: { htmlStyle?: unknown }): React.CSSProperties | undefined {
   }
   if (!st) return undefined;
   const o: Record<string, string> = {};
-  for (const [k, v] of Object.entries(st)) if (k.startsWith('--shiki-')) o[k] = v;
+  // Each mode's colour, as `--tk-dark` / `--tk-light` (shape.css reads them): Shiki names
+  // them `--shiki-*`, Highlights `--hls-*`.
+  for (const [k, v] of Object.entries(st)) {
+    const mode = /^--(?:shiki|hls)-(dark|light)$/.exec(k)?.[1];
+    if (mode) o[`--tk-${mode}`] = v;
+  }
   return o as React.CSSProperties;
 }
 

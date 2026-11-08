@@ -55,6 +55,7 @@ import {
 } from "@plannotator/shared/source-save-node";
 import type { AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { preloadFile } from "@pierre/diffs/ssr";
+import { CODE_HIGHLIGHTER } from "@plannotator/core/code-highlighter";
 
 /**
  * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
@@ -264,7 +265,8 @@ async function readCodeFile(path: string, input: string, parsed: ParsedCodePath)
 		try {
 			const result = await preloadFile({
 				file: { name: displayName, contents },
-				options: { disableFileHeader: true },
+				// The browser's highlighter, so the prerendered colours are the ones it keeps.
+				options: { disableFileHeader: true, preferredHighlighter: CODE_HIGHLIGHTER },
 			});
 			prerenderedHTML = result.prerenderedHTML;
 		} catch {

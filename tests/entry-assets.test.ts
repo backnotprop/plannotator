@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { openPackedApp, PACKED_ASSETS_MARKER } from '../packages/shared/packed-app';
 
 const root = resolve(import.meta.dir, '..');
@@ -54,15 +54,18 @@ describe('review entry assets', () => {
     expect(theme).toContain("--font-sans: 'Inter Variable'");
     expect(theme).toContain("--font-mono: 'Geist Mono Variable'");
 
-    // Syntax highlighting is the bundled Shiki instance @pierre/diffs already
-    // runs (JavaScript regex engine, no WASM, no network). A CDN-loaded
-    // highlighter or a runtime wasm fetch would break the single-file builds.
+    // Syntax highlighting is the bundled highlighter @pierre/diffs already
+    // runs, on the backend @plannotator/core/code-highlighter names (Highlights,
+    // whose WASM is inlined in its script, or Shiki's JavaScript regex engine);
+    // never a CDN or a runtime wasm fetch, which would break the single-file
+    // builds. The artifact checks below hold the WASM to Highlights' own.
     const codeBlock = read('packages/ui/components/blocks/CodeBlock.tsx');
     expect(codeBlock).toContain("from '../../utils/codeHighlight'");
 
     const highlighter = read('packages/ui/utils/codeHighlight.ts');
     expect(highlighter).toContain("import('@pierre/diffs')");
-    expect(highlighter).toContain("preferredHighlighter: 'shiki-js'");
+    expect(highlighter).toContain('preferredHighlighter: CODE_HIGHLIGHTER');
+    expect(read('packages/core/code-highlighter.ts')).toMatch(/export const CODE_HIGHLIGHTER: CodeHighlighter = '(highlights|shiki-js)';/);
     expect(highlighter).not.toMatch(/https?:\/\//);
   });
 
@@ -355,16 +358,29 @@ describe('review entry assets', () => {
   // WASM module always starts `\0asm\x01\0\0\0`, which encodes with the
   // `AGFzbQ` prefix regardless of how it got inlined.
   //
+  // The one module allowed is Pierre's Highlights (the code highlighter,
+  // @plannotator/core/code-highlighter): it ships as base64 inside its own
+  // script, and every build carries it. Each inlined module must open with
+  // that module's bytes, read from the installed package, so the Oniguruma
+  // blob (or any other) still fails.
+  //
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
+  const pierreDiffs = dirname(dirname(Bun.resolveSync('@pierre/diffs', resolve(root, 'packages/ui'))));
+  const highlightsWasm = readFileSync(resolve(pierreDiffs, '../highlights/dist/highlights.wasm.mjs'), 'utf8');
+  const highlightsHead = highlightsWasm.slice(highlightsWasm.indexOf('AGFzbQ'), highlightsWasm.indexOf('AGFzbQ') + 64);
   const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html'];
   for (const path of bundles) {
-    test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
-      // Asserted on a boolean, not the string: these bundles are ~20MB and a
+    test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly but Highlights'`, () => {
+      // Asserted on a count, not the string: these bundles are ~20MB and a
       // `toContain` failure would print all of it.
-      const inlinedWasm = readFileSync(resolve(root, path), 'utf8').includes('AGFzbQ');
-      expect({ path, inlinedWasm }).toEqual({ path, inlinedWasm: false });
+      const bundle = readFileSync(resolve(root, path), 'utf8');
+      let otherWasm = 0;
+      for (let at = bundle.indexOf('AGFzbQ'); at !== -1; at = bundle.indexOf('AGFzbQ', at + 1)) {
+        if (bundle.slice(at, at + highlightsHead.length) !== highlightsHead) otherWasm++;
+      }
+      expect({ path, otherWasm }).toEqual({ path, otherWasm: 0 });
     });
   }
 

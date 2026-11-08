@@ -8,6 +8,7 @@
     "./product-feedback": "./product-feedback.ts",
     "./diff-paths": "./diff-paths.ts",
     "./diff-files": "./diff-files.ts",
+    "./code-highlighter": "./code-highlighter.ts",
     "./stack-layers": "./stack-layers.ts",
     "./file-kind": "./file-kind.ts",
     "./package-changes": "./package-changes.ts",

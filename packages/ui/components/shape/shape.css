@@ -386,8 +386,8 @@
 .shp-ex-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .shp-ex-cap { flex: none; white-space: nowrap; font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
 .shp-ex-caps { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.shp-ex-card .tk { color: var(--shiki-dark); }
-html.light .shp-ex-card .tk { color: var(--shiki-light); }
+.shp-ex-card .tk { color: var(--tk-dark); }
+html.light .shp-ex-card .tk { color: var(--tk-light); }
 
 /* Values: one mono size, tabular; a literal takes its type's colour from the Code view's theme. */
 .shp-ex-val { display: inline-block; font: var(--ex-mono); font-variant-numeric: tabular-nums; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }

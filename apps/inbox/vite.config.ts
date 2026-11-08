@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
 import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { packedInboxApp } from '../../build/pack-inbox';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
 /**
  * What the window, the phone's surface (vite.surface.config.ts) and the Shape
@@ -39,6 +40,8 @@ export const sharedConfig = defineConfig({
   // imports collapsed, as apps/review does.
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

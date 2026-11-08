@@ -1,18 +1,18 @@
 /**
  * Syntax highlighting for markdown fences and suggestion snippets.
  *
- * There is exactly ONE highlighter in the app: the Shiki instance
- * `@pierre/diffs` already runs for the code-review diff pane
- * (`getSharedHighlighter`, driven by Shiki's JavaScript regex engine). Reusing
- * it rather than standing up a second one buys three things:
+ * There is exactly ONE highlighter in the app: the instance `@pierre/diffs`
+ * already runs for the code-review diff pane (`getSharedHighlighter`, on the
+ * backend `CODE_HIGHLIGHTER` names: Pierre's Highlights, or Shiki's JavaScript
+ * regex engine). Reusing it rather than standing up a second one buys three
+ * things:
  *
  *   - Fences render in the SAME resolved theme as the diff pane, so a code
  *     block and a diff hunk finally agree about what "Kanagawa Wave" looks
  *     like. See `./syntaxTheme.ts`.
- *   - Zero added bundle weight. Pierre imports Shiki's full bundle, so every
- *     grammar and theme is already inlined; a separate fine-grained highlighter
- *     would have duplicated a subset of what is already there.
- *   - Every language Shiki bundles, not a hand-curated shortlist.
+ *   - Zero added bundle weight. Pierre already bundles its highlighter and
+ *     every theme; a separate one would duplicate a subset of it.
+ *   - Every language the backend bundles, not a hand-curated shortlist.
  *
  * The API is deliberately imperative (`applyHighlight(el, ...)`) because that is
  * exactly the shape the removed `hljs.highlightElement(el)` had. The annotation
@@ -23,6 +23,8 @@
  * Language-less fences are never highlighted and never guessed at — see #1212.
  * There is no auto-detection anywhere in this module.
  */
+
+import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 
 type PierreModule = typeof import('@pierre/diffs');
 
@@ -212,9 +214,11 @@ export function highlightToRuns(code: string, lang: string, theme: string): High
 }
 
 /**
- * Attach `lang` + `theme` to the shared highlighter. Resolves `false` for
- * grammars or themes Shiki does not know, which is a normal outcome for a fence
- * tagged with something made up: that block simply stays plain.
+ * Attach `lang` + `theme` to the shared highlighter. Resolves `false` for a
+ * theme (or, under Shiki, a grammar) the backend does not know, which is a
+ * normal outcome for a fence tagged with something made up: that block simply
+ * stays plain. Highlights renders an unknown language as text in the theme's
+ * foreground colour instead, and resolves `true`.
  */
 export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
   const key = pairKey(lang, theme);
@@ -229,7 +233,7 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
       await mod.getSharedHighlighter({
         themes: [theme],
         langs: [lang],
-        preferredHighlighter: 'shiki-js',
+        preferredHighlighter: CODE_HIGHLIGHTER,
       });
       ready.add(key);
       return true;

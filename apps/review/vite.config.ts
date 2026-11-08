@@ -6,6 +6,7 @@ import pkg from '../../package.json';
 import { packedApp } from '../../build/pack-app';
 import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
 import { katexWoff2Only } from '../../build/katex-woff2-only';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
 function demoFileContentPlugin(): Plugin {
   return {
@@ -53,6 +54,8 @@ export default defineConfig({
   // inlined bundle.
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

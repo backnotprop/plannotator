@@ -69,6 +69,7 @@ import {
 } from "../generated/source-save-node.ts";
 import type { AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { preloadFile } from "@pierre/diffs/ssr";
+import { CODE_HIGHLIGHTER } from "../generated/code-highlighter.ts";
 
 /**
  * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
@@ -314,7 +315,8 @@ async function readCodeFile(res: Res, path: string, input: string, parsed: Parse
 		try {
 			const result = await preloadFile({
 				file: { name: displayName, contents },
-				options: { disableFileHeader: true },
+				// The browser's highlighter, so the prerendered colours are the ones it keeps.
+				options: { disableFileHeader: true, preferredHighlighter: CODE_HIGHLIGHTER },
 			});
 			prerenderedHTML = result.prerenderedHTML;
 		} catch {

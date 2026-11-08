@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { diffsWorkerCatalogs } from "../../build/diffs-worker-catalogs";
 
 /**
  * The Guide tab: Plannotator's guide reader (packages/guide-viewer over
@@ -48,6 +49,8 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: "worker.[hash].js" } },
   },
   define: { "process.env.NODE_ENV": '"production"' },

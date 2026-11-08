@@ -34,11 +34,14 @@ if (!manifest.jsIntegrity.startsWith('sha384-') || !manifest.cssIntegrity.starts
 // viewer, as a CLASSIC worker where a browser refuses module workers from an
 // opaque origin (Chrome, file://). That only works while the bundle carries no
 // module syntax: no static import/export, no dynamic import(), no import.meta.
+// Read by Bun's parser, not a regex: the bundle's strings may say "import" or
+// "export" in prose (@pierre/highlights' errors do).
 const workerFiles = readdirSync(dir).filter((f) => /^worker\..*\.js$/.test(f));
 if (workerFiles.length !== 1) failures.push(`expected exactly one worker bundle, found ${workerFiles.length}`);
 for (const file of workerFiles) {
   const src = readFileSync(path.join(dir, file), 'utf8');
-  const moduleSyntax = /(^|[;{}\s])(import|export)\s*[{("'*a-zA-Z_$]/.test(src) || /\bimport\.meta\b/.test(src);
+  const { imports, exports } = new Bun.Transpiler({ loader: 'js' }).scan(src);
+  const moduleSyntax = imports.length > 0 || exports.length > 0 || /\bimport\.meta\b/.test(src);
   if (moduleSyntax) failures.push(`${file} uses module syntax; the portable viewer must be able to run it as a classic worker (see portablePool.tsx)`);
   else report.push(`worker ${file} is import-free (classic-worker safe)`);
 }
