@@ -8651,6 +8651,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-from { display: none; }
   /* With the diff controls and a pull request's destination too, the bar's gaps narrow so the place still reads whole. */
   .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 6px; }
+  /* A PR's title gives way further here (5rem, not 9rem): the switch and the jump keep their room. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { min-width: min(5rem, 100%); }
 }
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
