@@ -36,10 +36,12 @@
  *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
  *   token with no spaces, not ending in `?`) is the asker's own label for
  *   the question, as agents write it: it is dropped, never the prompt, never
- *   context, and the line after it is the prompt. The value is never the
- *   key: the key is the hash of kind and prompt, which every reader
- *   (renderer, store, answers, `Replaces:` / supersedes) computes from the
- *   block itself. A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   context, and the line after it is the prompt. The key is still hashed
+ *   from the label line, as it was before the label was dropped (it was the
+ *   prompt then): the store keeps each question's key from the send, while
+ *   the window computes it again from the body, so a question stored with a
+ *   leading label keeps its picks, answers and supersedes. The value itself
+ *   is never the key. A capitalised or spaced line (`ID: x`, `Deploy: should
  *   we…?`) is the prompt as before, and an `id:` line after the prompt is
  *   context.
  * - Context: every other prose line (before or after the choices). A
@@ -858,6 +860,11 @@ export const parseQuestionBlock = (
 
   let prompt = '';
   let promptLine = -1;
+  // The text the key is hashed from when an id label came first: the label
+  // line, which builds before the label was dropped read as the prompt, so a
+  // stored question keeps its key (and its picks, answers and supersedes).
+  let keyText: string | undefined;
+  let keyTextLine = -1;
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
@@ -971,8 +978,15 @@ export const parseQuestionBlock = (
       openBullet = null;
       continue;
     }
-    // The asker's own label before the prompt (`id: sd-approach`): dropped.
-    if (!prompt && ID_LABEL_RE.test(line)) continue;
+    // The asker's own label before the prompt (`id: sd-approach`): dropped
+    // from what shows, but the first one stays the key's text (see `keyText`).
+    if (!prompt && ID_LABEL_RE.test(line)) {
+      if (keyText === undefined) {
+        keyText = line.trim().replace(/^#{1,6}\s+/, '');
+        keyTextLine = i;
+      }
+      continue;
+    }
     if (!prompt) {
       // A heading marker on the prompt line (`### Which…?`) is dropped.
       prompt = line.trim().replace(/^#{1,6}\s+/, '');
@@ -1097,6 +1111,11 @@ export const parseQuestionBlock = (
     pushContext(line.trimEnd());
   }
 
+  // A label and nothing to ask: the label is the prompt, as before it was read.
+  if (!prompt && keyText !== undefined) {
+    prompt = keyText;
+    promptLine = keyTextLine;
+  }
   if (!prompt) return null;
 
   // A pick question written with plain bullets: the bullets are the choices.
@@ -1216,7 +1235,7 @@ export const parseQuestionBlock = (
     ...(recommendation ? { recommendation } : {}),
     ...(suggestedText ? { suggestedText } : {}),
     ...(markedAt.length > 0 ? { recommendedMarker: true as const } : {}),
-    key: questionKey(kind, prompt),
+    key: questionKey(kind, keyText ?? prompt),
     ...(!readDecisionLines ? {} : decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
     ...(replaces.length > 0 ? { replaces } : {}),
     ...(readContractLines && contract.stakes ? { stakes: contract.stakes } : {}),

@@ -61,13 +61,13 @@ test("a pick-one or pick-several block with no choices is named; free text, plai
   expect(inboxQuestionsToCheck(two).map((q) => q.position)).toEqual([2]);
 });
 
-test("sent with an id label first: the stored question is the real one, with the plain question's key, and no advice", async () => {
+test("sent with an id label first: the stored question is the real one, keyed as before, and no advice", async () => {
   const { context, project } = world();
   const labelled = await sendAgentMessage(context, project, { body: block("question", "id: sd-approach", "Which approach do we take?", ...CHOICES), agent_host: "claude-code", agent_session: "ses_a" });
-  const plain = await sendAgentMessage(context, project, { body: block("question", "Which approach do we take?", ...CHOICES), agent_host: "claude-code", agent_session: "ses_b" });
   const [question] = labelled.structured.questions as { key: string; prompt: string }[];
   expect(question!.prompt).toBe("Which approach do we take?");
-  expect(question!.key).toBe((plain.structured.questions as { key: string }[])[0]!.key);
+  // The key builds before this stored for the same block (the label line was the prompt then).
+  expect(question!.key).toBe("q-41d641f8");
   expect(labelled.structured.questions_to_check).toBeUndefined();
   expect(questionsToCheckText(String(labelled.structured.message_id), labelled.questionsToCheck)).toBe("");
 });
