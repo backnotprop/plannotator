@@ -358,12 +358,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 2
+          "unread": 1
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -434,12 +434,12 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 3
+          "unread": 2
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -522,12 +522,12 @@
         "archived": [],
         "counts": {
           "waiting": 3,
-          "unread": 3
+          "unread": 2
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -609,12 +609,12 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 3
+          "unread": 2
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -967,12 +967,12 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 3
+          "unread": 2
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,

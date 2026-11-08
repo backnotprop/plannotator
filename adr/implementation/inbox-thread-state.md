@@ -126,12 +126,12 @@ Checked after every step of every sequence, on the store's own output:
 4. Mark read then Undo, back to back, gives the thread back exactly as it was (section, unseen, questions, picks), whatever an earlier Mark read closed. Undo always clears the read fields; afterwards a question is set aside exactly when an earlier Mark read closed it.
 5. Archive then Unarchive loses no message, question or pick; the row comes back identical.
 6. An agent message after the archive line brings the thread back into the list while something waits. Mark read on a came-back thread returns it to Archived. Unarchive clears a read made while archived.
-7. Counts. The sidebar's waiting count (`waitingCount`) equals the rows in Stopped, Holding and Waiting, in both views and per project; the bold rows are the rows in Stopped, Holding, Waiting and New less those in New only for the person's own unsent words (no unseen agent message, not "Answered, not sent"); an archived row never counts.
+7. Counts. The sidebar's waiting count (`waitingCount`) equals the rows in Stopped, Holding and Waiting, in both views and per project; the bold rows are the rows in Stopped, Holding and Waiting with an unseen agent message (the owner, 2026-11-08: a thread the person has read stops being bold and keeps its section), and the rows in New less those in New only for the person's own unsent words (no unseen agent message, not "Answered, not sent"); an archived row never counts.
 8. Replay: a store reopened from disk gives the same rows and threads (reply drafts included: they are files the store reads at open).
 9. Unsent work (a reply draft, picks, comments waiting) never sits in Quiet unless the thread is archived.
 9. Sort: the sections in the fixed order; newest first by `last_at` inside each, ties on the thread id; the archived list newest archived first, ties on the thread id. About one generated step in four shares the previous step's clock time, so `last_at` ties happen in the sections; a second property archives every open thread within one clock tick, so `resolved_at` ties happen in the archived list. Each fails if it met no tie. The trace fixtures keep one clock step per event: a thread id ends in random characters, so the order of a tie is not the same from one run to the next.
 
-Invariant 7 is circular: `waitingCount` counts the rows in Stopped, Holding and Waiting, and `unread` is defined from the section, so they check the counting code rather than the rules.
+Invariant 7's waiting count is circular: `waitingCount` counts the rows in Stopped, Holding and Waiting, so it checks the counting code rather than the rules. `unread` is defined from the section and `unseen`.
 
 The model also predicts every event's outcome (written, nothing to do, a replayed key, or the refusal code), which thread every message lands in, every question's state and every row's section, unseen count, read and came-back flags, `last_at` and `last_agent_at`. The store must match it exactly on every field after every step. (Until A, B and C below were fixed, the model derived each row under two look rules, the store's and the intended one, and recorded the difference; they are one rule now.)
 
@@ -150,7 +150,7 @@ Snooze (approval "inbox-snooze", 2026-11-02) adds no section rule and no store l
 ## Counts
 
 - **Inbox and folder counts in the sidebar**: rows in Stopped, Holding and Waiting (`waitingCount` in `packages/inbox/held.ts`). New is bold but not counted there.
-- **`projects[].unread`** in the list response: rows in Stopped, Holding, Waiting or New (`unread`, bold).
+- **`projects[].unread`** in the list response: the bold rows (`unread`): in Stopped, Holding or Waiting with an unseen agent message, or in New (not one there only for the person's draft). A thread the person has read that still waits is not counted, as on the tab.
 - Questions are never counted one by one in the badge.
 - A snoozed row counts nowhere (sidebar, `projects[].unread`, the tab count, the decision queue) until its snooze ends.
 

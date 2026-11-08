@@ -399,14 +399,16 @@ export function putReadRowBack(shown: readonly InboxListSection[], before: reado
  * The look the window sends when a thread opens has gone out: the open row
  * reads as looked at until the server has taken the look and the list has
  * been read again (App.tsx `looking`), which then gives the server's row. Its
- * news is seen (`unseen` 0); a row in New for that news alone is no longer
- * bold, so the row's hover action and the header's button are Mark unread at
- * once (markRead.ts `canMarkUnread`). A row that still waits on the person
- * (questions, picks not sent) stays bold and keeps Mark read.
+ * news is seen (`unseen` 0), so the row is no longer bold (shared/inbox/list.ts
+ * `inboxRowUnread`), in the group it is drawn in. A row in New for that news
+ * alone offers Mark unread at once, on its hover action and the header's
+ * button (markRead.ts `canMarkUnread`). A row in Stopped, Holding up work or
+ * Waiting on you keeps Mark read (its questions still wait). Only picks not
+ * sent ("Answered, not sent") keep a row bold: it waits on the person's Send.
  */
 export function lookedRow(row: InboxListRow): InboxListRow {
   if (row.unseen === 0) return row;
-  return { ...row, unseen: 0, unread: row.unread && !(row.section === 'new' && !row.answered_not_sent) };
+  return { ...row, unseen: 0, unread: row.unread && row.section === 'new' && row.answered_not_sent };
 }
 
 /** The list on screen with the rows of `threadIds` read as looked at (`lookedRow`); the group each is drawn in never changes. */
