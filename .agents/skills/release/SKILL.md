@@ -196,7 +196,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    Stage only the 10 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
-2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security). The browser tests (Inbox window e2e) and the Windows, Inbox Pi, Inbox Claude Code and relay suites run on main only nightly, so start them on the bump commit by hand:
+2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security). The full browser tests (Inbox window e2e) run on main only every two hours, and the Windows, Inbox Pi, Inbox Claude Code and relay suites only nightly, so start them on the bump commit by hand:
    ```bash
    git push origin main
    for wf in inbox-e2e.yml windows.yml inbox-pi.yml inbox-claude-code.yml relay.yml; do gh workflow run "$wf" --ref main; done

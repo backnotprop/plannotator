@@ -364,7 +364,7 @@ describe('deciding the plan', () => {
   const files = specFiles();
   const times = specTimes();
   const current: Current = { blobs: Object.fromEntries(files.map((f) => [f, 'B'])), quarantine: Object.fromEntries(files.map((f) => [f, 'q'])), now: NOW };
-  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', GITHUB_HEAD_REF: 'feat/x', GITHUB_RUN_ID: '100', PR_LABELS: '["ci:full"]' };
+  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', GITHUB_HEAD_REF: 'feat/x', GITHUB_RUN_ID: '100', PR_LABELS: '["ci:e2e"]' };
   const deps = (github: GitHub, key = () => 'K'): PlanDeps => ({ files, times, current, key, github: () => github, scratch: scratch('plan') });
   const [a, b] = files;
 
@@ -408,12 +408,12 @@ describe('deciding the plan', () => {
     expect(noKey.reuse.key).toBe('');
   });
 
-  test('the nightly run, a fork and the label never look at earlier runs', () => {
+  test('a scheduled run, a fork and the label never look at earlier runs', () => {
     const reusable: FakeRun[] = [{ id: 99, artifacts: { 'e2e-reuse-1': { key: 'K', passed: Object.fromEntries(files.map((f) => [f, rec('B')])) } } }];
     for (const env of [
       { GITHUB_EVENT_NAME: 'schedule' },
       { ...pr, HEAD_REPO: 'someone/r' },
-      { ...pr, PR_LABELS: JSON.stringify(['ci:full', FULL_LABEL]) },
+      { ...pr, PR_LABELS: JSON.stringify(['ci:e2e', FULL_LABEL]) },
     ]) {
       const calls: string[] = [];
       const { plan } = decidePlan(env, deps(fakeGitHub(reusable, 'o/r', calls)));
@@ -424,16 +424,16 @@ describe('deciding the plan', () => {
 });
 
 describe('a full run, always', () => {
-  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', PR_LABELS: '["ci:full"]' };
-  test('for the nightly and manual runs, a fork and the label; not for an ordinary PR', () => {
+  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', PR_LABELS: '["ci:e2e"]' };
+  test('for the scheduled and manual runs, a fork and the label; not for an ordinary PR', () => {
     expect(fullRunReason(pr)).toBe('');
     expect(fullRunReason({ ...pr, GITHUB_EVENT_NAME: 'schedule', PR_LABELS: 'null' })).not.toBe('');
     expect(fullRunReason({ ...pr, GITHUB_EVENT_NAME: 'workflow_dispatch', PR_LABELS: 'null' })).not.toBe('');
     expect(fullRunReason({ ...pr, HEAD_REPO: 'someone/fork' })).not.toBe('');
-    expect(fullRunReason({ ...pr, PR_LABELS: JSON.stringify(['ci:full', FULL_LABEL]) })).not.toBe('');
+    expect(fullRunReason({ ...pr, PR_LABELS: JSON.stringify(['ci:e2e', FULL_LABEL]) })).not.toBe('');
   });
 
-  test('the workflow starts a run when ci:e2e-all is added to a ci:full PR, in the PR group, and passes the labels to the plan', () => {
+  test('the workflow starts a run when ci:e2e-all is added to a PR, in the PR group, and passes the labels to the plan', () => {
     const wf = Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows/inbox-e2e.yml'), 'utf8')) as {
       concurrency: { group: string };
       jobs: Record<string, { if?: string; steps?: { run?: string; env?: Record<string, string> }[] }>;
@@ -441,7 +441,7 @@ describe('a full run, always', () => {
     const triggers = `github.event.label.name == '${FULL_LABEL}'`;
     for (const id of ['build', 'plan', 'full-ci']) {
       expect(wf.jobs[id]!.if, id).toContain(triggers);
-      expect(wf.jobs[id]!.if, id).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
+      expect(wf.jobs[id]!.if, id).toContain(`contains(github.event.pull_request.labels.*.name, '${FULL_LABEL}')`);
     }
     expect(wf.concurrency.group).toContain(`github.event.label.name != '${FULL_LABEL}'`);
     const planStep = wf.jobs.plan!.steps!.find((s) => s.run?.trim() === 'bun run scripts/ci-e2e-reuse.ts plan')!;
