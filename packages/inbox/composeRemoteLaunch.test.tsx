@@ -86,7 +86,8 @@ beforeEach(() => {
       if (path.startsWith('/api/inbox/outbox/')) return Response.json({ entry: { key: 'k1', state: 'cancelled' } });
       return Response.json({});
     }
-    if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines, ...(launchReads ? { launch_reads: launchReads } : {}) });
+    // The server sends the kept reads only to a read that asks for them.
+    if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines, ...(launchReads && path.includes('launch_reads=1') ? { launch_reads: launchReads } : {}) });
     if (path.startsWith(`/api/inbox/m/${MINI}/sessions`)) return Response.json({ serverSession: 't', home: '/Users/mini', projects: [], launch: miniBlock });
     if (path.startsWith('/api/inbox/sessions')) return Response.json({ serverSession: 's', home: '/Users/me', projects: [], launch: HERE });
     if (path.startsWith('/api/inbox/skills')) return Response.json({ skills: [] });
@@ -267,22 +268,23 @@ test.skipIf(!hasDom)("a window opened while that machine is asleep lists its pro
   expect(inDialog('[data-compose-note="asleep"]')!.textContent).toContain('Mac mini is asleep (since');
 });
 
-test.skipIf(!hasDom)("this page's own read of a machine wins over the server's kept one", async () => {
+test.skipIf(!hasDom)("while a machine is asleep, the server's kept read replaces this page's older one", async () => {
   machines = [SELF_VIEW, view(MINI, 'Mac mini')];
-  launchReads = { [MINI]: { launch: { ...MINI_BLOCK, projects: [{ id: 'prj_old', name: 'old-thing', root: '/Users/mini/code/old-thing', exists: true }] }, home: '/Users/mini' } };
   await open();
   await until(machinesRead, "Mac mini's sessions read");
   await startAndOpenMenu();
   await until(() => inDialog(`[data-compose-folder-option="prj_infra"]`) !== null, "Mac mini's own read");
-  // Mac mini goes to sleep, and the machines answer still carries the server's older copy: it never replaces what
-  // this page read.
+  // Another window read Mac mini later, after it gained a project; then Mac mini went to sleep. This page did not
+  // read it again, but the server kept that newer read.
+  const docs = { id: 'prj_docs', name: 'docs-site', root: '/Users/mini/code/docs-site', exists: true };
+  launchReads = { [MINI]: { launch: { ...MINI_BLOCK, projects: [...MINI_BLOCK.projects, docs] }, home: '/Users/mini' } };
   machines = [SELF_VIEW, view(MINI, 'Mac mini', { state: 'offline' })];
   await act(async () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await new Promise((r) => setTimeout(r, 30));
   });
-  expect(inDialog(`[data-compose-folder-option="prj_old"]`)).toBeNull();
-  expect(inDialog(`[data-compose-folder-option="prj_infra"]`)).not.toBeNull();
+  await until(() => inDialog(`[data-compose-folder-option="prj_docs"]`) !== null, "the server's newer read");
+  expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`).map((r) => r.getAttribute('data-compose-folder-option'))).toEqual(['prj_infra', 'prj_bill_m', 'prj_docs', INBOX_SCRATCH_PICK]);
 });
 
 test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, and Cancel takes it back and puts its words in Drafts", async () => {

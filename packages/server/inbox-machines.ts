@@ -663,10 +663,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";
       }
+      // Its launch block and home are kept for a window opened while it sleeps (`launch_reads` on the machines read),
+      // numbered as the read starts so an older answer that ends later never replaces a newer one.
+      const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
       try {
         const answer = await peer.request(route, search, { method: "GET", headers, signal: req.signal });
-        // Its launch block and home are kept for a window opened while it sleeps (`launch_reads` on the machines read).
-        if (route === MACHINE_SESSIONS_ROUTE && answer.ok) void launchReads.keep(machine, answer.clone(), () => peers.has(machine));
+        if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
         return passAnswer(answer);
       } catch {
         return offline();
@@ -845,6 +847,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       const machines = machinesView();
+      // Each linked machine's last launch read, only for compose, which asks: every other reader of this route skips it.
+      if (url.searchParams.get("launch_reads") !== "1") return json({ self: links.selfId, machines });
       const linked = machines.filter((m) => !m.self).map((m) => m.id);
       return json({ self: links.selfId, machines, launch_reads: launchReads.view(linked, context.isGuest(req, via)) });
     }

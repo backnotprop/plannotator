@@ -272,7 +272,7 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       await stopInbox(there.w);
       await waitFor(`${here.name} sees ${there.name} asleep`, async () => (await stateOf(here, there)) === "offline", 30_000);
       // A window opened now still lists its projects in New message: this Inbox kept that machine's last read.
-      const keptRead = ((await getJson(here, "/api/inbox/machines")).launch_reads as Json)[there.id];
+      const keptRead = ((await getJson(here, "/api/inbox/machines?launch_reads=1")).launch_reads as Json)[there.id];
       expect((keptRead.launch.projects as Json[]).map((p) => p.id)).toContain(there.project.id);
       const kept = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-held-${here.name}`, there.project.id));
       expect(kept.status).toBe(202);

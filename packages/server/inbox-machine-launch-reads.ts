@@ -2,9 +2,10 @@
  * Remote launch: each linked machine's last good launch read (docs/agent-guides/inbox-launch.md, "From another
  * linked machine"). A window reads a linked machine's `sessions` through the forward while it is online; the launch
  * block and home of the last read that answered are kept here, in memory, so a window opened while that machine is
- * asleep (a reload, a new tab, the phone) still lists its projects in New message's folder menu, and a Send there
- * waits in the outbox. Never on disk, like the machine's list (inbox-peer-link.ts): after a restart its projects come
- * back once it does. It goes with the link.
+ * asleep (a reload, a new tab, a browser on the tailnet) still lists its projects in New message's folder menu, and a
+ * Send there waits in the outbox. Never on disk, like the machine's list (inbox-peer-link.ts): after a restart its
+ * projects come back once it does. It goes with the link. Served only when the window asks (`launch_reads=1` on the
+ * machines read).
  */
 
 import type { InboxComposeLaunch } from "@plannotator/core/inbox-types";
@@ -31,24 +32,39 @@ export function machineLaunchReadOf(body: unknown): MachineLaunchRead | null {
   if (!isRecord(body)) return null;
   const launch = body.launch;
   if (!isRecord(launch) || !Array.isArray(launch.agents) || !Array.isArray(launch.projects)) return null;
-  return { launch: launch as unknown as InboxComposeLaunch, home: typeof body.home === "string" ? body.home : null };
+  // An agent entry that is not an object (a buggy, hostile or newer machine) is dropped, so no reader of it throws.
+  const agents = launch.agents.filter(isRecord);
+  return { launch: { ...launch, agents } as unknown as InboxComposeLaunch, home: typeof body.home === "string" ? body.home : null };
 }
 
-/** A tailnet guest's copy: no folder-trust facts (`untrusted`, the owner's alone), as a guest's forwarded read has none. */
+/**
+ * A tailnet guest's copy never carries folder-trust facts (`untrusted`, the owner's alone). Each agent is rebuilt from
+ * the fields a guest may see, so a field added to the launch block later reaches a guest only once it is listed here.
+ */
 export function machineLaunchReadForGuest(read: MachineLaunchRead): MachineLaunchRead {
-  return { ...read, launch: { ...read.launch, agents: read.launch.agents.map(({ untrusted: _untrusted, ...agent }) => agent) } };
+  const agents = read.launch.agents.map((a) => ({ agent: a.agent, name: a.name, ...(typeof a.scratch_trusted === "boolean" ? { scratch_trusted: a.scratch_trusted } : {}) }));
+  return { ...read, launch: { ...read.launch, agents } };
 }
 
 /** The kept reads, one per linked machine. */
 export function createMachineLaunchReads() {
   const reads = new Map<string, MachineLaunchRead>();
+  /** Per machine, the number of the newest read applied: an older read that ends later never replaces it. */
+  const applied = new Map<string, number>();
+  let started = 0;
   return {
+    /** Number a `sessions` read as it starts (before its request): `keep` applies it only if no later read was. */
+    begin(): number {
+      started += 1;
+      return started;
+    },
     /**
      * Keep the read in a far `sessions` answer that answered (pass a clone: the window gets the original). An answer
-     * with no launch block forgets the machine's read; one that can't be read keeps the last. `linked`: asked once the
-     * body is read, so a machine unlinked meanwhile is not kept again.
+     * with no launch block forgets the machine's read; one that can't be read keeps the last. `seq`: from `begin`, so
+     * a read that started before one already applied is dropped. `linked`: asked once the body is read, so a machine
+     * unlinked meanwhile is not kept again.
      */
-    async keep(machine: string, answer: Response, linked: () => boolean): Promise<void> {
+    async keep(machine: string, seq: number, answer: Response, linked: () => boolean): Promise<void> {
       if (!answer.ok) return;
       let body: unknown;
       try {
@@ -58,7 +74,8 @@ export function createMachineLaunchReads() {
       } catch {
         return;
       }
-      if (!linked()) return;
+      if (!linked() || seq < (applied.get(machine) ?? 0)) return;
+      applied.set(machine, seq);
       const read = machineLaunchReadOf(body);
       if (read) reads.set(machine, read);
       else reads.delete(machine);
@@ -74,6 +91,7 @@ export function createMachineLaunchReads() {
     },
     forget(machine: string): void {
       reads.delete(machine);
+      applied.delete(machine);
     },
   };
 }
