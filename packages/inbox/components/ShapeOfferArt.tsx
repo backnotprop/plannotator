@@ -1,7 +1,7 @@
 /**
  * The picture of Shape's offer (ShapeOffer.tsx): the fixed technical board (`SHAPE_OFFER_BOARD`) drawn by the real
- * Shape renderer, cropped close. Its own chunk (the renderer and its sanitizer load on first use), fetched once the
- * line arms the offer on a load (shapeOffer.ts `preload`). Its lines draw on once; under reduced motion it is still.
+ * Shape renderer, cropped close. A small chunk of its own (this wrapper and the board fixture; the renderer is already
+ * in the window's entry script), fetched once the line arms the offer on a load (shapeOffer.ts `preload`). Its lines draw on once; under reduced motion it is still.
  * Decoration only: the dialog hides it from assistive tech and makes it inert.
  */
 import { ShapeDiagram } from '@plannotator/ui/components/shape/ShapeDrawn';

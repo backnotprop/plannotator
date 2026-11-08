@@ -139,6 +139,8 @@ const BASE: State = { due: true, blocked: false, clear: true, held: false, toast
 
 /** What App holds: Shape on. */
 let shapeOn = false;
+/** How often the page asked for the picture's chunk (only a load the line armed may). */
+let preloads = 0;
 
 function Harness({ state }: { state: State }) {
   const [settings, setSettings] = useState<{ shape?: { on: boolean } } | null>({ shape: { on: state.shapeOnAtLoad } });
@@ -155,7 +157,10 @@ function Harness({ state }: { state: State }) {
     heldBack: () => state.held,
     toast: state.toast,
     on: shapeOn,
-    preload: preloadShapeOfferArt,
+    preload: () => {
+      preloads++;
+      preloadShapeOfferArt();
+    },
   });
   return (
     <>
@@ -190,6 +195,7 @@ function Harness({ state }: { state: State }) {
 
 function mount(state: State) {
   shapeOn = false;
+  preloads = 0;
   noteThreads();
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -223,6 +229,8 @@ describe.skipIf(!hasDom)("Shape's offer", () => {
     const set = mount(BASE);
     await wait(TIMES.settledMs * 4);
     expect(claims()).toHaveLength(0);
+    // Armed on this load: the picture's chunk is fetched once, before the moment, so it is there when the dialog opens.
+    expect(preloads).toBe(1);
     await readAndLeave(set, 't_long');
     await until(() => dialog() !== null);
     expect(claims().map((c) => c.body)).toEqual([{ id: 'shape', key: expect.any(String) }]);
@@ -285,6 +293,8 @@ describe.skipIf(!hasDom)("Shape's offer", () => {
     await wait(TIMES.settledMs * 4);
     expect(claims()).toHaveLength(0);
     expect(dialog()).toBeNull();
+    // Not armed: the picture's chunk is never fetched.
+    expect(preloads).toBe(0);
   });
 
   test('Shape already on (Settings here, another window): never offered, even when the line still names it', async () => {
@@ -293,6 +303,8 @@ describe.skipIf(!hasDom)("Shape's offer", () => {
     await wait(TIMES.settledMs * 4);
     expect(claims()).toHaveLength(0);
     expect(dialog()).toBeNull();
+    // Not armed: the picture's chunk is never fetched.
+    expect(preloads).toBe(0);
   });
 
   test('another one-time dialog on this load (the tour, an update, the star card): blocked, no claim', async () => {
@@ -301,6 +313,8 @@ describe.skipIf(!hasDom)("Shape's offer", () => {
     await wait(TIMES.settledMs * 4);
     expect(claims()).toHaveLength(0);
     expect(dialog()).toBeNull();
+    // Not armed: the picture's chunk is never fetched.
+    expect(preloads).toBe(0);
   });
 
   test('a reply being typed or a question waiting holds it; free again while the moment lasts, it opens', async () => {

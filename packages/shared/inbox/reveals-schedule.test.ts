@@ -320,8 +320,24 @@ describe("Shape's offer (approval \"shape-turn-on-dialog\": once, after 4 days a
     expectOnePerDay(shown);
   });
 
-  test("Shape decided (on, or switched off by the person) or held: never offered", () => {
-    expect(simulate(HEAVY).some((s) => s.id === "shape")).toBe(false);
+  test("a light user after 0.29 (Shape open): Shape on their first free load once the Board's patience lets it pass (day 14); the Checklist keeps its day", () => {
+    const shown = simulate({ ...LIGHT, shapeOff: true, moment: (id, day) => (id === "shape" ? day >= 9 : LIGHT.moment(id, day)) });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      ["star", 4],
+      ["snooze", 7],
+      ["shape", 14],
+      ["steps", 25],
+    ]);
+    expect(days(shown).steps).toBe(days(simulate(LIGHT)).steps);
+    expectOnePerDay(shown);
+  });
+
+  test("a light user who never reads a long agent message: never offered, still one a day", () => {
+    const shown = simulate({ ...LIGHT, shapeOff: true, moment: (id, day) => id !== "shape" && LIGHT.moment(id, day) });
+    expect(shown.some((s) => s.id === "shape")).toBe(false);
+    expect(days(shown)).toMatchObject({ agent_note: 0, star: 4, snooze: 7 });
+    expectOnePerDay(shown);
   });
 });
 

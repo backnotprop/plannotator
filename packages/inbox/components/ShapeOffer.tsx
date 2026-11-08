@@ -1,11 +1,17 @@
 import { Suspense } from 'react';
+import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { PEBBLE_REST } from '@plannotator/ui/components/shape/Pebble';
 import { lazyPart } from '../lazyParts';
 import { pageHeading, useFirstFocusOnDialog } from './CodeReviewOffer';
 import { Modal } from './Updates';
 
-/** The picture: its own chunk (the Shape renderer), fetched once the line arms the offer (`preloadShapeOfferArt`). */
-const ShapeOfferArtPart = lazyPart(() => import('./ShapeOfferArt'));
+/**
+ * The picture: a small chunk of its own (the board fixture and its wrapper; the Shape renderer itself is already in the
+ * window's entry script), fetched once the line arms the offer (`preloadShapeOfferArt`). `shapeOfferArtChunk.load` is
+ * the fetch, so a test can make it fail as a dropped link or a replaced build does.
+ */
+export const shapeOfferArtChunk = { load: () => import('./ShapeOfferArt') };
+const ShapeOfferArtPart = lazyPart(() => shapeOfferArtChunk.load());
 export const preloadShapeOfferArt = (): void => void ShapeOfferArtPart.preload().catch(() => {});
 
 /**
@@ -22,9 +28,13 @@ export function ShapeOffer({ phone, onClose, onTurnOn }: { phone: boolean; onClo
   return (
     <Modal labelledBy="ib-sho-title" describedBy="ib-sho-feats" testId="shape-offer" onClose={onClose} ownKeys fallbackFocus={pageHeading} className={`ib-cro ib-sho${phone ? ' ib-cro-phone' : ''}`}>
       <div className="ib-cro-art ib-sho-art" aria-hidden="true" inert>
-        <Suspense fallback={null}>
-          <ShapeOfferArtPart.Part />
-        </Suspense>
+        {/* A chunk that cannot arrive (a dropped link, an Inbox restarted onto a new release) leaves the band empty:
+            the dialog keeps its words and buttons, and the window stays mounted with whatever the person typed. */}
+        <LazyBlockBoundary fallback={() => null}>
+          <Suspense fallback={null}>
+            <ShapeOfferArtPart.Part />
+          </Suspense>
+        </LazyBlockBoundary>
       </div>
       <div className="ib-cro-body">
         <h2 id="ib-sho-title">Draw the work with Shape</h2>
