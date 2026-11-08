@@ -56,9 +56,10 @@
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
-import type { Host, HttpResult, LoadedPluginInfo } from './host'
+import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import {
   INBOX_ASK_POLL_FIELD,
+  INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -79,9 +80,11 @@ import {
   mcpAnswerOfResponse,
   parseInboxAskWaits,
   parseInboxBridgeCommands,
+  parseInboxReloadOffer,
   parseInboxRegistry,
   parseInboxToolList,
   type InboxRegistryView,
+  type InboxReloadOffer,
   type InboxReplyCommand,
   type InboxToolInfo,
 } from './inbox-contract'
@@ -308,6 +311,14 @@ export const INBOX_POLL_WAIT_MS = 20_000
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
+/**
+ * A tick seen not firing for at least this long is armed again by the
+ * self-heal (`InboxLink.ensureTicking`). Its looks are MOD_HEAL_EVERY_MS
+ * apart, so a stopped tick is armed again 30 to 60 s after it stopped.
+ */
+const INBOX_TICK_STALL_MS = 10_000
+/** Each reason a reply was not submitted is logged at most this often (`PLANNOTATOR_MOD_DEBUG`). */
+const NOT_DELIVERING_LOG_EVERY_MS = 60_000
 /** How often the lease is renewed or re-read. */
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
@@ -763,6 +774,20 @@ export interface InboxLinkOptions {
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
   turns?: TurnTracker
+  /**
+   * Plannotator reloads itself after an update (auto-reload.ts): the poll says
+   * so (`auto_reload`), each answered poll hands over the Inbox's word
+   * (`reload`, or null) and is noted, and each tick lets it look. Absent: the
+   * poll never asks, and the Inbox keeps the manual notice.
+   */
+  reload?: InboxLinkReload
+}
+
+/** What the link drives of auto-reload.ts's AutoReload. */
+export interface InboxLinkReload {
+  setOffer(offer: InboxReloadOffer | null): void
+  notePolled(): Promise<void>
+  tick(): Promise<void>
 }
 
 export class InboxLink {
@@ -802,6 +827,12 @@ export class InboxLink {
   /** The `alive` refresh in flight, which `release` waits for so no write lands in a claim it removed. */
   private aliveRefresh: Promise<void> = Promise.resolve()
   private delivering = false
+  /**
+   * Claude Code dropped a wake (`PromptDropped`: the person stopped the
+   * session and nobody has typed since). No delivery is tried until the
+   * person's own prompt or a turn start says input moves again.
+   */
+  private heldForInput = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
   /** The last title that was known; what a poll repeats when it is not. */
@@ -829,6 +860,12 @@ export class InboxLink {
   private folder: Promise<string | null> | null = null
   /** The Ask AI client, from a poll saying a question waits until it stops (`startAskClient`). */
   private askClient: BridgeHandle | null = null
+  /** Times the tick fired, and the count and time the self-heal last saw (`ensureTicking`). */
+  private fires = 0
+  private firesSeen = 0
+  private firesSeenAt: number | null = null
+  /** When each reason a reply was not submitted was last logged (`notDelivering`). */
+  private notDeliveringLogged = new Map<string, number>()
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -840,15 +877,56 @@ export class InboxLink {
     return this.disposed
   }
 
-  /** Start the tick. The person is in this process now. */
-  start(): void {
+  /**
+   * Inbox work this process has in flight: a reply handed out and not settled
+   * here, a delivery or claim under way, a Send now reply its turn has not
+   * read, an Ask AI client. Auto reload waits while any is true, so a reload
+   * never lands in the middle of one.
+   */
+  get hasWorkInFlight(): boolean {
+    return this.pending.size > 0 || this.delivering || this.submitting !== null || this.held.size > 0 || this.sentNow.length > 0 || this.askClient !== null
+  }
+
+  /**
+   * Start the tick. The person is in this process now, unless `touch` is
+   * false (the self-heal made this link: the lease goes to it only when no
+   * live process holds it).
+   */
+  start(options: { touch?: boolean } = {}): void {
     if (this.timer || this.disposed) return
     void this.host.now().then((now) => {
       this.startedAt ||= now
       this.idleSince ||= now
     })
-    void this.touch()
+    if (options.touch !== false) void this.touch()
+    this.arm()
+  }
+
+  /**
+   * The self-heal's look (self-heal.ts): a tick that did not fire between
+   * two looks at least INBOX_TICK_STALL_MS apart (the engine refused one
+   * `$.clock.every` period, which ends the interval) is armed again. Never a touch.
+   */
+  async ensureTicking(): Promise<void> {
+    if (this.disposed) return
+    const now = await this.host.now()
+    if (this.disposed) return
+    if (this.fires !== this.firesSeen || this.firesSeenAt === null) {
+      this.firesSeen = this.fires
+      this.firesSeenAt = now
+      return
+    }
+    if (this.timer && now - this.firesSeenAt < INBOX_TICK_STALL_MS) return
+    this.host.debug(`inbox: the tick has not fired for ${Math.round((now - this.firesSeenAt) / 1000)} s; armed again`)
+    this.timer?.cancel()
+    this.timer = null
+    this.firesSeenAt = now
+    this.arm()
+  }
+
+  private arm(): void {
     this.timer = this.host.every(INBOX_TICK_MS, () => {
+      this.fires++
       if (this.ticking) return
       this.ticking = true
       void this.tick()
@@ -895,6 +973,7 @@ export class InboxLink {
    */
   onForeignPrompt(prompt: { turnId?: string; originKind?: string }): void {
     if (!prompt.turnId) this.idleTicks = 0
+    this.heldForInput = false
     if (prompt.originKind === 'composer') void this.touch()
   }
 
@@ -1028,6 +1107,9 @@ export class InboxLink {
     for (const id of [...this.unacked]) await this.acknowledge(id)
     if (!this.leader) return
     if (!this.polling && now >= this.retryAt) void this.poll()
+    // Auto reload looks at the same idle state, outside any hook (this is a $.clock timer). Not awaited:
+    // a queued /reload-plugins never holds the tick (it guards itself against a second look meanwhile).
+    if (this.options.reload) void this.options.reload.tick().catch(() => undefined)
     // Send now (the person pressed it in the Inbox): the waiting replies go in without waiting for two
     // idle ticks, oldest first (an urgent reply never overtakes an older one), but only when there is a
     // turn they may go into or the session is idle: never into this session's own Ask question.
@@ -1035,7 +1117,7 @@ export class InboxLink {
       this.idleTicks < 2 &&
       [...this.pending.values()].some((command) => command.now === true && !this.noSteer.has(command.id)) &&
       (this.steerableTurn() !== null || !this.options.isBusy())
-    if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
+    if (!this.delivering && !this.heldForInput && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true
       void this.deliverNext(urgent).finally(() => {
         this.delivering = false
@@ -1084,6 +1166,11 @@ export class InboxLink {
       engine: this.host.engineVersion ? await this.host.engineVersion().catch(() => null) : null,
     }))()
     return this.loaded
+  }
+
+  /** A main-loop turn started: whatever held this session's input has let go. */
+  onMainTurnStart(): void {
+    this.heldForInput = false
   }
 
   /** A main-loop model request of `turnId` is going out: the replies put into that turn are in it. */
@@ -1182,9 +1269,15 @@ export class InboxLink {
       ...(folder ? { session_folder: folder } : {}),
       // Ask AI: a question for this session can run here, and `ask_waits` will be read.
       ...(this.options.turns ? { [INBOX_ASK_POLL_FIELD]: true } : {}),
+      // Auto reload: this connection reloads Plannotator itself when the answer says a reload loads a newer one.
+      ...(this.options.reload ? { [INBOX_AUTO_RELOAD_POLL_FIELD]: true } : {}),
     })
     if (!response || response.status !== 200) return null
     if (parseInboxAskWaits(response.text)) void this.startAskClient()
+    if (this.options.reload) {
+      this.options.reload.setOffer(parseInboxReloadOffer(response.text))
+      void this.options.reload.notePolled().catch(() => undefined)
+    }
     return parseInboxBridgeCommands(response.text)
   }
 
@@ -1289,7 +1382,7 @@ export class InboxLink {
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0)
-    if (fresh === null) return
+    if (fresh === null) return this.notDelivering(waiting.id, 'fresh_null', 'the Inbox did not say whether it still waits')
     // The same reply as this poll words it: a reply that waited through a turn says what the thread holds now.
     // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
     const command = fresh.find((candidate) => candidate.id === waiting.id)
@@ -1297,17 +1390,18 @@ export class InboxLink {
       // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
       this.pending.delete(waiting.id)
       this.held.delete(waiting.id)
-      return
+      return this.notDelivering(waiting.id, 'not_listed', 'the Inbox no longer has it waiting here')
     }
-    if (this.disposed || !(await this.holdLease(await this.host.now()))) return
+    if (this.disposed) return this.notDelivering(command.id, 'disposed', 'this link was disposed')
+    if (!(await this.holdLease(await this.host.now()))) return this.notDelivering(command.id, 'lease_lost', 'another process on this session holds the lease')
     const dir = this.claimDir(command.id)
     const claim = await this.host.run(inboxClaimArgv(dir, this.options.instanceId), { timeoutMs: 5_000 }).catch(() => null)
     if (claim?.exitCode === INBOX_CLAIM_EXIT.lost) {
       this.pending.delete(command.id)
       this.elsewhere.set(command.id, { command, since: await this.host.now() })
-      return
+      return this.notDelivering(command.id, 'claim_lost', 'another process claimed it')
     }
-    if (claim?.exitCode !== INBOX_CLAIM_EXIT.won) return
+    if (claim?.exitCode !== INBOX_CLAIM_EXIT.won) return this.notDelivering(command.id, 'claim_failed', `the claim failed (exit ${claim?.exitCode ?? 'none'})`)
     this.submitting = command.id
     this.held.add(command.id)
     await this.host.writeFile(`${dir}/alive`, String(await this.host.now())).catch(() => undefined)
@@ -1320,7 +1414,7 @@ export class InboxLink {
       // may lose the lease while the turn runs, and a claim it kept would leave the reply with nobody).
       this.submitting = null
       await this.release(command.id)
-      return
+      return this.notDelivering(command.id, 'busy_at_claim', 'a turn runs; the claim is given back')
     }
     this.host.debug(`inbox: delivering ${command.type} ${command.id}${turn ? ` into the running turn ${turn}` : ''}`)
     try {
@@ -1353,6 +1447,15 @@ export class InboxLink {
       }
     } catch (error) {
       this.submitting = null
+      if (error instanceof PromptDropped) {
+        // Claude Code refused the turn (the person stopped the session and has not typed since): nothing went
+        // in, so the claim is given back and the reply stays pending, to go in at the idle after their input.
+        // Held BEFORE the release: input that arrives while it runs must clear the hold, not be overwritten by it.
+        this.heldForInput = true
+        this.host.debug(`inbox: ${command.id} was not taken (${error.reason}); it waits for the person's next input`)
+        await this.release(command.id)
+        return
+      }
       this.settle(command.id)
       await this.host.writeFile(`${dir}/reported`, '1').catch(() => undefined)
       this.host.toast(
@@ -1365,6 +1468,15 @@ export class InboxLink {
     this.settle(command.id)
     this.unacked.add(command.id)
     await this.acknowledge(command.id)
+  }
+
+  /** One debug line for a reply not submitted now, at most once a minute per reason. */
+  private async notDelivering(id: string, reason: string, why: string): Promise<void> {
+    const now = await this.host.now()
+    const last = this.notDeliveringLogged.get(reason)
+    if (last !== undefined && now - last < NOT_DELIVERING_LOG_EVERY_MS) return
+    this.notDeliveringLogged.set(reason, now)
+    this.host.debug(`inbox: not delivering ${id}: ${reason} (${why})`)
   }
 
   /** Give back a claim nothing was submitted under; it stays pending here, for a later claim. */

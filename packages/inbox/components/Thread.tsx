@@ -1,5 +1,6 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
-import { inboxUrl, machineOf } from '../inboxUrl';
+import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
+import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -50,6 +51,7 @@ import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
+import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -434,7 +436,7 @@ export function MessageBody({
    * Comments on the text (an agent's message that can still be answered;
    * approval "inbox-message-comments"): the person's comments on this message
    * waiting for a Send, drawn as highlights, and a selection opens the
-   * comment-only toolbar. `onSave` stores a new one (false: it was refused,
+   * toolbar (Delete, Comment, 👍; no label picker). `onSave` stores a new one (false: it was refused,
    * and its highlight goes). `onUnanchored` hears which could not be found by
    * their words; `onPainted` that highlights were drawn (the DOM changed).
    * Absent: the text takes no comments.
@@ -955,6 +957,8 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
+        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
+        textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
@@ -1012,6 +1016,12 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
+  /** The thread is open in Reviews (the address), whatever its row says from one read to the next. */
+  inReviews?: boolean;
+  /** Its row in Reviews: the line and title over the messages, and what came before the review folded. */
+  reviewView?: ReviewView | null;
+  /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
+  onInReviews?: () => void;
   /**
    * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
    * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
@@ -1464,7 +1474,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1492,7 +1502,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
   // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
-  const openTerminal = launched && !phone && remote !== true && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
+  // Not for another machine's thread either (remote launch): its Terminal is on that machine; Copy attach command is the way in.
+  const openTerminal = launched && !phone && remote !== true && !machine && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
@@ -1503,7 +1514,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
           stop:
             !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
-              ? () => void launchAct(() => inboxApi.launchStop(launched.id))
+              ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
           // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
           remove: phone || guest ? null : () => setConfirmDelete(true),
@@ -1859,9 +1870,31 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
     setFoldState(fold);
   }
+  // Opened from Reviews: decided once too, on the Inbox's fold (`reviewOpenPlan`). A reply sent or a Done ticked here never
+  // makes anything vanish, and neither does a row that comes or goes. Decided again only when the same thread moves between
+  // the Inbox's view and this one. A window that can't tell what was read (`boundary`, null) leaves nothing out.
+  const reviewPlan = useRef<{ key: string; left: ReadonlySet<string> } | null>(null);
+  const reviewPlanKey = `${thread.thread_id}:${inReviews ? 'reviews' : 'inbox'}`;
+  if (reviewPlan.current?.key !== reviewPlanKey) {
+    const wasReviews = reviewPlan.current?.key === `${thread.thread_id}:reviews`;
+    const folds = wasReviews ? planFolds(thread.messages, fresh, boundary) : fold;
+    const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
+    reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
+    if (plan || wasReviews) {
+      fold = { threadId: thread.thread_id, folded: plan?.folded ?? folds.folded, hidden: plan?.hidden ?? folds.hidden.map((run) => [...run]), revealed: new Set() };
+      setFoldState(fold);
+    }
+  }
+  // The row went while the person is here: the link to what was left out went with it, so nothing stays left out.
+  if (!reviewView && reviewPlan.current.left.size > 0) reviewPlan.current = { ...reviewPlan.current, left: NO_IDS };
   const foldRef = useRef(fold);
   foldRef.current = fold;
-  const hiddenNow = new Set(fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)));
+  // Opened from Reviews: what came before the first review stays out of this view (the link over the messages opens the
+  // thread whole; expand-all and a link to one of those messages show them here).
+  const [earlierShownIn, setEarlierShownIn] = useState<string | null>(null);
+  const hiddenEarlier = earlierShownIn !== thread.thread_id ? reviewPlan.current.left : NO_IDS;
+  if (landing && hiddenEarlier.has(landing.messageId)) setEarlierShownIn(thread.thread_id);
+  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...hiddenEarlier]);
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
@@ -1942,6 +1975,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       announce('Earlier messages folded');
     } else {
       setFoldState((current) => (current ? { ...current, folded: new Set(), revealed: new Set(current.hidden.map((_, index) => index)) } : current));
+      setEarlierShownIn(thread.thread_id);
       announce(`All ${thread.messages.length} messages open`);
     }
   };
@@ -5551,6 +5585,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
               <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
                 <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  <HeadMark thread={thread} where="bar" />
                   {nameChip ?? thread.subject ?? '(no subject)'}
                 </span>
               </Tip>
@@ -5623,7 +5658,32 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
-        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {reviewView && (
+          <div className="ib-rvctx" data-review-context="">
+            <Icon name={reviewView.kind === 'local' ? 'laptop' : 'pullRequest'} size={15} />
+            <span dir="auto">{reviewView.context}</span>
+            {reviewView.onOpenPull && (
+              <button type="button" className="ib-rvctx-link" onClick={reviewView.onOpenPull} data-review-open-pull="">
+                See the pull request
+              </button>
+            )}
+            {reviewView.pullUrl && (
+              <a className="ib-rvctx-link" href={reviewView.pullUrl} target="_blank" rel="noreferrer noopener" data-review-pull-link="">
+                See the pull request
+              </a>
+            )}
+          </div>
+        )}
+        <HeadMark thread={thread} where="body" />
+        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
+        {reviewView?.fromThread && (
+          <p className="ib-rvfrom" data-review-from="">
+            Review from thread{' '}
+            <button type="button" className="ib-rvctx-link" dir="auto" onClick={reviewView.onWholeThread} data-review-from-link="">
+              {reviewView.fromThread}
+            </button>
+          </p>
+        )}
         {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
         {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
         {machine && (
@@ -5638,6 +5698,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
             <span>
               You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
+              {/* Started from another linked machine's window (remote launch): which one. */}
+              {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
             </span>
             {launched.full_permissions && (
               <>
@@ -5672,7 +5734,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     setConfirmDelete(false);
                     // A scratch folder that was not the one the Inbox made (a link, another folder, gone) is kept: the toast says so.
                     void launchAct(
-                      () => inboxApi.launchDelete(launched.id),
+                      () => inboxApi.launchDelete(launched.id, machine?.id ?? null),
                       (result) => (result.scratch_removed === false ? { lead: 'Session deleted', detail: 'its scratch folder was kept' } : { lead: 'Session deleted' }),
                     );
                   }}
@@ -5746,7 +5808,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         )}
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
-        {!one && (
+        {!one && !reviewView && (
           <div className="ib-tmeta" data-thread-meta="">
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 {participants.length > 1 && (
@@ -5862,7 +5924,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -5870,7 +5932,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -6105,6 +6167,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     picks={thread.messages.reduce((n, m) => n + (m.questions ?? []).filter((q) => q.sent_reply_id === message.id).length, 0)}
                   />
                 ) : (
+                <>
+                {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
                 <MessageBody
                   message={message}
                   sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
@@ -6153,6 +6217,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                       : undefined
                   }
                 />
+                </>
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
                 {(message.attachments?.length ?? 0) > 0 && (
@@ -6168,7 +6233,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 )}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
-                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onOpen={() => onOpenGuide(message.id)} />
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}
@@ -6192,7 +6257,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     ))}
                   </ul>
                 )}
-                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />}
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />}
                 {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
@@ -6303,6 +6368,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           );
           return before;
         })}
+        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">Curating the review…</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         {showNew && !phone && newPill}
@@ -6858,4 +6924,35 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
       </button>
     </span>
   );
+}
+
+/**
+ * Letter marks (letterMarks.tsx) in the thread's header. Styles "Inline" and "Avatar": the bar's title leads with the
+ * mark (Avatar: solid, with the project's on its corner). Style "Dot": a 30 px mark over the subject, where the list
+ * showed only the colour.
+ */
+function HeadMark({ thread, where }: { thread: { thread_id: string; subject: string | null; thread_name?: string | null; project: { id: string; name: string } }; where: 'bar' | 'body' }) {
+  const { marks } = useRowMarks();
+  if (marks.what === 'off') return null;
+  const style = marks.style;
+  const name = thread.thread_name?.trim() ? thread.thread_name : (thread.subject ?? '');
+  const threads = showsThreads(marks.what);
+  const projects = showsProjects(marks.what);
+  if (where === 'bar' && style !== 'dot') {
+    return (
+      <span className="ib-lm-head" data-take={style} aria-hidden="true">
+        {threads ? <LetterMark name={name} seed={thread.thread_id} size={20} solid={style === 'avatar'} /> : <ProjectMark projectId={thread.project.id} name={thread.project.name} size={20} solid={style === 'avatar'} />}
+        {style === 'avatar' && threads && projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={12} solid className="ib-lm-badge" />}
+      </span>
+    );
+  }
+  if (where === 'body' && style === 'dot') {
+    return (
+      <div className="ib-lm-hero" aria-hidden="true">
+        {threads && <LetterMark name={name} seed={thread.thread_id} size={30} />}
+        {projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={threads ? 16 : 30} className={threads ? 'ib-lm-heroP' : undefined} />}
+      </div>
+    );
+  }
+  return null;
 }

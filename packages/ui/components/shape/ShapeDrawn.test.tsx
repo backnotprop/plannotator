@@ -389,6 +389,52 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     expect(shadow.querySelector('image')?.getAttribute('href')).toBe('/assets/files/b.png');
   });
 
+  test('darkContrast on a dark board: edges on zones that draw no line, a tile behind each kept SVG picture (never a logo or a framed one), and a light board left exactly as drawn', async () => {
+    const { holdDarkBoard, releaseDarkBoard } = await import('./darkContrast');
+    // A stand-in for the canvas: happy-dom resolves the variables below to plain rgb().
+    const paint = (color: string) => {
+      const m = /^rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color);
+      return m ? ([Number(m[1]), Number(m[2]), Number(m[3])] as const) : null;
+    };
+    const palette = (dark: boolean) => dark
+      ? '.board { --paper: rgb(8 13 22); --ink: rgb(218 222 229); --grey: rgb(150 156 166); --surface: rgb(22 28 40); --rule: rgb(55 61 72); --blue: rgb(94 140 191); --blue-soft: rgb(13 24 39); --amber: rgb(193 147 86); --amber-soft: rgb(36 33 30); --green: rgb(90 170 120); --green-soft: rgb(12 30 25); --plum: rgb(180 100 150); --plum-soft: rgb(28 18 30); --alert: rgb(241 77 76); --alert-soft: rgb(38 16 20); }'
+      : '.board { --paper: rgb(245 246 248); --ink: rgb(20 24 32); --grey: rgb(90 96 106); --surface: rgb(255 255 255); --rule: rgb(220 222 226); --blue: rgb(40 90 150); --blue-soft: rgb(225 233 243); --amber: rgb(150 100 20); --amber-soft: rgb(248 236 215); --green: rgb(30 110 70); --green-soft: rgb(222 240 230); --plum: rgb(130 50 100); --plum-soft: rgb(243 226 236); --alert: rgb(200 30 30); --alert-soft: rgb(250 225 225); }';
+    const logo = expandShapeStamps('<svg data-logo="codex" x="0" y="0" width="40" height="40"/>').html;
+    const html = `<svg><rect id="zone" width="300" height="200" style="fill:var(--blue-soft)"/><rect id="lined" width="80" height="60" style="fill:var(--amber-soft);stroke:var(--rule)"/>${logo}<image href="files/shot.png" x="10" y="20" width="100" height="50" transform="rotate(3)" data-step="2"/><image href="files/framed.png" x="0" y="0" width="80" height="80" clip-path="url(#c)"/><defs><pattern id="p"><image href="files/pat.png" width="8" height="8"/></pattern></defs><image href="files/nosize.png"/></svg><div id="hz" style="background: var(--amber-soft)">zone</div><img src="files/a.png">`;
+
+    const dark = await draw({ html, css: palette(true), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
+    expect(holdDarkBoard(dark.board, paint)).toBe(true);
+    expect(dark.board.classList.contains('dark-hold')).toBe(true);
+    // Every structural colour it set reads at 3:1 or more on what it meets (the rule itself: darkContrast.test.ts).
+    expect(dark.board.style.getPropertyValue('--rule')).toMatch(/^rgb\(/);
+    expect(dark.board.style.getPropertyValue('--shp-edge-blue')).toMatch(/^rgb\(/);
+    expect(dark.shadow.getElementById('zone')?.getAttribute('data-shp-edge')).toBe('blue');
+    expect(dark.shadow.getElementById('hz')?.getAttribute('data-shp-edge')).toBe('amber');
+    // A zone that draws its own line keeps it (and its --rule is lifted instead).
+    expect(dark.shadow.getElementById('lined')?.hasAttribute('data-shp-edge')).toBe(false);
+    const tiles = [...dark.shadow.querySelectorAll('rect.shp-pic-tile')];
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]!.nextElementSibling?.getAttribute('href')).toBe('/assets/files/shot.png');
+    expect(['x', 'y', 'width', 'height'].map((k) => Number(tiles[0]!.getAttribute(k)))).toEqual([4, 14, 112, 62]);
+    // It turns and draws in with its picture.
+    expect(tiles[0]!.getAttribute('transform')).toBe('rotate(3)');
+    expect(tiles[0]!.getAttribute('data-step')).toBe('2');
+    expect(dark.shadow.querySelector('svg[data-brand] image')?.hasAttribute('data-shp-pic')).toBe(false);
+    // Taken back, nothing of it stays.
+    releaseDarkBoard(dark.board);
+    expect(dark.board.classList.contains('dark-hold')).toBe(false);
+    expect(dark.board.getAttribute('style') ?? '').not.toMatch(/--rule|--surface|--grey|--shp-edge/);
+    expect(dark.shadow.querySelectorAll('rect.shp-pic-tile, [data-shp-edge]')).toHaveLength(0);
+
+    // A light board: the same drawing, with the opt-in and without, is the same DOM (but the pictures' own mark).
+    const light = await draw({ html, css: palette(false), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
+    const before = light.board.outerHTML;
+    expect(holdDarkBoard(light.board, paint)).toBe(false);
+    expect(light.board.outerHTML).toBe(before);
+    const plain = await draw({ html, css: palette(false), resolveSrc: (src) => `/assets/${src}` });
+    expect(before.replace(/ data-shp-pic=""/g, '')).toBe(plain.board.outerHTML);
+  });
+
   test('a mouse over a number peeks; leaving hides it; a click opens it', async () => {
     const peeks: [number | null, string][] = [];
     const opens: number[] = [];

@@ -1141,6 +1141,13 @@ describe("parseMarkdownToBlocks — GitHub alerts", () => {
     expect(blocks[0].content).toBe("");
   });
 
+  test("an alert body keeps each line's indentation past its marker, so a fence under a list item stays under it", () => {
+    const md = "> [!NOTE]\n> - install:\n>\n>   ```bash\n>   bun install\n>   ```";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].content).toBe("- install:\n\n  ```bash\n  bun install\n  ```");
+  });
+
   test("blockquote without marker has no alertKind", () => {
     const blocks = parseMarkdownToBlocks("> just a quote");
     expect(blocks[0].alertKind).toBeUndefined();

@@ -1051,7 +1051,7 @@ test('the switch never set and a login shell that runs Claude in bypass mode: wi
     await page.goto(`${world.url}#settings/agents`);
     const row = page.locator('[data-launch-full-row]');
     await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
-    await expect(row.locator('[data-launch-follows="shell"]')).toHaveText("Follows your shell's setting until you change it.");
+    await expect(row.locator('[data-launch-follows="shell"]')).toHaveText("Uses your shell's setting until you change it.");
     await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
     // Without the person's consent it still follows the shell, and says why it does not apply.
     claudeSettings({});

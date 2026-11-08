@@ -145,3 +145,39 @@ test("both feeds name the shape when an agent picks up its waiting change", asyn
 		expect(text).toContain(`event: shapes\ndata: {"ids":["${id}"]}`);
 	}
 });
+
+test("What's changed comes back from Pi as from Bun, as the agent wrote it, and a Change it on one change is kept", async () => {
+	const { KETTLE_CHANGED, kettleBoard } = await import("../../../tests/fixtures/shape-whats-changed.ts");
+	const answers: string[][] = [];
+	for (const start of [startPi, async (d: string) => startBun(d)]) {
+		const dataDir = scratch();
+		const store = createShapeStore({ dataDir });
+		const made = store.update({ board: kettleBoard(), project: { name: "kettle", root: scratch() } });
+		if (!made.ok) throw new Error(JSON.stringify(made));
+		const base = await start(dataDir);
+		const read = await fetch(`${base}/api/shapes/${made.id}`).then((r) => r.json() as Promise<{ version: { views: { changed?: unknown } } }>);
+		expect(read.version.views.changed).toEqual(KETTLE_CHANGED);
+		answers.push([
+			await call(base, "GET", `/api/shapes/${made.id}`),
+			await call(base, "POST", `/api/shapes/${made.id}/notes`, { kind: "change", v: 1, view: "changed", part: "whistle", quote: "One whistle", text: "Twice is fine" }),
+		]);
+	}
+	expect(answers[0]).toEqual(answers[1]!);
+	expect(answers[0]![1]).toStartWith('200 {"note":{');
+	expect(answers[0]![1]).toContain('"view":"changed","part":"whistle"');
+});
+
+test("a board's scene comes back from Pi as from Bun, as the agent wrote it", async () => {
+	const { sceneBoard } = await import("../../../tests/fixtures/shape-scene-board.ts");
+	const answers: string[] = [];
+	for (const start of [startPi, async (d: string) => startBun(d)]) {
+		const dataDir = scratch();
+		const made = createShapeStore({ dataDir }).update({ board: sceneBoard(), project: { name: "lamp", root: scratch() } });
+		if (!made.ok) throw new Error(JSON.stringify(made));
+		const base = await start(dataDir);
+		const read = await fetch(`${base}/api/shapes/${made.id}`).then((r) => r.json() as Promise<{ version: { scenes?: Record<string, unknown> } }>);
+		expect(read.version.scenes).toEqual(sceneBoard().scenes);
+		answers.push(await call(base, "GET", `/api/shapes/${made.id}`));
+	}
+	expect(answers[0]).toEqual(answers[1]!);
+});

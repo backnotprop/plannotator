@@ -7,9 +7,10 @@ export function gitBytes(root: string, args: string[], maxBuffer = 64 * 1024 * 1
   return new Promise((resolve, reject) => {
     execFile(
       'git',
-      ['-C', root, ...args],
+      // `root` can be the person's repo (check, gate): a read never refreshes their index or takes index.lock
+      ['--no-optional-locks', '-C', root, ...args],
       // the live environment, never the one the process started with
-      { env: process.env, maxBuffer, encoding: 'buffer' },
+      { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffer, encoding: 'buffer' },
       (err, stdout, stderr) => {
         if (err) reject(new Error(`git ${args[0]}: ${String(stderr?.length ? stderr : err.message).trim()}`));
         else resolve(stdout);

@@ -346,6 +346,14 @@ export interface PlannotatorConfig {
    */
   planReview?: boolean;
   /**
+   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
+   * review, question or dialog, nothing typed for a while, an empty editor).
+   * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
+   */
+  autoReload?: boolean;
+  /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
    * own Settings: `true` / `false` for every host, or one boolean per host
@@ -486,6 +494,24 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
+   * every surface (packages/shared/star-ask.ts reads and writes it, nothing
+   * else does). `shownAt`: a surface showed it, so none shows it again.
+   * `answer`: `starred` (gh starred it on the click), `opened` (the GitHub
+   * page opened), `not-now`, or `already` (starred before it showed: nothing
+   * showed). `surface`: where. `canStar`: the button starred with gh.
+   * `checkedAt`: the already-starred check ran (a done-screen page at load)
+   * and the ask is still open; later loads reuse it without gh.
+   */
+  starAsk?: {
+    checkedAt?: string;
+    shownAt?: string;
+    answer?: "starred" | "opened" | "not-now" | "already";
+    answeredAt?: string;
+    surface?: "inbox" | "plan" | "review" | "annotate";
+    canStar?: boolean;
+  };
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -508,14 +534,11 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
-   * How every Shape board is drawn (approval "shape-board-style-switch"):
-   * `"sharp"` (1 px lines, 2 px corners; the default, also while unset or
-   * unreadable) or `"rounded"` (the earlier look). The renderer applies it to
-   * every board, old ones too; no board is rewritten. Written by Settings →
-   * Capabilities → Board style (`POST /api/inbox/settings` `{ shape_style }`);
-   * read by the Inbox and the Shapes server (`/api/shape-server` `board_style`).
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
    */
-  shapeBoardStyle?: "rounded" | "sharp";
+  inboxSystem?: boolean;
   /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
@@ -541,9 +564,14 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
+    code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    star?: { shownAt?: string; key?: string };
+    list_view?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -1534,6 +1562,30 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
+ * Whether Pi reloads itself for an updated Plannotator when neither the env
+ * var nor config.json decides (owner's call 2026-10-29: on). The one place to
+ * flip the default.
+ */
+export const AUTO_RELOAD_DEFAULT = true;
+
+/**
+ * Whether Pi reloads itself to load an updated Plannotator extension (see
+ * `autoReload`, apps/pi-extension/auto-reload.ts).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT
+ *
+ * Env `1` / `true` / `on` and `0` / `false` / `off` / `disabled` decide; an
+ * empty or unrecognized value counts as unset.
+ */
+export function resolveAutoReload(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_AUTO_RELOAD?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return parseConfigBoolean(config.autoReload) ?? AUTO_RELOAD_DEFAULT;
+}
+
+/**
  * Resolve whether `host` registers the `plannotator` agent tool.
  *
  * Priority (highest wins):
@@ -1574,30 +1626,35 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
- * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`).
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
+ * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching).
+ * also keeps its tool list fixed for request caching). Cline sends every
+ * tool's definition too and has no `plannotator` agent tool, so its entry is
+ * its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
+  cline: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
  * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
- * Pi's, and a context message there shows as the person's own words.
+ * Pi's, and a context message there shows as the person's own words. Nor does
+ * Cline (its plugin has no hidden-message slot either).
  */
 export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 
