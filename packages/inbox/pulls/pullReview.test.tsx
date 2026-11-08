@@ -35,11 +35,14 @@ const shown: { patch: string; title: string }[] = [];
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
 /** The reader's whole-file seam as the review last gave it. */
 let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
+/** The reader's Collapse all as the review last gave it. */
+let readerCollapse: { collapsed: boolean; token: number } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles; collapseAll?: typeof readerCollapse }) => {
       readerComments = props.comments;
       readerFiles = props.fileContents;
+      readerCollapse = props.collapseAll;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -273,6 +276,24 @@ test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole 
   await ask('layer', 'c'.repeat(40), '2026-11-03T13:02:00.000Z');
   await ask('stack', 'c'.repeat(40), '2026-11-03T13:03:00.000Z');
   expect(fileAsks).toEqual(['layer', 'stack']);
+});
+
+// Guards the PR page keeping the old two-mark Split | Unified switch, or a Collapse all that reaches no file
+// (approval diff-controls-headers: every review header's one button, Collapse all and the gear).
+test.skipIf(!hasDom)("the tab row over the code holds every review header's diff controls, and Collapse all reaches the reader", async () => {
+  diffPatch = ['a.ts', 'b.ts'].map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('');
+  // Its own push time: the window keeps a patch read a moment ago per push, and other tests read this layer's.
+  const pushed = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, updated_at: '2026-11-03T14:00:00.000Z' } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed} />);
+  await settle();
+  expect(shown.at(-1)!.patch).toContain('b.ts');
+  expect(document.querySelector('[data-pull-tabs] [data-diff-controls] [data-diff-layout-toggle]')).not.toBeNull();
+  expect(document.querySelector('[data-diff-style-switch]')).toBeNull();
+  expect(readerCollapse).toBeUndefined();
+  await act(async () => el('[data-pull-tabs] [data-diff-collapse-all="open"]').click());
+  expect(readerCollapse).toEqual({ collapsed: true, token: 1 });
+  await act(async () => el('[data-pull-tabs] [data-diff-collapse-all="collapsed"]').click());
+  expect(readerCollapse).toEqual({ collapsed: false, token: 2 });
 });
 
 test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack up to it; Next layer moves up', async () => {

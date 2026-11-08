@@ -46,7 +46,7 @@ import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from '../components/DiffControls';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
@@ -494,6 +494,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
+  // The tab row's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   // The comments panel, open or not, at every width: closed at first, as in the review app; from REVIEW_FOLD_PANEL_BELOW
   // up an open one is the column beside the code, below it the sheet. Crossing the fold closes it. Nothing is kept: a
   // fresh PR opens closed.
@@ -1000,10 +1002,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         )}
         {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
-            (approval pr-view-one-surface, 11-07 19:08). */}
+            (approval pr-view-one-surface, 11-07 19:08). The controls are every review header's (approval
+            diff-controls-headers): one Split / Unified button, Collapse all, the Diff display gear. */}
         {!phone && (
           <div className="ib-prp-tabs" data-pull-tabs="">
-            <DiffStyleSwitch icons />
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
           </div>
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
@@ -1051,6 +1054,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                     bare
                     controlsHost={controlsHost}
                     hostDiffControls
+                    {...(collapseAll ? { collapseAll } : {})}
                     snapshot={snapshot}
                     reviewed={[]}
                     onReviewedChange={() => {}}

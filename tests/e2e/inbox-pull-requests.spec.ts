@@ -1074,10 +1074,12 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment is a quiet mark in the bar; Split | Unified sits in the review app's muted tab row over the code.
+  // Global comment is a quiet mark in the bar; the diff controls (one Split / Unified button, Collapse all, the gear) sit
+  // in the review app's muted tab row over the code.
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-pull-tabs] [data-diff-style-switch]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
+  await expect(review.locator('[data-pull-tabs] [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+  await expect(review.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+  await expect(review.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
   // one hairline under it, and the first header at the top of the code.
@@ -1979,7 +1981,7 @@ test('the next file\'s header right under the last code row, whatever separators
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
-    await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
+    await review.locator('[data-pull-tabs] [data-diff-layout-toggle="split"]').click();
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
   } finally {
     await context.close();
