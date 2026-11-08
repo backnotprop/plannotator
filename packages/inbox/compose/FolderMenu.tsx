@@ -5,6 +5,7 @@ import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
 import { filterLaunchProjects, otherFolderMatches, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
 import { HomeFolderBrowser } from './HomeFolderBrowser';
+import { cleanPastedPath, homeRelative, looksLikePath } from './homeFolders';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -33,6 +34,10 @@ import { HomeFolderBrowser } from './HomeFolderBrowser';
  * "Another folder on <machine>…" (approval addendum "existing folders", `onFolder`): the quiet last row of each
  * group ("Another folder…" with no machine words when there is only this computer). Picked, the menu turns into
  * that machine's folder browser (HomeFolderBrowser.tsx) until a folder is picked or the person goes back.
+ *
+ * A path in the filter (approval "launch-create-clone", B4: typed or pasted, `~/…`, `/…`, quoted or `file://`): only
+ * the projects under that path stay, and each machine's "Another folder…" row carries the path and opens its browser
+ * there. The browser's path is kept per machine while compose is open (`kept`), so going back and in again keeps it (D2).
  */
 /** "New scratch folder" in one place: the folder a Send would make, its root, and whether the agent trusts the root. */
 export interface ScratchRow {
@@ -83,6 +88,7 @@ export function FolderMenu({
   groups,
   onFolder,
   folderPicked = null,
+  kept,
 }: {
   projects: readonly LaunchProject[];
   selected: string | null;
@@ -100,8 +106,13 @@ export function FolderMenu({
   onClose: () => void;
   /** Linked machines: the projects grouped by machine, each with its caption. Absent or null: one list, as always. */
   groups?: readonly FolderGroup[] | null;
-  /** "Another folder on <machine>…": a folder under that machine's home (`~/…`) was picked. Absent: no such row. */
-  onFolder?: (folder: string, name: string, machine: string | null) => void;
+  /**
+   * "Another folder on <machine>…": a folder under that machine's home (`~/…`) was picked; `create`: the Send makes it
+   * (Create a folder). Absent: no such row.
+   */
+  onFolder?: (folder: string, name: string, machine: string | null, create: boolean) => void;
+  /** The folder browser's path as last typed, per machine (`''` for this computer), kept while compose is open. */
+  kept?: Map<string, string>;
   /** The folder To names now, when it is one of these: the browser opens there on its machine. */
   folderPicked?: { folder: string; machine: string | null } | null;
 }) {
@@ -116,6 +127,11 @@ export function FolderMenu({
     [groups, home, projects, scratch, onScratch],
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
+  // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
+  // The paste was cleaned once already (its escapes read): what the filter holds keeps its backslashes now.
+  const typedPath = looksLikePath(query) ? cleanPastedPath(query, null, { unescape: false }) : null;
+  // Where "Another folder…" opened the browser from: a path in the filter, else the path kept for that machine.
+  const [openAt, setOpenAt] = useState<string | null>(null);
   // Its machine left the menu (unlinked): back to the list.
   useEffect(() => {
     if (otherId !== undefined && !other) setOtherId(undefined);
@@ -126,6 +142,15 @@ export function FolderMenu({
       .map((group) => {
         // A machine's name picks its whole group ("mini").
         const named = grouped && words.length > 0 && words.every((w) => group.name.toLowerCase().includes(w));
+        if (typedPath !== null) {
+          // A path: its projects (by where they are on that machine), and "Another folder…" carrying the path.
+          const at = homeRelative(typedPath, group.home).replace(/\/+$/, '');
+          const under = group.projects.filter((p) => {
+            const folder = tildePath(p.root, group.home);
+            return folder === at || folder.startsWith(`${at}/`);
+          });
+          return { group, projects: under, scratch: null, notice: null, other: !!onFolder && !group.notice && !group.asleep, path: homeRelative(typedPath, group.home) };
+        }
         return {
           group,
           projects: named ? [...group.projects] : filterLaunchProjects(group.projects, query),
@@ -134,10 +159,11 @@ export function FolderMenu({
           // A group that offers anything to start in (not a machine's notice) ends with "Another folder on <machine>…".
           // Not for an asleep machine: its folders can't be read, and its caption already says it is asleep.
           other: !!onFolder && !group.notice && !group.asleep && (named || otherFolderMatches(query)),
+          path: null as string | null,
         };
       })
       .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other);
-  }, [all, grouped, query, onFolder]);
+  }, [all, grouped, query, onFolder, typedPath]);
   const rows = useMemo<Row[]>(
     () =>
       shown.flatMap((g) => [
@@ -179,7 +205,24 @@ export function FolderMenu({
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [onClose]);
 
-  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? setOtherId(row.group.machine) : onPick(row.project, row.group.machine));
+  /** Into a machine's folder browser: at the path in the filter, else where it was left (D2). */
+  const openOther = (machine: string | null) => {
+    const path = shown.find((g) => g.group.machine === machine)?.path ?? null;
+    setOpenAt(path);
+    setOtherId(machine);
+  };
+  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? openOther(row.group.machine) : onPick(row.project, row.group.machine));
+
+  // A path pasted into the filter reads as the person meant it (quotes, `file://`, Terminal's escapes); words paste as words.
+  const onPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const raw = event.clipboardData?.getData('text') ?? '';
+    if (!looksLikePath(raw)) return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    setQuery(input.value.slice(0, start) + cleanPastedPath(raw) + input.value.slice(end));
+  };
 
   const onKey = (event: ReactKeyboardEvent) => {
     // The folder browser takes its own keys.
@@ -217,14 +260,19 @@ export function FolderMenu({
     return (
       <div className="ib-cp-picker ib-cp-folders" ref={ref} data-compose-folders="" data-other-folder={other.machine ?? 'self'} data-phone={phone ? '' : undefined}>
         <HomeFolderBrowser
-          machine={{ id: other.machine, name: named, asleep: other.asleep === true }}
+          machine={{ id: other.machine, name: named, asleep: other.asleep === true, home: other.home }}
           phone={phone}
-          initialPath={folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined}
+          initialPath={
+            openAt ??
+            kept?.get(other.machine ?? '') ??
+            (folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined)
+          }
+          onTyped={(typed) => kept?.set(other.machine ?? '', typed)}
           onBack={() => {
             setHlId(rowKey(other.machine, OTHER_PICK));
             setOtherId(undefined);
           }}
-          onPick={(folder, name) => onFolder?.(folder, name, other.machine)}
+          onPick={(folder, name, create) => onFolder?.(folder, name, other.machine, create)}
         />
       </div>
     );
@@ -256,6 +304,7 @@ export function FolderMenu({
           spellCheck={false}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onPaste={onPaste}
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-flist-${uid}`} aria-label="Projects">
@@ -376,18 +425,18 @@ export function FolderMenu({
                         id={optionId(i)}
                         role="option"
                         aria-selected={hl === i}
-                        aria-label={words}
+                        aria-label={`${words.replace(/…$/, '')}${g.path ? `, ${g.path}` : ''}`}
                         className={`ib-cp-opt ib-cp-fopt ib-cp-other${hl === i ? ' ib-hl' : ''}`}
                         data-compose-folder-other={group.machine ?? 'self'}
                         onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, OTHER_PICK))}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setOtherId(group.machine)}
+                        onClick={() => openOther(group.machine)}
                       >
                         <Icon name="folder" size={15} />
                         <span className="ib-cp-op" dir="auto">
                           {words}
                         </span>
-                        <span />
+                        {g.path ? <FolderPath path={g.path} /> : <span />}
                         <span className="ib-cp-check" aria-hidden="true" />
                       </div>
                     </>

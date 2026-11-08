@@ -371,6 +371,8 @@ export interface ComposeStart {
    * takes it (`~/code/billing-api`): `project` stands in for it (`folderProject`), and the Send names the folder.
    */
   folder?: string;
+  /** With `folder`: Create a folder (approval "launch-create-clone"): the Send makes it. */
+  create?: true;
 }
 
 /** A folder start's stand-in project: never a project id, so no project's facts or check marks are taken for it. */

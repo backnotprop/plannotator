@@ -156,6 +156,12 @@ export function RunLine({ run, canOpen, canReaddress = false, guest = false, mac
       text = (
         <>
           <b>{name} didn't start.</b> {run.cause ?? ''} Your message is kept.
+          {/* Create a folder (E8): the folder the Send made is not taken away when the agent doesn't start. */}
+          {run.made_folder ? (
+            <span className="ib-run-sub" data-run-made-folder="">
+              {run.made_folder} was made and stays.
+            </span>
+          ) : null}
           {run.trust?.warning ? (
             <span className="ib-run-sub" data-run-trust-warning="">
               {run.trust.warning}

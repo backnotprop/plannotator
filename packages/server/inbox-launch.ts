@@ -61,9 +61,9 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { isHomeItself, listHomeFolders, resolveHomeFolder } from "./inbox-home-folders";
+import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder } from "./inbox-home-folders";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -90,7 +90,7 @@ const HOST_TTL_MS = 10_000;
  * Compose's `to.launch`: a project's folder, or a new scratch folder. `trust`: the person pressed Trust and start on
  * this reading of it; the press is the consent, so the Send saves the trust ("Trusting a folder").
  */
-export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string }) & {
+export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true }) & {
   trust?: InboxLaunchTrust;
 };
 
@@ -272,6 +272,18 @@ export function createInboxLaunch(options: {
       return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(basename(folder)) && lstatSync(folder).isDirectory() && realpathSync(folder) === folder && !!inode && inodeOf(folder) === inode;
     } catch {
       return false;
+    }
+  };
+  /**
+   * Create a folder, undone (a thread that was never written): the folder goes only while it is still the one the Send
+   * made (no link swapped in, the same inode) and still empty, so nothing anyone put there is ever removed.
+   */
+  const removeMadeFolder = (folder: string, inode: string): void => {
+    try {
+      if (!lstatSync(folder).isDirectory() || realpathSync(folder) !== folder || inodeOf(folder) !== inode) return;
+      rmdirSync(folder);
+    } catch {
+      // Not empty, or gone: left as it is.
     }
   };
   /** `path` with its links resolved: the real path of the nearest folder that exists, then the rest as given. */
@@ -554,6 +566,7 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
+      ...(launch.made_folder ? { shownFolder: options.displayFolder(launch.folder) } : {}),
     });
   };
 
@@ -621,6 +634,31 @@ export function createInboxLaunch(options: {
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
 
+  /**
+   * Create a folder (q-d2512542): a folder the Send just made, still empty, is trusted as one the person trusted by
+   * hand (the same store, through the host's offer), so the agent starts at once, with no Trust folder step. Only while
+   * it is still that folder (a real folder at that path, the identity recorded when it was made) and still empty: a
+   * folder with anything in it is read and trusted by the person, as any other.
+   */
+  const trustMadeFolder = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<void> => {
+    if (!launch.made_folder || !launch.made_inode || launch.scratch || host.trusts(launch.folder)) return;
+    try {
+      if (!lstatSync(launch.folder).isDirectory() || realpathSync(launch.folder) !== launch.folder || inodeOf(launch.folder) !== launch.made_inode) return;
+      if (readdirSync(launch.folder).length > 0) return;
+    } catch {
+      return;
+    }
+    const offer = host.trustOffer?.({ folder: launch.folder, scratch: false });
+    if (!offer) return;
+    try {
+      await offer.accept();
+      log(`Inbox launch ${launch.id}: trusted ${launch.folder} (made by this Send, empty)`);
+    } catch (error) {
+      // Not saved: the start says it needs trust, with Trust folder, as before.
+      startLog(launch.id, `made folder: trust not saved: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
@@ -635,6 +673,7 @@ export function createInboxLaunch(options: {
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
+      await trustMadeFolder(launch, host);
       const name = root.thread_name ?? root.subject ?? "Inbox";
       const result = await host.start(launch, { name, login });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
@@ -1062,7 +1101,10 @@ export function createInboxLaunch(options: {
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
       if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
       // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
-      if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) return { agent: host.agent, folder: value!.folder, ...trustOfTarget(value!) };
+      // `create: true` (Create a folder): its last folder may not be there yet; the Send makes it.
+      if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) {
+        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!) };
+      }
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
@@ -1089,8 +1131,13 @@ export function createInboxLaunch(options: {
       if (typed && (!typed.ok || (typed.real && isHomeItself(options.homeDir, typed.real)))) {
         throw new InboxError("validation_error", typed.ok === false && typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
       }
-      if (typed && (!typed.exists || !typed.real)) throw new InboxError("folder_missing", `${typed.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
-      const folderTarget = typed?.ok && typed.real ? typed.real : null;
+      // Create a folder (`create`): a path whose last folder isn't there is checked now and made last, after every check.
+      const creating = typed?.ok && typed.state !== "folder" && "folder" in target && target.create === true ? checkNewHomeFolder(options.homeDir, target.folder) : null;
+      if (creating && !creating.ok) throw new InboxError(creating.code, creating.message, { field: "to.launch" });
+      if (typed?.ok && typed.state === "locked") throw new InboxError("folder_unavailable", `Can't open ${typed.shown}: no permission. Nothing was sent.`, { field: "to.launch" });
+      if (typed && !creating && (!typed.exists || !typed.real)) throw new InboxError("folder_missing", `${typed.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
+      const toMake = creating?.ok && creating.real === null ? creating : null;
+      let folderTarget = typed?.ok && typed.real ? typed.real : null;
       const chosen = "project_id" in target ? store.project(target.project_id) : folderTarget ? (store.listProjects().find((p) => p.root === folderTarget) ?? null) : null;
       if ("project_id" in target && !chosen) throw new InboxError("project_not_found", `No project ${target.project_id}.`);
       if (chosen && !isFolder(chosen.root)) {
@@ -1119,8 +1166,19 @@ export function createInboxLaunch(options: {
       // composer's read ahead, or another launch's start), or when no read ever finished (`warm` reads one at
       // Inbox start).
       if (reading || shell === null) await readLogin();
-      // After the shell read (it says where the agent's own files are), and before a scratch folder is made.
-      const trust = pressedTrust(host, chosen ? chosen.root : (folderTarget ?? scratchRoot()), target.trust);
+      // After the shell read (it says where the agent's own files are), and before a scratch folder is made. A folder
+      // still to be made has nothing in it to trust or read: plain Send.
+      const trust = toMake ? null : pressedTrust(host, chosen ? chosen.root : (folderTarget ?? scratchRoot()), target.trust);
+      // Create a folder: made now, after every check (one level, never its parents).
+      let createdFolder: { real: string; made: boolean; inode: string } | null = null;
+      if (toMake) {
+        try {
+          createdFolder = makeHomeFolder(toMake.parent, toMake.name);
+        } catch {
+          throw new InboxError("folder_unavailable", `Can't make ${toMake.shown}. Nothing was sent.`, { field: "to.launch" });
+        }
+        folderTarget = createdFolder.real;
+      }
       const made = chosen || folderTarget ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
       const folder = made ? made.folder : chosen ? chosen.root : folderTarget!;
       let project: InboxProject;
@@ -1128,6 +1186,7 @@ export function createInboxLaunch(options: {
         project = chosen ?? (await input.resolveProject(folder));
       } catch (error) {
         if (made) rmSync(folder, { recursive: true, force: true });
+        if (createdFolder?.made) removeMadeFolder(createdFolder.real, createdFolder.inode);
         throw error;
       }
       const start = host.startOf(folder);
@@ -1138,6 +1197,8 @@ export function createInboxLaunch(options: {
         folder,
         scratch: !!made,
         ...(made ? { scratch_inode: made.inode } : {}),
+        // Create a folder: the Send made it (the failed line says it stays; a thread never written removes it again).
+        ...(createdFolder?.made ? { made_folder: true as const, made_inode: createdFolder.inode } : {}),
         started_at: new Date(now()).toISOString(),
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
@@ -1158,6 +1219,12 @@ export function createInboxLaunch(options: {
      * folder it made goes, and the project made for it while no thread is in it.
      */
     abandon(launch: InboxLaunchRecord, project: InboxProject): void {
+      // Create a folder: the folder this Send made goes again while it is the same one and still empty.
+      if (launch.made_folder && launch.made_inode) {
+        removeMadeFolder(launch.folder, launch.made_inode);
+        if (project.root === launch.folder && store.project(project.id) && store.listRows({ projectId: project.id }).length === 0) store.deleteProject(project.id);
+        return;
+      }
       if (!launch.scratch) return;
       if (scratchIntact(launch.folder, launch.scratch_inode)) rmSync(launch.folder, { recursive: true, force: true });
       if (project.root === launch.folder && store.project(project.id) && store.listRows({ projectId: project.id }).length === 0) store.deleteProject(project.id);

@@ -302,8 +302,28 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
-  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project.
-  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string } } | null>(null);
+  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project; `create`: the Send
+  // makes it (Create a folder). A draft's own folder pick comes back with it (D9), checked again below.
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string; create?: boolean } } | null>(() => {
+    const kept = request.draft?.start;
+    return kept ? { agent: kept.agent, projectId: `folder:${kept.folder}`, machine: kept.machine, folder: { path: kept.folder, name: kept.name, ...(kept.create ? { create: true } : {}) } } : null;
+  });
+  // A reopened draft's new folder that is there by now is no longer made (D9): one read, when the draft opens.
+  useEffect(() => {
+    const kept = request.draft?.start;
+    if (!kept?.create) return;
+    const read = new AbortController();
+    inboxApi.homeFolders(kept.folder, kept.machine, read.signal).then(
+      (answer) => {
+        if (answer.exists) setStartPick((pick) => (pick?.folder?.path === kept.folder && pick.folder.create ? { ...pick, folder: { path: kept.folder, name: kept.name } } : pick));
+      },
+      () => {},
+    );
+    return () => read.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The folder browser's path per machine, kept while compose is open (D2).
+  const keptPaths = useRef(new Map<string, string>());
   // A typed folder has no project id, so no sessions read can look at its files (Trust and start is not offered for it).
   const trustPick = startPick && !startPick.folder ? startPick : null;
   const { model, load: loadHere } = useComposeSessions(true, transport?.sessions, trustPick && !trustPick.machine ? { agent: trustPick.agent, project: trustPick.projectId } : null);
@@ -366,7 +386,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const agent = block?.agents.find((a) => a.agent === startPick.agent);
     // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
     if (agent && startPick.folder && !pulls && !box) {
-      return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, machine: startPick.machine };
+      return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, ...(startPick.folder.create ? { create: true as const } : {}), machine: startPick.machine };
     }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
     if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && ((!pulls && !box) || linkScratch)) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
@@ -667,7 +687,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
         to: start
           ? {
               launch: {
-                ...(start.scratch ? { agent: start.agent, scratch: true as const } : start.folder ? { agent: start.agent, folder: start.folder } : { agent: start.agent, project_id: start.project.id }),
+                ...(start.scratch
+                  ? { agent: start.agent, scratch: true as const }
+                  : start.folder
+                    ? { agent: start.agent, folder: start.folder, ...(start.create ? { create: true as const } : {}) }
+                    : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
               },
@@ -767,7 +791,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
       const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
       const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
+      const keptStart = start?.folder && !target ? { agent: start.agent, machine: start.machine, folder: start.folder, name: start.project.name, ...(start.create ? { create: true as const } : {}) } : null;
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
@@ -975,12 +1001,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
             aria-haspopup="listbox"
             aria-expanded={folderMenu}
             data-compose-folder-machine={start.machine ?? undefined}
-            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
+            data-compose-folder-new={start.create ? '' : undefined}
+            aria-label={`Start in: ${start.project.name}, ${start.create ? `a new folder at ${start.folder}, made when you send` : tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
             onClick={() => {
               setPicker(false);
               setFolderMenu((open) => !open);
             }}
           >
+            {/* A13: a folder the Send makes carries the new-folder mark until then. */}
+            {start.create && <Icon name="folderPlus" size={15} />}
             {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
             {/* Another machine's project names its machine, as the list's rows do ("billing-svc · Mac mini"). */}
             {startMachineName && (
@@ -1173,17 +1202,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
           onFolder={
             pulls || box
               ? undefined
-              : (folder, name, machine) => {
+              : (folder, name, machine, create) => {
                   // A folder that is one of that machine's projects already is that project (its trust facts and all).
                   const machineHome = machine ? (there.reads.get(machine)?.home ?? null) : home;
-                  const known = blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
-                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name } });
+                  const known = create ? undefined : blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
+                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name, ...(create ? { create: true } : {}) } });
                   setFolderMenu(false);
                   setError(null);
+                  if (create) say(`Starts in ${name}, a new folder made when you send.`);
                   textRef.current?.focus();
                 }
           }
           folderPicked={start.folder ? { folder: start.folder, machine: start.machine } : null}
+          kept={keptPaths.current}
           onScratch={(machine) => {
             setStartPick({ agent: start.agent, projectId: SCRATCH_PICK, machine });
             setFolderMenu(false);

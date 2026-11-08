@@ -1068,6 +1068,13 @@ export interface InboxLaunchRecord {
    * only while the same folder is still there, never one made later at that path.
    */
   scratch_inode?: string;
+  /**
+   * Create a folder (approval "launch-create-clone", A13): the Send made this folder. It stays when the agent doesn't
+   * start (the failed line says so, E8); a thread that was never written removes it again while it is empty.
+   */
+  made_folder?: true;
+  /** With `made_folder`: the folder's identity when it was made (`<dev>:<ino>`), so only that folder is ever removed. */
+  made_inode?: string;
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
   full_permissions?: true;
@@ -1121,6 +1128,8 @@ export interface InboxRun {
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
   attach_command: string | null;
+  /** `failed`, in a folder the Send made (Create a folder): that folder as the person knows it (`~/…`); the line says it was made and stays (E8). */
+  made_folder?: string;
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -3012,6 +3021,21 @@ export interface InboxDraft {
   pulls?: { keys: string[]; projects: string[]; ask_line: string };
   /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
   board_request?: true;
+  /**
+   * Where a new session would start, when the person picked a folder that is no project yet (approval
+   * "launch-create-clone", D8/D9): the agent, the machine (null: this computer), the folder as `~/…`, its name, and
+   * `create` when the Send makes it. Reopened, the pick comes back, checked again (a folder there by now is no longer made).
+   */
+  start?: InboxDraftStart;
+}
+
+/** A draft's folder pick (`InboxDraft.start`). */
+export interface InboxDraftStart {
+  agent: string;
+  machine: string | null;
+  folder: string;
+  name: string;
+  create?: true;
 }
 
 /** A draft's chip: its chosen session is live, has ended, or none was chosen. */
