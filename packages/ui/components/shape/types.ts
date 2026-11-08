@@ -131,6 +131,25 @@ export interface ShapeReviewAt {
   line?: number;
   step?: number;
   files?: boolean;
+  /**
+   * A stack badge's "Read it in the review" (`stackBadges`): the PR's chapter (`step`), narrowed to the files that PR
+   * changed in one part, with a way back to the board. A host that does not narrow lands on `step`, else the first
+   * file, as for any other place.
+   */
+  narrow?: ShapeReviewNarrow;
+}
+
+/** What "Read it in the review" narrows to: one PR's files in one part of the board. */
+export interface ShapeReviewNarrow {
+  /** The part's name, as the card says it ("The dialog"). */
+  part: string;
+  pr: number;
+  /** The PR's title. */
+  title?: string;
+  url?: string;
+  /** The PR's hue on the board (OKLCH degrees, `shapeStackHue`), so its number keeps its colour in the review. */
+  hue?: number;
+  files: string[];
 }
 
 /**
@@ -153,6 +172,11 @@ export interface ShapeSurfaceReview {
    * file the review does not change: the board opens the file in its own viewer instead.
    */
   open(at: ShapeReviewAt): boolean | Promise<boolean>;
+  /**
+   * The review's whole patch, for a stack badge's file in the code popup (`stackBadges`). Absent or null: the file
+   * opens whole, through `host.readFile`.
+   */
+  patch?(): Promise<string | null>;
 }
 
 export interface ShapeSurfaceProps {
@@ -205,4 +229,11 @@ export interface ShapeSurfaceProps {
    * the board is drawn as written in both themes, as before. See `darkContrast.ts`.
    */
   darkContrast?: boolean;
+  /**
+   * Stack badges (approval "stack-show-me", addendum 2026-11-06), on a board whose data names a stack of two or more
+   * PRs (`stack`): a row of the PRs under the title (a click keeps one PR's parts bright), a tag per PR on each part it
+   * changed, and the tag's card (what the PR did there, its files, "Read it in the review" through `review`). Absent:
+   * none of it, whatever the board holds.
+   */
+  stackBadges?: boolean;
 }

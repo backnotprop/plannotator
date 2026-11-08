@@ -99,6 +99,13 @@ ${SHAPE_PICTURE_LOOK}
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks. The Plannotator Inbox does not show it: there, What's changed opens the thread's own review.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` a picture, named as on the Picture (the store keeps a copy); \`pr\` and \`link\` an https URL.
 
+**A stack of PRs.** When the work lands as more than one pull request, add \`stack\` to the board so the person can see which PR changed which part.
+- \`stack.pulls\`: one entry per PR, in landing order: \`{ "n": 301, "title": "Which failures retry", "url": "https://github.com/…/pull/301", "step": 1 }\`. \`step\` is the PR's chapter in the guided review (1-based), when the review has one chapter per PR.
+- \`stack.changes\`: one entry per PR per part it changed: \`{ "part": "<a mark on How it works or the Picture>", "pr": 301, "said": "…", "files": [{ "path": "src/billing/errors.ts", "additions": 15, "deletions": 0, "lines": [[1, 15]] }] }\`.
+- \`said\` is one or two plain sentences about what that PR did in that part: what it adds or changes, not how the code is written.
+- \`files\` holds the files that PR changed for that part (1–30), with project paths. \`additions\`/\`deletions\` are optional; \`lines\` are optional ranges in the new file, and the code popup shows the hunks that meet them.
+- Leave \`stack\` out for a single PR; the board shows no badges then.
+
 ## Drawing rules
 
 Draw it however you like, by hand or from a one-off script. The board makes it behave (hover, tap, full view, the person's theme, phone) if you keep these.

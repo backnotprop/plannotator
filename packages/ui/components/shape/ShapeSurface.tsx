@@ -49,6 +49,7 @@ import { ShapeChanged, openShapeReview } from './ShapeChanged';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
 import { useShapeFollow } from './ShapeFollow';
+import { useShapeStack } from './ShapeStack';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
@@ -169,7 +170,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false, stackBadges = false }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -452,11 +453,16 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     else void openCodeTarget({ path, line });
   }, [codeView, openCode, openCodeTarget]);
 
+  // Stack badges (`stackBadges`): a host that asks, on a board whose data names a stack of two or more PRs.
+  const stack = useShapeStack({ enabled: stackBadges, version, phone, root: rootEl, review: boardReview, readFile: host.readFile ? readProjectFile : undefined });
+  const stackOpen = useRef(false);
+  stackOpen.current = stack.open;
+
   // Esc: close the panel; otherwise skip the drawing while it plays.
   const stopFollowRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || boxDragging.current) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || boxDragging.current || stackOpen.current) return;
       // A board the host covers (inert, such as the Inbox's review open over it) leaves Esc to what covers it.
       if (rootRef.current?.closest('[inert]')) return;
       // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
@@ -934,7 +940,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}
-          onBoard={v === 'how' && phase !== 'leaving' ? setHowBoard : undefined}
+          onBoard={phase === 'leaving' ? undefined : v === 'how' ? (stackBadges ? (b) => { setHowBoard(b); stack.boardFor('how')(b); } : setHowBoard) : stackBadges ? stack.boardFor('picture') : undefined}
           scenes={version.scenes}
           sceneLook="technical"
         />
@@ -1023,6 +1029,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               </div>
             </div>
             <p className={`shp-claim${fresh('claim')}`}><ShapeInline text={version.claim} /></p>
+            {stack.row}
           </header>
 
           <div
@@ -1341,6 +1348,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
             onClose={() => setViewer(null)}
           />
         )}
+        {stack.overlay}
         {viewer?.kind === 'file' && (
           <CodeFilePopout open onClose={() => setViewer(null)} filepath={viewer.path} contents={viewer.contents} line={viewer.line} revealKey={viewer.token} headerAction={fileAction({ path: viewer.path, line: viewer.line })} />
         )}
