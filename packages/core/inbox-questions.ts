@@ -97,6 +97,42 @@ export function inboxQuestionKeysWithRecommendedMarker(markdown: string): string
   return questionBlocksOf(markdown).flatMap(({ key, parsed }) => (parsed.recommendedMarker ? [key] : []));
 }
 
+/**
+ * A question line that reads as a `key: value` field (`id: sd-approach`): a
+ * short lower-case name, a colon, one token with no spaces. Tight on
+ * purpose, so a real question that starts with a word and a colon
+ * (`Deploy: should we wait?`) never matches; `https://…` is not a field.
+ */
+const KEY_VALUE_PROMPT_RE = /^[a-z][a-z_-]{0,19}\s*:\s*(?!\/\/)\S+$/;
+
+/** One question of a body worth a second look, in block order: `position` 1-based among the questions. */
+export interface InboxQuestionToCheck {
+  key: string;
+  position: number;
+  /** The question line, when it reads as a `key: value` field, not a question. */
+  reads_as?: string;
+  /** A pick-one or pick-several block (`:::question`, `:::question-multi`) with no choices: the person answers in words. */
+  no_choices?: string;
+}
+
+/**
+ * The questions of a body that likely do not ask what the agent meant (the
+ * send result says so; the send goes through): a question line that reads
+ * as a `key: value` field, as when an agent puts `id: …` first (the first
+ * line is the question; a later `id:` line is shown as context, so it is
+ * not named here), and a `:::question` or `:::question-multi` block with no
+ * choices, which the person answers in words. Pure; never throws.
+ */
+export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] {
+  return questionBlocksOf(markdown).flatMap(({ key, parsed }, index) => {
+    const prompt = parsed.prompt.trim();
+    const readsAs = KEY_VALUE_PROMPT_RE.test(prompt) ? prompt : null;
+    const noChoices = parsed.directiveKind !== "question-text" && parsed.choices.length === 0;
+    if (!readsAs && !noChoices) return [];
+    return [{ key, position: index + 1, ...(readsAs ? { reads_as: readsAs } : {}), ...(noChoices ? { no_choices: `:::${parsed.directiveKind}` } : {}) }];
+  });
+}
+
 /** Each question block of a body, parsed as the Inbox reads it. */
 function questionBlocksOf(markdown: string): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];

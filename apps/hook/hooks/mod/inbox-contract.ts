@@ -484,7 +484,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
-    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
+    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
@@ -660,6 +660,48 @@ export function inboxAgentTool(
 }
 
 /**
+ * A string that reads as a piece of JSON rather than a value: it opens with
+ * `{"` or `["`, or holds a quote, a comma or colon, and another quote or
+ * bracket (`", "` or `": [`), which is what is left when a value's quoting
+ * broke and the rest of the call ran into it.
+ */
+const INBOX_JSON_FRAGMENT_RE = /^\s*[{[]\s*"|"\s*[,:]\s*["[{]/
+
+/**
+ * Whether an agent tool call with no action the Inbox has reads as input
+ * that never arrived as fields (an agent's call with broken quoting, which a
+ * host hands over empty, as one leftover field, or with the rest of the call
+ * inside a value), rather than a readable call that names no action or a
+ * wrong one: an action holding quotes, brackets, colons or commas; or no
+ * action and nothing at all, only fields no Inbox tool takes, or a value
+ * that holds JSON.
+ */
+export function inboxInputUnread(input: Record<string, unknown>, tools: readonly InboxToolInfo[]): boolean {
+  const { action, ...rest } = input
+  if (typeof action === 'string') return /["{}[\]:,\n]/.test(action)
+  if (action !== undefined) return false
+  const keys = Object.keys(rest)
+  if (keys.length === 0) return true
+  const known = new Set(tools.flatMap((tool) => Object.keys(propertiesOf(tool))))
+  if (keys.every((key) => !known.has(key))) return true
+  return Object.values(rest).some((value) => typeof value === 'string' && INBOX_JSON_FRAGMENT_RE.test(value))
+}
+
+/** What an agent tool call whose input did not arrive as fields answers: what arrived, the quoting to check, a call that reads, and the actions. */
+export function inboxUnreadInputText(input: unknown, tools: readonly InboxToolInfo[]): string {
+  let got: string
+  if (input === null || input === undefined) got = 'it arrived empty'
+  else if (typeof input !== 'object') got = `it arrived as a ${typeof input}, not fields`
+  else if (Array.isArray(input)) got = 'it arrived as a list, not fields'
+  else {
+    const keys = Object.keys(input)
+    const named = keys.slice(0, 3).map((key) => JSON.stringify(key.slice(0, 40))).join(', ')
+    got = keys.length === 0 ? 'it arrived empty' : `it arrived as ${named}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}`
+  }
+  return `Invalid plannotator_inbox call: its input could not be read as fields (${got}). Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
+}
+
+/**
  * The Inbox tool call an agent tool call stands for: the action's own fields
  * (any other field is refused, naming the action's fields) plus the filled
  * arguments that tool takes. An agent's own `project_path` (shape-checked
@@ -673,11 +715,12 @@ export function inboxToolCall(
   tools: readonly InboxToolInfo[],
   filled: InboxFilledArguments,
 ): { name: string; arguments: Record<string, unknown>; projectPath?: string } | { error: string } {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Invalid plannotator_inbox call: expected an object with an action.' }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: inboxUnreadInputText(input, tools) }
   const { action, ...rest } = input as Record<string, unknown>
   if (action === INBOX_REMOVED_ACTION) return { error: INBOX_REMOVED_ACTION_TEXT }
   const tool = tools.find((candidate) => candidate.name === action)
   if (!tool) {
+    if (inboxInputUnread(input as Record<string, unknown>, tools)) return { error: inboxUnreadInputText(input, tools) }
     return {
       error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (this Plannotator Inbox has no ${action}; update Plannotator for it)` : ''}.`,
     }

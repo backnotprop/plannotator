@@ -44,6 +44,8 @@ import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREA
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
+import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
@@ -266,6 +268,16 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
+  // A question whose first line reads as `key: value`, or a pick-one block with no choices: the result text's advice, on stderr too.
+  const toCheck = result?.structuredContent?.questions_to_check;
+  const messageId = result?.structuredContent?.message_id;
+  if (Array.isArray(toCheck) && toCheck.length > 0 && typeof messageId === "string") {
+    try {
+      err(`${questionsToCheckText(messageId, toCheck as InboxQuestionToCheck[]).trim()}\n`);
+    } catch {
+      // A malformed list (never from this Inbox) prints no advice; the result below still does.
+    }
+  }
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }
