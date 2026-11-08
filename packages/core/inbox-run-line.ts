@@ -64,6 +64,8 @@ export interface InboxRunEvidence {
   connector?: string;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
+  /** The launch's folder as the person knows it (`~/…`), for the failed line of a folder the Send made. */
+  shownFolder?: string;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
   permissionSince?: number | null;
 }
@@ -99,7 +101,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   const error = e.launch.error;
   if (error) {
     if (error.code === "missing") return line("missing");
-    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at });
+    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at, ...(e.launch.made_folder ? { made_folder: e.shownFolder ?? e.launch.folder } : {}) });
   }
   if (e.permissionSince != null) return line("waiting_answer", { since: iso(e.permissionSince) });
   const host = e.host === "absent" ? null : e.host;

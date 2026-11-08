@@ -159,6 +159,26 @@ function checkPulls(value: unknown): InboxDraft["pulls"] | null {
   return { keys: [...(pulls.keys as string[])], projects: [...(pulls.projects as string[])], ask_line: pulls.ask_line };
 }
 
+/** A draft's folder pick (`InboxDraft.start`): `{ agent, machine, folder: "~/…", name, create? }`, or null. */
+function checkStart(value: unknown): InboxDraft["start"] | null {
+  if (value === null || value === undefined) return null;
+  const start = value as Record<string, unknown>;
+  const text = (v: unknown, max: number) => typeof v === "string" && v.length > 0 && v.length <= max;
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !text(start.agent, 64) ||
+    !(start.machine === null || isInboxId("ibx", start.machine)) ||
+    !text(start.folder, 4096) ||
+    !(start.folder as string).startsWith("~/") ||
+    !text(start.name, 255) ||
+    !(start.create === undefined || start.create === true)
+  ) {
+    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\", name, create? } or null.", { field: "start" });
+  }
+  return { agent: start.agent as string, machine: start.machine as string | null, folder: start.folder as string, name: start.name as string, ...(start.create === true ? { create: true as const } : {}) };
+}
+
 /** A long paste's place in a draft's words (`InboxDraftPasted`), checked; null when the file is not one. */
 function checkPasted(value: unknown, index: number, bodyLength: number, list = "files"): InboxDraftPasted | null {
   if (value === undefined || value === null) return null;
@@ -246,7 +266,7 @@ export function checkInboxDraftIds(input: unknown, list: string): string[] {
 export function saveInboxDraft(
   inboxDirPath: string,
   id: unknown,
-  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; pulls?: unknown; board_request?: unknown },
+  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; pulls?: unknown; board_request?: unknown; start?: unknown },
   at: string,
 ): InboxDraft {
   if (!isInboxId("drf", id)) throw new InboxError("validation_error", "id: a draft id (drf_…).", { field: "id" });
@@ -264,6 +284,7 @@ export function saveInboxDraft(
   const project = checkProject(input.project);
   const card = checkCard(input.card);
   const pulls = checkPulls(input.pulls);
+  const start = checkStart(input.start);
   const base = input.base === undefined ? null : input.base;
   if (base !== null && typeof base !== "string") throw new InboxError("validation_error", "base: the updated_at you read, or null to create.", { field: "base" });
   const existing = readInboxDraft(inboxDirPath, id);
@@ -291,6 +312,7 @@ export function saveInboxDraft(
     ...(pulls ? { pulls } : {}),
     // Compose's Board chip, kept as it was left (approval "inbox-compose-board-chip").
     ...(input.board_request === true ? { board_request: true as const } : {}),
+    ...(start ? { start } : {}),
   };
   const dir = draftsDir(inboxDirPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });

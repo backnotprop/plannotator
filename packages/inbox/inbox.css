@@ -8868,12 +8868,25 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-hfb-back:hover { background: var(--muted); color: var(--foreground); }
 .ib-hfb-field > svg.ib-ic { flex: none; }
 .ib-hfb-start .ib-cp-op b { font-weight: 600; }
-.ib-hfb-start > svg.ib-ic { color: var(--foreground); }
 .ib-hfb .ib-cp-none.ib-hfb-note { line-height: 1.45; overflow-wrap: anywhere; }
+/* Create a folder (approval "launch-create-clone", A1-A12): a lead row's mark is the accent (Start, Create, Go to); a
+   Create that waits behind a matching folder stays quiet; a folder that can't be opened is dimmed with its lock and
+   "no access"; the quiet line after a leading Create; the new-folder mark in To's folder button. */
+.ib-hfb-start > svg.ib-ic { color: var(--primary); }
+.ib-hfb-quiet .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+.ib-hfb-noaccess, .ib-hfb-noaccess .ib-cp-op { color: var(--muted-foreground); cursor: default; }
+.ib-hfb-noaccess-word { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-hfb-after { grid-column: 2 / -1; padding: 2px 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-hfb-sub { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
+.ib-cp-tobtn[data-compose-folder-new] > svg.ib-ic:first-child { color: var(--muted-foreground); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-cp-picker[data-phone] .ib-hfb-head { min-height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
   .ib-cp-picker[data-phone] .ib-hfb .ib-cp-none { font-size: var(--ib-fs-14, 14px); padding: 14px 8px; }
   .ib-cp-picker[data-phone] .ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+  /* G6: a phone hides the path column, so a new folder's place is the row's second line. */
+  .ib-cp-picker[data-phone] .ib-hfb-two { padding-top: 7px; padding-bottom: 7px; }
+  .ib-cp-picker[data-phone] .ib-hfb-two .ib-cp-op { white-space: normal; }
+  .ib-cp-picker[data-phone] .ib-hfb-after { font-size: var(--ib-fs-13-5, 13.5px); }
 }
 
 /* System → Set up a project (packages/inbox/system/SetupDialog.tsx; approval "system-inbox", screens 2b to 2d):
