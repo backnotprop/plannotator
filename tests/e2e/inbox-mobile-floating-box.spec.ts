@@ -8,6 +8,8 @@
  *    row over the clip, the mic and the link, and every press stays 44 px (the owner's call, train C: tap size first).
  *  - What yields is decided: the questions' words, then the comment count's word (its name stays whole), then "Open in
  *    thread" becomes "Thread". Only at text sizes the row cannot hold, or under 360 px, do the chips take their own row.
+ *    Round 3's row needs "Thread" at 360 (the full link is about 30 px short there), so the spec reads what the fitter
+ *    drew (the foot's `data-fit`) and checks the words on screen match it and that one step less would not fit.
  *  - Every control in the box is 44 px to press, measured by hit test: the controls keep their size, an overlay
  *    takes the press.
  *  - A long agent's name is cut on one line, in the header and in "Sent to …".
@@ -128,6 +130,53 @@ async function shortTargets(page: Page, selectors: readonly string[]): Promise<s
   }, selectors);
 }
 
+/** The step before each of the foot's fits (footFit.ts `cardFootFitCandidates`), with the open questions at their count. */
+const FIT_BEFORE: Record<string, string> = { chips: '', 'chips link': 'chips', 'stack chips': 'stack', 'stack chips link wrap': 'stack chips' };
+/** The one-row fits from 360 px up, in the order the row yields them. */
+const ONE_ROW_FITS = ['', 'chips', 'chips link'];
+
+/**
+ * What the card's foot gave up: its `data-fit` (footFit.ts), the words on screen of the pill, the open questions and the
+ * link, and whether the step before that fit would have held the row, asked as the fitter asks it (the chips one line,
+ * nothing past the chips or the foot). Null where there is no step before (nothing yielded, or the first stacked fit).
+ */
+async function footYield(page: Page): Promise<{ fit: string; commentWord: boolean; questions: string; link: string; before: boolean | null }> {
+  return card(page).evaluate((root, FIT_BEFORE) => {
+    const foot = root.querySelector<HTMLElement>('[data-fcomp-foot]')!;
+    const chips = foot.querySelector<HTMLElement>('.ib-fcomp-chips')!;
+    const fit = (foot.getAttribute('data-fit') ?? '').trim().split(/\s+/).filter(Boolean).join(' ');
+    const shown = (el: Element | null) => !!el && getComputedStyle(el).clip === 'auto';
+    const lt = foot.querySelector<HTMLElement>('[data-fcomp-open-thread] .ib-fcomp-lt')!;
+    const link = shown(foot.querySelector('[data-fcomp-open-thread] .ib-fcomp-lo')) ? 'Open in thread' : getComputedStyle(lt).textTransform === 'capitalize' ? 'Thread' : (lt.textContent ?? '');
+    let before: boolean | null = null;
+    if (fit in FIT_BEFORE) {
+      const was = foot.getAttribute('data-fit')!;
+      foot.setAttribute('data-fit', FIT_BEFORE[fit]!);
+      const tops = [...chips.children]
+        .filter((el) => getComputedStyle(el).display !== 'none' && getComputedStyle(el).position !== 'absolute')
+        .map((el) => el.getBoundingClientRect().top);
+      before = tops.every((top) => Math.abs(top - tops[0]!) <= 1) && chips.scrollWidth <= chips.clientWidth + 1 && foot.scrollWidth <= foot.clientWidth + 1;
+      foot.setAttribute('data-fit', was);
+    }
+    return {
+      fit,
+      commentWord: shown(foot.querySelector('[data-fcomp-comments] .ib-fcomp-w')),
+      questions: foot.querySelector('[data-fcomp-questions] [data-oq-words]')?.textContent ?? '',
+      link,
+      before,
+    };
+  }, FIT_BEFORE);
+}
+
+/** The words on screen are the ones the fit leaves, and the row gave up no more than it had to. */
+function expectYield(y: Awaited<ReturnType<typeof footYield>>, where: string): void {
+  const tokens = y.fit.split(' ');
+  expect(y.commentWord, `${where}: the comments' word (fit "${y.fit}")`).toBe(!tokens.includes('chips'));
+  expect(y.link, `${where}: the link's words (fit "${y.fit}")`).toBe(tokens.includes('link') ? 'Thread' : 'Open in thread');
+  if (tokens.includes('chips')) expect(y.questions, `${where}: the open questions at their count`).toBe('3');
+  if (y.before !== null) expect(y.before, `${where}: the row gave up "${y.fit}" where "${FIT_BEFORE[y.fit]}" fits`).toBe(false);
+}
+
 const FOOT_TARGETS = ['.ib-fcomp-clip', '[data-fcomp-comments]', '[data-fcomp-questions]', '[data-voice-mic]', '[data-fcomp-open-thread]'];
 const TOP_TARGETS = ['[data-fcomp-mode="comment"]', '[data-fcomp-mode="reply"]', '[data-fcomp-minimize]', '[data-fcomp-send]'];
 
@@ -218,10 +267,16 @@ for (const phone of PHONES) {
             }
             expect(await shortTargets(page, [...FOOT_TARGETS, '.ib-vnote .ib-dtlink']), where).toEqual([]);
             expect(await shortTargets(page, file === 'shot.png' ? TOP_TARGETS : ['[data-fcomp-minimize]', '[data-fcomp-send]']), where).toEqual([]);
-            // The pill's name is whole, however little of it shows; and the row chooses that over the link's words.
+            // The names are whole, however little of them shows. What shows is what the fit left (the comments' word goes
+            // before the link's), one row from 360 px up, and the row gave up no more than it had to.
             await expect(card(page).locator('[data-fcomp-comments]'), where).toHaveAccessibleName(`${t === seeded.two ? 2 : 12} comments`);
             await expect(card(page).locator('[data-fcomp-open-thread]'), where).toHaveAccessibleName('Open in thread');
-            await expect(card(page).locator('[data-fcomp-open-thread] .ib-fcomp-lo'), where).toHaveCSS('clip', 'auto');
+            // A fit drawn before the font loaded or the width changed is drawn again (a resize observer): wait for it.
+            await expect.poll(async () => (await footYield(page)).before, { message: where }).not.toBe(true);
+            const y = await footYield(page);
+            if (oneRow) expect(ONE_ROW_FITS, `${where}: fit "${y.fit}"`).toContain(y.fit);
+            else expect(y.fit, where).toMatch(/^stack\b/);
+            expectYield(y, where);
           }
         }
       });
@@ -252,18 +307,44 @@ for (const phone of PHONES) {
       await expect.poll(() => footProblems(page)).toEqual([]);
     });
 
-    test('what yields: at 360 the pill is its icon and number, at 390 its words come back beside the bare count', async () => {
+    test('what yields: at 360 the pill is its icon and number; at 390 the row gives up no more than at 360, and only what it must', async () => {
+      const open = async (t: Thread) => {
+        await page.goto('about:blank');
+        await page.goto(fileUrl(t, 'shot.png'));
+        await card(page).waitFor();
+        await page.locator('[data-fcomp-mode="reply"]').tap();
+        await expect.poll(() => footProblems(page)).toEqual([]);
+      };
       await page.setViewportSize({ width: 360, height: 640 });
-      await page.goto('about:blank');
-      await page.goto(fileUrl(seeded.twelve, 'shot.png'));
-      await card(page).waitFor();
-      await page.locator('[data-fcomp-mode="reply"]').tap();
+      await open(seeded.twelve);
       const word = card(page).locator('[data-fcomp-comments] .ib-fcomp-w');
       await expect(word).not.toHaveCSS('clip', 'auto');
       await expect(card(page).locator('[data-fcomp-questions]')).toHaveText('3');
+      await expect.poll(async () => (await footYield(page)).before).not.toBe(true);
+      const at360 = await footYield(page);
+      expectYield(at360, '360 px, 12 comments');
+      expect(ONE_ROW_FITS, `360 px, 12 comments: fit "${at360.fit}"`).toContain(at360.fit);
+      // Wider, the row gives words back in the order it gave them up, never more yielded than at 360. Which words come
+      // back depends on the font (round 3's row, with Send's word and the 44 px clip, is tight at 390); the order does not.
       await page.setViewportSize({ width: 390, height: 844 });
-      await expect(word).toHaveCSS('clip', 'auto');
-      await expect(card(page).locator('[data-fcomp-questions]')).toHaveAttribute('aria-label', '3 open questions');
+      await expect.poll(() => footProblems(page)).toEqual([]);
+      await expect.poll(async () => (await footYield(page)).before).not.toBe(true);
+      const twelve = await footYield(page);
+      expectYield(twelve, '390 px, 12 comments');
+      expect(ONE_ROW_FITS, `390 px, 12 comments: fit "${twelve.fit}"`).toContain(twelve.fit);
+      expect(ONE_ROW_FITS.indexOf(twelve.fit), `390 px, 12 comments: fit "${twelve.fit}" against "${at360.fit}" at 360`).toBeLessThanOrEqual(ONE_ROW_FITS.indexOf(at360.fit));
+      await expect(card(page).locator('[data-fcomp-questions]')).toHaveAccessibleName('3 open questions');
+      await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('12 comments');
+      await expect(card(page).locator('[data-fcomp-open-thread]')).toHaveAccessibleName('Open in thread');
+      // With 2 comments at 390 the words shown are the fit's, and a shorter count never gives up more than a longer one.
+      await open(seeded.two);
+      await expect.poll(async () => (await footYield(page)).before).not.toBe(true);
+      const two = await footYield(page);
+      expectYield(two, '390 px, 2 comments');
+      expect(ONE_ROW_FITS, `390 px, 2 comments: fit "${two.fit}"`).toContain(two.fit);
+      expect(ONE_ROW_FITS.indexOf(two.fit), `390 px, 2 comments: fit "${two.fit}" against "${twelve.fit}" with 12`).toBeLessThanOrEqual(ONE_ROW_FITS.indexOf(twelve.fit));
+      await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('2 comments');
+      await expect(card(page).locator('[data-fcomp-open-thread]')).toHaveAccessibleName('Open in thread');
     });
 
     test('text at twice the size: the chips take a row of their own, and nothing leaves the box', async () => {
