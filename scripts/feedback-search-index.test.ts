@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Gh, writeSearchIndex } from './feedback-search-index';
+import { type Gh, releaseTitles, writeSearchIndex } from './feedback-search-index';
 
 const notes = (heading: string) => `## What's New in v9\n\n### ${heading}\n\nIntro.\n\n## Install\n\n### Windows steps\n`;
 const roots: string[] = [];
@@ -58,4 +58,9 @@ test('a failed or empty read keeps the file', () => {
   expect(() => writeSearchIndex(root, () => { throw new Error('no network'); })).toThrow();
   expect(() => writeSearchIndex(root, (args) => (args[0] === 'api' ? '' : '[]'))).toThrow();
   expect(readFileSync(file, 'utf8')).toBe('KEPT');
+});
+
+test("a release's TL;DR and Not yet on headings are not features", () => {
+  const body = "## What's New in v9\n\n### TL;DR\n\n- **New:** A buoy\n\n### Harbor charts\n\nText.\n\n#### Not yet on\n\nHidden.\n\n## Install\n";
+  expect(releaseTitles(body)).toEqual(['Harbor charts']);
 });

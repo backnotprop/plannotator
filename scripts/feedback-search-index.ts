@@ -51,7 +51,7 @@ const SKIPPED_ISSUES = new Set([925, 956]);
 /** Bots and trackers. */
 const NOT_A_REQUEST = /^(chore\(deps\)|bump |dependency dashboard|pre-release manual qa)/i;
 /** Sections of release notes that are people or install steps. */
-const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog|plannotator( inbox)?$|plannotator\.ai$|smaller |additional |behavior changes|documentation updates|features$|ux( improvements)?$|tidy$|v\d)/i;
+const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog|plannotator( inbox)?$|plannotator\.ai$|smaller |additional |behavior changes|documentation updates|features$|ux( improvements)?$|tidy$|tl;dr$|not yet on$|v\d)/i;
 const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 
 const plain = (text: string) => text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/`|\*/g, '').replace(/\s+/g, ' ').trim();
