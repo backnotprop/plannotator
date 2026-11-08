@@ -51,6 +51,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   'decision-data': 'contents',
   about: 'info',
   capabilities: 'puzzle',
+  usage: 'clock',
 };
 
 /** Projects listed before the rest fold under "N more projects". */
@@ -117,6 +118,8 @@ export interface SettingsPageProps {
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
+  /** Settings → Usage: the threads hour by hour (components/UsageChart.tsx). Absent: no Usage section. */
+  usage?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
   /** The section on screen (`#settings/<section>`); null is `#settings` alone: General, or the list of sections on a phone. */
@@ -782,6 +785,7 @@ const LEDE: Record<SettingsSection, string> = {
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
   capabilities: 'What the Inbox does beyond your messages. Each switch turns a whole feature on or off.',
+  usage: 'Your threads hour by hour: one row per thread in the order they began, a mark for each hour with messages.',
 };
 
 /**
@@ -901,12 +905,12 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null) && (id !== 'usage' || props.usage !== undefined),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
-    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
+    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'usage' || id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
   ].filter((group) => group.ids.length > 0);
 
   const devicesDot = devicesNeedAttention(phonesOn ? phones : null, settings?.tailscale);
@@ -965,6 +969,7 @@ export function SettingsPage(props: SettingsPageProps) {
         // Only once Storage was opened this visit: the list never asks for the walk.
         return store ? formatBytes(store.bytes) : '';
       case 'decision-data':
+      case 'usage':
         return '';
       case 'about':
         return settings.version;
@@ -1072,6 +1077,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'decision-data':
         body = <DecisionAsk />;
+        break;
+      case 'usage':
+        body = props.usage ?? null;
         break;
       case 'about':
         body = about;

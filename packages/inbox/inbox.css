@@ -1576,6 +1576,55 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Capabilities → Experimental's heading takes focus when `#settings/experimental` lands there, like a section's h1. */
 .pn-inbox .ib-sgroup > h2[tabindex]:focus, .pn-inbox .ib-sgroup > h2[tabindex]:focus-visible { outline: none; }
 .ib-sgroup > .ib-callout { margin-bottom: 10px; }
+/* Settings → Usage (components/UsageChart.tsx): the threads hour by hour, one SVG of a few paths. Every colour is
+   the theme's: the accent (--ib-use-ink) mixed toward the surface the chart sits on (--ib-use-ground), so each
+   palette, light or dark, draws its own ramp. Moving the chart onto another surface sets --ib-use-ground there.
+   usageInk.ts sets --ib-use-ink (and --ib-use-strand) on the section when a palette's accent sits too close to
+   its card: the accent with just enough of the text colour that the faintest mark keeps 2:1. */
+.ib-usage { --ib-use-ground: var(--card); --ib-use-ink: var(--primary); }
+.ib-usage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.ib-usage-sum { margin-left: auto; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-usage-box { position: relative; min-width: 0; }
+.ib-usage-scroll { position: relative; overflow-x: clip; border-radius: 6px; outline: none; }
+.ib-usage-scroll[data-scrolls] { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.ib-usage-scroll:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring, var(--primary)) 55%, transparent); }
+.ib-usage-svg { display: block; touch-action: pan-x pan-y; }
+/* The day labels stay on top while the page scrolls (when the chart is not scrolling sideways itself). */
+.ib-usage-days { position: sticky; top: -28px; z-index: 1; margin-bottom: -34px; background: var(--ib-use-ground); pointer-events: none; }
+.ib-usage-day { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 6px 6px; overflow: hidden; white-space: nowrap; }
+.ib-usage-day + .ib-usage-day::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 0; width: 1px; background: var(--ib-hair); }
+.ib-usage-wd { font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); line-height: 1.2; }
+.ib-usage-dt { font-size: var(--ib-fs-13, 13px); color: var(--foreground); font-weight: 550; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ib-usage-dline { stroke: var(--ib-hair); stroke-width: 1; fill: none; shape-rendering: crispEdges; }
+.ib-usage-band { fill: var(--ib-hover); }
+/* Blend: a faint strand along each thread, then each run of hours as one translucent shape, a little more opaque
+   for busier runs. Mixed in oklab, which never turns the hue on its way to the surface (oklch's hue arc does). */
+.ib-usage-strand { stroke: color-mix(in oklab, var(--ib-use-ink) var(--ib-use-strand, 34%), var(--ib-use-ground)); stroke-width: 1; fill: none; }
+.ib-usage-t0, .ib-usage-t1, .ib-usage-t2 { fill: var(--ib-use-ink); }
+.ib-usage-t0 { fill-opacity: 0.62; }
+.ib-usage-t1 { fill-opacity: 0.76; }
+.ib-usage-t2 { fill-opacity: 0.9; }
+/* Dots (dev comparison, ?usage-look=dots): five steps from the accent near the surface to the accent toward the
+   text colour, so the brightest step stands out in light and dark alike. */
+.ib-usage-s0 { fill: color-mix(in oklab, var(--ib-use-ink) 56%, var(--ib-use-ground)); }
+.ib-usage-s1 { fill: color-mix(in oklab, var(--ib-use-ink) 70%, var(--ib-use-ground)); }
+.ib-usage-s2 { fill: color-mix(in oklab, var(--ib-use-ink) 85%, var(--ib-use-ground)); }
+.ib-usage-s3 { fill: var(--ib-use-ink); }
+.ib-usage-s4 { fill: color-mix(in oklab, var(--ib-use-ink) 55%, var(--foreground)); }
+.ib-usage-ring { fill: none; stroke: var(--foreground); stroke-width: 1.5; pointer-events: none; }
+.ib-usage-key { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 12px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+.ib-usage-key svg { display: block; }
+.ib-usage-note { margin: 0; padding: 18px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-usage-wait { height: 160px; }
+.ib-usage-tip { position: fixed; z-index: 90; max-width: 300px; padding: 9px 11px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); pointer-events: none; font-size: var(--ib-fs-12, 12px); line-height: 1.45; }
+.ib-usage-tip-n { font-weight: 600; font-size: var(--ib-fs-13, 13px); margin-bottom: 4px; overflow-wrap: anywhere; }
+.ib-usage-tip-v { font-variant-numeric: tabular-nums; }
+.ib-usage-tip-v b { font-weight: 600; }
+.ib-usage-tip-m { margin-top: 4px; color: var(--muted-foreground); }
+@media (max-width: 767px) {
+  .ib-usage-days { top: 0; }
+  .ib-usage-sum { margin-left: 0; width: 100%; }
+}
 .ib-spg > .ib-callout { margin-top: 16px; }
 .ib-card { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; background: var(--card); }
 .ib-card-pad { padding: 4px 16px 12px; }
