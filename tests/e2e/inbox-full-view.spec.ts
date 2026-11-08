@@ -253,12 +253,12 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   expect((await world.context.cookies(world.url)).find((c) => c.name === 'plannotator-html-chrome')).toBeUndefined();
 });
 
-test('annotating works as before: a pin opens the composer, Save adds a marker; the drawer does not open, the count goes up', async () => {
+test('annotating works as before: a pin opens the composer, Comment adds a marker; the drawer does not open, the count goes up', async () => {
   const page = world.page;
   await frame().locator('#flagged').click();
   await composer().fill('"Repeats" reads like duplicate charges to a claims team. Say "repeated tool calls".');
   await shot(page, 'html-annotating', ['dark']);
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(count()).toHaveAccessibleName('Comments, 1');
   await expect(pane()).not.toHaveClass(/ib-drawer/);
   await expect(pane()).toHaveAttribute('data-full-view', '');

@@ -2256,6 +2256,11 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-fvhandle-w { color: var(--foreground); }
 .ib-fvhandle-n { display: inline-flex; align-items: center; gap: 3px; }
 .ib-fvhandle-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); flex: none; }
+/* A comment not sent waits in the file (approval "inbox-comment-box", visible drafts): a dot on the arrows, in the
+   theme's red (no pink token), ringed in the handle's colour. The handle's name says it; the dot is hidden from readers. */
+.ib-fvhandle-arrows { position: relative; display: inline-flex; }
+.ib-fvhandle-cdot { position: absolute; top: -3px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--destructive); box-shadow: 0 0 0 1.5px var(--popover); }
+.ib-fvdock-phone .ib-fvhandle-cdot { top: -3px; right: -5px; width: 8px; height: 8px; }
 /* A comment saved while the drawer is closed: the count bumps once. */
 .ib-bump { display: inline-block; animation: ib-bump 380ms cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes ib-bump { 0% { transform: scale(1); } 35% { transform: scale(1.18); } 100% { transform: scale(1); } }
@@ -7421,57 +7426,100 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .pn-inbox .ib-tidy-pos[data-phone] .ib-tidy-bot .ib-btn { height: 44px; padding: 0 22px; font-size: var(--ib-fs-15, 15px); }
 }
 
-/* ── Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4; FullScreenComposer.tsx) ──────────────
-   One card floating at the bottom centre of an image, a film or an HTML page in full screen: the tabs on its top edge,
-   the minimize at its top right, the field and its buttons under them. Buttons 30 px (the toolbar's), tabs 24 px; keyboard
-   focus is a 2 px ring, never a filled block; no coloured border while typing. Comment is amber, Reply the primary. */
+/* ── Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4; restyled by "inbox-comment-box",
+   round 3; FullScreenComposer.tsx) ──────────────────────────────────────────────────────────────────────────────────
+   One opaque card floating at the bottom centre of an image, a film or an HTML page in full screen. Its top is a tinted
+   tray with the two tabs carved out of it (shape c: the picked tab in the card's own colour, joined by two curved feet;
+   the other quieter, with a dot while it holds words) and the chevron that hides the tools at its end. Under it, the
+   words, then one row: the reply's is Send first (the reply box's, T6), the paperclip and the mic, what rides, Open in
+   thread and the bin; a comment's is the file's tools at the left, the bin, and a solid "Comment" at the right end.
+   No frosted plate, no transitions on the buttons, no fill that changes on hover; focus is a 2 px ring. */
 .ib-fcomp {
-  --fc-line: color-mix(in oklch, var(--foreground) 10%, transparent);
-  --fc-accent: var(--primary);
+  --fc-line: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --fc-tray: color-mix(in oklch, var(--foreground) 7%, var(--popover));
   position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9;
-  box-sizing: border-box; width: min(680px, calc(100% - 32px)); padding: 6px 6px 6px 8px; border-radius: 14px;
-  background: color-mix(in oklch, var(--popover) 92%, transparent); color: var(--popover-foreground);
+  box-sizing: border-box; width: min(600px, calc(100% - 32px)); padding: 0; border-radius: 16px;
+  background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--fc-line);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -6px rgba(0, 0, 0, 0.45), 0 28px 60px -18px rgba(0, 0, 0, 0.55);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 30px -14px rgb(0 0 0 / 0.55);
   transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s);
 }
-:root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 9%, transparent); background: color-mix(in oklch, var(--popover) 94%, transparent); box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 8px 20px -6px rgba(20, 20, 30, 0.12), 0 24px 52px -20px rgba(20, 20, 30, 0.2); }
-.ib-fcomp.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
+:root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 11%, transparent); --fc-tray: color-mix(in oklch, var(--foreground) 4.5%, var(--popover)); box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 12px 30px -14px rgb(20 20 30 / 0.22); }
+.pn-inbox .ib-fcomp :is(button, .ib-btn, .ib-fvb) { transition: none !important; }
 
-/* The tabs (a radio group) on the card's top edge, and the minimize at its right. */
-.ib-fcomp-top { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; }
-.ib-fcomp-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in oklch, var(--muted) 60%, transparent); }
-.pn-inbox .ib-fcomp-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 550; white-space: nowrap; cursor: pointer; }
-.pn-inbox .ib-fcomp-tabs button:hover { color: var(--foreground); }
-.pn-inbox .ib-fcomp-tabs button.ib-on { background: var(--popover); color: var(--foreground); box-shadow: 0 0 0 1px var(--fc-line); }
-.pn-inbox .ib-fcomp-tabs button.ib-on .ib-ic { color: var(--fc-accent); }
-.ib-fcomp-solo { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* The tray and its tabs (one radio group), the chevron at its end. */
+.ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }
+.ib-fcomp-tabs { flex: 1 1 auto; display: flex; align-items: flex-end; gap: 10px; min-width: 0; padding-left: 4px; }
+.pn-inbox .ib-fcomp-tab {
+  position: relative; flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; margin-bottom: 2px; padding: 0 14px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground);
+  font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer;
+}
+.pn-inbox .ib-fcomp-tab:not(.ib-on):hover { color: var(--foreground); }
+.pn-inbox .ib-fcomp-tab.ib-on { height: 32px; margin-bottom: 0; border-radius: 10px 10px 0 0; background: var(--popover); color: var(--foreground); cursor: default; }
+/* A long agent name cuts the Reply tab, never the Comment tab; below 360 px the tabs drop their icons. */
+.pn-inbox .ib-fcomp-tab[data-fcomp-mode="comment"] { flex-shrink: 0; }
+.pn-inbox .ib-fcomp-tab[data-fcomp-mode="reply"] { min-width: 64px; }
+.ib-fcomp-tabl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp-tab .ib-ic { flex: none; }
+.ib-fcomp-tabdot { flex: none; width: 6px; height: 6px; border-radius: 3px; background: var(--primary); }
+.ib-fcomp-flare { display: block; position: absolute; bottom: 0; pointer-events: none; overflow: visible; fill: var(--popover); }
+.ib-fcomp-flare-l { left: -10px; }
+.ib-fcomp-flare-r { right: -10px; transform: scaleX(-1); }
+.pn-inbox .ib-fcomp-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+.ib-fcomp-solo { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 32px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-fcomp-solo b { color: var(--foreground); font-weight: 550; }
-.ib-fcomp-solo .ib-ic { color: var(--fc-accent); }
-/* The minimize is the toolbar's own button (.ib-fvb: 30 px square, 8 px corner, its muted hover); only its place is new. */
-.pn-inbox .ib-fcomp .ib-fcomp-min { margin-left: auto; width: 30px; padding: 0; }
+/* The chevron: the toolbar's own button (.ib-fvb), in the tray. */
+.pn-inbox .ib-fcomp .ib-fcomp-min { flex: none; align-self: center; width: 30px; height: 30px; margin: -4px 0 0 auto; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
 
-/* The row: the file's comment row, or the reply field and Send, flat inside the card. */
-.ib-fcomp-row { display: flex; align-items: flex-end; gap: 6px; }
-.ib-fcomp-slot { flex: 1; min-width: 0; display: flex; }
-.ib-fcomp-slot[hidden] { display: none; }
-.ib-fcomp-comment { flex: 1; min-width: 0; display: flex; }
-.ib-fcomp .ib-ccard { flex: 1; min-width: 0; max-width: none; padding: 0; border: 0; background: transparent; box-shadow: none; }
-.ib-fcomp .ib-ccard:focus-within { border-color: transparent; box-shadow: none; }
-.pn-inbox .ib-fcomp .ib-ccard .ib-ta { min-height: 36px; padding: 8px 6px; font-size: var(--ib-fs-14, 14px); }
-.pn-inbox .ib-fcomp .ib-ccard .ib-btn, .pn-inbox .ib-fcomp .ib-fcomp-send { height: 30px; border-radius: 8px; padding: 0 11px; gap: 6px; margin-bottom: 3px; font-size: var(--ib-fs-13, 13px); }
-.pn-inbox .ib-fcomp .ib-ccard .ib-csave { background: var(--warning, #e0a548); border-color: transparent; color: #1b1406; }
-.pn-inbox .ib-fcomp .ib-ccard .ib-csave:disabled { opacity: 0.55; }
-.ib-fcomp .ib-ccard .ib-vtime { margin-bottom: 3px; }
-.ib-fcomp-field { flex: 1; min-width: 0; }
-.ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 8px 6px; }
-.pn-inbox .ib-fcomp-send { flex: none; }
-.pn-inbox .ib-fcomp-send:disabled { opacity: 0.5; }
+/* The body: the words, then the row. A comment's row is the file's own comment row drawn into this grid (the slot, the
+   comment and its card are display: contents); the reply's row is one flex line (`.ib-fcomp-foot`) across it. */
+.ib-fcomp-body {
+  display: grid; align-items: center; column-gap: 2px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "thumbs thumbs thumbs thumbs" "field field field field" "tools mid end pri";
+  padding: 0 8px 8px;
+}
+.ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
+.ib-fcomp .ib-fcomp-slot[hidden] { display: none; }
+.ib-fcomp .ib-ccard > :is(.ib-kept, .ib-tipwrap:has(> :is(.ib-markup, .ib-vframe))) { grid-area: thumbs; justify-self: start; margin: 10px 0 0 4px; }
+.ib-fcomp .ib-ccard > :is(.ib-vtime, .ib-tipwrap:has(> .ib-vtime)) { grid-area: mid; justify-self: start; margin-left: 6px; }
+.pn-inbox .ib-fcomp .ib-ccard > .ib-ta { grid-area: field; width: 100%; min-width: 0; box-sizing: border-box; min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: var(--ib-fs-14, 14px); line-height: 1.5; outline: none; field-sizing: content; }
+.ib-fcomp .ib-ccard > .ib-tipwrap:has(> .ib-cbtn) { grid-area: tools; }
+.pn-inbox .ib-fcomp .ib-ccard .ib-cbtn { height: 30px; width: 30px; margin: 0; padding: 0; justify-content: center; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-cbtn-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ib-fcomp-cend { grid-area: end; display: inline-flex; align-items: center; }
+/* The comment button (the same as the comment card's, comment-card.css): the solid primary, squarer than Send's pill
+   (8 px, 12 px on a phone), "Comment" and no icon. Empty, only its fill lightens (65% of the primary on the card). */
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave {
+  grid-area: pri; display: inline-flex; align-items: center; height: 30px; margin: 0 0 0 8px; padding: 0 14px;
+  border: 0; border-radius: 8px; background: var(--primary); color: var(--primary-foreground);
+  font-size: var(--ib-fs-13, 13px); font-weight: 600; white-space: nowrap; opacity: 1;
+}
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave:disabled { background: color-mix(in srgb, var(--primary) 65%, var(--popover)); color: var(--primary-foreground); opacity: 1; cursor: default; }
+.ib-fcomp-field { grid-area: field; min-width: 0; padding: 6px 0 0; }
+.ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 6px; }
+.ib-fcomp .ib-fcomp-field :is(textarea, .ib-rtext):focus { outline: none; box-shadow: none; border-color: transparent; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-fcomp-bin:disabled { opacity: 0.35; cursor: default; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
+/* Send: the reply box's round pill (T6), first in the reply's row. */
+.pn-inbox .ib-fcomp-send { flex: none; height: 30px; margin: 0 4px 0 0; padding: 0 15px; border: 0; border-radius: 15px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.pn-inbox .ib-fcomp-send:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
+.pn-inbox .ib-fcomp-send:disabled { opacity: 0.45; }
 
-/* Under the row: the refused Send's words, and (only when something rides the Send, or it just went) the chips and Open in thread. */
-.ib-fcomp-err { margin: 2px 6px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
-.ib-fcomp-foot { display: flex; align-items: center; gap: 8px; min-height: 26px; margin: 4px 2px 0; padding-top: 4px; border-top: 1px solid var(--fc-line); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* The reply's row, and under it the refused Send's words. */
+.ib-fcomp-err { margin: 0 12px 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+.ib-fcomp-foot { grid-row: 3; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fcomp-foot > .ib-fcomp-chips { padding: 0 4px; }
+.pn-inbox .ib-fcomp-foot > .ib-fcomp-link { margin-left: auto; }
+.ib-fcomp-foot > .ib-fcomp-link ~ .ib-fcomp-bin { margin-left: 2px; }
+.pn-inbox .ib-fcomp:focus-visible { outline: none; }
+@media (max-width: 360px) {
+  .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab { padding: 0 12px; gap: 6px; }
+  .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab .ib-ic { display: none; }
+}
 /* The reply's paperclip (the reply box's AttachFilesButton), first in the toolbar, the card's 30 px button. */
 .pn-inbox .ib-fcomp .ib-fcomp-clip { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
 .pn-inbox .ib-fcomp .ib-fcomp-clip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -7494,7 +7542,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    panel: centred while it fits beside it, else moved left (--ib-foot-c). A phone's sheet hides it, as the sheet covers an
    image's card and hides the toolbar. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: var(--ib-foot-c); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { width: min(680px, var(--ib-foot-w)); }
+/* Round 3's card is 600 px: centred on half of that beside the panel (--ib-foot-c's own half is 340). */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { left: min(50%, calc(100% - 368px - min(300px, (100% - 392px) / 2))); width: min(600px, var(--ib-foot-w)); }
 /* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
 .ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
@@ -7567,15 +7616,21 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fcomp.ib-phone { left: 8px; right: 8px; width: auto; transform: none; bottom: calc(8px + env(safe-area-inset-bottom)); }
 /* With the keyboard up the full view ends at its top (`--ib-vvh`) and the home bar is under it: the card sits on the keyboard. */
 :root[data-ib-keyboard] .ib-fcomp.ib-phone { bottom: 8px; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tabs button { height: 32px; font-size: var(--ib-fs-13, 13px); }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-min, .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-clip { width: 36px; height: 36px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab { height: 44px; padding: 0 16px; gap: 8px; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab:not(.ib-on) { height: 44px; margin-bottom: 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab.ib-on { border-radius: 12px 12px 0 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-top { padding-top: 4px; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-bin) { width: 44px; height: 44px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-fcomp.ib-phone .ib-fcomp-field .ib-rtext, .ib-fcomp.ib-phone .ib-fcomp-field .ib-rmirror { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-ta { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
 }
-.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 40px; min-width: 40px; margin-bottom: 2px; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { width: 40px; height: 40px; padding: 0; justify-content: center; margin-bottom: 2px; }
-.ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 44px; min-width: 44px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { height: 44px; padding: 0 18px; border-radius: 22px; margin: 0 0 0 4px; font-size: var(--ib-fs-15, 15px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-csave, .pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-csave { height: 44px; padding: 0 18px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
+/* No bin on a phone (the owner's T6 note): the words go by clearing them. */
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-bin, .ib-fcomp-cend) { display: none; }
+.ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 44px; font-size: var(--ib-fs-13, 13px); }
 /* The foot is one row at 320 px and up. The mic takes its own room, not half the row's, so the chips get what is left;
    a chip never wraps or shrinks. When the row runs short, what yields is decided in footFit.ts (`cardFootFitCandidates`)
    and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
@@ -7608,8 +7663,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 /* 44 px to press, drawn on an overlay: the card's controls stay the size they are, and nothing moves. The top row's
    reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
 .ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
@@ -7624,13 +7679,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    the corner control still shows, the one way back. */
 .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-slot:not([hidden]) .ib-htmlcomment) .ib-fvdock[data-bar="tucked"] .ib-fvhandle { visibility: visible; }
 .ib-view.ib-fullview.ib-phone:has(.ib-htmlframe) .ib-fcomp.ib-phone { background: var(--popover); }
-.ib-htmlcomment { flex-direction: column; }
-.ib-htmlcomment-on { display: flex; align-items: center; gap: 2px; min-height: 44px; padding-left: 6px; }
-.ib-htmlcomment-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
-.pn-inbox .ib-htmlcomment-on .ib-fvb { flex: none; width: 44px; height: 44px; padding: 0; }
-.pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-btn { height: 44px; padding: 0 16px; }
-.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-tabs button { height: 44px; padding: 0 14px; }
-.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-min { width: 44px; height: 44px; }
+/* In the card's grid: what it is on reads as the line above the field; Parent and Child go to the row's tools, so the
+   only chevron on top is the one that hides the tools. */
+.ib-fcomp .ib-htmlcomment-on { display: contents; }
+.ib-fcomp .ib-htmlcomment-t { grid-area: thumbs; display: block; min-width: 0; margin: 0; padding: 10px 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb { grid-area: tools; justify-self: start; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb[data-html-comment-step="child"] { margin-left: 44px; }
+.ib-fcomp .ib-ccard > .ib-fcomp-field { grid-area: field; min-width: 0; }
 
 /* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,

@@ -614,6 +614,10 @@ packages/ui/components/html-viewer/HtmlViewer.reopenComment.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/ui/components/CommentPopover.card.test.tsx
+packages/ui/components/Viewer.commentDrafts.test.tsx
+packages/inbox/fullViewCommentDot.test.tsx
+packages/ui/components/diagram/DiagramComposer.card.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
 packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx

@@ -239,6 +239,11 @@ configurePlannotatorUI({
   digitHexIssueRefs: true,
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
+  // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css
+  // imports its sheet). Docked, it spans the pane the words are in and never covers the pane's reply bar or box.
+  commentCard: { pane: '.ib-fullview, [data-attachment-pane], section.ib-pane', foot: '.ib-pfoot, .ib-fcomp, [data-file-foot]' },
+  // A comment closed with words keeps them highlighted, with a "Draft" badge that opens it again.
+  visibleCommentDrafts: true,
   // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,

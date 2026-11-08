@@ -453,7 +453,7 @@ async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await frame.getByRole('heading', { name: 'Dead-lettered charges' }).click();
   const composer = page.locator('[data-comment-popover]');
   await composer.locator('textarea').first().fill('Say how many are waiting.');
-  await composer.getByRole('button', { name: 'Save' }).click();
+  await composer.getByRole('button', { name: 'Comment', exact: true }).click();
   const pin = frame.locator('[data-plannotator-marker]');
   await expect(pin).toHaveCount(1);
   await pointerOffTheEdge(page);

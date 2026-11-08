@@ -2110,7 +2110,7 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
 
     // So does the global comment's.
     const addGlobal = review.locator('[data-guide-global-comment-add]');
-    const global = page.getByPlaceholder('Add a global comment...');
+    const global = page.locator('[data-comment-popover]').getByPlaceholder('Add a global comment…');
     await comments.click();
     await addGlobal.click();
     await expect(global).toBeFocused();

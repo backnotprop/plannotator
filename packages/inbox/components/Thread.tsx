@@ -984,8 +984,8 @@ export function MessageBody({
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
     const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
-    // A link in the highlight stays a link.
-    if (!id || target.closest('a, button')) return;
+    // A link in the highlight stays a link. A comment not sent yet (its draft mark) is the Viewer's: it opens the box.
+    if (!id || target.closest('a, button') || mark?.classList.contains('comment-draft')) return;
     // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
     comments?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
@@ -4713,7 +4713,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           sendingFromComposer.current = false;
           const active = document.activeElement;
           if (active && active !== document.body && active.isConnected && !active.closest('[data-fcomp]')) return;
-          document.querySelector<HTMLElement>('[data-fcomp] .ib-fcomp-row > :not([hidden]) textarea, [data-fcomp-pill]')?.focus({ preventScroll: true });
+          document.querySelector<HTMLElement>('[data-fcomp] [data-fcomp-body] > :not([hidden]) textarea, [data-fcomp-pill]')?.focus({ preventScroll: true });
         });
       }
     }

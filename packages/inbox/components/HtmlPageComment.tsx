@@ -31,6 +31,7 @@ import { composerMinimized, openComposerComment, setComposerMinimized, showCompo
 import { Icon } from '../icons';
 import { isWindowPinched } from '../windowPinch';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
+import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
 
 export interface HtmlPageCommentOptions {
@@ -239,10 +240,10 @@ function HtmlCommentCard({
           <>
             {/* Pressing one keeps focus in the field, so the keyboard stays up. */}
             <button type="button" className="ib-fvb" onMouseDown={(event) => event.preventDefault()} onClick={() => onStep('parent')} aria-label="Comment on the element around it" data-html-comment-step="parent">
-              <Icon name="chevU" size={18} />
+              <Icon name="arrowUp" size={18} />
             </button>
             <button type="button" className="ib-fvb" onMouseDown={(event) => event.preventDefault()} onClick={() => onStep('child')} aria-label="Comment on the element inside it" data-html-comment-step="child">
-              <Icon name="chevD" size={18} />
+              <Icon name="arrowDown" size={18} />
             </button>
           </>
         )}
@@ -265,6 +266,7 @@ function HtmlCommentCard({
             tags={tags}
           />
         </div>
+        <FullScreenCommentBin />
         <button type="button" className="ib-btn ib-pri ib-csave" onClick={onSubmit} disabled={saving || words.trim() === ''} data-html-comment-save="">
           Comment
         </button>
