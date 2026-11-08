@@ -25,6 +25,7 @@ const { useShortcutScope } = (hasDom ? await import('@plannotator/ui/shortcuts')
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const prefs = await import('./shortcuts/prefs');
+const { withShortcut } = (hasDom ? await import('./shortcuts/hint') : {}) as typeof import('./shortcuts/hint');
 const { inboxAppShortcuts } = await import('./shortcuts/app.shortcuts');
 
 let root: Root | null = null;
@@ -504,9 +505,9 @@ test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from a
   expect(refreshes).toBe(3);
 });
 
-test.skipIf(!hasDom)('the list’s ↻ shows only Shift+R’s keycap beside it, keeps its words for screen readers, and drops both with single keys off', () => {
+test.skipIf(!hasDom)('the list’s ↻: its tooltip reads Refresh with the two keys ⇧ R, just Refresh with single keys or keycaps off; the button keeps its words and key name', () => {
   let refreshed = 0;
-  const list = () => (
+  const el = mount(
     <SidebarProvider>
       <InboxList
         title="Inbox"
@@ -521,29 +522,46 @@ test.skipIf(!hasDom)('the list’s ↻ shows only Shift+R’s keycap beside it, 
         phone={false}
         onRefresh={() => (refreshed += 1)}
       />
-    </SidebarProvider>
+    </SidebarProvider>,
   );
-  const el = mount(list());
   const button = () => el.querySelector<HTMLButtonElement>('.ib-lhead [data-list-refresh]')!;
-  // The keycaps are inside the button (an overlay, inbox.css `.ib-hover-kbd`): two, Shift and R, with no words of their own.
-  const group = button().querySelector<HTMLElement>('.ib-hover-kbd');
-  expect(group?.getAttribute('aria-hidden')).toBe('true');
-  expect(group?.textContent).toBe('');
-  const caps = [...(group?.querySelectorAll('kbd.ib-kbd') ?? [])].map((k) => k.getAttribute('data-keycap'));
-  // ⇧ on a Mac, Shift elsewhere (the registry's formatter).
-  expect(caps.length).toBe(2);
-  expect(caps[0]).toMatch(/^(⇧|Shift)$/);
-  expect(caps[1]).toBe('R');
+  // Nothing pops out beside the ↻: no keycap on the button itself, its icon the tooltip's own trigger.
+  expect(button().querySelector('kbd')).toBeNull();
+  expect(button().querySelector('[data-list-refresh-icon] svg.ib-ic-refresh')).not.toBeNull();
   expect(button().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
   expect(document.getElementById(button().getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Refresh the list');
   act(() => button().click());
   expect(refreshed).toBe(1);
+  // The tooltip's words (the same withShortcut the ↻ hands its Tip): Refresh, then one cap per key.
+  const tipHost = document.createElement('div');
+  document.body.append(tipHost);
+  const tipRoot = createRoot(tipHost);
+  restores.push(() => {
+    act(() => tipRoot.unmount());
+    tipHost.remove();
+  });
+  const drawTip = () => act(() => tipRoot.render(<SidebarProvider>{withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })}</SidebarProvider>));
+  drawTip();
+  expect(tipHost.textContent?.replace(/\s+/g, ' ').trim()).toMatch(/^Refresh ?(⇧|Shift) ?R$/);
+  expect(tipHost.querySelectorAll('kbd').length).toBe(2);
+  for (const off of [() => prefs.setSingleKeys(false), () => prefs.setKeyHints(false)]) {
+    act(off);
+    try {
+      drawTip();
+      expect(tipHost.querySelectorAll('kbd').length).toBe(0);
+      expect(tipHost.textContent?.trim()).toBe('Refresh');
+    } finally {
+      act(() => {
+        prefs.setSingleKeys(true);
+        prefs.setKeyHints(true);
+      });
+    }
+  }
+  // Single keys off: the button's key name goes too.
   act(() => prefs.setSingleKeys(false));
   try {
-    expect(button().querySelector('kbd')).toBeNull();
     expect(button().hasAttribute('aria-keyshortcuts')).toBe(false);
   } finally {
     act(() => prefs.setSingleKeys(true));
   }
-  expect(button().querySelectorAll('.ib-hover-kbd kbd').length).toBe(2);
 });

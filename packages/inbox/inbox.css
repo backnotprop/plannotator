@@ -822,21 +822,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-lhead-title:hover svg.ib-ic-refresh { opacity: 1; }
 }
 .pn-inbox .ib-lhead-title:focus-visible svg.ib-ic-refresh, .pn-inbox .ib-lhead-title[data-refreshing] svg.ib-ic-refresh { opacity: 1; }
-/* Shift+R's keycap on a ↻ (approval "inbox-refresh-key"; the list header's and Reviews' foot): no tooltip, the owner's
-   call on #2911. On hover or keyboard focus only it pops out just right of the ↻. In the header it is an overlay
-   (absolute), so the header never changes width; in Reviews' foot it follows the button in the row (below), so it never
-   covers the words. ShortcutHint leaves it out with single keys or Show keys on buttons off, and on a phone. */
-.pn-inbox .ib-lhead-title { position: relative; }
-/* The pane's own colour, and a ring of it: over the Reviews foot's words it covers them cleanly (as `.ib-sb-trigger-dot`). */
-/* Two caps, ⇧ and R (the owner: "better when it's two keys"), each `.ib-kbd`, a small gap between. */
-.pn-inbox .ib-hover-kbd { display: inline-flex; align-items: center; gap: 3px; position: absolute; top: 50%; left: calc(100% + 6px); z-index: 2; translate: 0 -50%; scale: 0.92; transform-origin: left center; opacity: 0; pointer-events: none; white-space: nowrap; background: var(--ib-pane-bg-s, var(--ib-main-bg)); box-shadow: 0 0 0 4px var(--ib-pane-bg-s, var(--ib-main-bg)); transition: opacity 120ms ease-out, scale 120ms ease-out; }
-/* Reviews' foot: in the row after the button, its room kept while hidden, so hover moves nothing. */
-.pn-inbox .ib-pr-foot > .ib-hover-kbd { position: static; flex: none; translate: none; box-shadow: none; }
-@media (hover: hover) {
-  .pn-inbox .ib-lhead-title:hover .ib-hover-kbd, .pn-inbox .ib-pr-refresh:hover + .ib-hover-kbd { opacity: 1; scale: 1; }
-}
-.pn-inbox .ib-lhead-title:focus-visible .ib-hover-kbd, .pn-inbox .ib-pr-refresh:focus-visible + .ib-hover-kbd { opacity: 1; scale: 1; }
-@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-hover-kbd { scale: 1; transition: opacity 120ms ease-out; } }
+/* The ↻'s tooltip trigger (its own, apart from the name's): the icon's box, nothing more. */
+.ib-lhead-ic { display: inline-flex; flex: none; }
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
 /* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
    out under the rows sliding past it (they are opaque and sit above it while they move). */

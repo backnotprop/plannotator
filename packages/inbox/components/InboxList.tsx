@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
-import { ShortcutHint, shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
@@ -1464,11 +1464,10 @@ export function InboxList(props: InboxListProps) {
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
-            {/* The ↻ has no words (the owner, on #2911: a tooltip over it is too heavy): on hover or keyboard focus only
-                Shift+R's keycap pops out beside it, over the header (inbox.css `.ib-hover-kbd`); its words stay for
-                screen readers (the description below, `aria-keyshortcuts`). The name keeps its own tooltip, as a
-                header without the ↻ has: a project's full name and folder (never beside the name), else the name
-                when the header cuts it. */}
+            {/* Two tooltips, each on its own part: the name's, as a header without the ↻ has (a project's full name and
+                folder, never beside the name; else the name when the header cuts it), and the ↻'s, below it: "Refresh"
+                with Shift+R's two keycaps (the owner, on #2911; withShortcut leaves the keys out with single keys or
+                Show keys on buttons off, and Tip opens on no touch screen). */}
             <button
               type="button"
               className="ib-lhead-title"
@@ -1481,8 +1480,11 @@ export function InboxList(props: InboxListProps) {
               <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
                 <span className="ib-lhead-tt">{props.title}</span>
               </Tip>
-              <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
-              <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-hover-kbd" split />
+              <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })} side="bottom">
+                <span className="ib-lhead-ic" data-list-refresh-icon="">
+                  <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
+                </span>
+              </Tip>
             </button>
           </h1>
         ) : (

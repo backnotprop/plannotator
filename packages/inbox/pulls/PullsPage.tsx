@@ -35,7 +35,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
@@ -331,21 +331,20 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
-      {/* No tooltip, as the list's ↻ (the owner, on #2911): on hover or keyboard focus only Shift+R's keycap shows beside it.
-          The keycap follows the button in the row, invisible until then, so it has its own room and never covers the
-          words or moves them (inbox.css `.ib-pr-foot > .ib-hover-kbd`); with no keycap drawn, no room is kept. */}
-      <button
-        type="button"
-        className="ib-iconbtn ib-pr-refresh"
-        onClick={onRefresh}
-        aria-label="Read the pull requests again"
-        aria-keyshortcuts={refreshKeys}
-        data-refreshing={loading ? '' : undefined}
-        data-pulls-refresh=""
-      >
-        <Icon name="refresh" size={14} />
-      </button>
-      <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-hover-kbd" split />
+      {/* As the list's ↻ (the owner, on #2911): "Refresh" with Shift+R's two keycaps, which Shift+R runs here. */}
+      <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })}>
+        <button
+          type="button"
+          className="ib-iconbtn ib-pr-refresh"
+          onClick={onRefresh}
+          aria-label="Read the pull requests again"
+          aria-keyshortcuts={refreshKeys}
+          data-refreshing={loading ? '' : undefined}
+          data-pulls-refresh=""
+        >
+          <Icon name="refresh" size={14} />
+        </button>
+      </Tip>
       <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
         {words}
       </span>
