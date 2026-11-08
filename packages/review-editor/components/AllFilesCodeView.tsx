@@ -9,12 +9,11 @@ import type {
   DiffLineAnnotation,
   FileDiffLoadedFiles,
   FileDiffMetadata,
-  LineAnnotation,
   PostRenderPhase,
   SelectedLineRange,
   VirtualFileMetrics,
 } from '@pierre/diffs';
-import { CodeView, EditProvider, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
 import { CODE_HIGHLIGHTER } from '@plannotator/core/code-highlighter';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
@@ -102,7 +101,7 @@ export type AllFilesOrder = 'tree' | 'kind' | 'list';
  *
  *  - CodeView is typed with `<DiffAnnotationMetadata>` so each diff item's
  *    `annotations: DiffLineAnnotation<DiffAnnotationMetadata>[]` and
- *    `renderAnnotation(annotation, item)` are fully typed.
+ *    `renderAnnotation(annotation, fileDiff, item)` are fully typed.
  *  - Annotations are grouped per file (the same projection AllFilesDiffView
  *    builds: side 'additions'/'deletions', lineNumber = ann.lineEnd, metadata =
  *    DiffAnnotationMetadata) and seeded onto each item at build time. When the
@@ -1334,18 +1333,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return map;
   }, [annotations, prUrl, prDiffScope]);
 
-  // Render a single annotation from item state. `renderAnnotation` receives both
-  // the LineAnnotation and DiffLineAnnotation union — guard `'side' in
+  // Render a single annotation from item state. CodeView calls it as
+  // (annotation, file or fileDiff, item): the owning item is the THIRD argument
+  // (it was the second before @pierre/diffs 1.6). Its method-style prop type is
+  // checked bivariantly, so a two-argument handler still compiles and silently
+  // gets the fileDiff as `item`: keep the tuple type. Guard `'side' in
   // annotation && item.type === 'diff'` (the Diffshub pattern) so file-item
   // annotations (none here) and metadata-less annotations are skipped. Actions
   // route by the OWNING item, not an active-file side channel.
   const renderAnnotation = useStableCallback(
-    (
-      annotation:
-        | DiffLineAnnotation<DiffAnnotationMetadata>
-        | LineAnnotation<DiffAnnotationMetadata>,
-      item: CodeViewItem<DiffAnnotationMetadata>,
-    ) => {
+    (...[annotation, , item]: CodeViewAnnotationArgs<DiffAnnotationMetadata>) => {
       if (!('side' in annotation) || item.type !== 'diff') return null;
       if (!annotation.metadata) return null;
       if (annotation.metadata.kind === 'context-note') {
