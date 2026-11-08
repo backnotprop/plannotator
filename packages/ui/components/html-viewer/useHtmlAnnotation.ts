@@ -62,6 +62,8 @@ export function formatBridgeProtocolWarning(
 // Collision-proof annotation ids. `Date.now()` alone repeats within a millisecond,
 // so two quick annotations could share a data-bind-id and clobber each other.
 let htmlAnnSeq = 0;
+// Ids for a host's reopenComment requests (restore-draft), unique per page.
+let htmlReopenSeq = 0;
 function nextHtmlAnnId(): string {
   return `html-ann-${Date.now().toString(36)}-${(htmlAnnSeq++).toString(36)}`;
 }
@@ -100,6 +102,8 @@ interface BridgeSelectionMessage {
   richCopy?: boolean;
   /** `text` was cut to MAX_SELECTION_TEXT_LENGTH (the page's selection is longer). */
   textCut?: boolean;
+  /** The `restore-draft` this selection answers (a host's `reopenComment`). */
+  restoreId?: string;
 }
 
 /** The bridge's answer to `rich-copy-request`: the pending range's markup
@@ -164,7 +168,8 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}unanchored`; ids: string[] }
   | { type: `${typeof PREFIX}resize`; height: number }
   | { type: `${typeof PREFIX}page-change`; pageUrl: string }
-  | { type: `${typeof PREFIX}link-click`; href: string };
+  | { type: `${typeof PREFIX}link-click`; href: string }
+  | { type: `${typeof PREFIX}restore-draft-missing`; id: string };
 
 /** Live proxied-app session credentials: the proxy origin messages must come
  * from, and the per-session token every message must echo. */
@@ -354,6 +359,11 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
   return { selector, tagName, text, ...(point ? { point } : {}) };
 }
 
+/** A `restore-draft` id (the host mints it): short, or none. */
+function parseRestoreId(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+}
+
 function parseTargetKey(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_TARGET_KEY_LENGTH
     ? value
@@ -412,7 +422,12 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         targetKey: parseTargetKey(value.targetKey) ?? undefined,
         targetLabel: parseTargetLabel(value.targetLabel),
         context: parseHtmlElementContext(value.context),
+        ...(parseRestoreId(value.restoreId) ? { restoreId: parseRestoreId(value.restoreId)! } : {}),
       };
+    }
+    case `${PREFIX}restore-draft-missing`: {
+      const id = parseRestoreId(value.id);
+      return id ? { type: value.type, id } : null;
     }
     case `${PREFIX}multi-target-added`: {
       const key = parseTargetKey(value.key);
@@ -533,7 +548,7 @@ export function useHtmlAnnotation({
   onHostDraft,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
-  "highlighterRef" | "highlightRange" | "highlightMathElement"
+  "highlighterRef" | "highlightRange" | "highlightMathElement" | "reopenComment"
 > & {
   /** Whether any pinned draft target is still displayed by the page. Always
    *  true while no composer is open. */
@@ -556,6 +571,10 @@ export function useHtmlAnnotation({
    *  for the unanchored union: a minted id the host never listed is a
    *  swapped-out local mark, not a host row. Read-only, stable identity. */
   createdAnnotationIds: ReadonlySet<string>;
+  /** HtmlViewer's reopenComment: the restore-draft message to post, or null. */
+  prepareReopen: (annotation: Annotation, onMissing?: () => void) => Record<string, unknown> | null;
+  /** Give up on a restore-draft not answered yet: its `onMissing` runs. */
+  expireReopen: (id: string) => void;
 } {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -623,6 +642,9 @@ export function useHtmlAnnotation({
   onHostDraftRef.current = onHostDraft;
   // The id of the draft the host holds, so a stale cancel cannot drop a newer one.
   const hostDraftIdRef = useRef<string | null>(null);
+  // A host's reopenComment waiting for the bridge's answer to restore-draft:
+  // the selection stamped with its id opens the composer holding its words.
+  const reopenRef = useRef<{ id: string; text: string; onMissing?: () => void } | null>(null);
   // The effective cap and whether the host set one: only an explicit cap
   // rides on arm-multi-select, so an unconfigured viewer posts today's message.
   const maxTargetsRef = useRef(resolveMaxAdditionalTargets(maxAdditionalTargets));
@@ -764,12 +786,19 @@ export function useHtmlAnnotation({
       }
 
       if (type === `${PREFIX}selection`) {
+        // The answer to a restore-draft that gave up waiting (expireReopen): its words went back to the host.
+        if (message.restoreId && reopenRef.current?.id !== message.restoreId) {
+          post({ type: `${PREFIX}cancel-selection` });
+          return;
+        }
         setPinVisible(true);
         setComposerWasHidden(false);
         pendingTextRef.current = message.text;
         pendingAnchorRef.current = message.anchor ?? null;
         pendingContextRef.current = message.context ?? null;
         setDraftTargets([]); // a new selection always starts a fresh draft
+        const reopen = message.restoreId && reopenRef.current?.id === message.restoreId ? reopenRef.current : null;
+        if (reopen) reopenRef.current = null;
         const reportDraft = onHostDraftRef.current;
         if (reportDraft) {
           // The host composes: HTML is comment-only, so every selection or
@@ -790,7 +819,7 @@ export function useHtmlAnnotation({
               htmlAnchor: message.anchor,
               elementContext: message.context,
             },
-            intent: message.pinpoint ? "compose" : "selection",
+            intent: message.pinpoint || reopen ? "compose" : "selection",
             label: message.targetLabel,
             cancel: () => {
               if (hostDraftIdRef.current !== id) return;
@@ -824,6 +853,8 @@ export function useHtmlAnnotation({
           // Pinpoint click-to-pin: the click already chose the target, so skip
           // the intermediate toolbar and go straight to the comment composer.
           || (message.pinpoint && currentMode === "selection")
+          // A host's reopenComment: the comment was being written, so it opens again.
+          || reopen
         ) {
           // Release iframe focus so the popover's textarea autofocus lands in the
           // parent (otherwise the iframe keeps focus and swallows further keys).
@@ -832,7 +863,10 @@ export function useHtmlAnnotation({
             anchorEl: anchor,
             contextText: message.text,
             selectedText: message.text,
-            draftKey: htmlCommentDraftKey(message.text, message.anchor, message.targetKey),
+            // A reopened comment holds the host's words, under its own key so
+            // no older draft of the same pin and quote takes their place.
+            ...(reopen ? { initialText: reopen.text } : {}),
+            draftKey: htmlCommentDraftKey(message.text, message.anchor, message.targetKey) + (reopen ? `:reopen:${reopen.id}` : ""),
           });
           // Pinpoint drafts arm shift-click multi-select: the clicked element
           // becomes the primary target of the (single) draft comment. The
@@ -898,6 +932,15 @@ export function useHtmlAnnotation({
             } : {}),
           });
         }
+      }
+
+      if (type === `${PREFIX}restore-draft-missing`) {
+        const pending = reopenRef.current;
+        if (pending?.id === message.id) {
+          reopenRef.current = null;
+          pending.onMissing?.();
+        }
+        return;
       }
 
       if (type === `${PREFIX}multi-target-added`) {
@@ -1271,6 +1314,72 @@ export function useHtmlAnnotation({
     pendingAnchorRef.current = null;
   }, [post]);
 
+  /**
+   * For HtmlViewer's reopenComment: the restore-draft message that pins the
+   * annotation's element again (or selects its words again), remembering the
+   * words for the composer it opens. Null when there is nothing to reopen it
+   * on. A request still waiting is replaced, and told it found nothing.
+   */
+  const prepareReopen = useCallback((annotation: Annotation, onMissing?: () => void): Record<string, unknown> | null => {
+    if (!enabledRef.current || annotation.type !== AnnotationType.COMMENT) return null;
+    const quote = annotation.originalText || "";
+    if (!annotation.htmlAnchor && !quote) return null;
+    const previous = reopenRef.current;
+    const id = `reopen-${Date.now().toString(36)}-${(htmlReopenSeq++).toString(36)}`;
+    reopenRef.current = { id, text: annotation.text ?? "", onMissing };
+    previous?.onMissing?.();
+    return {
+      type: `${PREFIX}restore-draft`,
+      id,
+      text: quote,
+      ...(annotation.htmlAnchor ? { anchor: annotation.htmlAnchor } : {}),
+    };
+  }, []);
+
+  /** The comment being written, as `commitComposerDraft` would add it (its words empty), touching nothing. */
+  const peekComment = useCallback((): Annotation | null => {
+    const open = commentPopoverRef.current;
+    if (!enabledRef.current || !open) return null;
+    const text = open.selectedText || pendingTextRef.current;
+    if (!text) return null;
+    const targets = draftTargetsRef.current;
+    const additionalTargets: HtmlAnnotationTarget[] | undefined =
+      targets.length > 1
+        ? targets.slice(1, 1 + maxTargetsRef.current).map((t) => ({
+            label: t.label,
+            text: t.text,
+            anchor: t.anchor ?? undefined,
+            ...(t.context ? { context: t.context } : {}),
+          }))
+        : undefined;
+    return {
+      id: "peek",
+      blockId: "",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: "",
+      originalText: text,
+      author: getIdentity(),
+      createdA: Date.now(),
+      htmlAnchor: pendingAnchorRef.current ?? undefined,
+      elementContext: pendingContextRef.current ?? undefined,
+      htmlAdditionalTargets: additionalTargets,
+    };
+  }, []);
+
+  /**
+   * A restore-draft with no answer yet (a bridge asset older than the
+   * message ignores it): the host gets its words back (`onMissing`), and a
+   * late answer is let go.
+   */
+  const expireReopen = useCallback((id: string) => {
+    const pending = reopenRef.current;
+    if (pending?.id !== id) return;
+    reopenRef.current = null;
+    pending.onMissing?.();
+  }, []);
+
   const removeHighlight = useCallback(
     (id: string) => {
       post({ type: `${PREFIX}remove-mark`, id });
@@ -1331,5 +1440,8 @@ export function useHtmlAnnotation({
     flashDraftTarget,
     composerFocusToken,
     createdAnnotationIds: mintedIdsRef.current,
+    prepareReopen,
+    expireReopen,
+    peekComment,
   };
 }

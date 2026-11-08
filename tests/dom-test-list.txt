@@ -131,7 +131,7 @@ packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
-packages/inbox/attachmentSteppingSave.test.tsx
+packages/inbox/fileCloseKeepsDraft.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
@@ -585,6 +585,10 @@ packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
+packages/ui/components/Viewer.reopenComment.test.tsx
+packages/ui/components/CodeFilePopout.reopen.test.tsx
+packages/ui/components/AnnotationPanel.reopenEdit.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.reopenComment.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx

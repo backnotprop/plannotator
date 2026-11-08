@@ -98,7 +98,7 @@ export interface StepKeyContext {
   full: boolean;
   /** The pane's own element: beside the thread, keys step only from inside it. */
   pane: HTMLElement | null;
-  /** The question row or the list is open: they own the keys. */
+  /** A menu or the list is open: they own the keys. */
   blocked: boolean;
 }
 
@@ -106,7 +106,7 @@ export interface StepKeyContext {
  * Whether a keydown steps, and which way: 1 next, -1 previous, null not a
  * step. `]` `[` always, except while typing, with ⌘ / Ctrl / Alt (⌘[ ⌘] are
  * the browser's Back and Forward), on auto-repeat, during an IME
- * composition, or when the question row or the list is open. `→` `←` the
+ * composition, or when a menu or the list is open. `→` `←` the
  * same, and also not with Shift, not where the focused element uses arrows
  * or sits in a block that scrolls sideways, not while a text selection
  * exists, and not when a handler already used the

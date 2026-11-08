@@ -14,8 +14,8 @@
  * keeps focus, and says "Last file in this thread"; the list opens
  * upward, grouped by message, and jumps; inside the HTML page a plain `]`
  * steps while armed (Annotate) and does nothing in Interact or in the page's
- * text field; a typed image comment raises the question row, Keep writing
- * returns to it and "Save it and go on" saves it and steps; one Back returns
+ * text field; a typed image comment never stops a step (its words wait for
+ * that image, back in its box when it opens again); one Back returns
  * to the thread; on a phone (always full screen) the toolbar's ⋯ opens every
  * file of the thread as a sheet.
  *
@@ -339,7 +339,7 @@ test('a file read before opens where it was left: scroll is kept per file until 
   await expect.poll(() => pane().locator('.ib-docscroll').evaluate((el) => el.scrollTop)).toBeGreaterThan(560);
 });
 
-test('a typed image comment asks before stepping: Keep writing returns to it, Save it and go on saves it and steps', async () => {
+test('a typed image comment never stops a step: its words wait for the image and are back in its box', async () => {
   const page = world.page;
   await label().click();
   await page.getByRole('gridcell', { name: /checkout-mobile\.png/ }).click();
@@ -347,33 +347,25 @@ test('a typed image comment asks before stepping: Keep writing returns to it, Sa
   const box = pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' });
   await box.fill('The Pay button sits under the fold on an iPhone SE. Move it up?');
   await nextButton().click();
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard).toContainText('Your comment on checkout-mobile.png is not saved yet.');
-  await expect(guard.getByRole('button', { name: 'Discard and go to refund-policy.pdf' })).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Save it and go on' })).toBeFocused();
-  await expectAt(4, 'checkout-mobile.png');
-  // ] does nothing while the question row is open.
-  await page.keyboard.press(']');
-  await expectAt(4, 'checkout-mobile.png');
-  await shot('05-guard');
-  await guard.getByRole('button', { name: 'Keep writing' }).click();
-  await expect(guard).toHaveCount(0);
-  await expect(box).toBeFocused();
-  await expect(box).toHaveValue('The Pay button sits under the fold on an iPhone SE. Move it up?');
-
-  await nextButton().click();
-  await page.locator('[data-step-guard]').getByRole('button', { name: 'Save it and go on' }).click();
+  // The first press steps: no question row, nothing saved.
   await expectAt(5, 'refund-policy.pdf');
-  await expect
-    .poll(async () => {
-      const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as {
-        annotations: { attachment_id: string; annotation: { text?: string } }[];
-      };
-      return model.annotations.filter((a) => a.attachment_id === world.ids['checkout-mobile.png']).map((a) => a.annotation.text);
-    })
-    .toEqual(['The Pay button sits under the fold on an iPhone SE. Move it up?']);
-  // Back on the image: its comment box is empty, not the last file's words.
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  const saved = async () => {
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as {
+      annotations: { attachment_id: string; annotation: { text?: string } }[];
+    };
+    return model.annotations.filter((a) => a.attachment_id === world.ids['checkout-mobile.png']).map((a) => a.annotation.text);
+  };
+  expect(await saved()).toEqual([]);
+  // Back on the image: the words are in its box again.
+  await page.locator('[data-step-prev]').click();
+  await expectAt(4, 'checkout-mobile.png');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' })).toHaveValue('The Pay button sits under the fold on an iPhone SE. Move it up?');
+  await shot('05-kept');
+  // Cleared on the comment itself: nothing waits.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' }).fill('');
+  await nextButton().click();
+  await expectAt(5, 'refund-policy.pdf');
   await page.locator('[data-step-prev]').click();
   await expectAt(4, 'checkout-mobile.png');
   await expect(pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' })).toHaveValue('');
