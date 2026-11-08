@@ -146,6 +146,7 @@
     "./inbox/ask": "./inbox/ask.ts",
     "./inbox/system-setup": "./inbox/system-setup.ts",
     "./inbox/debug-log": "./inbox/debug-log.ts",
+    "./inbox/decision-data": "./inbox/decision-data.ts",
     "./inbox/store": "./inbox/store.ts",
     "./inbox/project-key": "./inbox/project-key.ts",
     "./shape/format": "./shape/format.ts",

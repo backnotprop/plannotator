@@ -9145,12 +9145,65 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-dd-box .ib-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-dd-who { margin-top: 8px; }
 .ib-dd-who select { max-width: 100%; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
-.ib-sgroup > p.ib-dd-note { margin: 10px 0 0; }
+.ib-sgroup > p.ib-dd-note { margin: 10px 0; }
 @media (max-width: 480px) {
   .ib-dd-box { flex-wrap: wrap; }
   .ib-dd-box input { flex-basis: 100%; }
   .pn-inbox .ib-dd-box .ib-btn { max-width: 100%; }
 }
+.ib-dd { --ib-dd-mark: var(--primary); margin-top: 2px; }
+:root:not(.light) .ib-dd { --ib-dd-mark: oklch(from var(--primary) 0.65 c h); }
+.ib-sgroup > p b { font-weight: 600; color: var(--foreground); }
+.ib-dd-range { margin: 14px 0 2px; }
+.ib-dd-range .ib-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.ib-dd-trends { margin: 8px 0 18px; }
+.ib-sgroup .ib-dd-trends > p { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); margin: 0 0 2px; }
+.ib-dd-trends ul, .ib-dd-insights { list-style: none; margin: 0; padding: 0; }
+.ib-dd-insights { margin-top: 10px; }
+.ib-dd-insights li, .ib-dd-trends li { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 20px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--ib-fs-14, 14px); line-height: 1.45; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ib-dd-insights li:first-child, .ib-dd-trends li:first-child { border-top: 0; }
+.ib-dd-insights li > span, .ib-dd-trends li > span:last-child { color: var(--muted-foreground); }
+.ib-dd-insights b, .ib-dd-trends b { color: var(--foreground); font-weight: 600; }
+.ib-dd-insights li > span:last-child, .ib-dd-trends li > span:last-child { margin-left: auto; text-align: right; }
+.ib-dd-arrow { display: inline-block; width: 1.15em; color: var(--muted-foreground); }
+.ib-dd-sub { font-size: var(--ib-fs-14, 14px); font-weight: 600; margin: 22px 0 8px; color: var(--foreground); }
+.ib-dd-chart { position: relative; margin-top: 8px; }
+.ib-dd-chart svg { display: block; overflow: visible; }
+.ib-dd-grid { stroke: color-mix(in oklch, var(--border) 70%, transparent); stroke-width: 1; shape-rendering: crispEdges; }
+.ib-dd-axis { fill: var(--muted-foreground); font-size: var(--ib-fs-11, 11px); font-variant-numeric: tabular-nums; }
+.ib-dd-label { fill: var(--foreground); font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; stroke: var(--card); stroke-width: 3px; paint-order: stroke; stroke-linejoin: round; }
+.ib-dd-bar { fill: var(--ib-dd-mark); }
+.ib-dd-band { fill: color-mix(in oklch, var(--muted) 70%, transparent); }
+.ib-dd-tip { position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 1px; min-width: 150px; max-width: 220px; padding: 7px 10px; border-radius: 8px; background: var(--popover, var(--card)); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 2px 10px color-mix(in oklch, var(--foreground) 16%, transparent), 0 0 0 1px var(--ib-line); font-size: var(--ib-fs-12, 12px); line-height: 1.45; pointer-events: none; }
+.ib-dd-tip b { font-weight: 600; }
+.ib-dd-tip span { color: var(--muted-foreground); }
+.ib-dd-byday { margin-top: 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-dd-byday summary { cursor: pointer; }
+.ib-dd-byday-in { max-height: 220px; overflow: auto; margin-top: 6px; border: 1px solid var(--ib-line); border-radius: 8px; }
+.ib-dd-tbl { width: 100%; border-collapse: collapse; font-size: var(--ib-fs-13, 13px); }
+.ib-dd-tbl th { padding: 9px 14px 7px; text-align: left; font-weight: 500; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); border-bottom: 1px solid var(--ib-hair); white-space: nowrap; }
+.ib-dd-tbl td { padding: 8px 14px; border-bottom: 1px solid var(--ib-hair); vertical-align: middle; }
+.ib-dd-tbl tr:last-child td { border-bottom: 0; }
+.ib-dd-r { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
+.ib-dd-namecell { max-width: 0; width: 100%; }
+.ib-dd-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ib-dd-name > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-dd-thin { display: block; height: 4px; margin-top: 5px; border-radius: 2px; }
+.ib-dd-thin > span { display: block; height: 4px; min-width: 2px; border-radius: 2px; background: var(--ib-dd-mark); }
+.ib-dd-gap { height: 10px; }
+.ib-dd-gl { list-style: none; margin: 0; padding: 0; }
+.ib-dd-gl li { padding: 10px 14px; border-bottom: 1px solid var(--ib-hair); }
+.ib-dd-gl li:last-child { border-bottom: 0; }
+.ib-dd-gl-top { display: flex; justify-content: space-between; gap: 10px; font-size: var(--ib-fs-13, 13px); }
+.ib-dd-tnum { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-dd-gl-sub { margin-top: 5px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); line-height: 1.5; }
+.ib-sgroup > p.ib-dd-dash { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); margin: 10px 0 0; }
+.ib-dd-foot { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; font-size: var(--ib-fs-13, 13px); margin-top: 18px; color: var(--muted-foreground); }
+.ib-dd-meaning { margin-top: 24px; font-size: var(--ib-fs-13, 13px); }
+.ib-dd-meaning summary { cursor: pointer; font-weight: 600; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-dd-meaning ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted-foreground); line-height: 1.55; }
+.ib-dd-meaning li { margin-bottom: 5px; }
+.ib-dd-meaning b { color: var(--foreground); font-weight: 600; }
 
 /* Remote launch (the folder menu grouped by machine, approval "remote-launch"). "billing-svc · Mac mini" in To's folder
    button; the folder menu's "· you started it here last"; a machine where the agent can't start, one quiet line (with
