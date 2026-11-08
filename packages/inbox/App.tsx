@@ -101,11 +101,12 @@ import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SE
 import { ThreadWait } from './components/ThreadWait';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
+import { ConnectLine } from './components/ConnectLine';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { SystemSetupHost } from './system/SetupHost';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
-import { cardReport, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import { connectLineNews, noteQuestionRows } from './agents';
+import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus, STEPS_REFRESH_MS } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -954,11 +955,19 @@ function Inbox() {
   const [agentsSettled, setAgentsSettled] = useState(false);
   /**
    * The one-time agent-note dialog: open on this load (with the agents it
-   * asks about and the band's news, fixed when it opens), or shown on it.
-   * Decided once per load, after the sound dialog and never on a load that
-   * showed it.
+   * asks about, fixed when it opens), or shown on it. Decided once per load,
+   * after the sound dialog and never on a load that showed it. Since the note
+   * is written by itself for the agents proven to load it (approval
+   * "inbox-agent-note-auto"), it asks only about the others (Qwen Code,
+   * Cursor's copy by hand).
    */
-  const [agentNote, setAgentNote] = useState<'none' | 'shown' | { rows: InboxAgentRow[]; report: InboxConnectReport | null }>('none');
+  const [agentNote, setAgentNote] = useState<'none' | 'shown' | { rows: InboxAgentRow[] }>('none');
+  /**
+   * The connect line above the list (ConnectLine: the last run's news and the
+   * notes written by themselves), fixed when it first shows on this load; the
+   * Inbox is told at once that it was said, so the next load is clear.
+   */
+  const [connectLine, setConnectLine] = useState<ReturnType<typeof connectLineNews> | 'gone'>(null);
   const agentNoteDecided = useRef(false);
   /** The note dialog was decided on this load (shown or not): state, so the notification lines re-render when it is. */
   const [agentNoteSettled, setAgentNoteSettled] = useState(false);
@@ -5246,7 +5255,7 @@ function Inbox() {
           (cause) => !(cause instanceof InboxApiError) || cause.status === 404 || cause.status === 422,
         )
         .then((show) => {
-          if (show) setAgentNote({ rows, report: cardReport(model) });
+          if (show) setAgentNote({ rows });
           setAgentNoteSettled(true);
         });
       return true;
@@ -5260,6 +5269,30 @@ function Inbox() {
       clearInterval(timer);
     };
   }, [agentNoteReady]);
+  // The connect line (approval "inbox-agent-note-auto"; ConnectLine): once the agents are read (the run that
+  // opened the window has finished connecting and writing notes), the news not said yet shows above the list and
+  // on the first-run screen, quiet, never a dialog. Fixed for this load when it shows, and said at once
+  // (`POST /api/inbox/agents/seen`). Not over the tailnet: the agents are this computer's, as for the note dialog.
+  useEffect(() => {
+    if (connectLine !== null || !agentsSettled || !agents || !settings || settings.via === 'tailnet') return;
+    const news = connectLineNews(agents);
+    if (!news) return;
+    setConnectLine(news);
+    void inboxApi.agentsSeen().then(setAgents, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, agentsSettled, settings?.via, connectLine]);
+  const connectLineEl =
+    connectLine && connectLine !== 'gone' ? (
+      <ConnectLine
+        report={connectLine.report}
+        notes={connectLine.notes}
+        onDismiss={() => setConnectLine('gone')}
+        onSettings={() => {
+          setConnectLine('gone');
+          go({ page: 'settings', project: null, thread: null, section: 'agents' });
+        }}
+      />
+    ) : null;
   // Started, and the content cannot be had: the tour leaves without a word, back where it was started (the
   // first-run screen, Settings), recording nothing.
   useEffect(() => {
@@ -5587,16 +5620,21 @@ function Inbox() {
             </div>
           ) : null
         ) : // Not over the tailnet: that page is another device, and the first run is set up on this computer.
-        notifications.firstRunAsk && askLinesFree && !overTailnet ? (
-          <NotificationAsk
-            kind={notifications.firstRunAsk}
-            firstRun
-            soundOn={sound.settings.enabled}
-            movedFrom={settings?.notifications.allowed_origin ?? null}
-            onTurnOn={() => void notifications.turnOn()}
-            onNotNow={notifications.notNow}
-            onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
-          />
+        connectLineEl || (notifications.firstRunAsk && askLinesFree && !overTailnet) ? (
+          <>
+            {connectLineEl}
+            {notifications.firstRunAsk && askLinesFree && !overTailnet && (
+              <NotificationAsk
+                kind={notifications.firstRunAsk}
+                firstRun
+                soundOn={sound.settings.enabled}
+                movedFrom={settings?.notifications.allowed_origin ?? null}
+                onTurnOn={() => void notifications.turnOn()}
+                onNotNow={notifications.notNow}
+                onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
+              />
+            )}
+          </>
         ) : null
       }
     />
@@ -5944,19 +5982,23 @@ function Inbox() {
           notice={notice}
           stale={staleNotice}
           ask={
-            // The first real thread's inline ask (the tour's, once) stands in for this line while it shows.
-            notifications.ask && offerLinesFree && !(notifyAgain && notifyAgainThread !== null) ? (
-              <NotificationAsk
-                kind={notifications.ask}
-                soundOn={sound.settings.enabled}
-                movedFrom={settings?.notifications.allowed_origin ?? null}
-                onTurnOn={() => void notifications.turnOn()}
-                onNotNow={notifications.notNow}
-                onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
-              />
-            ) : notifications.slept && notifications.permission === 'granted' && offerLinesFree ? (
-              <TabSleptLine slept={notifications.slept} onDismiss={notifications.dismissSlept} />
-            ) : null
+            <>
+              {/* What the last run connected and the notes written by themselves (ConnectLine), above the notification lines. */}
+              {connectLineEl}
+              {/* The first real thread's inline ask (the tour's, once) stands in for this line while it shows. */}
+              {notifications.ask && offerLinesFree && !(notifyAgain && notifyAgainThread !== null) ? (
+                <NotificationAsk
+                  kind={notifications.ask}
+                  soundOn={sound.settings.enabled}
+                  movedFrom={settings?.notifications.allowed_origin ?? null}
+                  onTurnOn={() => void notifications.turnOn()}
+                  onNotNow={notifications.notNow}
+                  onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
+                />
+              ) : notifications.slept && notifications.permission === 'granted' && offerLinesFree ? (
+                <TabSleptLine slept={notifications.slept} onDismiss={notifications.dismissSlept} />
+              ) : null}
+            </>
           }
           // The title refreshes the list it names, the thread beside it staying open (the list adopts, as Show does).
           onRefresh={() => void refreshInbox(route.project, false)}
@@ -6556,14 +6598,7 @@ function Inbox() {
         />
       )}
       {typeof agentNote === 'object' && agents && (
-        <AgentNoteDialog
-          rows={agentNote.rows}
-          report={agentNote.report}
-          noteText={agents.note_text}
-          onModel={setAgents}
-          onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'agents' })}
-          onClosed={() => setAgentNote('shown')}
-        />
+        <AgentNoteDialog rows={agentNote.rows} noteText={agents.note_text} onModel={setAgents} onClosed={() => setAgentNote('shown')} />
       )}
       {tourIntroShown && (
         <div className="ib-tour-layer">

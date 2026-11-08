@@ -593,8 +593,13 @@ export interface PlannotatorConfig {
      * now, Don't add a note, or `plannotator inbox --notes`). Absent before
      * 0.28.19: `offered` alone then counts for the agents that could take a
      * note when it is first read (notesAsked in inbox-agent-notes.ts).
+     * Since the note is written by itself (approval "inbox-agent-note-auto"),
+     * an agent it was written for is listed too, and one the person turned
+     * off in Settings → Agents, so neither is ever written again by itself.
      */
     asked?: string[];
+    /** Notes written by themselves that the window has not said yet (`{ agent, path }`, path with `~`); cleared when said. */
+    auto?: { agent: string; path: string }[];
   };
   /**
    * The Plannotator Inbox's phone surface: pairing, the device door
