@@ -108,7 +108,6 @@ import {
   parseUpdateCheckEnv,
   resolveAutoUpdate,
   resolveUpdateCheck,
-  resolveInboxAskAi,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -451,11 +450,6 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
-  /**
-   * Ask AI (inbox-ask.ts). Default: `resolveInboxAskAi` (PLANNOTATOR_INBOX_ASK_AI,
-   * else off). Off, its routes answer the unknown-route 404.
-   */
-  askAi?: boolean;
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
@@ -1034,8 +1028,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
-  // Read once per start: Ask AI stays hidden until the owner has used it.
-  const askOn = options.askAi ?? resolveInboxAskAi();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -2348,12 +2340,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * lands, only config.json `inboxSystem` turns it on.
    */
   const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
-  /**
-   * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
-   * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
-   * so Show me). Read on every request, as the switch is.
-   */
-  const askOnNow = () => askOn || codeReviewOn();
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2728,8 +2714,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
-    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI, or Code review on): absent while it is off, and for a tailnet guest, who may not use it. */
-    ...(askOnNow() && !guest ? { ask_ai: true } : {}),
+    /** Ask AI, on in every Inbox: always true, kept for older windows that read it; absent for a tailnet guest, who may not use it. */
+    ...(!guest ? { ask_ai: true } : {}),
     /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
     cswap: !guest && accounts.installed(),
   });
@@ -3564,7 +3550,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOnNow,
     codeReviewOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
@@ -3852,8 +3837,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A launched session's permission hook (Claude Code's: inbox-launch-claude-permission.ts): guarded like the bridge below
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
-    // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    // Ask AI's client (inbox-ask-live.ts).
+    const askClient = path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
@@ -3959,7 +3944,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tourAnswer) return tourAnswer;
 
     try {
-      // Ask AI's session and query routes. Off, and on any other server path, they do not exist here.
+      // Ask AI's session and query routes. On any other server path, they do not exist here.
       if (path.startsWith("/api/ai/")) {
         const answer = await ask.aiRoute(req, path, via);
         if (answer) return answer;
@@ -4696,7 +4681,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
-      // Ask AI: off, this answers nothing and the path is an unknown route.
+      // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.

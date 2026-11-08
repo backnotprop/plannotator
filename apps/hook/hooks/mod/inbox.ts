@@ -52,7 +52,7 @@
  *
  * Ask AI: a poll answer can say a question waits on this session, and only
  * then does this link start a client on the session's Ask AI bridge
- * (`startAskClient`; the Inbox's setting off means none ever waits).
+ * (`startAskClient`).
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'

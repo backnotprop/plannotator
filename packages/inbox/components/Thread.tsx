@@ -1151,7 +1151,7 @@ export interface ThreadPaneProps {
   /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
   replyRequest?: string | null;
   onReplyOpened?: () => void;
-  /** Ask AI's icon (ask/useInboxAsk.tsx): null while this thread cannot ask, always null with the setting off. */
+  /** Ask AI's icon (ask/useInboxAsk.tsx): null while this thread cannot ask, always null with Ask off (the tour, a tailnet guest). */
   askButton?: React.ReactNode;
   /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
   shapeButton?: React.ReactNode;

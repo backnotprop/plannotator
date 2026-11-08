@@ -472,7 +472,7 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
-  /** Ask AI is on for this reader (PLANNOTATOR_INBOX_ASK_AI). Absent while it is off, for a tailnet guest, and from an older Inbox. */
+  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent for a tailnet guest and from an older Inbox. */
   ask_ai?: true;
   /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
   cswap?: boolean;
@@ -571,6 +571,14 @@ export interface InboxLaunchSettings {
  */
 export function tailnetGuest(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined): boolean {
   return settings?.via === 'tailnet' && settings.guest !== false;
+}
+
+/**
+ * Whether this page offers Ask AI: in every Inbox, with no switch (approval "inbox-ask-ai-flow", addendum
+ * 2026-11-07), once the settings say whose page it is; never for a tailnet guest, and never in the tour.
+ */
+export function inboxAskOn(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined, tourOn: boolean): boolean {
+  return settings != null && !tailnetGuest(settings) && !tourOn;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -1987,7 +1995,7 @@ export interface InboxEventHandlers {
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
    */
   onDrafts?: (threadId: string | null) => void;
-  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
+  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
