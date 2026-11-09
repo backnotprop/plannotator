@@ -213,6 +213,10 @@ export interface PRThreadComment {
   createdAt: string;
   url: string;
   diffHunk?: string;
+  /** The forge hides it (GitHub's minimized comment). */
+  isMinimized?: boolean;
+  /** Why, in the forge's words ("OFF_TOPIC", "outdated"), when it is hidden and says. */
+  minimizedReason?: string;
 }
 
 export interface PRReviewThread {
@@ -223,6 +227,8 @@ export interface PRReviewThread {
   line: number | null;
   startLine: number | null;
   diffSide: 'LEFT' | 'RIGHT' | null;
+  /** The side of `startLine` (GitHub), when the forge says: a range can start on a removed line and end on an added one. */
+  startDiffSide?: 'LEFT' | 'RIGHT' | null;
   comments: PRThreadComment[];
 }
 
@@ -237,8 +243,20 @@ export interface PRContext {
   comments: PRComment[];
   reviews: PRReview[];
   reviewThreads: PRReviewThread[];
+  /** The forge failed while `reviewThreads` was read: there may be more than this holds. */
+  threadsIncomplete?: boolean;
   checks: PRCheck[];
   linkedIssues: PRLinkedIssue[];
+  /** Who has been asked to review and has not yet, as far as the forge says. Absent when this read did not ask. */
+  requestedReviewers?: PRRequestedReviewer[];
+}
+
+export interface PRRequestedReviewer {
+  /** A person's or an app's login; a team as `org/team`. */
+  login: string;
+  avatarUrl?: string;
+  isBot?: boolean;
+  isTeam?: boolean;
 }
 
 export interface PRReviewFileComment {

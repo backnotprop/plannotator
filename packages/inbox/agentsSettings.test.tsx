@@ -12,6 +12,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import type { InboxLaunchSettings } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { AgentsSettings, repliesOf, offWords } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
@@ -72,7 +73,7 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   };
 }
 
-function mount(start: InboxAgentsModel) {
+function mount(start: InboxAgentsModel, launch?: InboxLaunchSettings) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -86,6 +87,7 @@ function mount(start: InboxAgentsModel) {
           render();
         }}
         context={{ command: ['/opt/plannotator', 'inbox', 'mcp'], mcpUrl: 'http://127.0.0.1:1/mcp', platform: 'mac' }}
+        {...(launch ? { launch } : {})}
       />,
     );
   act(() => {
@@ -163,6 +165,53 @@ test.skipIf(!hasDom)('a switch saves that one change and says it applies to the 
   act(() => showCursor.click());
   expect(group(el, 'cursor').querySelector('pre')?.textContent).toBe('note');
   expect(group(el, 'cursor').querySelector('.ib-cbox p')?.textContent).toBe("Copy this text into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+});
+
+test.skipIf(!hasDom)('"Start agents from New message": always shown, saves config.json\'s switch, and the launch rows follow it', async () => {
+  const on: InboxLaunchSettings = { enabled: true, full_permissions: false, follows: null, scratch_dir: '/Users/me/.plannotator/scratch', scratch_dir_shown: '~/.plannotator/scratch' };
+  const off: InboxLaunchSettings = { enabled: false, full_permissions: false };
+  let state = on;
+  const sent: { method: string; url: string; body: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    sent.push({ method, url, body });
+    if (method === 'POST' && body && typeof body.enabled === 'boolean') state = body.enabled ? on : off;
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), on);
+  await settle();
+  const enabledRow = () => el.querySelector('[data-launch-enabled-row]');
+  const launchRows = () => [!!el.querySelector('[data-launch-full-row]'), !!el.querySelector('[data-launch-scratch-row]')];
+  // Its own group, first, above the agents.
+  expect(el.querySelector('.ib-agents')!.firstElementChild!.hasAttribute('data-launch-enabled-group')).toBe(true);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+  const press = async () => {
+    await act(async () => (enabledRow()!.querySelector('[role="switch"]') as HTMLButtonElement).click());
+    await settle();
+  };
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }]);
+  expect(sent.find((r) => r.method === 'POST')!.url).toContain('/api/inbox/launch/settings');
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('off');
+  expect(enabledRow()!.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+  // Off: the rows for sessions you start hide; the switch stays to turn it back on.
+  expect(launchRows()).toEqual([false, false]);
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }, { enabled: true }]);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+});
+
+test.skipIf(!hasDom)('Windows (launch unsupported there): no switch, and no launch rows while off', () => {
+  const el = mount(model(), { enabled: false, full_permissions: false, unsupported: true });
+  expect(el.querySelector('[data-launch-enabled-row]')).toBeNull();
+  expect(el.querySelector('[data-launch-full-row]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('connected under another QWEN_HOME: shown off, where it is, and turning it on asks to move it here', async () => {
@@ -295,13 +344,10 @@ test.skipIf(!hasDom)('Your replies: a new turn through Plannotator\'s own tool, 
   expect(replies('cursor')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Your replies on Windows: Claude Code\'s mod stands down there, so its group says nothing about a new turn', () => {
-  const claude = tool('claude-code', 'Claude Code');
-  expect(repliesOf(claude, 'mac')).toEqual({ text: 'arrive as a new turn', wakes: true });
-  expect(repliesOf(claude, 'windows')).toBeNull();
-  // Pi's own extension still wakes it on Windows; an MCP agent is the same everywhere.
-  expect(repliesOf(tool('pi', 'Pi'), 'windows')?.wakes).toBe(true);
-  expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'), 'windows')?.wakes).toBe(false);
+test.skipIf(!hasDom)('Your replies: Claude Code and Pi arrive as a new turn on every platform, Windows included; an MCP agent reads them when it checks', () => {
+  expect(repliesOf(tool('claude-code', 'Claude Code'))).toEqual({ text: 'arrive as a new turn', wakes: true });
+  expect(repliesOf(tool('pi', 'Pi'))?.wakes).toBe(true);
+  expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'))?.wakes).toBe(false);
 });
 
 test.skipIf(!hasDom)('each switch left off says what that means for the agent, one line under it, only while it is off', async () => {

@@ -80,7 +80,7 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Each test asks in a thread of its own (a named thread: the session's default thread would be the first one). */
+/** Each test asks in a thread of its own, by name. */
 async function ask(subject: string, thread: string): Promise<string> {
   const sent = await world.claude.send({ project_path: world.billing, subject, thread, body: BODY }, { wakes: true });
   return sent.thread_id as string;
@@ -189,7 +189,7 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
 
   // Send: the words once, every answer once, no summary line in the words.
   await pane.locator('.ib-rbox').scrollIntoViewIfNeeded();
-  await pane.locator('.ib-acts').getByRole('button', { name: 'Send', exact: true }).last().click();
+  await pane.locator('.ib-rbox [data-reply-send]').click();
   await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
   const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
   expect(reply.split('Cards: the list is short').length).toBe(2);
@@ -260,12 +260,11 @@ test.describe('a phone (iPhone 15 screen)', () => {
     await expect(box).toHaveValue('Cards: the list is short.');
     // More answers than fit: the list holds about two and a half rows and scrolls, so the box
     // never eats the thread with the keyboard up.
-    // One tap at a time, each seen saved (two taps close together read as a double tap in Chromium's touch emulation).
-    await page.waitForTimeout(600);
+    // Quick taps, as a thumb makes them: the browser counts a tap near the last one as its second click, and a tap
+    // on another card's answer still picks (only a second tap on the same answer is a double tap).
     await choice(2, 'Code after').tap();
-    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'open', 'picked', 'open']);
-    await page.waitForTimeout(600);
     await choice(3, 'Footer').tap();
+    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'picked', 'picked', 'open']);
     await expect(list).toContainText('Your 5 answers go with this reply');
     const rows = list.locator('.ib-ranswers-l');
     const [shown, whole] = await rows.evaluate((el) => [el.clientHeight, el.scrollHeight]);

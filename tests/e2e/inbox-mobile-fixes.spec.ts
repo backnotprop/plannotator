@@ -289,19 +289,26 @@ for (const phone of PHONES) {
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
-      // The paperclip sits in the box's toolbar, as on a desktop (approval "inbox-reply-attach"): 36 px drawn, a 44 px tap area.
-      const attach = box.locator('.ib-rfoot [data-reply-attach]');
+      // The paperclip leads the box's row on a phone (approval "inbox-reply-box", T6; the owner: "I like attachment on
+      // left"): a 44 px button, all of it the tap area, with nothing over it.
+      const attach = box.locator('[data-reply-row] [data-reply-attach]');
       await expect(attach).toHaveCount(1);
-      const clip = box.locator('.ib-rfoot .ib-rclip');
+      const clip = box.locator('[data-reply-row] .ib-rclip');
       const target = (await clip.boundingBox())!;
-      expect(target.width).toBe(36);
-      expect(target.height).toBe(36);
+      expect(target.width).toBe(44);
+      expect(target.height).toBe(44);
+      const leads = await box.locator('[data-reply-row]').evaluate((row) => {
+        const controls = [...row.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+        const lefts = controls.map((el) => ({ clip: el.classList.contains('ib-rclip'), left: el.getBoundingClientRect().left }));
+        return lefts.sort((a, b) => a.left - b.left)[0]?.clip ?? false;
+      });
+      expect(leads).toBe(true);
       const tapArea = await clip.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const hit = (x: number, y: number) => el.contains(document.elementFromPoint(x, y));
-        return { left: hit(r.left - 3, r.top + r.height / 2), above: hit(r.left + r.width / 2, r.top - 3), below: hit(r.left + r.width / 2, r.bottom + 3) };
+        return { left: hit(r.left + 2, r.top + r.height / 2), top: hit(r.left + r.width / 2, r.top + 2), bottom: hit(r.left + r.width / 2, r.bottom - 2) };
       });
-      expect(tapArea).toEqual({ left: true, above: true, below: true });
+      expect(tapArea).toEqual({ left: true, top: true, bottom: true });
       // What the photo library hands over: a file named image.png (iOS) with no name a person chose.
       await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(1);

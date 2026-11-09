@@ -256,9 +256,9 @@ test.skipIf(!hasDom)('the sidebar: "Reload Claude Code N", a real button, opens 
   expect(row.querySelector('.ib-rw-label')!.textContent).toBe('Reload Claude Code');
   expect(row.querySelector('.ib-n')!.textContent).toBe(String(count));
   expect(row.textContent).toContain('the plugin from before the update; /reload-plugins loads the new one. Opens Settings, Agents.');
-  // Under the What's new spot and above Settings.
+  // Under the What's new spot and above Settings (its row in the sidebar layout's slot, #2924).
   const foot = document.querySelector('.ib-side-foot')!;
-  const order = [...foot.children].map((el) => (el.matches('[data-restart-sidebar]') ? 'restart' : el.matches('.ib-setrow') ? 'settings' : 'other'));
+  const order = [...foot.children].map((el) => (el.matches('[data-restart-sidebar]') ? 'restart' : el.matches('.ib-setrow, [data-sidebar-item="settings"]') ? 'settings' : 'other'));
   expect(order.indexOf('restart')).toBeLessThan(order.indexOf('settings'));
   await act(async () => row.click());
   await until(() => window.location.hash.includes('settings/agents'), 'Settings → Agents');

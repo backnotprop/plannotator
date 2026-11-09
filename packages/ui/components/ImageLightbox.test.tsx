@@ -206,6 +206,29 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
     expect(lightboxModule!.lightboxImageName({ src: '/x/image?src=a', alt: 'Option A' })).toBe('image');
   });
 
+  test('`at` opens the place asked for when two pictures share a URL (one picture shown for two choices); absent, the first', async () => {
+    const shared = [
+      { src: '/api/inbox/attachments/att_strip/image', alt: 'Strip', name: 'A · Strip left' },
+      { src: '/api/inbox/attachments/att_strip/image', alt: 'Strip', name: 'B · Strip right' },
+      { src: '/api/inbox/attachments/att_bar/image', alt: 'Bar', name: 'C · Bar' },
+    ];
+    const { ImageLightbox } = lightboxModule!;
+    const open = async (at?: number) => {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const root = createRoot(host);
+      await act(async () => {
+        root.render(<ImageLightbox src={shared[1]!.src} alt="Strip" images={shared} at={at} onClose={() => {}} />);
+      });
+      cleanups.push(() => root.unmount());
+      return host.querySelector('[data-image-lightbox]')!.getAttribute('aria-label');
+    };
+    expect(await open(1)).toBe('B · Strip right, image 2 of 3');
+    expect(await open()).toBe('A · Strip left, image 1 of 3');
+    // A place that is not that picture is not taken at its word.
+    expect(await open(2)).toBe('A · Strip left, image 1 of 3');
+  });
+
   test('a finger steps to the next picture and stops at the last; a drag down at Fit closes', async () => {
     let closed = 0;
     const { host, area } = await mountNamed(() => closed++);

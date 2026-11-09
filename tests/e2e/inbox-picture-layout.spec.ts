@@ -178,7 +178,7 @@ test('nothing moves when the pictures load: two wide pictures share the width, b
 
 test('phone screenshots: narrow columns, three across in a 726 px card, two in a 390 px window, one in a 320 px one', async () => {
   await open('phones');
-  await page.getByRole('button', { name: 'Hide the sidebar and the list' }).first().click();
+  await page.locator('.ib-listcol .ib-handle-hit').first().click();
   let l = await loaded(6);
   expect(rows(l)).toEqual([3, 3]);
   expect(Math.max(...l.tiles.map((t) => t.tile.w))).toBeLessThanOrEqual(320);

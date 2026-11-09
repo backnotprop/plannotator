@@ -1,6 +1,7 @@
 /**
- * A made-up board with What's changed (a kettle that now whistles once), for the format, store, server and board
- * tests. Invented content only.
+ * A made-up board that still carries `views.changed` (once What's changed; accepted, never shown since approval
+ * "shape-whats-changed-removed"): a kettle that now whistles once, for the format, store, server and board tests.
+ * Invented content only.
  */
 import type { ShapeBoard, ShapeChanged } from '../../packages/core/shape';
 

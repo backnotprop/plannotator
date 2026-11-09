@@ -2,8 +2,8 @@
  * Linked machines in the window (docs/agent-guides/inbox-machines.md), on the
  * window's own components: a row from another machine reads its machine where
  * it reads its project ("billing-svc · MacBook"); an asleep machine's rows are
- * greyed under one "MacBook asleep since …" line; the sidebar lists Machines
- * as a filter beside Projects; the list's ⋯ menu offers "Hide offline
+ * greyed under one "MacBook asleep since …" line; the sidebar's Agents section
+ * names each machine, a filter beside Projects; the list's ⋯ menu offers "Hide offline
  * machines"; Settings → Machines lists each machine with its state and
  * version, Unlink asks twice, and the link form sends a pasted link or an
  * address and six digits. With no machine linked none of it is drawn.
@@ -163,7 +163,7 @@ async function menuHasHideOffline(): Promise<boolean> {
   return found;
 }
 
-test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed row, no "Hide offline machines", no Machines section', async () => {
+test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed row, no "Hide offline machines", no machine in the sidebar', async () => {
   // A never-linked Inbox's merged list names this machine alone.
   list([machine(SELF, 'Studio', 'online')], [OWN]);
   expect(label('msg_own')).toBe('billing-svc');
@@ -175,7 +175,7 @@ test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed ro
   host?.remove();
   host = null;
   mount(<Sidebar {...sidebarProps({ machines: machinesModel([machine(SELF, 'Studio', 'online')]) })} />);
-  expect(document.querySelector('[data-sidebar-section="machines"]')).toBeNull();
+  expect(document.querySelector('[data-sidebar-section="agents"]')).toBeNull();
   expect(document.querySelector('[data-machine]')).toBeNull();
   expect(document.querySelector('[data-sidebar-section="projects"]')).not.toBeNull();
 });
@@ -230,12 +230,40 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
-test.skipIf(!hasDom)('the sidebar lists Machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet', () => {
+test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates: a tailnet guest gets none, in the sidebar or on its Settings row', () => {
+  const update = { phase: 'behind' as const, target: '0.28.49', from: '0.28.39', can_update: true, self_update: true };
+  const list = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { update })];
+  const model = machinesModel(list);
+  const fresh = () => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  };
+  mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
+  expect(host!.querySelector('.ib-mthing')?.textContent).toBe('Update');
+  fresh();
+  mount(<Sidebar {...sidebarProps({ machines: model })} />);
+  expect(host!.querySelector('[data-machine]')).not.toBeNull();
+  expect(host!.querySelector('.ib-mthing')).toBeNull();
+  expect(host!.querySelector('[data-machine-notice]')).toBeNull();
+  fresh();
+  mount(<MachinesSection machines={list} via="local" onChanged={noop} onMachineUpdate={noop} />);
+  expect(host!.textContent).toContain('0.28.49 is out');
+  fresh();
+  mount(<MachinesSection machines={list} via="tailnet" onChanged={noop} />);
+  expect(host!.textContent).toContain('MacBook');
+  expect(host!.textContent).not.toContain('0.28.49');
+  expect(host!.textContent).not.toContain('is out');
+});
+
+test.skipIf(!hasDom)("the sidebar's Agents names the machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet", () => {
   const picked: string[] = [];
   const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline')]);
   mount(<Sidebar {...sidebarProps({ machines: model, machineCounts: new Map([[SELF, 1], [MAC, 2]]), onMachine: (id) => picked.push(id) })} />);
   const headers = [...document.querySelectorAll('[data-sidebar-section]')].map((h) => h.getAttribute('data-sidebar-section'));
-  expect(headers.indexOf('machines')).toBeLessThan(headers.indexOf('projects'));
+  expect(headers.indexOf('agents')).toBeGreaterThanOrEqual(0);
+  expect(headers.indexOf('agents')).toBeLessThan(headers.indexOf('projects'));
   const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-machine]')];
   expect(rows.map((r) => r.querySelector('.ib-name')!.textContent)).toEqual(['Studio', 'MacBook']);
   expect(rows[1]!.hasAttribute('data-away')).toBe(true);

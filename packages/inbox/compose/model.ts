@@ -4,6 +4,7 @@
  * React and no requests here, so each rule is tested alone.
  */
 
+import { parseInboxGitUrl } from '@plannotator/core/inbox-git-url';
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
@@ -113,9 +114,10 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
  * first-run screen) names its session; focus then starts in the message.
  * A draft saved with nobody in To opens the same way as a plain one.
  */
-export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null }): { chosen: string | null; focus: 'to' | 'message' } {
+export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown; launch?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
-  return { chosen, focus: chosen ? 'message' : 'to' };
+  // "+" on a project row (F3), and Agents' Add agent: To is filled, so the cursor starts in the message.
+  return { chosen, focus: chosen || request.start || request.launch ? 'message' : 'to' };
 }
 
 /** "started 2:41 PM": when the session started, without its host. */
@@ -352,7 +354,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
 export const actionLabel = (action: ComposeAction): string =>
   action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
 
-// ── Launch: start a new session from To (behind `inboxLaunch.enabled`; docs/agent-guides/inbox-launch.md) ──
+// ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
 /** A project the folder menu lists (`InboxComposeLaunch.projects`). */
 export type LaunchProject = InboxComposeLaunch['projects'][number];
@@ -371,6 +373,40 @@ export interface ComposeStart {
    * takes it (`~/code/billing-api`): `project` stands in for it (`folderProject`), and the Send names the folder.
    */
   folder?: string;
+  /** With `folder`: Create a folder (approval "launch-create-clone"): the Send makes it. */
+  create?: true;
+  /** With `folder`: Clone from a git URL (approval "launch-create-clone"): the Send clones the repo into it, then starts. */
+  clone?: ComposeClone;
+}
+
+/** A clone pick: the URL as pasted (the server reads it again), and what the words name (`acme/billing-api` on github.com). */
+export interface ComposeClone {
+  url: string;
+  host: string;
+  slug: string;
+  branch?: string;
+}
+
+/**
+ * A failed clone's Change the URL (E5): the run line asks the window for New message with the URL in the folder
+ * menu's filter, To the same agent and machine, and the same words (`ComposeRequest.clone`).
+ */
+export const COMPOSE_CLONE_EVENT = 'plannotator-inbox:compose-clone';
+export interface ComposeCloneRequest {
+  url: string;
+  agent: string;
+  machine: string | null;
+  /** The folder the clone was going to (`~/…`). */
+  folder: string | null;
+  body: string;
+}
+
+/** A draft's clone pick as compose holds it, its words read from the URL again (null: the URL is no repo's now). */
+export function cloneOfUrl(url: string, branch?: string): ComposeClone | null {
+  const repo = parseInboxGitUrl(url);
+  if (!repo || repo.kind !== 'repo') return null;
+  const pickedBranch = branch ?? repo.branch;
+  return { url, host: repo.host, slug: repo.slug, ...(pickedBranch ? { branch: pickedBranch } : {}) };
 }
 
 /** A folder start's stand-in project: never a project id, so no project's facts or check marks are taken for it. */
@@ -448,7 +484,9 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
 
 /** The status line beside Send for a start: none, as for a message to a live session, unless the folder is gone (screen 13). */
 export function startStatusLine(start: ComposeStart): string {
-  return start.project.exists ? '' : 'Pick a folder to start in.';
+  if (!start.project.exists) return 'Pick a folder to start in.';
+  // C13, decision 11a: what the Send does first.
+  return start.clone ? `Clones ${start.clone.slug}, then starts ${start.name}.` : '';
 }
 
 // ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──
@@ -501,6 +539,40 @@ export type LaunchHistory = ReadonlyMap<string, { at: string; project: string }>
  * Where the person last started an agent on each machine, from the list's rows: a launched thread's row carries
  * `run` (its key, even when null), and the merged list names its `machine`. Each machine keeps its newest.
  */
+/** The agent the person started last from New message (a launched row's addressee), for "+" on a project row (F3); null: none yet. */
+export function lastLaunchAgent(rows: readonly { created_at: string; run?: unknown; addressee?: { host: string } | null }[]): string | null {
+  let last: { at: string; host: string } | null = null;
+  for (const row of rows) {
+    if (!('run' in row) || !row.addressee) continue;
+    if (!last || row.created_at > last.at) last = { at: row.created_at, host: row.addressee.host };
+  }
+  return last?.host ?? null;
+}
+
+/** "+" on a project row's tip and name (F1, F4): the project, its machine when it is another, and that it waits while asleep. */
+export function newSessionTip(name: string, machineName: string | null, asleep: boolean): string {
+  return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
+}
+
+/** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
+export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boolean): boolean {
+  return launchEnabled === true && !guestPage;
+}
+
+/**
+ * "+" on one project row: hidden where it can't start anything, so a press never opens New message with an empty To
+ * or a folder to pick again. That machine's launch block (this computer's, or a linked machine's last read): no
+ * agent to start there, or the project's folder isn't there any more. A linked machine with launch off (`launch:
+ * false`) has none either. Not read yet, or asleep: shown (F4: it starts when the machine is back).
+ */
+export function projectCanStart(project: { id: string; root: string }, block: InboxComposeLaunch | null | undefined, machineLaunch?: boolean | null): boolean {
+  if (machineLaunch === false) return false;
+  if (!block) return true;
+  if (block.agents.length === 0) return false;
+  const known = block.projects.find((p) => p.id === project.id) ?? block.projects.find((p) => p.root === project.root);
+  return known?.exists !== false;
+}
+
 export function launchHistory(rows: readonly { machine?: string; project: { id: string }; created_at: string; run?: unknown }[]): Map<string, { at: string; project: string }> {
   const out = new Map<string, { at: string; project: string }>();
   for (const row of rows) {
@@ -548,8 +620,11 @@ export function launchGroups(input: {
   const linked = input.machines.filter((m) => !m.self && m.state !== 'revoked');
   const theirs = linked.map((m, i) => {
     const asleep = m.state === 'offline';
-    const words = m.launch === false ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
     const read = reads.get(m.id);
+    // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
+    // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
+    const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
+    const words = off ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
     return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
   });
   const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {

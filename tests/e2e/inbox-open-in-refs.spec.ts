@@ -154,7 +154,8 @@ function fakes(dir: string, launches: string, patch: string) {
       '  "api repos/"*) exit 1;;',
       'esac',
       `if [ "$1" = api ] && [ "$2" = graphql ]; then cat '${join(dir, 'pulls.json')}'; exit 0; fi`,
-      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo "' + '8'.repeat(40) + '"; exit 0; fi',
+      // The PR read around its patch: head and description as one JSON line (`| tojson`); a plain `.head.sha`, raw.
+      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo \'{"sha":"' + '8'.repeat(40) + '","body":null}\';; *) echo "' + '8'.repeat(40) + '";; esac; exit 0; fi',
       `if [ "$1" = api ] && [ "$2" = --hostname ]; then cat '${join(dir, 'pr.patch')}'; exit 0; fi`,
       'exit 1',
       '',
@@ -174,10 +175,9 @@ const REVIEW_GUIDE = {
 function board(patch: string) {
   return {
     title: 'Back off between retries',
-    claim: 'Built. The loop now waits [^1].',
+    claim: 'Built. The loop now waits [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
     views: {
       picture: { html: '<svg viewBox="0 0 700 240" width="700" height="240"><g data-step="1" data-mark="loop" data-code="src/ledger.ts#L1" data-ref="1"><rect class="ink" x="40" y="70" width="260" height="90" rx="12"/><text x="170" y="120" text-anchor="middle">The retry loop</text></g><g data-step="2" data-mark="gone" data-ref="3"><rect class="acc-fill" x="400" y="70" width="260" height="90" rx="12"/><text x="530" y="120" text-anchor="middle" class="t-acc">A file that is gone</text></g></svg>', width: 700, height: 240 },
-      know: 'The loop waits 0.5 s, 2 s, then 8 s [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
       code: {
         stage: 'after',
         guide: { title: 'Back off between retries', intent: 'Wait before retrying, in `src/retry.ts:3`.', sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }] }] },
@@ -471,21 +471,20 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
       await expect(popout).toBeVisible();
 
-      // What to know: resting on a code span shows its code, with Open. One that is not a file shows nothing.
+      // The board's claim: resting on a code span shows its code, with Open. One that is not a file shows nothing.
       await page.reload();
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-      await expect(page.locator('.shp-view.v-know.drawn')).toBeVisible(); // its fade in has finished, for the picture
-      const knowWindow = await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'));
-      await expect(knowWindow).toContainText('export const ledger');
-      await knowWindow.locator('[data-open-in-caret]').click();
-      const knowMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
-      await expect(knowMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
-      await shot(page, `13-board-know-code-span-${colorScheme}`);
-      const knowCount = launched().length;
-      await knowMenu.locator('[data-open-in-item="reveal"]').click();
-      await expect.poll(() => launched().length).toBe(knowCount + 1);
+      await expect(page.locator('.shp-view.v-picture.drawn')).toBeVisible(); // its fade in has finished, for the picture
+      const claimWindow = await codeWindowOf(page, page.locator('.shp-claim [data-code-hover="src/ledger.ts"]'));
+      await expect(claimWindow).toContainText('export const ledger');
+      await claimWindow.locator('[data-open-in-caret]').click();
+      const claimMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
+      await expect(claimMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `13-board-claim-code-span-${colorScheme}`);
+      const claimCount = launched().length;
+      await claimMenu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(claimCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/ledger.ts')));
-      await noCodeWindow(page, page.locator('.shp-know [data-code-hover="react.js"]'));
+      await noCodeWindow(page, page.locator('.shp-claim [data-code-hover="react.js"]'));
       // The board's Chat tab is the thread: its messages' words too.
       await page.locator('.shp-tbtn.chat').click();
       await page.locator('.shp-tabs [role="tab"]', { hasText: 'Thread' }).click();
@@ -495,12 +494,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
       await page.getByRole('button', { name: 'Close panel' }).click();
       // The number beside it is still the number.
-      await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
-      // Commenting (the crosshair, in Annotate's place), the words are only words: nothing shows, and a click picks them.
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+      await expect(page.locator('.shp-claim [data-ref="1"]').first()).toBeVisible();
+      // Commenting (the crosshair, in Annotate's place), the claim's words are only words: nothing shows.
+      await page.locator('.shp-tbtn', { hasText: 'Shape' }).first().click();
       await page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true }).click();
-      await expect(page.locator('.shp-know [data-code-hover]')).toHaveCount(0);
-      await noCodeWindow(page, page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }));
+      await expect(page.locator('.shp-claim [data-code-hover]')).toHaveCount(0);
+      await noCodeWindow(page, page.locator('.shp-claim code', { hasText: 'src/ledger.ts:1' }));
 
       // The review's own words: its intent names a file.
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
@@ -702,7 +701,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
 
       // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
-      await page.locator('section.ib-pane [data-ask-open]').click();
+      // Side on the message's words reopens the thread's chat (no Ask icon in the top bar, no row in the corner: the owner, 2026-11-09).
+      await sideOpensChat(page, message);
       const ask = page.locator('[data-chat-window]');
       await expect(ask).toContainText('from the table in');
       // Read once, the review's message is folded in the thread: the review opens by its address too.
@@ -741,7 +741,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     }
   });
 
-  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread and in Ask AI`, async ({ browser }) => {
+  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread, and no Ask`, async ({ browser }) => {
     await world.handPull(world.prReviewThread);
     const { context, page } = await windowAt(browser, 390, 844, colorScheme);
     try {
@@ -755,22 +755,40 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, `33-phone-review-thread-${colorScheme}`);
       await sheet.locator('[data-code-hover-close]').tap();
       await expect(sheet).toHaveCount(0);
-      await page.locator('[data-ask-open]').first().tap();
-      const ask = page.locator('[data-chat-window]');
-      // Ask AI's window on a phone is the whole screen, as it is with Code review off.
-      await expect(ask).toBeVisible();
-      await expect.poll(async () => JSON.stringify(await ask.boundingBox())).toBe(JSON.stringify({ x: 0, y: 0, width: 390, height: 844 }));
-      await ask.locator('code', { hasText: 'src/retry.ts:1-3' }).tap();
-      await expect(sheet).toContainText('BACKOFF_MS');
-      await page.waitForTimeout(250);
-      await shot(page, `34-phone-review-ask-${colorScheme}`);
-      await sheet.locator('[data-code-hover-close]').tap();
-      await expect(sheet).toHaveCount(0);
-      await expect(ask).toBeVisible();
+      // No Ask on a phone for now (the owner, 2026-11-09): no round button, so nothing opens Ask's window here.
+      await expect(page.locator('button[data-rf-corner], [data-rf-card="ask"], [data-ask-open]')).toHaveCount(0);
     } finally {
       await context.close();
     }
   });
+}
+
+/** Side on a message's words opens (or reopens) the thread's chat: a drag inside the words themselves, never from the margin. */
+async function sideOpensChat(page: Page, message: Locator, words = 'The schedule is in'): Promise<void> {
+  const side = page.locator('.annotation-toolbar [data-annotation-side]');
+  await expect(async () => {
+    const at = await message.first().evaluate((root, needle) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.textContent?.indexOf(needle) ?? -1;
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + needle.length);
+        const r = range.getClientRects()[0]!;
+        return { x1: r.left + 1, x2: r.right - 1, y: r.top + r.height / 2 };
+      }
+      return null;
+    }, words);
+    expect(at, `"${words}" is on screen`).not.toBeNull();
+    await page.mouse.move(at!.x1, at!.y);
+    await page.mouse.down();
+    await page.mouse.move((at!.x1 + at!.x2) / 2, at!.y, { steps: 6 });
+    await page.mouse.move(at!.x2, at!.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(side).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await side.click();
 }
 
 /** Press in the text before `words`, and drag past them into the text after. */
@@ -821,7 +839,7 @@ test('a selection or a saved comment across the words: resting on them still sho
     await dragAcross(page, span);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Check the rows.');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
     await page.reload();
     await expect(span).toBeVisible();
@@ -865,7 +883,7 @@ test('a saved comment across a link to a missing file: learning it is missing le
     await dragAcross(page, link);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Is this one here?');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await page.reload();
     await expect(link.locator('mark').first()).toBeVisible();
     await link.hover();
@@ -885,17 +903,18 @@ test('a saved comment across a link to a missing file: learning it is missing le
 
 test('Ask AI\'s window in a small window keeps its place, and a code span in it shows its code over it', async ({ browser }) => {
   await world.handPull(world.prReviewThread);
-  const { context, page } = await windowAt(browser, 700, 500, 'dark');
+  // 800 x 500: the smallest desktop layout (PHONE_QUERY is 767 px and under), where Side opens the chat.
+  const { context, page } = await windowAt(browser, 800, 500, 'dark');
   try {
     await page.goto(`${world.url}#thread=${world.prReviewThread}`);
-    await page.locator('section.ib-pane [data-ask-open]').click();
+    await sideOpensChat(page, page.locator('.ib-body', { hasText: 'Start at' }));
     const ask = page.locator('[data-chat-window]');
     await expect(ask).toContainText('from the table in');
     const box = (await ask.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(500);
-    expect(box.x + box.width).toBeLessThanOrEqual(700);
+    expect(box.x + box.width).toBeLessThanOrEqual(800);
     await expect(ask.getByRole('button').first()).toBeInViewport();
     const inAsk = await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
     // Over Ask AI's window: the window's own header is under it, not over it.
@@ -958,8 +977,7 @@ test('an agent in a linked worktree: its message, review and board open the work
 
     // The board's and the review's own words start in the worktree too. (With the panel open, a click on the board only closes the panel.)
     await page.reload();
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-    await (await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'))).locator('[data-open-in-caret]').click();
+    await (await codeWindowOf(page, page.locator('.shp-claim [data-code-hover="src/ledger.ts"]'))).locator('[data-open-in-caret]').click();
     expect(await pick('src/ledger.ts')).toBe(revealed(inTree('src/ledger.ts')));
     await page.goto(`${world.url}#thread=${world.treeReviewThread}`);
     await page.getByRole('button', { name: 'Start review' }).first().click();
@@ -1011,8 +1029,8 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-    await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
+    await page.locator('.shp-sidep .shp-icon-btn').click();
+    await expect(page.locator('.shp-claim code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
     await expect(page.locator('[data-code-hover]')).toHaveCount(0);
     // A guide opens as a plain guide with Code review off, and its words stay words.
     await page.goto(`${world.url}#thread=${world.reviewThread}`);

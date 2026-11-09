@@ -84,7 +84,7 @@ describe("the daily ping on the Pi servers", () => {
 			const server = await start();
 			try {
 				await until(() => sent().includes(tool));
-				expect(bodies).toEqual([`POST /ping {"version":"0.28.46","age_week":4,"tool":"${tool}","first":1}`]);
+				expect(bodies).toEqual([`POST /ping {"version":"0.28.46","age_week":4,"tool":"${tool}","first":1,"favicon":"none"}`]);
 				expect(JSON.parse(readFileSync(join(dataDir, "ping.json"), "utf8"))).toMatchObject({ day: today(), sent: [tool] });
 				expect(await checkDailyPing({ version: "0.28.46", tool })).toBe("sent-today");
 				expect(bodies).toHaveLength(1);
@@ -93,6 +93,19 @@ describe("the daily ping on the Pi servers", () => {
 			}
 		});
 	}
+
+	test("Pi reads the same config.json favicon as the CLI: totman is face", async () => {
+		setPiPingVersionForTests({ version: "0.28.46" });
+		used();
+		writeFileSync(join(dataDir, "config.json"), JSON.stringify({ favicon: "totman" }));
+		const server = await startPlanReviewServer({ plan: "# Plan", origin: "pi", htmlContent: MINIMAL_HTML });
+		try {
+			await until(() => sent().includes("plan"));
+			expect(bodies).toEqual(['POST /ping {"version":"0.28.46","age_week":4,"tool":"plan","first":1,"favicon":"face"}']);
+		} finally {
+			server.stop();
+		}
+	});
 
 	test("the archive browser is not plan review: no request, as in the CLI", async () => {
 		setPiPingVersionForTests({ version: "0.28.46" });

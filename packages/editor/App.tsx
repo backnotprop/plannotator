@@ -377,8 +377,10 @@ import { scrollableEditSurface } from './editScroll';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 
 // Plannotator's own plan review and annotate: the selection toolbar's Copy
-// copies rich text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// copies rich text, and on a touch screen the toolbar sits below the selection
+// (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;

@@ -100,8 +100,10 @@ async function world(options: Options = {}) {
   const config: Record<string, unknown> = {
     updateCheck: false,
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
-    inboxListIntro: { shownAt: settledAt },
+    inboxListIntro: { shownAt: settledAt, version: 2 },
     inboxVoiceIntro: { shownAt: settledAt },
+    // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+    favicon: "glass",
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
   if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });

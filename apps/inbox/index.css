@@ -18,17 +18,37 @@
 @source "../../packages/inbox/review-drawing/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
+/* Floating reply drafts (packages/inbox/floaters/). */
+@source "../../packages/inbox/floaters/**/*.tsx";
+/* A thread's PRs: the mark, the button and its card (packages/inbox/threadPulls/). */
+@source "../../packages/inbox/threadPulls/**/*.tsx";
+/* The Pull requests page (packages/inbox/prs/). */
+@source "../../packages/inbox/prs/**/*.tsx";
+/* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
+@source "../../packages/inbox/agents/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
 @import "../../packages/ui/components/shape/shape.css";
 /* A document's contents rail (its own sheet: not in theme.css). */
 @import "../../packages/ui/contents-rail.css";
+/* The comment card and visible comment drafts (configurePlannotatorUI commentCard / visibleCommentDrafts, App.tsx). */
+@import "../../packages/ui/comment-card.css";
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
+@import "../../packages/inbox/prototype-window.css";
+/* System: the drawing's own sheet (sys- classes, packages/system), drawn in Reviews' System pane. */
+@import "../../packages/system/src/system.css";
+/* Floating reply drafts and Ask AI in the corner. */
+@import "../../packages/inbox/floaters/floaters.css";
+/* The Pull requests page and a stack's page (packages/inbox/prs/). */
+@import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+/* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
+@import "../../packages/inbox/agents/agents.css";
 
 /* Window controls (inbox-window.md): read-only, for a desktop host, the line the panes' heads centre on while it has
    set its variables; its buttons go there. A length once computed, so a host reads a number. Here and not in inbox.css:

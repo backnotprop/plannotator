@@ -21,6 +21,13 @@
  * A record it cannot place (a malformed frame, a kind this build does not
  * know, a read owed with no record) reads the thread too.
  *
+ * A question record that only says what this window's own save already
+ * brought back (`ownSaves.ts`: its revision is no newer than the save's
+ * answer) is noted apart: the pane drew that answer when the save landed, so
+ * it reads neither the thread nor its files. It still owes the list, the
+ * decisions and the drafts, which show the pick too. The thread is read as
+ * before when the list has no row for it or it is another machine's.
+ *
  * A read the records do not need is replaced by what it did besides: the
  * thread's files are read again (a file edited on disk, an image captured on
  * a later read), and once the list read lands, the thread is read after all
@@ -41,10 +48,22 @@ export interface RecordBatch {
   any: boolean;
   /** The threads the records belong to. */
   threads: Set<string>;
+  /** The threads of records that only echo this window's own question saves (not in `threads` for them alone). */
+  own: Set<string>;
 }
 
 export function newRecordBatch(): RecordBatch {
-  return { any: false, threads: new Set() };
+  return { any: false, threads: new Set(), own: new Set() };
+}
+
+/** Note a record of this window's own question save, already drawn from the save's answer. */
+export function noteOwnRecord(batch: RecordBatch, threadId: string): void {
+  batch.own.add(threadId);
+}
+
+/** The batch holds only echoes of this window's own saves: nothing another window, device or agent did. */
+export function onlyOwnRecords(batch: RecordBatch): boolean {
+  return !batch.any && batch.threads.size === 0 && batch.own.size > 0;
 }
 
 /** Note one record in the batch. `null`: a malformed frame, or a read owed with no record (a pick save's). */
@@ -88,11 +107,15 @@ export interface OpenThreadState {
   listed: boolean;
 }
 
-/** `thread`: read the open thread again. `files`: only its files, then check the list read (see the header). */
-export type OpenThreadRead = 'thread' | 'files';
+/**
+ * `thread`: read the open thread again. `files`: only its files, then check the list read (see the header).
+ * `none`: the records only echo this window's own saves, which the pane already drew: only the list check.
+ */
+export type OpenThreadRead = 'thread' | 'files' | 'none';
 
 export function openThreadRead(batch: RecordBatch, open: OpenThreadState): OpenThreadRead {
   if (batch.any || batch.threads.has(open.threadId)) return 'thread';
+  if (onlyOwnRecords(batch) && batch.own.has(open.threadId)) return open.remote || !open.listed ? 'thread' : 'none';
   if (open.remote || !open.settled || !open.listed) return 'thread';
   if (open.loaded?.thread_id !== open.threadId || open.loaded.project.repo == null) return 'thread';
   // The server refreshes a repo only when a read asks for it after this long: read, as every record did before.

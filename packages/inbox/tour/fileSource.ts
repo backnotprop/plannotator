@@ -15,10 +15,10 @@ import { tourAssetOf, tourFileOf, tourRecord, tourSuggestionFor, type TourFixtur
 
 /**
  * The mock's own policy inside its srcdoc frame (the frame also inherits the
- * window's): its inline scripts and styles, pictures from data: and blob:,
- * nothing fetched.
+ * window's): its inline scripts and styles, pictures, video and audio from
+ * data: and blob:, nothing fetched.
  */
-export const MOCK_FRAME_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'";
+export const MOCK_FRAME_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'";
 
 export function mockSrcdoc(html: string): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${MOCK_FRAME_CSP}">`;

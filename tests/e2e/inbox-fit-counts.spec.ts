@@ -56,7 +56,7 @@ test.beforeAll(async () => {
   const ask = (q: string) => [':::question', q, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
   const questions = (n: number) => Array.from({ length: n }, (_, i) => ask(`Question ${i}?`)).join('\n\n');
   const actions = (n: number) => Array.from({ length: n }, (_, i) => [':::action', `Approve thing ${i}`, ':::'].join('\n')).join('\n\n');
-  // Each its own thread (a session's messages without a thread name join its one thread).
+  // Each its own thread, named by its subject.
   const say = async (agent: SimAgent, project: string, subject: string, body: string) =>
     (await agent.send({ project_path: scratchProject(src, project), thread: subject, subject, body })).thread_id as string;
   opener = await say(codex, 'billing-svc', 'Token refresh fails after the laptop sleeps', 'Retry on wake is in.');

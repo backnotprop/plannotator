@@ -1,7 +1,7 @@
 /**
- * The one-time list options dialog's claim (approval "inbox-list-options-intro") on a real Inbox: decided at the first
- * release start, due only for someone who used an Inbox before, claimed once per machine. What regresses: a fresh
- * install getting it, a dev build deciding it, the dialog showing twice (two tabs, a reload), a claim with another
+ * The one-time "Choose how your list looks" dialog's claim (approval "inbox-rows-dialog") on a real Inbox: decided at
+ * the first release start of its version, due for everyone (fresh installs too), claimed once per machine. What
+ * regresses: a fresh install left out, a dev build deciding it, the dialog showing twice (two tabs, a reload), a claim with another
  * server session going through, or a claim that could not be saved showing it (it would show again on every load).
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -36,7 +36,7 @@ async function world(options: { version: string; usedBefore: boolean }) {
   const base = `http://127.0.0.1:${server.port}`;
   const post = (path: string, body: Record<string, unknown> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const due = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { list_intro: { due: boolean } }).list_intro.due;
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxListIntro as { dueAt?: string; shownAt?: string } | undefined;
+  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxListIntro as { dueAt?: string; shownAt?: string; version?: number } | undefined;
   return { base, post, due, saved };
 }
 
@@ -71,12 +71,12 @@ describe("the list options dialog's claim", () => {
     expect(((await (await post("/api/inbox/list-intro")).json()) as { show: boolean }).show).toBe(true);
   });
 
-  test("a fresh install never gets it: marked shown at its first start", async () => {
+  test("a fresh install gets it too: due at its first start (the page waits for five threads)", async () => {
     const { post, due, saved } = await world({ version: "0.30.0", usedBefore: false });
-    expect(await due()).toBe(false);
-    expect(saved()?.shownAt).toMatch(/^\d{4}-/);
-    expect(saved()?.dueAt).toBeUndefined();
-    expect(((await (await post("/api/inbox/list-intro")).json()) as { show: boolean }).show).toBe(false);
+    expect(await due()).toBe(true);
+    expect(saved()?.dueAt).toMatch(/^\d{4}-/);
+    expect(saved()?.shownAt).toBeUndefined();
+    expect(((await (await post("/api/inbox/list-intro")).json()) as { show: boolean }).show).toBe(true);
   });
 
   test("a dev build decides nothing, so the dialog never shows from it", async () => {

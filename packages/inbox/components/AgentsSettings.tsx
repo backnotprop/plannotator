@@ -271,14 +271,12 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
  * Plannotator's own connection puts it into the session as a new turn; an
  * agent reached through MCP (or OpenCode 1, which has the tool but no wake)
  * reads it when it next checks. Null when the agent does not reach the Inbox,
- * or when it is not known (Claude Code on Windows).
+ * or when it is not known.
  */
-export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platform']): { text: string; wakes: boolean } | null {
+export function repliesOf(row: InboxAgentRow): { text: string; wakes: boolean } | null {
   if (!row.reach.on) return null;
   if (row.reach.kind === 'tool') {
     if (row.tool?.mod_off) return null;
-    // Claude Code's mod stands down on Windows (no /bin/sh), so nothing wakes it there: say no more than the Reaches row.
-    if (row.id === 'claude-code' && platform === 'windows') return null;
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
     return { text: 'arrive as a new turn', wakes: true };
   }
@@ -356,14 +354,11 @@ function AgentGroup({
   pending,
   busy,
   sessions,
-  platform,
   extra,
 }: {
   row: InboxAgentRow;
   /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
   extra?: ReactNode;
-  /** This computer's platform (the window's), for what wakes a session. */
-  platform?: ConnectContext['platform'];
   noteText: string;
   onChange: (change: Change) => void;
   pending: Set<string>;
@@ -421,7 +416,7 @@ function AgentGroup({
   const modOff = row.tool?.mod_off === true;
   // Claude Code's MCP entry is one the person added by hand (`claude mcp add`): Plannotator never writes or removes it.
   const handMcp = row.id === 'claude-code' && reach.kind === 'mcp';
-  const replies = repliesOf(row, platform);
+  const replies = repliesOf(row);
   const reachSwitchable = (reach.kind === 'tool' || reach.kind === 'mcp') && reach.state !== 'foreign' && reach.state !== 'unreadable' && !modOff && !handMcp;
   const note = row.note;
   const noteOn = note?.state === 'added' || note?.state === 'edited';
@@ -585,15 +580,15 @@ export function AgentsSettings({
   model: InboxAgentsModel;
   onModel: (next: InboxAgentsModel) => void;
   context: ConnectContext | null;
-  /** Starting agents from New message (`SettingsModel.launch`, only while `inboxLaunch.enabled`). Absent: no row. */
+  /** Starting agents from New message (`SettingsModel.launch`): its switch, and while on the launch rows. Absent: no launch rows. */
   launch?: InboxLaunchSettings | null;
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
   useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
-  // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
+  // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
-    if (!launch?.enabled) return;
+    if (!launch) return;
     let live = true;
     inboxApi
       .launchSettingsRead()
@@ -603,6 +598,39 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
+  // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
+  const toggleEnabled = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      const next = (await inboxApi.launchEnabled(!launchState.enabled)).launch;
+      setLaunchState(next);
+      // Turned on: the full-permissions row as a launch would start now (the login shell, read once it was on).
+      if (next.enabled) {
+        void inboxApi
+          .launchSettingsRead()
+          .then((read) => setLaunchState((was) => (was?.enabled ? read.launch : was)))
+          .catch(() => {});
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  // Windows (`unsupported`): no switch; launch there is config.json only.
+  const enabledRow = launchState && !launchState.unsupported ? (
+    <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
+      <Row
+        k="Start agents from New message"
+        v="Claude Code and Pi"
+        sub="New message can start Claude Code or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
+        r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
+      />
+    </div>
+  ) : null;
   const toggleFull = async () => {
     if (!launchState || launchBusy) return;
     setLaunchBusy(true);
@@ -772,6 +800,7 @@ export function AgentsSettings({
         </p>
       )}
       <div className="ib-agents">
+        {enabledRow}
         {shown.map((row) => (
           <AgentGroup
             key={row.id}
@@ -780,7 +809,6 @@ export function AgentsSettings({
             pending={pending}
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
-            {...(context ? { platform: context.platform } : {})}
             {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />

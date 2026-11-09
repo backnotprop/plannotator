@@ -65,7 +65,7 @@ test.beforeAll(async () => {
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-phone-compose-send-');
   const dataDir = join(root, 'data');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
@@ -197,7 +197,6 @@ async function openWorstDraft(page: Page): Promise<void> {
     ]);
     await expect(sheet.locator('[data-compose-file="done"]')).toHaveCount(2);
     await sheet.locator('[data-compose-cancel]').click();
-    await sheet.locator('[data-compose-keep]').click();
     await expect(sheet).toHaveCount(0);
     draftKept = true;
   }
@@ -498,7 +497,6 @@ for (const engine of ENGINES) {
         const field = sheet.locator('[data-compose-text] textarea');
         await field.fill(words);
         await sheet.locator('[data-compose-cancel]').click();
-        await sheet.locator('[data-compose-keep]').click();
         await expect(sheet).toHaveCount(0);
 
         // The session is gone when the draft comes back.
@@ -701,7 +699,7 @@ for (const engine of ENGINES) {
 }
 
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
-  test('none of it applies: the foot keeps Send with its keycap, Save draft and the status line; a draft keeps Delete draft', async ({ page }) => {
+  test('none of it applies: the foot keeps Send (no ⌘↵ keycap, the key named for a screen reader), Save draft and the status line; a draft keeps Delete draft', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
     await page.goto(world.url);
@@ -718,7 +716,9 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await sheet.locator(`[data-compose-session="${SESSION}"]`).click();
     const send = sheet.locator('.ib-cp-foot [data-compose-send]');
     await expect(send).toHaveClass('ib-btn ib-pri');
-    await expect(send.locator('[data-shortcut-hint]')).toBeVisible();
+    // No ⌘↵ on Send (approval "inbox-send-no-shortcut-hint"); the key is named in aria-keyshortcuts.
+    await expect(send.locator('kbd, [data-shortcut-hint]')).toHaveCount(0);
+    await expect(send).toHaveAttribute('aria-keyshortcuts', /^(Meta|Control)\+Enter$/);
     await expect(sheet.locator('.ib-cp-sendl')).toHaveCount(0);
 
     // What reads as a keyboard on a phone is nothing here: To and Thread stay put.
@@ -738,7 +738,6 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await page.locator('[data-open-compose]').first().click();
     await sheet.locator('[data-compose-text] textarea').fill('A draft to delete.');
     await page.keyboard.press('Escape');
-    await sheet.locator('[data-compose-keep]').click();
     await expect(sheet).toHaveCount(0);
     await page.goto(`${world.url}#drafts`);
     await page.locator('[data-draft-id] .ib-draft-open').first().click();
