@@ -199,6 +199,7 @@ test('one agent sends five files of five kinds across two messages of one thread
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id as string,
     body: 'The phone checkout at 390 px is below, and the refund policy PDF the "See policy" link opens.',
     attachments: ['shots/checkout-mobile.png', 'docs/refund-policy.pdf'],
   });

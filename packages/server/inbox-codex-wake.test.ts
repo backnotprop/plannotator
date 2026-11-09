@@ -406,7 +406,7 @@ describe("a reply to a Codex thread", () => {
     await w.server.codexWake.sweep();
     expect(argOf(queues(w.fake)[0]!.args, "message")).toContain("Thanks.");
     // A reply stays queued until a turn says it reached the thread: a command names no turn.
-    await fromShell(w.client, w.project, { body: "Still working." });
+    await fromShell(w.client, w.project, { reply_to: sent.structuredContent.message_id, body: "Still working." });
     await Bun.sleep(50);
     const reachedIt = (await thread(w.server, sent.structuredContent.thread_id)).messages.find((m) => m.author.kind === "person");
     expect(reachedIt!.delivery ?? null).toBeNull();

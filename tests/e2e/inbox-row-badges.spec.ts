@@ -106,8 +106,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const holding = await opencode.send({ project_path: docs, body: DEMO_MESSAGES.holding, thread: 'install-page' });
-  await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
-  // Its own thread (pi's next message joins the one above): no badge, no thread name, no question.
+  const fcm = await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
+  // Its own thread (pi's next relay message replies in the one above): no badge, no thread name, no question.
   const news = await opencode.send({ project_path: relay, subject: 'Release notes are up', body: DEMO_MESSAGES.news });
   const long = await opencode.send({
     project_path: northwind,
@@ -122,6 +122,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await pi.send({ project_path: billing, reply_to: named.message_id ?? named.thread_id, body: 'Pi here: the webhook is signed, so trusting it is safe.' });
   await pi.send({
     project_path: relay,
+    reply_to: fcm.message_id,
     subject: 'Push payload over 4 KB',
     body: [':::question', 'Drop the question context from the push, or send ids only?', 'Stopped: the relay cannot deliver without this.', '', '- [ ] Drop the context', '- [ ] Ids only', ':::'].join('\n'),
   });

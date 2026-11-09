@@ -118,7 +118,7 @@ async function world(options: Options = {}) {
   const then = new Date(Date.now() - days * DAY);
   const store = InboxStore.open(dataDir, { now: () => then });
   const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
-  // One session's messages make one thread: a session each.
+  // Each message starts its own thread.
   for (let i = 0; i < (options.threads ?? 6); i++) {
     store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
   }

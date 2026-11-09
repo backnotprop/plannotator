@@ -241,12 +241,13 @@ test("New message counts a session working in a worktree as a live session of th
 
 test("a store from before the fold replays and routes as it did; only new sends from the worktree fold", async () => {
   const { main, worktree, dataDir } = world();
-  // What an older Inbox wrote: a project keyed by the worktree, a thread in it.
+  // What an older Inbox wrote: a project keyed by the worktree, a named thread in it.
   const before = InboxStore.open(dataDir);
   const old = before.ensureProject({ name: "api-wt", root: worktree });
   const author = { kind: "agent" as const, host: "claude-code", session: "ses_wt", name: "Claude Code" };
-  const first = before.sendMessage({ project_id: old.id, author, body: "Written by an older Inbox." }).message;
-  const second = before.sendMessage({ project_id: old.id, author, body: "Same session, same thread." }).message;
+  const thread = "Worktree notes";
+  const first = before.sendMessage({ project_id: old.id, author, thread, body: "Written by an older Inbox." }).message;
+  const second = before.sendMessage({ project_id: old.id, author, thread, body: "Same name, same thread." }).message;
   expect(second.thread_id).toBe(first.id);
 
   const server = await start(dataDir);
@@ -254,8 +255,8 @@ test("a store from before the fold replays and routes as it did; only new sends 
   // The old project and its thread are as they were.
   expect(server.store.project(old.id)?.root).toBe(worktree);
   expect(server.store.message(second.id)?.thread_id).toBe(first.id);
-  // A new send from the worktree folds: the main repository's project, a new thread there.
-  const folded = await send(client, { project_path: worktree, body: "Written after the fold.", agent_session: "ses_wt" });
+  // A new send from the worktree folds: the main repository's project, a new thread there, though the name is the same.
+  const folded = await send(client, { project_path: worktree, thread, body: "Written after the fold.", agent_session: "ses_wt" });
   expect(folded.project.root).toBe(main);
   expect(folded.project.id).not.toBe(old.id);
   expect(folded.new_thread).toBe(true);
@@ -274,8 +275,8 @@ test("a store from before the fold replays and routes as it did; only new sends 
     expect(after.message(id)?.project_id).toBe(server.store.message(id)?.project_id);
     expect(after.message(id)?.thread_id).toBe(server.store.message(id)?.thread_id);
   }
-  expect(after.sendMessage({ project_id: old.id, author, body: "Old project, replayed." }).message.thread_id).toBe(first.id);
-  expect(after.sendMessage({ project_id: folded.project.id, author, body: "Main project, replayed." }).message.thread_id).toBe(folded.thread_id);
+  expect(after.sendMessage({ project_id: old.id, author, thread, body: "Old project, replayed." }).message.thread_id).toBe(first.id);
+  expect(after.sendMessage({ project_id: folded.project.id, author, thread, body: "Main project, replayed." }).message.thread_id).toBe(folded.thread_id);
 });
 
 test("an agent that asked from a worktree before the fold still gets the reply: read_thread covers the worktree's earlier project", async () => {

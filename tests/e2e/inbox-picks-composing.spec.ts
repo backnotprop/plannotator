@@ -80,7 +80,7 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Each test asks in a thread of its own (a named thread: the session's default thread would be the first one). */
+/** Each test asks in a thread of its own, by name. */
 async function ask(subject: string, thread: string): Promise<string> {
   const sent = await world.claude.send({ project_path: world.billing, subject, thread, body: BODY }, { wakes: true });
   return sent.thread_id as string;
