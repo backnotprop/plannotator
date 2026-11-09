@@ -10,8 +10,10 @@
  *
  * What regresses: a Show me word (the `overview.diagram` rules, the refusal of `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
- * off. These texts change for everyone on purpose, so the test names the words
- * and not the texts; a control proves each word is real, with Code review on.
+ * off, or Code review on and Shape off (approval "code-review-029-shape-off":
+ * Show me and the Overview's drawing ride Shape's own switch too). These texts
+ * change for everyone on purpose, so the test names the words and not the
+ * texts; a control proves each word is real, with Code review and Shape on.
  */
 import { afterAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -25,7 +27,7 @@ import { formatInboxHelp } from "./inbox-help";
 import { formatSubcommandHelp, formatTopLevelHelp, SHAPE_COMMAND_USAGE } from "./cli";
 import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_DRAW_GONE_NO_SHAPE, INBOX_REVIEW_SKILLS, inboxReviewSkills } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -47,13 +49,13 @@ const SHOW_ME_WORDS = {
   "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's"],
 };
 
-/** Each text an agent reads, with Code review on or off. */
-async function agentTexts(codeReview: boolean): Promise<Record<string, string>> {
-  const dataDir = join(root, codeReview ? "data-texts-on" : "data-texts-off");
+/** Each text an agent reads, with Code review on or off (and Shape, off unless named). */
+async function agentTexts(codeReview: boolean, shape = false): Promise<Record<string, string>> {
+  const dataDir = join(root, `data-texts-${codeReview ? "on" : "off"}${shape ? "-shape" : ""}`);
   mkdirSync(dataDir, { recursive: true });
   const saved = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, codeReview, phones: false });
+  const server = await startInboxServer({ dataDir, codeReview, shape, phones: false });
   const client = new Client({ name: "show-me-off-test", version: "1.0.0" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -109,11 +111,27 @@ test("Code review off: no agent text holds a Show me word", async () => {
   expect(leaks).toEqual([]);
 });
 
-test("Code review on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
-  const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
-    get_guide_brief: (await agentTexts(true)).get_guide_brief!,
-    "review draw": INBOX_REVIEW_DRAW_GONE,
+test("Code review on and Shape off: no agent text holds a Show me word or names the overview's diagram", async () => {
+  // `review_draw_gone` stays: an older agent's `review draw` is still refused, in words that name no Shape.
+  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())].filter((word) => word !== "review_draw_gone");
+  const texts = {
+    ...(await agentTexts(true, false)),
+    "review draw": INBOX_REVIEW_DRAW_GONE_NO_SHAPE,
     "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
+  };
+  const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
+  expect(leaks).toEqual([]);
+  // The brief's schema has no overview diagram either (a message's fenced diagrams are another thing, elsewhere).
+  expect(texts.get_guide_brief).not.toContain("diagram");
+  // Code review's own words are still there: the notes rule.
+  expect(texts.get_guide_brief).toContain("diffs[].notes");
+});
+
+test("Code review and Shape on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
+  const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
+    get_guide_brief: (await agentTexts(true, true)).get_guide_brief!,
+    "review draw": INBOX_REVIEW_DRAW_GONE,
+    "the review skills": inboxReviewSkills({ shape: true }).map((skill) => skill.body).join("\n"),
   };
   const missing = Object.entries(SHOW_ME_WORDS).flatMap(([name, words]) =>
     words.filter((word) => !carriers[name as keyof typeof SHOW_ME_WORDS].includes(word)).map((word) => `${name}: ${word}`),
@@ -201,6 +219,43 @@ test("Code review off with a broken config.json: --version, --help, review --hel
       const rest = broken.stderr.split("\n").filter((line) => !line.includes("failed to read config.json")).join("\n");
       expect([argv, rest]).toEqual([argv, offRun.stderr]);
     }
+  } finally {
+    removeStubbedHtml(stubbed);
+  }
+}, 120_000);
+
+test("Code review on: `shape` answers only with Shape on, and an old `review draw` names Shape only then", async () => {
+  const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+  const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+  const { SHAPE_OFF_TEXT } = await import("./shape-command");
+  const stubbed = stubHookDistHtml();
+  const run = async (config: Record<string, boolean>, argv: string[]) => {
+    const dataDir = join(root, `data-cli-${Object.keys(config).filter((key) => config[key]).join("-")}`);
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER: "1",
+      NO_ANON_PING: "1",
+      PLANNOTATOR_UPDATE_CHECK: "0",
+      PLANNOTATOR_INBOX_CONNECT: "0",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+    };
+    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    return { stdout, stderr, code };
+  };
+  const draw = ["review", "draw", "--file", "d.json", "--review", "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F", "--turn", "turn-0001"];
+  try {
+    const codeReviewOnly = { inboxCodeReview: true, inboxShape: false };
+    expect(await run(codeReviewOnly, ["shape", "--help"])).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+    expect(await run(codeReviewOnly, draw)).toEqual({ stdout: "", stderr: `${INBOX_REVIEW_DRAW_GONE_NO_SHAPE}\n`, code: 1 });
+    const both = { inboxCodeReview: true, inboxShape: true };
+    expect((await run(both, ["shape", "--help"])).code).toBe(0);
+    expect(await run(both, draw)).toEqual({ stdout: "", stderr: `${INBOX_REVIEW_DRAW_GONE}\n`, code: 1 });
   } finally {
     removeStubbedHtml(stubbed);
   }

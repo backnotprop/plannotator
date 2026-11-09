@@ -506,8 +506,9 @@ export async function inboxGuideRoute(
  * get_guide_brief's output_schema while Code review is on: the guide's, plus
  * an optional `overview: { text, diagram? }` (a drawing: `kind: "html"` with
  * source, css, width and height, tall; or `kind: "mermaid"` with source).
+ * `diagram`: only while Shape is on too; off, the overview is `{ text }`.
  */
-function guideSchemaWithOverview(): Record<string, unknown> {
+function guideSchemaWithOverview({ diagram }: { diagram: boolean }): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -525,7 +526,7 @@ function guideSchemaWithOverview(): Record<string, unknown> {
     type: "object",
     properties: {
       text: { type: "string" },
-      diagram: {
+      ...(diagram && { diagram: {
         type: "object",
         properties: {
           kind: { enum: ["html", "mermaid"] },
@@ -537,7 +538,7 @@ function guideSchemaWithOverview(): Record<string, unknown> {
         },
         required: ["kind", "source"],
         additionalProperties: false,
-      },
+      } }),
     },
     required: ["text"],
     additionalProperties: false,
@@ -558,11 +559,14 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview({ diagram: context.shapeOn?.() ?? false }) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
-        // Context notes ride the same switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview, and its one drawing
+        // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
+        // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
+        rules: context.codeReviewOn?.()
+          ? [...GUIDE_RULES, ...(context.shapeOn?.() ? [INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : []), INBOX_REVIEW_NOTES_RULE]
+          : GUIDE_RULES,
         example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
       }),
   );

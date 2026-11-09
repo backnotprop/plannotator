@@ -246,7 +246,7 @@ import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } f
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_DRAW_GONE_NO_SHAPE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
@@ -355,8 +355,9 @@ const rawArgs = process.argv.slice(2);
 // agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
 // while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
 // the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
+// With Shape off the refusal names no Shape (approval "code-review-029-shape-off").
 if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
-  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
+  process.stderr.write(`${loadConfig({ quiet: true }).inboxShape === true ? INBOX_REVIEW_DRAW_GONE : INBOX_REVIEW_DRAW_GONE_NO_SHAPE}\n`);
   process.exit(1);
 }
 // `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
@@ -364,8 +365,9 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
 // strict-annotate parse, which takes `--file`-style flags for itself.
 {
   const args = rawArgs;
-  // Off unless the person turned Shape on, or Code review, whose Show me makes a board (Settings → Capabilities):
-  // no command and no help, so an agent learns nothing of it (the same switches hide the Pebble and the routes).
+  // Off unless the person turned Shape on (Settings → Capabilities; Code review alone brings none of it, approval
+  // "code-review-029-shape-off"): no command and no help, so an agent learns nothing of it (the same switch hides the
+  // Pebble and the routes).
   // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
