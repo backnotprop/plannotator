@@ -636,6 +636,7 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/inbox/prototypeWindow.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx
 packages/review-editor/components/guide/GuideDiffControls.test.tsx
