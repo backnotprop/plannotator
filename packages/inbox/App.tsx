@@ -242,7 +242,7 @@ import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
-import { setReviewSkillsShape } from './skills';
+import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
@@ -1910,6 +1910,10 @@ function Inbox() {
   const boardsOn = shapeOn;
   // The review skills a Send pastes carry their drawing lines only while Shape is on.
   setReviewSkillsShape(shapeOn);
+  // Chapter diagrams (Settings → Capabilities, under Code review; on unless turned off): off, the review skills a Send
+  // pastes carry no diagram line, and a guide that still has a chapter diagram draws it folded.
+  const chapterDiagramsOn = settings?.chapter_diagrams?.on !== false;
+  setReviewSkillsDiagrams(chapterDiagramsOn);
   const shapes = useInboxShapes(boardsOn, subscribeShapeFrames);
   const wakeOnChange = useRef(codeReviewOn);
   wakeOnChange.current = codeReviewOn;
@@ -4656,6 +4660,19 @@ function Inbox() {
     }
   };
 
+  // Chapter diagrams, under Code review: every other window hears `event: capabilities`.
+  const toggleChapterDiagrams = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, chapter_diagrams: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveChapterDiagrams(next);
+      setSettings((current) => (current ? { ...current, chapter_diagrams: saved.chapter_diagrams ?? { on: next } } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleShape = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
@@ -6386,6 +6403,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
+        onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
@@ -7736,6 +7754,7 @@ function Inbox() {
           guest={tailnetGuest(settings)}
           codeReview={codeReviewOn}
           shape={shapeOn}
+          chapterDiagrams={chapterDiagramsOn}
           // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
           onBack={() => {
             const now = routeRef.current;

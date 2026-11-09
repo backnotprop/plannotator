@@ -626,6 +626,12 @@ export interface SettingsModel {
    */
   system?: { on: boolean };
   /**
+   * Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): its switch, present only while Code review
+   * is on (the Settings row shows only then). Off: agents are not offered chapter diagrams, and one that still arrives
+   * draws folded. Absent: on.
+   */
+  chapter_diagrams?: { on: boolean };
+  /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
    * another config.json `urlHost`; either locks it. Absent for a tailnet guest
@@ -1492,6 +1498,8 @@ export const inboxApi = {
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
+  /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
+  saveChapterDiagrams: (on: boolean) => post<{ chapter_diagrams?: { on: boolean } }>(inboxUrl('/settings'), { chapter_diagrams: { on } }),
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),
   systemDrawing: (project: string) => get<SystemDrawingAnswer<SystemModel>>(inboxUrl(`/system/drawing?project=${encodeURIComponent(project)}`)),
@@ -2295,7 +2303,7 @@ export interface InboxEventHandlers {
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -2451,7 +2459,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -2460,6 +2468,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
+          ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
         });
       } catch {
         // A malformed frame changes nothing.
