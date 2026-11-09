@@ -113,6 +113,15 @@ interface AnnotationToolbarProps {
    */
   onSide?: (text: string, context: SelectionActionContext) => void;
   /**
+   * Opt-in host capability: how the `onSide` button is drawn. With it the
+   * button is icon-only, an ordinary toolbar button the size of its
+   * neighbours, in the same place between the same dividers: `icon` is its
+   * glyph (absent → the package's two speech bubbles) and `label` its tooltip
+   * and accessible name. Absent → the two bubbles and the word "Side", as
+   * before. Ignored without `onSide`. Nothing about the press changes.
+   */
+  sideButton?: { icon?: React.ReactNode; label: string };
+  /**
    * Whether the package's own quick labels are offered (default true).
    * `false` hides the Zap picker button and the Alt+digit label shortcuts on
    * this toolbar. The one-click 👍 is a separate affordance and is unaffected.
@@ -147,6 +156,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   selectionActions,
   selectionActionsIcon,
   onSide,
+  sideButton,
   quickLabels: quickLabelsEnabled = true,
   copyText,
   getRichCopy,
@@ -530,30 +540,44 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             )}
           </>
         )}
-        {onSide && (
-          <>
-            <div className="w-px h-5 bg-border mx-0.5" />
-            {/* The word shows, so the name is the word: no tooltip. On a touch
-                toolbar theme.css gives it the 44px height and the 20px glyph;
-                its words are a bare text node, never a span (sized there as a
-                glyph). */}
-            <button
-              type="button"
-              data-pn-touch-target="true"
-              data-annotation-side=""
-              onClick={() => {
-                // Read at press time, as the selection actions read it.
-                const text = copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '';
-                onSide(text, buildSelectionActionContext(element, text));
-                onClose();
-              }}
-              className="flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-md text-foreground hover:bg-muted transition-colors text-[12.5px] font-medium whitespace-nowrap"
-            >
-              <MessagesSquareIcon />
-              Side
-            </button>
-          </>
-        )}
+        {onSide && (() => {
+          const pressSide = () => {
+            // Read at press time, as the selection actions read it.
+            const text = copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '';
+            onSide(text, buildSelectionActionContext(element, text));
+            onClose();
+          };
+          return (
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              {sideButton ? (
+                // The host's own drawing (`sideButton`): icon-only, as its neighbours are, named by its tooltip.
+                <ToolbarButton
+                  onClick={pressSide}
+                  icon={sideButton.icon ?? <MessagesSquareIcon />}
+                  label={sideButton.label}
+                  className="text-foreground hover:bg-muted"
+                  dataAttributes={{ 'data-annotation-side': '' }}
+                />
+              ) : (
+                // The word shows, so the name is the word: no tooltip. On a touch
+                // toolbar theme.css gives it the 44px height and the 20px glyph;
+                // its words are a bare text node, never a span (sized there as a
+                // glyph).
+                <button
+                  type="button"
+                  data-pn-touch-target="true"
+                  data-annotation-side=""
+                  onClick={pressSide}
+                  className="flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-md text-foreground hover:bg-muted transition-colors text-[12.5px] font-medium whitespace-nowrap"
+                >
+                  <MessagesSquareIcon />
+                  Side
+                </button>
+              )}
+            </>
+          );
+        })()}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
           onClick={onClose}
