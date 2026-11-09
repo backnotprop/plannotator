@@ -184,7 +184,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
-import { adoptSavedFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
+import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
@@ -215,6 +215,8 @@ import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
+import { TabIconChoice } from './components/TabIconChoice';
+import { useTabIconChoice } from './tabIconChoice';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -969,6 +971,7 @@ function Inbox() {
   // latest read (not the held list on screen, and not the sidebar's project filter).
   const faviconHref = useInboxFaviconHref();
   const faviconBadgeHref = useInboxFaviconBadgeHref();
+  const faviconInUse = useInboxFavicon();
   useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref, faviconBadgeHref);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
@@ -5153,10 +5156,26 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
+  // while it is `reveal.next`, at the line's calm moment (back on the list, or the page idle), 60 s into the page.
+  const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const tabIconChoice = useTabIconChoice({
+    due: snoozeIntroLatch.current?.next === 'tab_icon',
+    blocked: revealBlocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    thread: tabIconThread,
+    rows: snoozeIntroRows,
+    clear: listViewRevealClear(listIntroClear, tabIconThread, pageIdle),
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+  });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -5243,7 +5262,9 @@ function Inbox() {
     starReveal.stage !== 'open' &&
     starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
-    listViewReveal.stage !== 'claimed';
+    listViewReveal.stage !== 'claimed' &&
+    tabIconChoice.stage !== 'open' &&
+    tabIconChoice.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -7393,6 +7414,20 @@ function Inbox() {
             setListView('list');
             listViewReveal.close();
           }}
+        />
+      )}
+      {tabIconChoice.stage === 'open' && (
+        <TabIconChoice
+          phone={phone}
+          current={faviconInUse ?? 'glass'}
+          title={document.title}
+          onUse={(style) => {
+            // Settings' own save (config.json `favicon`): plan review, code review and annotate show it at their next load.
+            void chooseFavicon(style);
+            tabIconChoice.close();
+          }}
+          // Escape or a click outside: the tab's own icon is back (the dialog put it back), nothing saved. Final.
+          onDismiss={tabIconChoice.close}
         />
       )}
       {voiceIntro.stage === 'open' && (
