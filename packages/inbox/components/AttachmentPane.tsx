@@ -535,8 +535,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
-  /** Full screen's composer: an image, a film and an HTML page draw it (the comment row of the first two goes inside it). */
-  const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'html');
+  /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
+  const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
   /**
    * The tools: showing (pinned), or gathered into the corner control (tucked) by » or the composer's ⌄. Every opening
    * of full screen starts showing.
@@ -813,7 +813,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // An image's or a film's comment row (a phone's "Comment at" button for a film) stays at the file's foot in full screen: the chip and a phone's toolbar sit above it.
   useEffect(() => {
     const section = sectionRef.current;
-    if (!full || !section || (kind !== 'image' && kind !== 'video' && !(kind === 'html' && hasComposer))) return;
+    if (!full || !section || (kind !== 'image' && kind !== 'video' && kind !== 'audio' && !(kind === 'html' && hasComposer))) return;
     const place = () => {
       const row = fileFootRow(section);
       // The layout height (offsetHeight), not the box on screen: a card flying into the corner control is scaled down.
@@ -1470,7 +1470,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const isText = kind === 'markdown' || kind === 'text';
   const isCode = kind === 'code';
   const isImage = kind === 'image';
-  const isVideo = kind === 'video';
+  /** A video or a recording: one player view, comments at moments (contract 4). */
+  const isVideo = kind === 'video' || kind === 'audio';
   const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
   const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
@@ -3003,7 +3004,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // An edit kept when the file closed, back in its card's edit box.
             reopenEdit={panelReopenEdit}
             // A linked page takes no comments: the hint says where they can be written instead.
-            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
+            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? `Pause at a moment and comment below the ${kind === 'audio' ? 'player' : 'film'}` : isCode ? 'Click a line to comment' : undefined}
             isOpen
             hideEmptyMessage={earlierCount > 0}
             timelineFooter={

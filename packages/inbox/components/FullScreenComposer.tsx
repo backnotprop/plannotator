@@ -269,8 +269,8 @@ export function FullScreenComposer({
   onMinimized,
 }: {
   value: FullScreenComposerValue;
-  /** What a comment is on ("this image", "this video", "this page"). */
-  noun: 'image' | 'video' | 'page' | null;
+  /** What a comment is on ("this image", "this video", "this recording", "this page"). */
+  noun: 'image' | 'video' | 'recording' | 'page' | null;
   /** The file's own comment row (its field, Mark up, Comment), drawn as is in the Comment tab. Null: Reply only. */
   comment: ReactNode | null;
   /** The card starts as its pill until the person opens it (an HTML page on a phone). */
@@ -375,7 +375,7 @@ export function FullScreenComposer({
     if (listAt && !listShown) reply.comments.onList(null);
   });
 
-  const nounText = noun === 'video' ? 'this video' : noun === 'page' ? 'this page' : 'this image';
+  const nounText = noun === 'video' ? 'this video' : noun === 'recording' ? 'this recording' : noun === 'page' ? 'this page' : 'this image';
   const commentLabel = `Comment on ${nounText}`;
   const replyLabel = `Reply to ${reply.to}`;
   const label = mode === 'comment' ? commentLabel : replyLabel;

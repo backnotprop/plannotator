@@ -802,6 +802,8 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
   switch (upload ? readInboxAttachmentKind(upload.kind) : null) {
     case 'image':
       return 'photo';
+    case 'audio':
+      return 'music';
     case 'html':
     case 'code':
       return 'code';
