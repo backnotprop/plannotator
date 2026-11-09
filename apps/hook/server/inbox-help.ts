@@ -32,7 +32,7 @@ import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inbox
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
@@ -182,6 +182,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `thread_id`: the thread (or a message id in it), from send_message's result. `steps`: the whole list, `[{ \"step\": \"Replay the failures in staging\", \"status\": \"doing\", \"note\": \"38 of 40 recovered\" }, ...]`; `[]` clears it. At most 12 steps, 80 characters per step and per note, one line each; past that nothing is written (`validation_error` naming the step).",
       "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
       "- A reply in that thread wakes you with one line, \"Your checklist here: 3 of 6 done; doing: X. If you're still working on this, keep it current.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
+      `- No list of yours in a thread yet: a reply that answers your questions there wakes you with one line, "${INBOX_STEPS_START_WAKE_LINE}"`,
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },

@@ -70,9 +70,6 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
-import { cardStepLists, stepsWaitWords } from '../steps/model';
-import { StepGlyph } from '../steps/StepsMarks';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
 
@@ -506,8 +503,6 @@ export function BoardPage(props: BoardPageProps) {
     const mark = marks.get(card.id);
     return mark && mark.url === ref.url ? mark : { kind: ref.kind === 'issue' ? 'issue' : 'pr', ref: ref.ref, url: ref.url, state: 'unknown', title: null };
   };
-  // The checklist (approval "inbox-thread-steps", part 4): the lists of the card's threads, while the switch is on.
-  const stepsOf = (card: InboxCardWire) => cardStepLists(card.threads, model?.steps);
 
   const common: CardCommon = {
     visitLook: props.visitLook,
@@ -519,7 +514,6 @@ export function BoardPage(props: BoardPageProps) {
     menuKeys,
     rowOf: props.rowOf,
     markOf,
-    stepsOf,
     projectOfCard: (card) => {
       if (!cardsShowProject) return null;
       const name = names.get(card.project_id);
@@ -611,7 +605,6 @@ export function BoardPage(props: BoardPageProps) {
       phone={phone}
       now={now}
       rowOf={props.rowOf}
-      steps={stepsOf(open)}
       onClose={() => props.onOpenCard(null)}
       onMove={async (change, fromMenu) => void (await move(open, change, fromMenu))}
       dropAsk={dropAsk?.id === open.id ? dropAsk.n : 0}
@@ -804,8 +797,6 @@ interface CardCommon {
   rowOf: (threadId: string) => InboxListRow | null;
   /** The card's lane mark (its linked PR or issue), null when it links neither. */
   markOf: (card: InboxCardWire) => InboxCardMark | null;
-  /** The card's checklists, the latest first (none while the switch is off): the first one's pie is on the card. */
-  stepsOf: (card: InboxCardWire) => InboxStepsWire[];
   /** The card's project for its head row, or null while the Board shows one project's cards. */
   projectOfCard: (card: InboxCardWire) => { name: string; root: string } | null;
   onOpen: (card: InboxCardWire) => void;
@@ -966,7 +957,6 @@ function BoardCard({
   menuKeys,
   rowOf,
   markOf,
-  stepsOf,
   projectOfCard,
   onOpen,
   onOpenThread,
@@ -981,14 +971,8 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  // The checklist's mark (approval "inbox-checklist-spinners-2026-11-07"): the lane card stays still, with nothing
-  // while the agent works and the still amber pause only while a list waits on the person; the opened card has the rest.
-  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has answered since the list
-  // (a reply or a 👍), nor once its session has ended, so the card and the list row always agree; the words come from
-  // the first list that still waits by that rule (`stepsWaitWords`: never an ended session's), as the mark does.
-  const planWords = stepsWaitWords(stepsOf(card).filter((list) => rowOf(list.thread_id)?.steps_waiting));
   const cardProject = projectOfCard(card);
-  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
+  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
   const waiting = line?.you ? null : waitingThread(card, rowOf);
@@ -1001,13 +985,6 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
-      {planWords && (
-        <Tip content={planWords}>
-          <span className="ib-strow ib-bc-plan" data-card-steps="waiting">
-            <StepGlyph status="waiting" size={13} />
-          </span>
-        </Tip>
-      )}
       <BoardProjectMark projectId={card.project_id} />
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
@@ -1367,7 +1344,6 @@ function OpenedCard({
   phone,
   now,
   rowOf,
-  steps,
   onClose,
   onMove,
   dropAsk,
@@ -1386,7 +1362,6 @@ function OpenedCard({
   phone: boolean;
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
-  steps: readonly InboxStepsWire[];
   onClose: () => void;
   /** `fromMenu`: a Drop… the card's right-click menu started (its toast). */
   onMove: (move: BoardMove, fromMenu?: boolean) => Promise<void>;
@@ -1483,7 +1458,6 @@ function OpenedCard({
           : null
       }
       rowOf={rowOf}
-      steps={steps}
       phone={phone}
       now={now}
       onClose={onClose}

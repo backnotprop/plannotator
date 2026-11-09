@@ -2892,9 +2892,9 @@ export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12675, tokens: 3486 } as cons
  * `steps` action and send_message's `steps` field; approval
  * "inbox-thread-steps"), for the switch's words. Measured on Pi's request
  * shape from a real Inbox, steps on minus steps off (checked within 5% by
- * inbox-steps-agent.test.ts): 854 bytes (the approved text on the field, a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
+ * inbox-steps-agent.test.ts): 901 bytes (the approved text on the field, with its line on when to start one, and a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
  */
-export const INBOX_TOOL_COST_STEPS = { bytes: 854, tokens: 235 } as const;
+export const INBOX_TOOL_COST_STEPS = { bytes: 901, tokens: 248 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

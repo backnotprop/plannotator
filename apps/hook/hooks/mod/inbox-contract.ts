@@ -376,7 +376,7 @@ export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlast
  * `inboxSteps`): off, no agent text carries any of it.
  */
 export const INBOX_STEPS_LEAD =
-  "The person's checklist for this thread, only for multi-step work you're both aligned on. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one."
+  "The person's checklist for this thread, only for multi-step work you're both aligned on. Start one when the person gives the go-ahead on work with several steps. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one."
 
 /** The agent tool's line for the `steps` action (the owner, 2026-11-07): short, so the description stays under 2,048. */
 export const INBOX_STEPS_ACTION_LINE = "person's checklist for multi-step work you're aligned on (see the steps field)."
@@ -394,6 +394,15 @@ export const INBOX_STEPS_FIELD_DESCRIPTION = `steps: ${INBOX_STEPS_LEAD} No thre
 export function inboxStepsWakeLine(steps: { done: number; total: number; doing: string | null }): string {
   return `Your checklist here: ${steps.done} of ${steps.total} done${steps.doing ? `; doing: ${steps.doing}` : ''}. If you're still working on this, keep it current.`
 }
+
+/**
+ * The wake's one line when the person's reply answers the receiving session's
+ * questions in a thread where that session has no checklist yet, while the
+ * person has the checklist on (the owner, 2026-11-09: "when the person answers
+ * questions"). Never on a plain reply or a 👍; never once the session has a
+ * list there.
+ */
+export const INBOX_STEPS_START_WAKE_LINE = "If these answers start work with several steps, start a checklist here (the steps action). If not, skip it."
 
 /** A command's `steps` as the wake may print it, or null (absent, or not the Inbox's shape). */
 function wakeSteps(value: unknown): { done: number; total: number; doing: string | null } | null {
@@ -1246,6 +1255,13 @@ export interface InboxReplyCommand {
    */
   steps?: { done: number; total: number; doing: string | null }
   /**
+   * The person's reply answers the receiving session's questions in a thread
+   * where it keeps no checklist, while the person has steps on: the wake adds
+   * INBOX_STEPS_START_WAKE_LINE. Absent otherwise (and always with `steps`);
+   * an older connection ignores it.
+   */
+  steps_start?: true
+  /**
    * What the wake's details line says about the thread (approval
    * "inbox-wake-context"). Absent on a Tidy, a 👍, a hand-off notice and a
    * brand new thread; an older connection ignores it and delivers `body` as
@@ -1754,6 +1770,7 @@ export function inboxWakeText(
     reask_one?: unknown
     tidy?: boolean
     steps?: unknown
+    steps_start?: unknown
     context?: unknown
   },
   now: number = Date.now(),
@@ -1768,9 +1785,11 @@ export function inboxWakeText(
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
+  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
+  // with none there yet and the person's answers in this reply, the line that says when to start one.
   const steps = wakeSteps(command.steps)
-  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
+  const stepsLine = steps ? inboxStepsWakeLine(steps) : command.steps_start === true ? INBOX_STEPS_START_WAKE_LINE : ''
+  const closing = `${stepsLine ? `\n\n${stepsLine}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
   const { body, context } = inboxWakeCommand(command)
   const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true, queued: wording.queued === true })
   const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''

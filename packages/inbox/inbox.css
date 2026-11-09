@@ -5915,9 +5915,6 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: none; }
 }
 
-/* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
-.ib-strow { flex: none; display: inline-flex; align-items: center; }
-
 /* a phone: the sheet, 44 px rows and targets, a grab handle */
 .ib-oq-pos[data-phone] .ib-stp { width: auto; max-height: 72vh; border-radius: 14px 14px 0 0; border-width: 1px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); animation: ib-oq-up 240ms var(--ib-st-calm); }
 @media (prefers-reduced-motion: reduce) { .ib-oq-pos[data-phone] .ib-stp { animation: none; } }
@@ -5937,22 +5934,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-m { line-height: 22px; }
 .ib-oq-pos[data-phone] .ib-st-jump { margin: -11px 0; }
 
-/* the Board (part 4): the lane card stays still, with only the amber pause while a list waits on the person; the
-   opened card lists the steps under a section head like Threads and Links; the panel's head has a Board icon that
-   opens the card */
-.ib-bc-plan { flex: none; display: inline-flex; align-items: center; color: var(--ib-st-mut); }
-.ib-crdp-steps .ib-st-head { height: auto; padding: 0; margin: 0 0 4px; }
-.ib-crdp-sec.ib-crdp-steps h3.ib-st-lbl { margin: 0; }
-.ib-crdp-steps .ib-sts { margin: 0 -10px; }
-.ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
-/* The opened card on a phone: two lines too, as the foot's sheet. */
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-gl { margin-top: 4px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-m { line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -9px 0; }
+/* The checklist lives only in its thread (owner, 2026-11-09): no mark on a list row or a Board card. The panel's head
+   keeps its Board icon, which opens the card that links the thread. */
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }

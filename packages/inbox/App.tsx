@@ -12,6 +12,7 @@
 
 import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
+import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -117,7 +118,7 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
-import { createStepsBus, STEPS_REFRESH_MS } from './steps/useThreadSteps';
+import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
@@ -256,6 +257,11 @@ configurePlannotatorUI({
   refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
+  // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
+  // shows) and the rest in idle time, not all at once when the thread opens (utils/codeHighlight).
+  deferOffscreenCodeHighlight: true,
+  // Their tokens are made in a Web Worker; the page only writes the markup (codeHighlightWorker.ts).
+  codeHighlightWorker: createInboxCodeHighlightWorker(() => import('./codeHighlight.worker?worker&inline').then((module) => new module.default())),
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   // The `/` and `$` skill picker (composers and comments on attached files)
   // lists this computer's global skills (approval "inbox-skill-references").
@@ -1810,52 +1816,6 @@ function Inbox() {
   }, [boardEnabled, refreshCards]);
   const onBoard = route.page === 'board' && boardEnabled === true;
   /**
-   * The Board's checklists (approval "inbox-thread-steps", part 4) ride on the cards read: while the Board shows and
-   * the switch is on, a steps change for a thread a card links (or a presence move, a catch-up) reads the cards
-   * again, and so does the switch turning, and a minute passing while a card wears a checklist (its presence ages).
-   */
-  const cardsNowRef = useRef(cards);
-  cardsNowRef.current = cards;
-  const stepsShownOn = settings?.steps?.on === true;
-  // The switch turning (here or in another window): the rows' amber pause (`steps_waiting`) comes or goes with it.
-  const stepsListOn = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (!settings) return;
-    if (stepsListOn.current !== null && stepsListOn.current !== stepsShownOn) void refreshList(false);
-    stepsListOn.current = stepsShownOn;
-  }, [settings, stepsShownOn, refreshList]);
-  const stepsBoardOn = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (!onBoard) {
-      stepsBoardOn.current = null;
-      return;
-    }
-    // The switch turned while the Board was in front: its marks come or go now (entering the Board reads the cards anyway).
-    if (stepsBoardOn.current !== null && stepsBoardOn.current !== stepsShownOn) void refreshCards();
-    stepsBoardOn.current = stepsShownOn;
-    if (!stepsShownOn) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = stepsBus.subscribe((change) => {
-      const now = cardsNowRef.current;
-      // Presence moving changes only a checklist a card wears; a thread's steps line, only a card that links it.
-      const wanted =
-        change === '*' ||
-        (change === 'presence' ? Object.keys(now?.steps ?? {}).length > 0 : !!now?.cards.some((card) => card.threads.includes(change)));
-      if (!wanted) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refreshCards(), 250);
-    });
-    const tick = setInterval(() => {
-      const steps = cardsNowRef.current?.steps;
-      if (steps && Object.keys(steps).length > 0) void refreshCards();
-    }, STEPS_REFRESH_MS);
-    return () => {
-      unsubscribe();
-      if (timer) clearTimeout(timer);
-      clearInterval(tick);
-    };
-  }, [onBoard, stepsShownOn, stepsBus, refreshCards]);
-  /**
    * The project the Board is filtered to (`#board&project=prj_…`). A project the Inbox does not
    * know (a stale or hand-edited link) is no filter once the projects have loaded; before that the
    * id filters as it stands, so a filtered link never flashes every card.
@@ -2110,12 +2070,11 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a thread read.
-          // The list is read again (one read for a pause's events): a row wears the still amber pause while a step
-          // waits on the person (approval "inbox-checklist-spinners-2026-11-07", `steps_waiting`).
+          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
+          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
+          // 2026-11-09): no list row or Board card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
-            listAfterEvents(120);
             return;
           }
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`
