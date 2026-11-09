@@ -11,14 +11,14 @@ export interface GrillMeTipCopy {
 
 /** Variant A, the one shown (DRAFT: the words wait on the owner's OK). */
 export const GRILL_ME_TIP_COPY_A: GrillMeTipCopy = {
-  title: 'Have you tried /grill-me?',
+  title: 'Try /grill-me here',
   body: 'Plannotator gives grill-me an optimized experience: its questions come to your Inbox as cards you can answer anytime.',
   reach: 'Pick /grill-me in a reply or a new message. Nothing to turn on.',
 };
 
 /** Variant B, kept for the owner to swap in (`GRILL_ME_TIP_COPY`). */
 export const GRILL_ME_TIP_COPY_B: GrillMeTipCopy = {
-  title: '/grill-me, in your Inbox',
+  title: 'Try /grill-me here',
   body: 'Pick /grill-me in a reply or a new message, and its interview comes back here, one card per question: pick an answer, add a note, take your time.',
   reach: 'Works with any grill-me skill you have. Nothing to turn on.',
 };
