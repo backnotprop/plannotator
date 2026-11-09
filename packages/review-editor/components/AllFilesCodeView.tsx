@@ -585,8 +585,8 @@ export function projectFileAnnotations(
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
-  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
   contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
+  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
   const reviewAnnotations = annotations
     .filter(
@@ -619,8 +619,8 @@ function buildItemIdentity(
   seedCollapsed: boolean,
   generatedFiles: Set<string> | undefined,
   expandedGeneratedFiles: Set<string> | undefined,
-  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
   contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
+  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -669,7 +669,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, hostLineNotes, contextNotes);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, contextNotes, hostLineNotes);
     // Generated files (#1317) seed collapsed like GitHub's diff view, unless
     // the user already expanded them this session. A view-state seed only —
     // the item carries the full fileDiff either way.
@@ -1105,8 +1105,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       seedCollapsed === true,
       generatedFiles,
       expandedGeneratedRef.current,
-      hostLineNotesRef.current,
       contextNotesRef.current,
+      hostLineNotesRef.current,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
@@ -2374,8 +2374,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         filePath,
         prUrl,
         prDiffScope,
-        hostLineNotesRef.current,
         contextNotesRef.current,
+        hostLineNotesRef.current,
       );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
