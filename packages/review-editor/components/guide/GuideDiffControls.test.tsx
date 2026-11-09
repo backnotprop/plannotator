@@ -89,6 +89,9 @@ describe('GuideScreen top-bar diff controls', () => {
     // The Inbox's order: Split/Unified, Collapse all, gear.
     const buttons = Array.from(group.querySelectorAll('button'));
     expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Switch to Split view', 'Collapse all files', 'Diff display options']);
+    // The owner's order: Close · Approve | these | Annotations · Ask AI · Review Agents | ☰. The divider after them
+    // separates them from the tool icons that follow in the bar.
+    expect(group.nextElementSibling?.hasAttribute('data-guide-diff-controls-divider')).toBe(true);
 
     const toggle = bar!.querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;
     expect(toggle.getAttribute('data-diff-layout-toggle')).toBe('unified');
@@ -104,5 +107,6 @@ describe('GuideScreen top-bar diff controls', () => {
   test.skipIf(!hasDom)('a compact touch layout draws none of them', async () => {
     await renderGuide(true);
     expect(bar!.querySelector('button')).toBeNull();
+    expect(bar!.querySelector('[data-guide-diff-controls-divider]')).toBeNull();
   });
 });
