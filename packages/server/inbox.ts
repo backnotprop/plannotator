@@ -3329,8 +3329,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
     // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
     // the person has steps on.
-    const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
-    if (!list) return { ...command, ...context };
+    // No list of the session's there yet: a reply that answers its questions carries the line that says when to start
+    // one (`steps_start`), never a plain reply or a 👍, and never once the session has kept a list there.
+    if (!stepsOn() || !receiver) return { ...command, ...context };
+    const list = store.stepsOf(reply.thread_id, receiver);
+    if (!list) return { ...command, ...context, ...(store.answersQuestionsOf(reply, receiver) ? { steps_start: true as const } : {}) };
     const { done, total, doing } = inboxStepsProgress(list.steps);
     return { ...command, ...context, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
   };

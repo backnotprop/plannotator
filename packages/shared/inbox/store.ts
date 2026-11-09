@@ -6850,6 +6850,23 @@ export class InboxStore {
     return inboxPersonAnsweredSince(this.threadMessages(root), since);
   }
 
+  /**
+   * The person's `reply` answers at least one of `session`'s questions: a question (never an action item) that agent
+   * session asked in the thread, sent with this reply and not skipped. A plain reply, a 👍 or a skip answers none. The
+   * wake's line that says when to start a checklist (INBOX_STEPS_START_WAKE_LINE) rides only on such a reply.
+   */
+  answersQuestionsOf(reply: InboxMessage, session: string): boolean {
+    if (reply.author.kind !== "person" || reply.ack_of) return false;
+    for (const member of this.threadMessages(reply.thread_id)) {
+      if (member.author.kind !== "agent" || member.author.session !== session) continue;
+      for (const id of this.messageQuestions.get(member.id) ?? []) {
+        const record = this.questions.get(id);
+        if (record && record.kind !== "action" && record.sent_reply_id === reply.id && record.answer && !record.answer.skipped) return true;
+      }
+    }
+    return false;
+  }
+
   /** Every list that holds steps, in threads that still exist (Tidy reads them). */
   allSteps(): InboxSteps[] {
     const out: InboxSteps[] = [];
