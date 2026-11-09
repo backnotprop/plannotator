@@ -40,8 +40,13 @@ export const REVEAL_TIMES = {
   claimRetryMs: 1_500,
   /** Bro mode's moment: the long agent message was open this long before the person went back to the list. */
   broReadMs: 20_000,
-  /** A load that has shown no one-time dialog reads the line again this often (`useLineLatch`). */
-  lineReadMs: 10 * 60_000,
+  /** The line is read again this long after the moment the Inbox named, so the moment has passed there too (`useLineLatch`). */
+  lineReadSlackMs: 1_000,
+  /**
+   * A dialog outside the line's hooks (the Board's welcome, the star ask's card) holds the reveals back this long
+   * after it showed: the Inbox's gap between two dialogs (shared/inbox/reveals.ts `REVEAL_SPACING_MS`, 40 minutes).
+   */
+  otherDialogMs: 40 * 60_000,
 };
 
 /**
@@ -121,16 +126,16 @@ function listKey(rows: readonly InboxListRow[]): string {
  * The leave tracker, the settling wait, the claim and the opening, for one reveal. `target`: the thread just left.
  */
 /**
- * Another one-time dialog showed on this load (the Board's first visit, the star ask's card): App's `revealBlocked`
- * reads it, so Snooze, the Board and the Checklist reveals hold back for the rest of the load. Nothing is stamped: the
- * line and every day stay as they are.
+ * Another one-time dialog showed on this load a moment ago (the Board's first visit, the star ask's card): App's
+ * `revealBlocked` reads it, so the reveals hold back for the gap (`REVEAL_TIMES.otherDialogMs`; until 2026-11-09, for
+ * the rest of the load). Nothing is stamped here.
  */
-let otherOneTimeDialog = false;
+let otherOneTimeDialogAt: number | null = null;
 export function noteOneTimeDialogShown(): void {
-  otherOneTimeDialog = true;
+  otherOneTimeDialogAt = Date.now();
 }
 export function oneTimeDialogShownThisLoad(): boolean {
-  return otherOneTimeDialog;
+  return otherOneTimeDialogAt !== null && Date.now() - otherOneTimeDialogAt < REVEAL_TIMES.otherDialogMs;
 }
 
 export function useRevealMoment(input: RevealMomentInput) {
@@ -329,44 +334,55 @@ export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ah
 }
 
 /**
- * What a load arms of the line, kept as the newest settings read has it until the load is spent (App's latches).
+ * What a load arms of the line (App's latch), and the one timer that keeps it true on a tab left loaded.
  *
- * The line moves while a tab stays loaded: the gap ends, tenure passes, another dialog is shown
- * elsewhere. A tab left loaded for hours or days used to keep what its first read said, so a load that began while the
- * line was held (the gap after a dialog, say) armed nothing for the rest of its life, whatever the Inbox answered later.
- * So the latch follows each later read, and the load reads the line again every `REVEAL_TIMES.lineReadMs` while the tab
- * is in front (and when it comes back in front after that long), until it is spent.
+ * The line moves while a tab stays loaded: the gap after a dialog ends, tenure passes. A latch read once at load left
+ * a tab that began while the line was held arming nothing for the rest of its life (the owner, 2026-11-09). So:
  *
- * Spent: this load showed or claimed a one-time dialog, or had the tour or an update on screen. Then what it holds
- * stays and it reads no more: a load shows one dialog at most, as before. The Inbox still decides every claim (the
- * gap, never the load right after one that showed a dialog).
+ *  - The latch is the newest settings read, each time one arrives (the page reads settings on its event stream for
+ *    other reasons anyway). `frozen` (the tour or an update was on screen on this load) keeps the first read, as before.
+ *  - No polling. The Inbox says when a date can next change the line (settings `reveal.again_in`, shared/inbox/reveals.ts
+ *    `revealAgainAt`: the end of the gap, of a Not now's three days, of a tenure); App keeps it as a time on the
+ *    page's clock (`againAt`). One timeout waits for that moment and then calls `reread` once; the read's answer
+ *    brings the next moment, or none. With no moment ahead nothing is scheduled at all.
+ *  - The timeout exists only while the tab is visible: hidden (or the page going away, `pagehide`) clears it, and
+ *    coming back in front arms it again, at once when the moment has passed. Unmounting clears it and both listeners.
  *
- * `read`: what the newest settings arm, null until the first list and settings are in. `line`: the Inbox keeps a line
- * (settings `reveal.line`; without one nothing moves with time, so nothing is read again).
+ * The Inbox still decides every claim (the gap; three days after a Not now).
  */
-export function useLineLatch<T>(input: { read: T | null; spent: boolean; line: boolean; reread: () => void }): T | null {
+export function useLineLatch<T>(input: { read: T | null; frozen: boolean; againAt: number | null; reread: () => void }): T | null {
   const held = useRef<T | null>(null);
-  if (input.read !== null && (held.current === null || !input.spent)) held.current = input.read;
+  if (input.read !== null && (held.current === null || !input.frozen)) held.current = input.read;
   const reread = useRef(input.reread);
   reread.current = input.reread;
-  const watching = held.current !== null && input.line && !input.spent;
+  const againAt = held.current !== null && !input.frozen ? input.againAt : null;
   useEffect(() => {
-    if (!watching) return;
-    let last = Date.now();
-    // Never while the tab is hidden: it reads once it is in front again, when the last read is that old.
-    const read = (after: number) => {
-      if (document.visibilityState !== 'visible' || Date.now() - last < after) return;
-      last = Date.now();
-      reread.current();
+    if (againAt === null) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
     };
-    const timer = setInterval(() => read(0), REVEAL_TIMES.lineReadMs);
-    const front = () => read(REVEAL_TIMES.lineReadMs);
-    document.addEventListener('visibilitychange', front);
+    const arm = () => {
+      clear();
+      if (document.visibilityState !== 'visible') return;
+      timer = setTimeout(
+        () => {
+          timer = null;
+          reread.current();
+        },
+        Math.max(0, againAt - Date.now()) + REVEAL_TIMES.lineReadSlackMs,
+      );
+    };
+    arm();
+    document.addEventListener('visibilitychange', arm);
+    window.addEventListener('pagehide', clear);
     return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', front);
+      clear();
+      document.removeEventListener('visibilitychange', arm);
+      window.removeEventListener('pagehide', clear);
     };
-  }, [watching]);
+  }, [againAt]);
   return held.current;
 }
 

@@ -182,22 +182,25 @@ test.skipIf(!hasDom)('the card opens in the window when the queue says bro, at t
   await until(() => card() === null, 'the card to close');
 }, 30_000);
 
-test.skipIf(!hasDom)('a tab loaded inside the gap after another dialog and left loaded shows the card once the line is free, with no reload', async () => {
-  // The line's last dialog, as config.json keeps it (the Inbox reads it live).
-  const lastDialog = (at: number) => {
-    const stamp = new Date(at).toISOString();
-    writeFileSync(join(server!.dataDir, 'config.json'), JSON.stringify({ ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } }));
-  };
-  // A dialog showed a moment ago: this load may arm nothing.
-  lastDialog(Date.now());
-  reveal.REVEAL_TIMES.lineReadMs = 200;
+test.skipIf(!hasDom)('a tab loaded inside the gap after another dialog and left loaded shows the card once the gap is over, with no reload and no polling', async () => {
+  // The line's last dialog showed 40 minutes ago less two seconds (config.json, read live): this load may arm nothing
+  // yet, and the Inbox names the moment the gap ends (`reveal.again_in`).
+  const stamp = new Date(Date.now() - 40 * 60_000 + 2_000).toISOString();
+  writeFileSync(join(server!.dataDir, 'config.json'), JSON.stringify({ ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } }));
+  reveal.REVEAL_TIMES.lineReadSlackMs = 100;
+  let settingsReads = 0;
+  const counted = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET' && String(input).split('?')[0] === '/api/inbox/settings') settingsReads += 1;
+    return counted(input, init);
+  }) as typeof fetch;
   await readAndLeave();
-  await wait(TIMES.settledMs + 400);
   expect(openDialogs()).toEqual([]);
   expect(config().inboxReveals.bro).toBeUndefined();
-  // The gap passes on the same tab: the Inbox has Bro mode next, and the tab asks it for the line again.
-  lastDialog(Date.now() - 26 * 3_600_000);
-  await wait(reveal.REVEAL_TIMES.lineReadMs + 300);
+  const readsAtLoad = settingsReads;
+  // The gap ends on the same tab: one read of the line at that moment, and Bro mode is armed.
+  await wait(2_600);
+  expect(settingsReads - readsAtLoad).toBe(1);
   act(() => {
     window.location.hash = `#thread=${server!.thread}`;
     window.dispatchEvent(new HashChangeEvent('hashchange'));

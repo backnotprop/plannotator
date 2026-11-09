@@ -175,9 +175,8 @@ describe("the star ask's who (approval \"star-ask\")", () => {
     expect(revealAsideNow(state({ ...week, open: { steps: true, star: true } }), NOW)).toEqual(["star"]);
   });
 
-  test("only while the line is free: not within 40 minutes of a dialog, not on the load after one, not after a Not now", () => {
+  test("only while the line is free: not within 40 minutes of a dialog, not after a Not now", () => {
     expect(star({ dayShownAt: local(0, 0, 5).toISOString() })).toBeNull();
-    expect(star({ afterShowLoad: true })).toBeNull();
     expect(star({ lastShownAt: local(0, 0, 0).toISOString() })).toBeNull();
     // 40 minutes on, the same day: free.
     expect(star({ lastShownAt: local(-1, 23, 50).toISOString(), dayShownAt: local(-1, 23, 50).toISOString() })).toBe("star");

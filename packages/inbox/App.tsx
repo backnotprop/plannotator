@@ -1163,11 +1163,12 @@ function Inbox() {
   const listIntroLatch = useRef<{ local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   /**
-   * A one-time dialog of the line showed or was claimed on this load (a reveal's, voice's, the star ask's, Code
-   * review's offer): with the dialogs App keeps itself, it makes the load spent (`lineLatch`). Written at the end of
-   * each render, from the hooks' stages.
+   * A one-time dialog of the line is claimed or open now (a reveal's, voice's, the star ask's, Code review's offer):
+   * with the dialogs App keeps itself, the load arms nothing else meanwhile (`lineLatch`). Set from the hooks' stages.
    */
-  const lineStagesSpent = useRef(false);
+  const [lineStagesBusy, setLineStagesBusy] = useState(false);
+  /** When a date can next change the line, on this page's clock (settings `reveal.again_in` at its read), or null. */
+  const [lineAgainAt, setLineAgainAt] = useState<number | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
@@ -1783,15 +1784,20 @@ function Inbox() {
     }
   }, [setThreadLoad, stopLiveThreadRetry]);
 
+  /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
+  const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
+    setLineAgainAt(typeof reveal?.again_in === 'number' ? Date.now() + reveal.again_in : null);
+  }, []);
   /**
-   * The line of one-time dialogs, read again (reveal.ts `useLineLatch`): only what the line says moves (which dialog is
-   * next, the list options and voice dialogs' `due`), so nothing else on the page changes. Quiet: a read that fails
-   * waits for the next one.
+   * The line of one-time dialogs, read again (reveal.ts `useLineLatch`: once, at the moment the Inbox named, and after
+   * a dialog of this load is claimed): only what the line says moves (which dialog is next, the list options and voice
+   * dialogs' `due`), so nothing else on the page changes. Quiet: a read that fails waits for the next settings read.
    */
   const rereadLine = useCallback(() => {
     void inboxApi
       .settings()
-      .then((next) =>
+      .then((next) => {
+        noteLineAgain(next.reveal);
         setSettings((current) =>
           current
             ? {
@@ -1802,10 +1808,10 @@ function Inbox() {
                 voice: current.voice && next.voice ? { ...current.voice, intro_due: next.voice.intro_due } : current.voice,
               }
             : current,
-        ),
-      )
+        );
+      })
       .catch(() => {});
-  }, []);
+  }, [noteLineAgain]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -1824,6 +1830,7 @@ function Inbox() {
       // carries it. Only with Code review on: off, every comment reads as on main.
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
+      noteLineAgain(next.reveal);
       setSettings(next);
       setSettingsReadFailed(false);
     } catch (cause) {
@@ -4936,28 +4943,30 @@ function Inbox() {
   }
   const listIntroAtLoad = listIntroLatch.current;
   // What this load arms of the line (reveal.ts `useLineLatch`): the dialog that is next (settings `reveal.next`), the
-  // `ahead` offers and the ones beside it, and whether the list options and voice dialogs are due and next. It follows
-  // each later settings read, and the load reads the line again now and then, until the load is spent (it showed or
-  // claimed a one-time dialog, or had the tour or an update): a tab left loaded since before the line was free used to
-  // arm nothing for the rest of its life. The Inbox's claim still decides each one (the gap, the load rule).
-  const lineSpent =
-    soundDialog !== 'none' ||
-    agentNote !== 'none' ||
-    listIntro !== 'none' ||
-    listIntroAsked.current ||
-    tourThisLoad.current ||
-    updatingThisLoad.current ||
-    oneTimeDialogShownThisLoad() ||
-    lineStagesSpent.current;
+  // `ahead` offers and the ones beside it, and whether the list options and voice dialogs are due and next, as the
+  // newest settings read has them. Held as it is while a one-time dialog of this load is claimed or open (the others
+  // are blocked meanwhile, `revealBlocked`; the Inbox's gap starts with the claim, and the line is read again then, so
+  // what follows is armed only once the Inbox names it). A load that had the tour or an update keeps its first read. A tab left loaded since before the line was free used
+  // to arm nothing for the rest of its life; and since 2026-11-09 the same tab may show the next dialog once the gap
+  // has passed (the owner: "after 40 minutes, the same tab (or a fresh load) can show the next one").
+  /** The Inbox keeps a line (a release build): its gap, not the page load, paces the dialogs. */
+  const lineKept = settings?.reveal?.line === true;
+  const lineBusy =
+    soundDialog === 'open' || typeof agentNote === 'object' || listIntro === 'claimed' || listIntro === 'open' || (listIntroAsked.current && !listIntroDecided) || lineStagesBusy;
   const lineLatch = useLineLatch({
     read:
       settings && latest !== null
         ? { ...revealArmed(settings), listIntroDue: settings.list_intro?.due === true && lineArms('list_intro'), voiceDue: settings.voice?.intro_due === true && lineArms('voice') }
         : null,
-    spent: lineSpent,
-    line: settings?.reveal?.line === true,
+    // With no line, a load that showed or claimed a dialog keeps what it held, as before.
+    frozen: tourThisLoad.current || updatingThisLoad.current || lineBusy || (!lineKept && (soundDialog !== 'none' || agentNote !== 'none' || listIntro !== 'none' || listIntroAsked.current)),
+    againAt: lineKept ? lineAgainAt : null,
     reread: rereadLine,
   });
+  // A dialog of this load was just claimed: the line as the Inbox has it now (nothing next, and when to ask again).
+  useEffect(() => {
+    if (lineBusy) rereadLine();
+  }, [lineBusy, rereadLine]);
   const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
   // Every one-time dialog's hold: something typed or open over the page, or a question waiting in the open thread.
   const oneTimeHeldBack = () => listIntroHeldBack() || openQuestionHere();
@@ -4982,7 +4991,9 @@ function Inbox() {
     // Read with the page as it is now: the wait's flag clears an effect later, never a render late.
     settled: listIntroSettled && listOptionsClear,
     tourThisLoad: tourThisLoad.current,
-    otherDialogThisLoad: soundDialog !== 'none' || agentNote !== 'none',
+    // With a line: on screen now (one that closed no longer holds this load; the gap is the Inbox's). An Inbox that
+    // keeps no line (a dev build, an older one) has no gap, so there a load that showed one still shows no other.
+    otherDialogThisLoad: lineKept ? soundDialog === 'open' || typeof agentNote === 'object' || lineStagesBusy : soundDialog !== 'none' || agentNote !== 'none',
     othersSettled: soundSettled && agentNoteSettled,
     updating: updateDialog !== null || restarting,
   };
@@ -5061,13 +5072,16 @@ function Inbox() {
   const revealBlocked = snoozeIntroBlockedBy({
     tour: tourThisLoad.current,
     updating: updatingThisLoad.current,
-    sound: soundDialog,
-    agentNote,
-    listIntroWant,
-    listIntro,
-    voiceWanted: voiceIntro.wanted,
-    voiceStage: voiceIntro.stage,
-    board: oneTimeDialogShownThisLoad(),
+    // With a line, each as it is now: a dialog that closed ('shown') no longer holds the rest of the load (the gap is
+    // the Inbox's). With no line (no gap), a load that showed one still shows no other.
+    sound: lineKept && soundDialog === 'shown' ? 'none' : soundDialog,
+    agentNote: lineKept && agentNote === 'shown' ? 'none' : agentNote,
+    listIntroWant: listIntroWant && !(lineKept && listIntro === 'shown'),
+    listIntro: lineKept && listIntro === 'shown' ? 'none' : listIntro,
+    voiceWanted: voiceIntro.wanted && !(lineKept && voiceIntro.stage === 'shown'),
+    voiceStage: lineKept && voiceIntro.stage === 'shown' ? 'none' : voiceIntro.stage,
+    // Another dialog of the line is claimed or open now, or one outside its hooks showed within the gap.
+    board: oneTimeDialogShownThisLoad() || lineStagesBusy,
   });
   const snoozeIntro = useSnoozeIntro({
     due: lineLatch?.snoozeDue ?? false,
@@ -5822,7 +5836,7 @@ function Inbox() {
   // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
   const codeReviewOffer = useCodeReviewOffer({
     due: lineLatch?.next === 'code_review',
-    blocked: updatingThisLoad.current || soundDialog !== 'none' || agentNote !== 'none' || oneTimeDialogShownThisLoad(),
+    blocked: updatingThisLoad.current || (lineKept ? soundDialog === 'open' || typeof agentNote === 'object' : soundDialog !== 'none' || agentNote !== 'none') || oneTimeDialogShownThisLoad(),
     tourScreen: showTourEntry || tourIntroShown || tourOn,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     rows: snoozeIntroRows,
@@ -5833,13 +5847,14 @@ function Inbox() {
     on: settings?.code_review?.on === true,
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
-  // The load is spent once any of these showed or was claimed (`lineLatch`, read at the next render).
-  lineStagesSpent.current = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, starReveal.stage, codeReviewOffer.stage].some(
-    (stage) => stage !== 'none',
+  // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, starReveal.stage, codeReviewOffer.stage].some(
+    (stage) => stage === 'claimed' || stage === 'open',
   );
+  useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
   // The agent-note dialog's moment (approval "inbox-one-time-dialogs": day 0 is setup, one after another): once the
   // tour's screens are gone (the entry screen, its intro, the tour itself), and only when the Inbox's line says this
-  // load may (`reveal.setup`: never on a day that had another dialog, nor on the load right after one). Then the
+  // load may (`reveal.setup`: never within the gap of another dialog). Then the
   // claim (`POST /api/inbox/reveal` `agent_note`) stamps the day, so two tabs never both show it; an older Inbox
   // without the line answers with an error, and the dialog shows as before.
   const agentNoteReady =
@@ -5863,7 +5878,7 @@ function Inbox() {
       agentNoteDecided.current = true;
       const model = settings?.via === 'tailnet' ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
-      // Not on this load (the line's day or load rule): decided, so the notification lines need not wait for it.
+      // Not on this load (the line's gap): decided, so the notification lines need not wait for it.
       if (rows.length === 0 || !model || settingsRef.current?.reveal?.setup === false) {
         setAgentNoteSettled(true);
         return true;

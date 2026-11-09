@@ -6,8 +6,8 @@
  * every claim against it.
  *
  * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
- * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the gap and the page-load
- * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
+ * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the gap
+ * (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
  *  - Day 0 is setup only: every offer needs tenure (two days or more since first use), but Code review's
@@ -15,13 +15,13 @@
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (List view: approval "inbox-one-time-dialogs", "the change") may also
- *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the load and
+ *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the
  *    spacing rules (`revealAhead`). It never goes before an update-day dialog.
  *  - No one-a-day rule (the owner, 2026-11-09: "I don't wanna wait a whole day now ... at 40 minutes, give him the new
  *    option"): the gap below is the whole pace, so a heavy user may see several dialogs in one day, each at its moment.
- *  - Never on two page loads in a row: the load right after the one that showed the last dialog shows none
- *    (`revealAfterShowLoad`; each page sends its load id, and a load counts once, when it is first seen, so an old tab
- *    reading settings again never becomes the newest load).
+ *  - No page-load rule any more (the owner, 2026-11-09: "after 40 minutes, the same tab (or a fresh load) can show the
+ *    next one"; it was "never on two page loads in a row", and a load that showed one showed no other): the gap is the
+ *    only pace, on any load. `inboxReveals.shownLoad` is still stamped, as a record; nothing reads it.
  *  - Spacing (changed 2026-11-09: about 40 minutes; it was one day): `REVEAL_SPACING_MS` (40 minutes) after the last
  *    dialog of any kind: the line's own (`lastShownAt`), the agent note (`dayShownAt`) and the ones that stand aside
  *    (`asideShownAt`: the star ask, the grill-me tip), so none stacks on another (`revealGapFree`).
@@ -169,8 +169,6 @@ export interface RevealState {
   dayShownAt?: string | null;
   /** The last offer closed with Not now (config.json `inboxReveals.notNowAt`). */
   notNowAt?: string | null;
-  /** This page's load comes right after the load that showed the last dialog (`revealAfterShowLoad`). */
-  afterShowLoad?: boolean;
   /** Heavy use holds (`revealHeavyUse`). Absent: false. */
   heavy?: boolean;
   /** Threads on this machine. */
@@ -215,13 +213,12 @@ export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShown
 }
 
 /**
- * The line's own rules, for any dialog in it: not on the load right after the one that showed the last dialog, not
- * within the gap of any other dialog, and (except the agent note, `setup`) not within three days of an offer's Not
- * now. A dev build keeps no line: free.
+ * The line's own rules, for any dialog in it, on any page load: not within the gap of any other dialog, and (except
+ * the agent note, `setup`) not within three days of an offer's Not now. A dev build keeps no line: free.
  */
 export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now: Date): boolean {
   if (!state.release) return true;
-  if (state.afterShowLoad || !revealGapFree(state, now)) return false;
+  if (!revealGapFree(state, now)) return false;
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);
 }
 
@@ -323,6 +320,40 @@ function revealFresh(state: RevealState, now: Date, table: readonly RevealEntry[
   });
 }
 
+/**
+ * The next moment the line can change by time alone, or null when no date ahead can change it: the end of the gap
+ * after each dialog, the end of the three days after a Not now, and for each entry still open the end of its tenure, of
+ * its patience and (an offer) of its 14 days, and the day after first use for an entry that waits for a later day.
+ * The Inbox reports how far away it is (`reveal.again_in`), so a page left loaded asks again once, then, with one
+ * timer and no polling (packages/inbox/reveal.ts `useLineLatch`). Everything else that moves the line (a thread
+ * arriving, a switch, a claim) is an event, not a date.
+ */
+export function revealAgainAt(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): number | null {
+  if (!state.release) return null;
+  const moments: (number | null)[] = [];
+  const after = (stamp: string | null | undefined, ms: number) => {
+    const at = time(stamp);
+    moments.push(at === null ? null : at + ms);
+  };
+  for (const stamp of [state.lastShownAt, state.dayShownAt, state.asideShownAt]) after(stamp, REVEAL_SPACING_MS);
+  after(state.notNowAt, REVEAL_NOT_NOW_SPACING_MS);
+  const first = time(state.firstUseAt);
+  for (const entry of table) {
+    if (!entry.enabled || state.open[entry.id] !== true) continue;
+    if (first !== null) {
+      moments.push(first + entry.tenureMs);
+      if (entry.laterDay) {
+        const day = new Date(first);
+        moments.push(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime());
+      }
+    }
+    after(state.waitingSince?.[entry.id], REVEAL_PATIENCE_MS);
+    if (entry.kind === "offer") after(state.waitingSince?.[entry.id], REVEAL_RETIRE_MS);
+  }
+  const ahead = moments.filter((at): at is number => at !== null && at > now.getTime());
+  return ahead.length === 0 ? null : Math.min(...ahead);
+}
+
 /** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual day. */
 export function revealNotNowAllowed(id: unknown, table: readonly RevealEntry[] = INBOX_REVEALS): id is RevealId {
   return table.some((entry) => entry.id === id && entry.kind === "offer" && !entry.lastResort);
@@ -350,7 +381,7 @@ export interface RevealsSaved {
   lastShownAt?: string;
   dayShownAt?: string;
   notNowAt?: string;
-  /** The load id of the page that showed the last dialog. */
+  /** The load id of the page that showed the last dialog: a record only (the page-load rule ended 2026-11-09). */
   shownLoad?: string;
   waitingSince?: Partial<Record<RevealId, string>>;
   /** The agent note: the agents it was shown for (`revealAgentNoteNew`). */
@@ -360,40 +391,6 @@ export interface RevealsSaved {
 /** A page's load id, as a page sends it (`X-Plannotator-Load`): 8 to 64 letters, digits, - or _. */
 export function revealLoadId(value: string | null | undefined): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value) ? value : null;
-}
-
-/** How many page loads the Inbox remembers (each with the load before it). */
-export const REVEAL_LOADS_KEPT = 256;
-
-/**
- * The page loads the Inbox saw, in the order each was first seen: `newest`, and for each load the one first seen just
- * before it. Kept in memory, not in config.json: it changes on every load; after a restart the gap alone
- * holds the next load. A load counts once: an old tab reading settings again is not a new load.
- */
-export interface RevealLoads {
-  newest?: string;
-  before?: ReadonlyMap<string, string | null>;
-}
-
-/** The loads once this page load is seen: null when nothing changes (a load already seen, or no id). */
-export function revealSeeLoad(loads: RevealLoads, load: string | null): RevealLoads | null {
-  if (!load || loads.before?.has(load)) return null;
-  const before = new Map(loads.before ?? []);
-  before.set(load, loads.newest ?? null);
-  for (const oldest of before.keys()) {
-    if (before.size <= REVEAL_LOADS_KEPT) break;
-    before.delete(oldest);
-  }
-  return { newest: load, before };
-}
-
-/**
- * This load was first seen right after the load that showed the last dialog (`shownLoad`, saved with the stamp), so it
- * shows none for its whole life. A page that sends no id, or a load this Inbox never saw, is never held back.
- */
-export function revealAfterShowLoad(shownLoad: string | undefined, loads: RevealLoads, load: string | null): boolean {
-  if (!load || !shownLoad) return false;
-  return loads.before?.get(load) === shownLoad;
 }
 
 /**

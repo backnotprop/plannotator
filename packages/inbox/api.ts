@@ -106,8 +106,8 @@ export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' |
 export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
 
 /**
- * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
- * one on the load right after the load that showed the last (packages/shared/inbox/reveals.ts).
+ * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
+ * dialog's stamp, as a record (packages/shared/inbox/reveals.ts; the page-load rule it once served ended 2026-11-09).
  */
 const pageLoad = newUuid();
 
@@ -558,7 +558,7 @@ export interface SettingsModel {
    * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
    * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */

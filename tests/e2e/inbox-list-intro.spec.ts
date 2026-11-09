@@ -14,7 +14,7 @@
  *  - "Customize rows" opens Settings → Rows, saves nothing and retires it.
  *  - A key or a click during the demo jumps to the held picture.
  *  - Never on the same load as the tour (the next load shows it); after the sound dialog, never that load nor the next
- *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": 40 minutes apart, never on two loads in a row).
+ *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": 40 minutes apart).
  *  - Its moment is back on the list (approval "inbox-one-time-dialogs"): a first load on a thread link (desktop or
  *    phone) never shows it over the thread; back on the list it shows after the same short wait as a first load on the
  *    list; never while a file is open beside the thread, nor with the thread alone; never under an image opened full
@@ -421,7 +421,7 @@ for (const how of ['a key', 'a click'] as const) {
   });
 }
 
-test('after the sound dialog: never on that load, nor on the next (40 minutes apart, never two loads in a row)', async ({ browser }) => {
+test('after the sound dialog: not on that load nor on the next, inside the gap (40 minutes apart)', async ({ browser }) => {
   const w = await world({ earlier: true, soundDue: true });
   const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(w.url);

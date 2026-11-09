@@ -799,18 +799,34 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
       })
     ).json()) as Json;
 
-  test("the load first seen right after the one that showed a dialog arms and claims none; an old tab reading again holds no new load", async () => {
+  test("no page-load rule (the owner, 2026-11-09: after 40 minutes, the same tab or a fresh load can show the next one): the load that showed the last dialog, and the load right after it, are armed and may claim once the gap is over", async () => {
     // Load A showed the last dialog three days ago (its stamp); the Board is next.
     const w = await world({ config: { inboxReveals: { lastShownAt: ago(3 * DAY), dayShownAt: ago(3 * DAY), shownLoad: "load-aaaaaaaa" } } });
     expect((await settingsAs(w, "load-aaaaaaaa")).reveal.next).toBe("board");
-    // B opens right after A: nothing armed, and its claim is refused.
-    expect((await settingsAs(w, "load-bbbbbbbb")).reveal.next).toBeNull();
-    expect((await claimAs(w, "load-bbbbbbbb", { id: "board" })).show).toBe(false);
-    // Tab A comes back and reads settings again, then C opens: C is not the load after A, and gets the Board.
-    await settingsAs(w, "load-aaaaaaaa");
-    expect((await settingsAs(w, "load-cccccccc")).reveal.next).toBe("board");
-    expect((await claimAs(w, "load-cccccccc", { id: "board" })).show).toBe(true);
-    expect(w.saved().inboxReveals.shownLoad).toBe("load-cccccccc");
+    // B opens right after A: armed too.
+    expect((await settingsAs(w, "load-bbbbbbbb")).reveal.next).toBe("board");
+    // The same tab that showed the last one claims the next.
+    expect((await claimAs(w, "load-aaaaaaaa", { id: "board" })).show).toBe(true);
+    expect(w.saved().inboxReveals.shownLoad).toBe("load-aaaaaaaa");
+    // Inside the gap nothing more, on any load, and the Inbox says when to ask again: 40 minutes on.
+    const after = (await settingsAs(w, "load-cccccccc")).reveal;
+    expect(after.next).toBeNull();
+    expect(after.again_in).toBeGreaterThan(39 * 60_000);
+    expect(after.again_in).toBeLessThanOrEqual(40 * 60_000);
+  });
+
+  test("when to ask again (`reveal.again_in`): null when no date can change the line, and never for a guest or a dev build", async () => {
+    // Day 6 (every tenure behind), the Board next and waiting for its moment: the next date is the end of its patience.
+    const w = await world({ days: 6 });
+    expect((await w.settings()).reveal.next).toBe("board");
+    const patience = (await w.settings()).reveal.again_in;
+    expect(patience).toBeGreaterThan(3 * DAY - 60_000);
+    expect(patience).toBeLessThanOrEqual(3 * DAY);
+    // Everything decided and nothing shown lately: no date ahead, so a page schedules nothing.
+    const quiet = await world({ config: { inboxBoard: true, inboxSteps: true, inboxBro: true, inboxCodeReview: true, starAsk: { answer: "already", at: ago(DAY) }, inboxReveals: { grill_me_tip: { shownAt: ago(DAY) }, list_view: { shownAt: ago(DAY) } } } });
+    expect((await quiet.settings()).reveal).toMatchObject({ next: null, again_in: null });
+    const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { lastShownAt: ago(60_000) } } });
+    expect((await dev.settings()).reveal.again_in).toBeNull();
   });
 
   test("Not now stamps the four days only for an offer: an update-day dialog's Not now is refused and writes nothing", async () => {
