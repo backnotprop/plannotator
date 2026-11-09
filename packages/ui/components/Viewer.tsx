@@ -140,6 +140,12 @@ export interface ViewerProps {
    */
   onSide?: (text: string, context: SelectionActionContext) => void;
   /**
+   * Opt-in host capability: how that button is drawn (AnnotationToolbar
+   * `sideButton`: an icon-only button with the host's glyph and tooltip).
+   * Absent → the two bubbles and the word "Side": unchanged.
+   */
+  sideButton?: { icon?: React.ReactNode; label: string };
+  /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label
    * shortcuts; the 👍 button is unaffected.
@@ -856,6 +862,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   selectionActions,
   selectionActionsIcon,
   onSide,
+  sideButton,
   quickLabels,
   mentionSource,
   globalAttachments = [],
@@ -2225,6 +2232,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
               onSide={onSide}
+              sideButton={sideButton}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}

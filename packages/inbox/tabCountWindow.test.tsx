@@ -19,7 +19,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
-import { FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
+import { FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_DATA_URL, FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
 import { resetInboxFaviconForTests } from './faviconChoice';
 
 const hasDom = typeof document !== 'undefined';
@@ -121,7 +121,8 @@ beforeEach(() => {
   document.head.querySelector('link[rel="icon"]')?.remove();
   const link = document.createElement('link');
   link.rel = 'icon';
-  link.setAttribute('href', '/favicon.png');
+  link.setAttribute('href', '/favicon.ico');
+  link.setAttribute('sizes', '16x16 32x32 48x48');
   document.head.appendChild(link);
   window.location.hash = '';
 });
@@ -181,8 +182,8 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
   await until(() => document.title === '(1) Plannotator Inbox', 'one thread counted');
   await until(() => iconLabel() === '1', 'the badged icon');
   expect(iconHref().startsWith('data:image/svg+xml')).toBe(true);
-  // The plain icon rides inside the badged one.
-  expect(decodeURIComponent(iconHref())).toContain('href="data:image/png;base64,');
+  // The badge is drawn over Glass's hand-pixelled 32 (the server's /favicon.png), not the .ico.
+  expect(decodeURIComponent(iconHref())).toContain(`href="${FAVICON_PNG_DATA_URL}"`);
 
   // An agent starts a thread: the count rises.
   const fresh = await agentSends('A fresh finding about the build.');
@@ -195,7 +196,7 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
 
   // Opening the last one: no prefix, the plain icon again.
   openThread(world.stopped);
-  await until(() => document.title === 'Plannotator Inbox' && iconHref() === '/favicon.png', 'the plain tab');
+  await until(() => document.title === 'Plannotator Inbox' && iconHref() === '/favicon.ico', 'the plain tab');
 });
 
 test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the badge drawn over it, and saved for every page', async () => {
@@ -217,7 +218,7 @@ test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the 
   const choice = () => document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="totman"]');
   await until(() => choice() !== null, 'the Favicon row');
   const labels = [...document.querySelectorAll('input[name="ib-favicon"]')].map((input) => input.closest('label')?.textContent);
-  expect(labels).toEqual(['Glass', 'Face', 'P']);
+  expect(labels).toEqual(['Glass', 'Yellow', 'Face']);
   expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="glass"]')?.checked).toBe(true);
 
   act(() => choice()!.click());

@@ -208,6 +208,7 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const outside = [
       ["GET", "/"],
       ["GET", "/favicon.png"],
+      ["GET", "/favicon.ico"],
       ["GET", "/api/inbox/threads"],
       ["GET", "/api/inbox/health"],
       ["POST", "/mcp"],

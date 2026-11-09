@@ -56,11 +56,18 @@ function useCopies({ thread, linkOf, onToast }: CopyMenuHost) {
   };
 }
 
-/** The menus are drawn inside the window's root, so its styles (and theme) reach them. */
+/**
+ * The menus are drawn inside the window's root, so its styles (and theme) reach them. Found again after each render:
+ * the element `ref` names can come later than the first one (a far message draws its ⋯ plain until it is armed), and
+ * a menu drawn outside the root loses the root's styles (its icons come out as filled black shapes).
+ */
 function usePortal<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => setPortal(ref.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  useLayoutEffect(() => {
+    const root = ref.current?.closest<HTMLElement>('.pn-inbox');
+    if (root) setPortal(root);
+  });
   return { ref, portal };
 }
 
@@ -136,6 +143,7 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
     // menu key on the head) arms the message and opens its menu.
     const plain = (
       <button
+        ref={more}
         type="button"
         className="ib-mut ib-mmore"
         aria-haspopup="menu"

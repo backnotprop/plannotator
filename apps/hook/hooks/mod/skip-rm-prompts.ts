@@ -29,6 +29,8 @@
  * cancelling the person's own setting.
  */
 
+import { isAbsolutePath } from './paths'
+
 /** The variable Claude Code reads for the waiver. */
 export const SKIP_RM_PROMPTS_VARIABLE = 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'
 
@@ -114,7 +116,7 @@ function hooksFileSelectsBash(parsed: unknown): boolean {
 
 /** Whether one installed plugin folder holds a PreToolUse or PermissionRequest hook that could run for Bash, or cannot be read. */
 async function pluginFolderSelectsBash(folder: string, readText: ReadText): Promise<boolean> {
-  const root = folder.replace(/\/+$/, '')
+  const root = folder.replace(/[\\/]+$/, '')
   const defaultHooks = await readText(`${root}/hooks/hooks.json`)
   if (defaultHooks !== null && hooksFileSelectsBash(JSON.parse(defaultHooks))) return true
   const manifestText = await readText(`${root}/.claude-plugin/plugin.json`)
@@ -129,7 +131,7 @@ async function pluginFolderSelectsBash(folder: string, readText: ReadText): Prom
       continue
     }
     const named = item.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, root)
-    const path = named.startsWith('/') ? named : `${root}/${named.replace(/^\.\//, '')}`
+    const path = isAbsolutePath(named) ? named : `${root}/${named.replace(/^\.[\\/]/, '')}`
     const text = await readText(path)
     // A hooks file the manifest names but that is not there (or that names another variable): the mod cannot tell what it meant.
     if (text === null || hooksFileSelectsBash(JSON.parse(text))) return true
@@ -153,8 +155,8 @@ export async function pluginsGuardRemovals(settings: unknown, configDir: unknown
     // `false` turns a plugin off; `true` or a version list turns it on.
     const enabled = Object.entries(enabledPlugins).filter(([, value]) => value !== false).map(([id]) => id)
     if (enabled.length === 0) return false
-    if (typeof configDir !== 'string' || !configDir.startsWith('/')) return true
-    const registryText = await readText(`${configDir.replace(/\/+$/, '')}/plugins/installed_plugins.json`)
+    if (typeof configDir !== 'string' || !isAbsolutePath(configDir)) return true
+    const registryText = await readText(`${configDir.replace(/[\\/]+$/, '')}/plugins/installed_plugins.json`)
     if (registryText === null) return true
     const registry = JSON.parse(registryText)
     if (!registry || typeof registry !== 'object') return true
@@ -168,7 +170,7 @@ export async function pluginsGuardRemovals(settings: unknown, configDir: unknown
       if (records.length === 0) return true
       for (const record of records) {
         const installPath = record && typeof record === 'object' ? (record as { installPath?: unknown }).installPath : undefined
-        if (typeof installPath !== 'string' || !installPath.startsWith('/')) return true
+        if (typeof installPath !== 'string' || !isAbsolutePath(installPath)) return true
         if (await pluginFolderSelectsBash(installPath, readText)) return true
       }
     }

@@ -10,6 +10,10 @@
  * - The attached page is its own document (packages/server/inbox-pages.ts):
  *   its `https:` and plain `http:` pictures are fetched and drawn,
  *   and its picture from another folder on this computer still loads.
+ * - Its own video plays: a `<video src="data:video/mp4;base64,…">` loads and
+ *   the page reports no CSP violation (the page's policy and the window's
+ *   name `media-src 'self' data: blob:`; without it media fell back to
+ *   `default-src 'self'` and was blocked).
  * - A message whose text names web pictures (three Mermaid ways: an image
  *   node, an `<img>` in a label, a background in a label's style; a markdown
  *   image; a raw `<img>`; a protocol-relative one) makes zero requests: the
@@ -43,6 +47,8 @@ const shots = process.env.PLANNOTATOR_PAGES_ONLY_SHOTS ?? '';
 
 // A 2×2 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwnwEKGAA9yAH/2Y2kfwAAAABJRU5ErkJggg==', 'base64');
+// One black 16×16 H.264 frame (ffmpeg, no audio, no metadata): 808 bytes.
+const MP4 = 'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAALqbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAACgAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAjl0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAACgAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAAoAAAAAAABAAAAAAGxbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAAAgBVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAARxzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMAyDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAArwAAAAAAAAABhzdHRzAAAAAAAAAAEAAAABAAACAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAAAAAAOAAAAAQAAABRzdGNvAAAAAAAAAAEAAAMaAAAAPXVkdGEAAAA1bWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAFm1kYXQAAAAKZYiECvJigACnvg==';
 
 /** A stand-in for the web: answers every request with the PNG and remembers its path. */
 async function webServer(root: string, tls: boolean): Promise<{ origin: string; hits: string[]; server: Server }> {
@@ -108,12 +114,14 @@ test('an attached page shows its web pictures; the window asks the web for none,
     writeFileSync(
       join(project, 'pages', 'page.html'),
       `<!doctype html><html><head><meta charset="utf-8"><title>Pictures</title>
-<style>body{font:15px/1.5 system-ui;margin:32px;color:#222;background:#fff}img{width:120px;height:80px;display:inline-block;margin:6px;background:#eee;image-rendering:pixelated}</style></head><body>
+<style>body{font:15px/1.5 system-ui;margin:32px;color:#222;background:#fff}img{width:120px;height:80px;display:inline-block;margin:6px;background:#eee;image-rendering:pixelated}</style>
+<script>window.cspViolations=[];document.addEventListener('securitypolicyviolation',(e)=>window.cspViolations.push(e.effectiveDirective+' '+e.blockedURI));</script></head><body>
 <h1>Pictures from the web</h1>
 <p id="target">This paragraph takes a comment.</p>
 <img id="web" alt="web" src="${secure.origin}/page-web.png">
 <img id="plain" alt="plain http" src="${plain.origin}/page-http.png">
 <img id="far" alt="another folder" src="${far}/far.png">
+<video id="clip" muted preload="auto" width="32" height="32" src="data:video/mp4;base64,${MP4}"></video>
 </body></html>`,
     );
     agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
@@ -192,6 +200,13 @@ test('an attached page shows its web pictures; the window asks the web for none,
       await expect.poll(() => width('plain')).toBe(2);
       expect(secure.hits).toEqual(['/page-web.png']);
       expect(plain.hits).toEqual(['/page-http.png']);
+      // Its own data: video loads, and nothing on the page broke its policy.
+      const clip = frame.locator('#clip');
+      if (await clip.evaluate((v: HTMLVideoElement) => v.canPlayType('video/mp4; codecs="avc1.42E01E"') !== '')) {
+        await expect.poll(() => clip.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+        expect(await clip.evaluate((v: HTMLVideoElement) => v.error?.code ?? 0)).toBe(0);
+      }
+      expect(await frame.locator('body').evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
       await shot(tab, 'pages-only-1-attached-page-web-picture');
 
       // (c) Annotation in the served page: a click pins the paragraph, the comment saves, the page marks it.

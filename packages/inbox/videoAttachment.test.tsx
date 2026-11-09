@@ -150,7 +150,7 @@ test.skipIf(!hasDom)('the tile reads "MP4 video · 7:41 · 1920 × 1080 · size"
   act(() => root!.unmount());
   host!.remove();
   await render(<AttachmentTiles attachments={[film]} annotationCounts={new Map([[film.path, 2]])} onOpen={() => {}} />);
-  expect(host!.querySelector(`button[data-attachment-id="${film.id}"] .ib-kd`)!.textContent).toBe('MP4 video · 7:41 · 1920 × 1080 · 461.0 MB · 2 comments');
+  expect(host!.querySelector(`button[data-attachment-id="${film.id}"] .ib-kd`)!.textContent).toBe('MP4 video · 7:41 · 2 comments · 1920 × 1080 · 461.0 MB');
 });
 
 test.skipIf(!hasDom)('the pane plays the film from its Range route; a dot per comment on the rail seeks there', async () => {

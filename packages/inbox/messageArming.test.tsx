@@ -207,6 +207,26 @@ test.skipIf(!hasDom)("a press on a far message's ⋯ opens its menu at once", as
   expect(items).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
 });
 
+// The window's styles are scoped to its root (`.pn-inbox svg.ib-ic` draws the icons as outlines): a menu drawn on
+// the page's body shows its icons as filled black shapes and loses the theme's sizes.
+test.skipIf(!hasDom)("a far message's menu is drawn inside the window's root, opened by a press or once it comes near", async () => {
+  await render();
+  const pressed = IDS[5]!;
+  await press(more(pressed));
+  await until(() => !!document.querySelector(`[data-message-menu="${pressed}"]`), 'the pressed message menu');
+  expect(document.querySelector(`[data-message-menu="${pressed}"]`)!.closest('.pn-inbox')).toBe(host);
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !document.querySelector(`[data-message-menu="${pressed}"]`), 'the pressed menu to close');
+  const scrolled = IDS[3]!;
+  await report(scrolled, true, true);
+  expect(armed(scrolled)).toBe(true);
+  await press(more(scrolled));
+  await until(() => !!document.querySelector(`[data-message-menu="${scrolled}"]`), 'the armed message menu');
+  expect(document.querySelector(`[data-message-menu="${scrolled}"]`)!.closest('.pn-inbox')).toBe(host);
+});
+
 test.skipIf(!hasDom)('a message that goes far from the view is disarmed, but never while focus is inside it', async () => {
   await render();
   const [kept, left] = [IDS[2]!, IDS[3]!];
