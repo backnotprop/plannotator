@@ -11,7 +11,7 @@ import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
+import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxLaunchReminder } from './inbox'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
@@ -320,6 +320,8 @@ export interface SessionInfo {
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
   /**
    * Made by the self-heal (self-heal.ts), not by anything the person did: the
    * Inbox link starts without a touch, so a live lease another process holds stands.
@@ -418,6 +420,7 @@ export class PlannotatorMod {
           instanceId: this.instanceId,
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
+          ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),
         })
       : null
     this.inbox?.start({ touch: !session.healed })

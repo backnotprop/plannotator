@@ -23,7 +23,7 @@
  *   PATH folders.
  * - `launchSettingsEnv`: what goes in the per-launch settings FILE's `env`
  *   (reaches only our session, survives respawn, never shows in `ps`): the
- *   login shell's `CLAUDE_*` values and PATH, never the rest of it.
+ *   login shell's `CLAUDE_*` values, PATH and LAUNCH_SHELL_SWITCHES, never the rest of it.
  *
  * Variable values are never logged; only names.
  */
@@ -43,6 +43,34 @@ import { INBOX_LAUNCH_FULL_PERMISSIONS_ENV } from "@plannotator/core/inbox-permi
  * markers (an Inbox started from inside a Pi session has Pi's: its session, its file, its model).
  */
 const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID|PI_SESSION_ID|PI_SESSION_FILE|PI_PROVIDER|PI_MODEL|PI_REASONING_LEVEL)$/;
+
+/**
+ * The Plannotator switches a launch keeps from the person's LOGIN shell (approval "inbox-launched-agent-note"):
+ * plan review, and the off switches for what a session's Plannotator sends out or keeps a copy of. Only these
+ * names, only from the login shell read (never the Inbox's own env, which may be an agent's or a test's), and
+ * only into the launched session itself: Claude Code's per-launch settings file, Pi's process. Never a
+ * marker, data dir, port, URL, connect or test name, and never a switch a launch needs on (the mod, the Inbox
+ * tool). `environment.md` lists them.
+ */
+export const LAUNCH_SHELL_SWITCHES = [
+  "PLANNOTATOR_PLAN_REVIEW",
+  "PLANNOTATOR_AI",
+  "PLANNOTATOR_SHARE",
+  "PLANNOTATOR_JINA",
+  "PLANNOTATOR_ANNOTATE_HISTORY",
+  "PLANNOTATOR_FEEDBACK_HISTORY",
+  "PLANNOTATOR_GUIDE_HISTORY",
+] as const;
+
+/** The login shell's LAUNCH_SHELL_SWITCHES, as it set them. */
+export function launchShellSwitches(login: Readonly<LaunchEnv>): LaunchEnv {
+  const out: LaunchEnv = {};
+  for (const name of LAUNCH_SHELL_SWITCHES) {
+    const value = login[name];
+    if (typeof value === "string") out[name] = value;
+  }
+  return out;
+}
 
 /** Claude Code's own switch for bypass mode without the acceptance dialog. */
 export const CLAUDE_SKIP_PERMISSIONS_ENV = "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS";
@@ -110,6 +138,8 @@ export function launchSettingsEnv(
   }
   // A session gets its supervisor's env, whoever started that: the file is the one way the login PATH reaches it.
   if (login.PATH) out.PATH = login.PATH;
+  // The person's own Plannotator switches (LAUNCH_SHELL_SWITCHES): here, never in the supervisor's env.
+  Object.assign(out, launchShellSwitches(login));
   if (input.dataDir) out.PLANNOTATOR_DATA_DIR = input.dataDir;
   out.PLANNOTATOR_LAUNCH = input.launchId;
   out.PLANNOTATOR_LAUNCH_KEY = input.key;

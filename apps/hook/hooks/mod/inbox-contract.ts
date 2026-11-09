@@ -1205,6 +1205,16 @@ export interface InboxReplyCommand {
    */
   name_thread?: boolean
   /**
+   * On the root of a thread the person started by launching this session
+   * from the Inbox (`claude --bg`, `pi --mode rpc`), handed to the session it
+   * started: the wake adds `inboxLaunchedLines` (approval
+   * "inbox-launched-agent-note"). `agent` is the launch's; `project` is true
+   * when it started in a project folder (not a scratch folder, one the Send
+   * made, or a clone). Absent on every later command and on every session
+   * the Inbox did not launch; an older connection ignores it.
+   */
+  launched?: { agent: 'claude-code' | 'pi'; project: boolean }
+  /**
    * The person pressed Send now in the Inbox: deliver it at once, into the
    * running turn when one runs (Claude Code: `$.session.append`; Pi: a
    * steer; OpenCode 2: `delivery: "steer"`), instead of waiting for the
@@ -1634,6 +1644,37 @@ export const INBOX_NAME_THREAD_LINE =
   "Name this thread in your reply: pass `thread` with a few words saying what it is about. The first name you give sets it, once."
 
 /**
+ * The line under the instruction (and the naming line) on a launched
+ * session's first wake (`launched`, approval "inbox-launched-agent-note"):
+ * the person started it from the Inbox, reads the Inbox and not its chat,
+ * and no one is at its terminal.
+ */
+export const INBOX_LAUNCHED_LINE =
+  "You joined the person's Plannotator Inbox: they started this session from it. They read the Inbox, not this chat, and no one is at this terminal, so send there what they should see and ask there as `:::question` blocks, never in the chat (AskUserQuestion or similar)."
+
+/** Under INBOX_LAUNCHED_LINE when a Claude Code session was launched into a project folder (Claude Code keeps its own edits apart). */
+export const INBOX_LAUNCHED_PROJECT_LINE_CLAUDE =
+  "Other agents may be working in this folder. When you report, say where your work is (its branch or folder)."
+
+/** Under INBOX_LAUNCHED_LINE when a Pi session was launched into a project folder. */
+export const INBOX_LAUNCHED_PROJECT_LINE_PI =
+  "Other agents may be working in this folder. In a git repository, work in a git worktree of your own unless your instructions (CLAUDE.md, AGENTS.md, the person's rules) or their message say otherwise, and say where your work is when you report."
+
+/**
+ * A launched session's first-wake lines (`InboxReplyCommand.launched`):
+ * INBOX_LAUNCHED_LINE, then, in a project folder, the line for its agent.
+ * `[]` for anything else.
+ */
+export function inboxLaunchedLines(launched: unknown): string[] {
+  if (!launched || typeof launched !== 'object') return []
+  const { agent, project } = launched as Record<string, unknown>
+  if (project !== true) return [INBOX_LAUNCHED_LINE]
+  if (agent === 'pi') return [INBOX_LAUNCHED_LINE, INBOX_LAUNCHED_PROJECT_LINE_PI]
+  if (agent === 'claude-code') return [INBOX_LAUNCHED_LINE, INBOX_LAUNCHED_PROJECT_LINE_CLAUDE]
+  return [INBOX_LAUNCHED_LINE]
+}
+
+/**
  * The line under the instruction on a message that adds to a thread the
  * person started with another session: the session reading it has not seen
  * that thread, so it reads it first.
@@ -1805,7 +1846,8 @@ export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; 
  * (the title is the command's `subject`, or `a reply` / `a message` without
  * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
- * saying so under it), the details and Replying to lines when the Inbox sent
+ * saying so under it; on a launched session's first wake, `inboxLaunchedLines`
+ * after the naming line), the details and Replying to lines when the Inbox sent
  * their data (`inboxWakeDetailsLine`, `inboxWakeReplyingLine`), then the words
  * verbatim, then INBOX_WAKE_CLOSING_LINE. Never the thread re-sent. A 👍 Looks
  * good (`ack_of`) is the first line and `inboxAckLine`, closed by
@@ -1819,6 +1861,7 @@ export function inboxWakeText(
     new_thread?: boolean
     continues_thread?: boolean
     name_thread?: boolean
+    launched?: unknown
     ack_of?: string
     ack_reaction?: unknown
     tagged?: { owner?: unknown } | null
@@ -1906,7 +1949,9 @@ export function inboxWakeText(
       ? `\n${inboxContinuesLine(command.id)}`
       : ''
   const naming = command.name_thread === true ? `\n${INBOX_NAME_THREAD_LINE}` : ''
-  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}${facts}\n\n${body}${closing}`
+  // A session the Inbox launched, on its first wake: where the person reads, and (in a project folder) other agents.
+  const launched = inboxLaunchedLines(command.launched).map((line) => `\n${line}`).join('')
+  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}${launched}${facts}\n\n${body}${closing}`
 }
 
 /**

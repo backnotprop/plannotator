@@ -87,6 +87,24 @@ export function inboxLaunchedSession(root: { to?: { session: string } | null; la
   return to && (to.startsWith("launch:") || root.launch.session_ref) ? to : null;
 }
 
+/**
+ * A bridge command's `launched` (approval "inbox-launched-agent-note"): set only on a launched thread's root, while
+ * it is addressed to the session its launch started (never once the person moved it to another session, never on
+ * a deleted launch), so only that session's first wake carries the launched lines. `project`: started in a
+ * project folder, not a scratch folder, one the Send made, or a clone. Null for every other message.
+ */
+export function inboxLaunchedWakeOf(message: {
+  id: string;
+  thread_id: string;
+  to?: { session: string } | null;
+  launch?: Pick<InboxLaunchRecord, "agent" | "session" | "session_ref" | "scratch" | "made_folder" | "clone" | "deleted_at"> | null;
+}): { agent: InboxLaunchRecord["agent"]; project: boolean } | null {
+  const launch = message.launch;
+  if (!launch || launch.deleted_at || message.id !== message.thread_id || !message.to) return null;
+  if (inboxLaunchedSession(message) !== message.to.session) return null;
+  return { agent: launch.agent, project: !launch.scratch && !launch.made_folder && !launch.clone };
+}
+
 export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   // Clone from a git URL: the clone comes before the agent (E1-E7, E11).
   const clone = e.launch.clone;
