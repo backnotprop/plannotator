@@ -15,6 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FEEDBACK_HEREDOC_END, FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import { FEEDBACK_PROMPT_TEXT_LINE, feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
+import { FEEDBACK_FAQ, type FeedbackFaqAction } from './feedbackFaq';
 
 const hasDom = typeof document !== 'undefined';
 const { FeedbackDialog, forgetUnsentFeedback } = (hasDom ? await import('./components/FeedbackDialog') : {}) as typeof import('./components/FeedbackDialog');
@@ -52,7 +53,9 @@ function stubFetch(answer: (call: Call) => Response | Promise<Response>): Call[]
   return calls;
 }
 
-function render(overrides: { onCopyPrompt?: (draft: string) => void; onClose?: () => void } = {}) {
+function render(
+  overrides: { onCopyPrompt?: (draft: string) => void; onAction?: (kind: FeedbackFaqAction) => void; simpleListOn?: boolean; onClose?: () => void } = {},
+) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -66,6 +69,8 @@ function render(overrides: { onCopyPrompt?: (draft: string) => void; onClose?: (
           await inboxApi.sendFeedback(input);
         }}
         onCopyPrompt={overrides.onCopyPrompt ?? (() => {})}
+        onAction={overrides.onAction ?? (() => {})}
+        simpleListOn={overrides.simpleListOn}
         onClose={overrides.onClose ?? (() => {})}
       />,
     ),
@@ -81,6 +86,10 @@ function render(overrides: { onCopyPrompt?: (draft: string) => void; onClose?: (
     sent: () => q<HTMLElement>('[data-feedback-sent]'),
     copy: () => q<HTMLButtonElement>('[data-feedback-copy-prompt]')!,
     what: () => q<HTMLElement>('[data-feedback-what]')!,
+    tab: (id: 'message' | 'questions') => q<HTMLButtonElement>(`[data-feedback-tab="${id}"]`)!,
+    form: () => q<HTMLFormElement>('.ib-fbk-form')!,
+    questions: () => q<HTMLElement>('[data-feedback-questions]')!,
+    item: (id: string) => q<HTMLElement>(`[data-feedback-faq="${id}"]`)!,
   };
 }
 
@@ -216,12 +225,13 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
   test('email and category are optional, and say so: with neither, Send sends just the message', async () => {
     const calls = stubFetch(() => Response.json({ ok: true }));
     const dialog = render();
-    // Optional where a person sees it (the placeholder, and the line above the row) and where a screen reader hears it.
-    expect(dialog.contact().getAttribute('placeholder')).toBe('Email (optional)');
+    // Optional where a person sees it (the placeholder) and where a screen reader hears it (the field's and the group's names).
+    expect(dialog.contact().getAttribute('placeholder')).toContain('(optional)');
     expect(dialog.contact().getAttribute('aria-label')).toBe('Email (optional)');
     expect(dialog.contact().required).toBe(false);
     expect(dialog.host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Category (optional)');
-    expect(dialog.host.querySelector('[data-feedback-optional]')?.textContent).toContain('optional');
+    // No line above the row says it again (approval "inbox-feedback-faq").
+    expect(dialog.host.textContent).not.toContain('Category and email are optional');
     type(dialog.box(), 'Just the words');
     await press(dialog.send());
     expect(calls).toHaveLength(1);
@@ -256,6 +266,112 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     });
     expect(enter.defaultPrevented).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  test('the switch opens on Message: a tab list under the "Feedback" title, the form shown and Common questions hidden', () => {
+    const dialog = render();
+    const dlg = dialog.host.querySelector('dialog')!;
+    expect(document.getElementById(dlg.getAttribute('aria-labelledby')!)?.textContent).toBe('Feedback');
+    const tabs = [...dialog.host.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]')];
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Message', 'Common questions']);
+    expect(dialog.tab('message').getAttribute('aria-selected')).toBe('true');
+    expect(dialog.tab('questions').getAttribute('aria-selected')).toBe('false');
+    // One tab stop for the list; each tab names the panel it shows.
+    expect(dialog.tab('message').tabIndex).toBe(0);
+    expect(dialog.tab('questions').tabIndex).toBe(-1);
+    expect(dialog.form().getAttribute('role')).toBe('tabpanel');
+    expect(dialog.form().id).toBe(dialog.tab('message').getAttribute('aria-controls')!);
+    expect(dialog.questions().id).toBe(dialog.tab('questions').getAttribute('aria-controls')!);
+    expect(dialog.form().hidden).toBe(false);
+    expect(dialog.questions().hidden).toBe(true);
+    expect(document.activeElement).toBe(dialog.box());
+  });
+
+  test('the privacy line has no icon and says it is anonymous unless an email is added', () => {
+    const dialog = render();
+    expect(dialog.what().querySelector('svg')).toBeNull();
+    expect(dialog.what().textContent).toContain('Nothing from your threads or files');
+    expect(dialog.what().textContent).toContain('anonymous unless you add your email');
+    expect(dialog.what().textContent).not.toContain('(');
+  });
+
+  test('Common questions shows the accordion, one answer open at a time; "Tell us about it" goes back to Message with the words kept', async () => {
+    const dialog = render();
+    type(dialog.box(), 'list moves too much');
+    await press(dialog.tab('questions'));
+    expect(dialog.tab('questions').getAttribute('aria-selected')).toBe('true');
+    expect(dialog.form().hidden).toBe(true);
+    expect(dialog.questions().hidden).toBe(false);
+
+    const questions = [...dialog.questions().querySelectorAll<HTMLButtonElement>('[aria-expanded]')];
+    expect(questions).toHaveLength(FEEDBACK_FAQ.length);
+    expect(questions.every((q) => q.getAttribute('aria-expanded') === 'false')).toBe(true);
+    const answerOf = (q: HTMLButtonElement) => document.getElementById(q.getAttribute('aria-controls')!)!;
+    expect(answerOf(questions[0]!).hidden).toBe(true);
+
+    await press(questions[0]!);
+    expect(questions[0]!.getAttribute('aria-expanded')).toBe('true');
+    expect(answerOf(questions[0]!).hidden).toBe(false);
+    // Its link is real release notes, opened in a new tab.
+    const link = answerOf(questions[0]!).querySelector<HTMLAnchorElement>('a')!;
+    expect(link.href).toStartWith('https://github.com/backnotprop/plannotator/releases/tag/v');
+    expect(link.target).toBe('_blank');
+
+    await press(questions[2]!);
+    expect(questions[0]!.getAttribute('aria-expanded')).toBe('false');
+    expect(answerOf(questions[0]!).hidden).toBe(true);
+    expect(questions[2]!.getAttribute('aria-expanded')).toBe('true');
+
+    await press(dialog.host.querySelector<HTMLButtonElement>('[data-feedback-back]')!);
+    expect(dialog.tab('message').getAttribute('aria-selected')).toBe('true');
+    expect(dialog.form().hidden).toBe(false);
+    expect(dialog.questions().hidden).toBe(true);
+    expect(dialog.box().value).toBe('list moves too much');
+    expect(document.activeElement).toBe(dialog.box());
+  });
+
+  test('an answer\'s action hands its setting to the window, and Simple list says when it is already on', async () => {
+    const actions: FeedbackFaqAction[] = [];
+    const dialog = render({ onAction: (kind) => actions.push(kind) });
+    await press(dialog.tab('questions'));
+    for (const id of ['list-moves', 'rows', 'phone']) {
+      await press(dialog.item(id).querySelector<HTMLButtonElement>('[aria-expanded]')!);
+      await press(dialog.item(id).querySelector<HTMLButtonElement>('[data-feedback-faq-action]')!);
+    }
+    expect(actions).toEqual(['simple-list', 'settings-rows', 'settings-devices']);
+
+    act(() => root?.unmount());
+    root = null;
+    const on = render({ onAction: (kind) => actions.push(kind), simpleListOn: true });
+    await press(on.tab('questions'));
+    await press(on.item('list-moves').querySelector<HTMLButtonElement>('[aria-expanded]')!);
+    const action = on.item('list-moves').querySelector<HTMLButtonElement>('[data-feedback-faq-action]')!;
+    expect(action.disabled).toBe(true);
+    expect(action.textContent).toBe('Simple list is on');
+  });
+
+  test('the arrow keys move between the tabs, and Tab wraps past the panel that is not shown', async () => {
+    const dialog = render();
+    const list = dialog.host.querySelector<HTMLElement>('[role="tablist"]')!;
+    dialog.tab('message').focus();
+    act(() => {
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(dialog.tab('questions').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(dialog.tab('questions'));
+    act(() => {
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+    });
+    expect(dialog.tab('message').getAttribute('aria-selected')).toBe('true');
+
+    // On Message, Send is the last stop: Tab from it wraps to the first (the ×), not into the hidden questions.
+    dialog.send().focus();
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    act(() => {
+      dialog.send().dispatchEvent(tab);
+    });
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
   });
 
   test('Prompt your agent to send feedback hands over what is typed so far, and sends nothing', async () => {
