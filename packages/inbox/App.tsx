@@ -6889,7 +6889,6 @@ function Inbox() {
             draftSignal={draftSignal}
             filesSignal={filesSignal}
             onReplyOpened={() => setReplyFor(null)}
-            askButton={ask.button}
             shapeButton={(() => {
               const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
               if (!board) return null;

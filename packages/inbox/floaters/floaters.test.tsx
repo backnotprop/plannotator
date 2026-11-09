@@ -11,7 +11,7 @@
  *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
  * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs;
  * - a draft floating while "Float reply drafts" is off (the default, the owner 2026-11-08), or a draft that floated
- *   before staying in the corner once it is known to be off; Ask's corner row going with the drafts.
+ *   before staying in the corner once it is known to be off; no Ask row in the corner.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -300,21 +300,17 @@ test('a draft whose thread holds picks hands its Send to the thread and posts no
   expect(fake.posts.some((p) => p.path.endsWith('/reply'))).toBe(false);
 });
 
-test('the corner lists this thread’s Ask chat beside the drafts, and Ask’s own menu never lists a draft', async () => {
+test('the corner never lists Ask’s chat, only the drafts, and Ask’s own menu never lists a draft', async () => {
   if (!hasDom) return;
   fake.threads.set('thr_a', thread('thr_a'));
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first'));
   mods.floatThread('thr_a', Date.now() - 10_000);
-  let asked = 0;
-  const ask = fakeAsk({ threadId: 'thr_ask', hasChat: true, subject: 'Ledger schema review', open: () => (asked += 1) });
+  const ask = fakeAsk({ threadId: 'thr_ask', hasChat: true, subject: 'Ledger schema review' });
   await act(async () => root!.render(<Harness start="thr_ask" rows={[row('thr_a')]} ask={ask} />));
-  await until(() => card('ask') !== null && card('thr_a') !== null, 'both rows');
-  expect(document.querySelector('[data-rf-card="ask"] [data-ask-sparkle]')).not.toBeNull();
-  expect(card('ask')!.textContent).toContain('Ask AI · Ledger schema review');
-  act(() => card('ask')!.click());
-  act(() => card('ask')!.click());
-  expect(asked).toBe(1);
-  expect(document.querySelector('[data-rf-box]')).toBeNull();
+  await until(() => card('thr_a') !== null, "the draft's row");
+  // No Ask row in the corner (the owner, 2026-11-09): this thread's chat, minimized, has no button there.
+  expect(card('ask')).toBeNull();
+  expect(document.querySelectorAll('[data-rf-card]').length).toBe(1);
   act(() => root!.unmount());
 
   // Ask's header menu, beside the corner with a draft floating (the corner lists it; the drafts list the server
@@ -509,7 +505,7 @@ test('the bin is off while a Send is on its way', async () => {
   await until(() => toasts.some((t) => t.lead === 'Sent to Claude Code'), 'the sent toast');
 });
 
-test('"Float reply drafts" off (the default): typing and leaving floats nothing, a draft that floated stops, Ask keeps its corner row', async () => {
+test('"Float reply drafts" off (the default): typing and leaving floats nothing, a draft that floated stops, and Ask has no corner row', async () => {
   if (!hasDom) return;
   for (const id of ['thr_a', 'thr_b', 'thr_ask']) fake.threads.set(id, thread(id));
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first'));
@@ -536,9 +532,8 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   expect(floating()).toEqual([]);
   expect(document.querySelector('[data-rf-card][data-kind="draft"]')).toBeNull();
   expect(document.querySelector('[data-rf-box]')).toBeNull();
-  // Ask minimized still has its row in the corner, alone.
-  expect(document.querySelector('[data-rf-card="ask"]')).not.toBeNull();
-  expect(document.querySelectorAll('[data-rf-card]').length).toBe(1);
+  // Ask minimized has no row in the corner: nothing is there.
+  expect(document.querySelectorAll('[data-rf-card], [data-rf-corner]').length).toBe(0);
   // Turned on (0.28.54's behaviour): typing and leaving floats again.
   act(() => setFloatDrafts(true));
   act(() => setThreadId('thr_a'));
