@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { configStore } from '../config/configStore';
 import { readThemePairCookies, writeThemePairCookies } from '../config/settings';
 import { useConfigValue } from '../config/useConfig';
-import { faviconDataUrl } from '@plannotator/core/favicon';
+import { faviconDataUrl, faviconLinkType } from '@plannotator/core/favicon';
 import { storage } from '../utils/storage';
 import {
   BUILT_IN_THEMES,
@@ -220,13 +220,9 @@ export function ThemeProvider({
       link.rel = 'icon';
       document.head.appendChild(link);
     }
-    if (faviconStyle === 'classic') {
-      link.type = 'image/svg+xml';
-      link.removeAttribute('sizes');
-    } else {
-      link.type = 'image/png';
-      link.setAttribute('sizes', '192x192');
-    }
+    const { type, sizes } = faviconLinkType(faviconStyle);
+    link.type = type;
+    link.setAttribute('sizes', sizes);
     link.href = faviconDataUrl(faviconStyle);
   }, [faviconStyle, manageFavicon]);
 

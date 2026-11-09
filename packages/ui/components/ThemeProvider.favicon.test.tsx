@@ -5,8 +5,9 @@ import { configStore } from '../config/configStore';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { ThemeProvider } from './ThemeProvider';
 import {
-  CLASSIC_FAVICON_DATA_URL,
+  FACE_FAVICON_PNG_DATA_URL,
   FAVICON_PNG_DATA_URL,
+  P_FAVICON_PNG_DATA_URL,
 } from '@plannotator/core/favicon';
 
 const hasDom = typeof document !== 'undefined';
@@ -72,7 +73,19 @@ describe('ThemeProvider favicon synchronization', () => {
     resetStorageBackend();
   });
 
+  test.skipIf(!hasDom)('nothing stored draws Glass', async () => {
+    configStore.loadFromBackend();
+
+    await mount();
+
+    const link = getFaviconLink();
+    expect(link?.href).toBe(FAVICON_PNG_DATA_URL);
+    expect(link?.type).toBe('image/png');
+    expect(link?.getAttribute('sizes')).toBe('192x192');
+  });
+
   test.skipIf(!hasDom)('updates document link[rel="icon"] href, type, and sizes when faviconStyle changes', async () => {
+    // 'totman', the id people stored when the Face icon was the default, still draws the Face icon.
     stored.set('plannotator-favicon', 'totman');
     configStore.loadFromBackend();
 
@@ -80,30 +93,30 @@ describe('ThemeProvider favicon synchronization', () => {
 
     const link = getFaviconLink();
     expect(link).not.toBeNull();
-    expect(link?.href).toBe(FAVICON_PNG_DATA_URL);
+    expect(link?.href).toBe(FACE_FAVICON_PNG_DATA_URL);
     expect(link?.type).toBe('image/png');
-    expect(link?.getAttribute('sizes')).toBe('192x192');
+    expect(link?.getAttribute('sizes')).toBe('64x64');
 
     await act(async () => {
       configStore.set('faviconStyle', 'classic');
     });
 
     const updatedLink = getFaviconLink();
-    expect(updatedLink?.href).toBe(CLASSIC_FAVICON_DATA_URL);
-    expect(updatedLink?.type).toBe('image/svg+xml');
-    expect(updatedLink?.hasAttribute('sizes')).toBe(false);
+    expect(updatedLink?.href).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(updatedLink?.type).toBe('image/png');
+    expect(updatedLink?.getAttribute('sizes')).toBe('192x192');
 
     await act(async () => {
-      configStore.set('faviconStyle', 'totman');
+      configStore.set('faviconStyle', 'glass');
     });
 
-    const revertedLink = getFaviconLink();
-    expect(revertedLink?.href).toBe(FAVICON_PNG_DATA_URL);
-    expect(revertedLink?.type).toBe('image/png');
-    expect(revertedLink?.getAttribute('sizes')).toBe('192x192');
+    const glassLink = getFaviconLink();
+    expect(glassLink?.href).toBe(FAVICON_PNG_DATA_URL);
+    expect(glassLink?.type).toBe('image/png');
+    expect(glassLink?.getAttribute('sizes')).toBe('192x192');
   });
 
-  test.skipIf(!hasDom)('initializes with classic style when stored in backend', async () => {
+  test.skipIf(!hasDom)('classic, stored by anyone who chose the old navy P, draws the P icon', async () => {
     stored.set('plannotator-favicon', 'classic');
     configStore.loadFromBackend();
 
@@ -111,9 +124,8 @@ describe('ThemeProvider favicon synchronization', () => {
 
     const link = getFaviconLink();
     expect(link).not.toBeNull();
-    expect(link?.href).toBe(CLASSIC_FAVICON_DATA_URL);
-    expect(link?.type).toBe('image/svg+xml');
-    expect(link?.hasAttribute('sizes')).toBe(false);
+    expect(link?.href).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(link?.type).toBe('image/png');
   });
 });
 
@@ -191,6 +203,6 @@ describe('ThemeProvider favicon ownership is opt-in', () => {
 
     await mount(true);
 
-    expect(getFaviconLink()?.href).toBe(CLASSIC_FAVICON_DATA_URL);
+    expect(getFaviconLink()?.href).toBe(P_FAVICON_PNG_DATA_URL);
   });
 });

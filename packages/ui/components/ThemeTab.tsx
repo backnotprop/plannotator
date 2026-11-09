@@ -5,7 +5,7 @@ import type { ThemeHalf, ThemeInfo } from '../utils/themeRegistry';
 import { useThemePaletteHalves } from '../hooks/useThemePaletteHalves';
 import { configStore } from '../config/configStore';
 import { useConfigValue } from '../config/useConfig';
-import { faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
+import { FAVICON_STYLE_CHOICES, faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
 
 interface ThemeTabProps {
   onPreview?: () => void;
@@ -17,11 +17,6 @@ const HALVES: { id: ThemeHalf; label: string }[] = [
   { id: 'dark', label: 'Dark' },
 ];
 
-const FAVICON_STYLES: { id: FaviconStyle; label: string }[] = [
-  { id: 'totman', label: 'Totman' },
-  { id: 'classic', label: 'Classic P' },
-];
-
 const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
@@ -31,12 +26,12 @@ const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
 /**
  * The favicon style choices. Rendered in both layouts, so it lives in one place.
  * The compact layout drops the visible "Favicon" heading the full layout has, so
- * the group carries its own accessible name and two unlabelled image buttons are
+ * the group carries its own accessible name and three unlabelled image buttons are
  * never all a screen reader gets.
  */
 const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected }) => (
   <div className="flex gap-1" role="group" aria-label="Favicon style">
-    {FAVICON_STYLES.map(({ id, label }) => (
+    {FAVICON_STYLE_CHOICES.map(({ id, label }) => (
       <button
         key={id}
         type="button"
