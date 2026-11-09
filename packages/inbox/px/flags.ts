@@ -1,7 +1,7 @@
 /**
  * PROTOTYPE ONLY (branch proto/composer-picker; never merged): the three open choices of the composer and picker
  * redesign, flipped live from outside the window. The side-by-side page writes them to localStorage and fires
- * `ib-px-flags`; another tab's write arrives as a `storage` event; `?px=send:pill,model:off,to:top` sets them at load
+ * `ib-px-flags`; another tab's write arrives as a `storage` event; `?px=send:pill,model:off,to:top,agent:name` sets them at load
  * (for a phone, which has no switches). Each defaults to the recommended choice.
  */
 import { useSyncExternalStore } from 'react';
@@ -13,16 +13,20 @@ export interface PxFlags {
   model: boolean;
   /** New message's To: the pill in the bottom row, or the line at the top as today. */
   to: 'row' | 'top';
+  /** The agent in the thread reply's row: its mark alone as a round button, or the pill with its name. New message keeps the pill. */
+  agent: 'icon' | 'name';
+  /** Several recipients on the icon button: the first mark with a count, or two marks overlapped (for a still; not on the page). */
+  multi: 'badge' | 'stack';
 }
 
 const KEY = 'ib-px-flags';
 const EVENT = 'ib-px-flags';
-const DEFAULTS: PxFlags = { send: 'round', model: true, to: 'row' };
+const DEFAULTS: PxFlags = { send: 'round', model: true, to: 'row', agent: 'icon', multi: 'badge' };
 
 function parse(raw: string | null): PxFlags {
   try {
     const v = raw ? (JSON.parse(raw) as Partial<PxFlags>) : {};
-    return { send: v.send === 'pill' ? 'pill' : 'round', model: v.model !== false, to: v.to === 'top' ? 'top' : 'row' };
+    return { send: v.send === 'pill' ? 'pill' : 'round', model: v.model !== false, to: v.to === 'top' ? 'top' : 'row', agent: v.agent === 'name' ? 'name' : 'icon', multi: v.multi === 'stack' ? 'stack' : 'badge' };
   } catch {
     return DEFAULTS;
   }
@@ -49,6 +53,7 @@ function paint(): void {
   root.dataset.pxSend = flags.send;
   root.dataset.pxTo = flags.to;
   root.dataset.pxModel = flags.model ? 'on' : 'off';
+  root.dataset.pxAgent = flags.agent;
 }
 
 const listeners = new Set<() => void>();
@@ -68,6 +73,8 @@ export function startPxFlags(): void {
       if (name === 'send') flags.send = value === 'pill' ? 'pill' : 'round';
       if (name === 'model') flags.model = value !== 'off';
       if (name === 'to') flags.to = value === 'top' ? 'top' : 'row';
+      if (name === 'agent') flags.agent = value === 'name' ? 'name' : 'icon';
+      if (name === 'multi') flags.multi = value === 'stack' ? 'stack' : 'badge';
     }
     try {
       localStorage.setItem(KEY, JSON.stringify(flags));

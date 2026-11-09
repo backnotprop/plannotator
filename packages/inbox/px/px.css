@@ -241,4 +241,16 @@
 :root[data-px]:not(.light) .ib-px-seg button[data-on] { background: color-mix(in oklch, var(--popover) 70%, var(--foreground) 12%); }
 :root[data-px-model="off"] .ib-px-lset { display: none; }
 
+
+/* ---------- The thread reply's agent as its mark alone (the fourth switch; New message keeps the pill) ---------- */
+:root[data-px] .pn-inbox .ib-px-agent[data-open] { background: var(--px-fill-2); }
+:root[data-px] .pn-inbox .ib-px-agent[data-ended] .ib-px-agent-mk { opacity: 0.45; }
+:root[data-px] .ib-px-agent-mk { display: inline-flex; }
+:root[data-px] .ib-px-agent-mk .ib-mk, :root[data-px] .ib-px-agent-mk .ib-mk > :is(svg, img) { width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); }
+/* Several recipients: the first mark with how many (the default), at the button's corner like an unread count. */
+:root[data-px] .ib-px-agent-n { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 10.5px; font-weight: 650; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--px-raised); }
+/* Or two marks overlapped (kept for comparison). */
+:root[data-px] .ib-px-agent-stack { display: inline-flex; align-items: center; }
+:root[data-px] .ib-px-agent-stack .ib-px-agent-mk .ib-mk, :root[data-px] .ib-px-agent-stack .ib-px-agent-mk .ib-mk > :is(svg, img) { width: var(--ib-mark-16, 16px); height: var(--ib-mark-16, 16px); }
+:root[data-px] .ib-px-agent-stack .ib-px-agent-mk + .ib-px-agent-mk { margin-left: -5px; border-radius: 5px; box-shadow: 0 0 0 1.5px var(--px-raised); background: var(--px-raised); }
 }

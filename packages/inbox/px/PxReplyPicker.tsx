@@ -5,7 +5,8 @@
  * circle at its end adds it; the last row types a real `@`. The rules stay replyRecipients.ts and ThreadPane's.
  */
 import { useRef } from 'react';
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
+import { usePxFlags } from './flags';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { agentName, namesList } from '../tags';
@@ -42,6 +43,7 @@ export function PxReplyPicker({
   several: boolean;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
+  const flags = usePxFlags();
   // The sessions' titles, as New message's To reads them.
   const { model } = useComposeSessions(true);
   const live = new Map((model?.projects ?? []).flatMap((group) => group.sessions.map((s) => [s.session, { label: s.label ?? null, project: group.project.name }] as const)));
@@ -50,20 +52,62 @@ export function PxReplyPicker({
   const one = chosen.length === 1 ? chosen[0]! : null;
   const names = namesList(chosen.map((r) => titleOf(r) ?? r.label));
   const ended = one?.state === 'ended';
+  /** Who gets the reply, as it is read out: "Claude Code · Invoice PDF fonts", each agent with its session's title. */
+  const spoken = namesList(chosen.map((r) => (titleOf(r) ? `${agentName(r.host)} · ${titleOf(r)}` : r.label)));
   const label = one ? (titleOf(one) ?? one.label) : chosen.length > 0 ? `${chosen.length} agents` : 'Choose an agent';
   return (
     <>
-      <PxPill
-        buttonRef={anchor}
-        hosts={chosen.map((r) => r.host)}
-        label={label}
-        detail={ended ? 'ended' : null}
-        ask={chosen.length === 0}
-        open={open}
-        ariaLabel={`To ${names || 'nobody yet'}${ended ? ', ended' : ''}. Change who gets this reply`}
-        attrs={{ 'data-recipient': '', 'data-ended': ended ? '' : undefined, 'data-px-chosen': chosenIds.join(',') }}
-        onClick={() => onOpen(!open)}
-      />
+      {flags.agent === 'icon' ? (
+        // The owner: "maybe it's just the Claude icon in the bottom row": the agent is seldom changed in a thread, so its
+        // mark alone, a round button like its neighbours. Who gets the reply is in its name for a screen reader.
+        <button
+          type="button"
+          ref={anchor}
+          className="ib-px-chip ib-px-agent"
+          data-px-pill=""
+          data-recipient=""
+          data-ended={ended ? '' : undefined}
+          data-open={open ? '' : undefined}
+          data-px-chosen={chosenIds.join(',')}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`Reply goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`}
+          onClick={() => onOpen(!open)}
+        >
+          {chosen.length === 0 ? (
+            <Icon name="user" size={20} />
+          ) : flags.multi === 'stack' && chosen.length > 1 ? (
+            <span className="ib-px-agent-stack">
+              {chosen.slice(0, 2).map((r) => (
+                <span key={r.session} className="ib-px-agent-mk">
+                  <HostMark host={r.host} />
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="ib-px-agent-mk">
+              <HostMark host={chosen[0]!.host} />
+            </span>
+          )}
+          {chosen.length > 1 && flags.multi === 'badge' && (
+            <span className="ib-px-agent-n" aria-hidden="true">
+              {chosen.length}
+            </span>
+          )}
+        </button>
+      ) : (
+        <PxPill
+          buttonRef={anchor}
+          hosts={chosen.map((r) => r.host)}
+          label={label}
+          detail={ended ? 'ended' : null}
+          ask={chosen.length === 0}
+          open={open}
+          ariaLabel={`To ${names || 'nobody yet'}${ended ? ', ended' : ''}. Change who gets this reply`}
+          attrs={{ 'data-recipient': '', 'data-ended': ended ? '' : undefined, 'data-px-chosen': chosenIds.join(',') }}
+          onClick={() => onOpen(!open)}
+        />
+      )}
       <PxSurface open={open} phone={phone} title="Who gets this reply" onClose={() => onOpen(false)} anchor={anchor} host={phone ? section : null} label="Who gets this reply" attrs={{ 'data-recipient-list': '' }}>
         <div className="ib-px-list" role="listbox" aria-label="Who gets this reply" aria-multiselectable={several || undefined}>
           {rows.map((row) => {
