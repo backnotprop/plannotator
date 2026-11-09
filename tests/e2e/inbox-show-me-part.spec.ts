@@ -4,7 +4,7 @@
  * Proved in a real browser against the compiled binary. The agent is scripted (a real connection, the real pull
  * client, the real `plannotator shape`; never a real agent CLI).
  *
- * In order: from a review (Code review on, Shape's switch off), the box, the wait on the board, the new board, three
+ * In order: from a review (Code review and Shape on), the box, the wait on the board, the new board, three
  * levels, the arrow, browser Back, each board intact, Show me again, the whole-board box, a part outside the diff,
  * the list with 2, 6 and 20 boards, several presses in a row, a phone's tap; the review's selection still works; then
  * Shape on its own (Code review off): the same on a board over its thread (Ask itself is on for everyone); then both
@@ -240,7 +240,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: false }));
+  // Show me needs Shape's own switch too (approval "code-review-029-shape-off").
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
   const trap = join(root, 'trap');
   mkdirSync(trap);
   for (const name of ['gh', 'glab', 'tailscale']) {
@@ -771,6 +772,6 @@ test('both off: no board, and a Show me is refused', async () => {
   );
   expect(refused.status).toBe(409);
   expect(refused.body).toContain('code_review_off');
-  setSwitches({ inboxCodeReview: true, inboxShape: false });
+  setSwitches({ inboxCodeReview: true, inboxShape: true });
   expect(world.errors).toEqual([]);
 });

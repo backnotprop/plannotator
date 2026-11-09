@@ -38,7 +38,7 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
-import { choiceLetters, optionOf, optionSetId, optionSetOf } from '../optionSets';
+import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -126,7 +126,7 @@ import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
-import { createPickQueue, onlyQuestionsChanged } from '../pickQueue';
+import { createPickQueue, keepSavedQuestions, onlyQuestionsChanged } from '../pickQueue';
 import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -488,10 +488,11 @@ export function MessageBody({
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**
    * A picture choice's zoom (approval "inbox-image-swipe", "Option sets"): its captured file opens in the
-   * viewer over that question's picture choices only (the question's key). Absent: it opens like any image
-   * of the body.
+   * viewer over that question's picture choices only (the question's key), on the choice zoomed (`choice`, its
+   * place among the question's choices: a picture two choices share opens as the one zoomed). Absent: it opens
+   * like any image of the body.
    */
-  onOpenOptionSet?: (key: string, image: InboxInlineImage) => void;
+  onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
   readOnly: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
@@ -730,11 +731,11 @@ export function MessageBody({
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
   const openSetRef = useRef(onOpenOptionSet);
   openSetRef.current = onOpenOptionSet;
-  /** A picture choice's zoom: its question's choices in the viewer; a picture not captured yet (or a host's own `onImage`) opens as before. */
+  /** A picture choice's zoom: its question's choices in the viewer, on this choice; a picture not captured yet (or a host's own `onImage`) opens as before. */
   const onZoomChoice = useCallback(
-    (key: string, _index: number, src: string, alt: string) => {
+    (key: string, index: number, src: string, alt: string) => {
       const image = onImageRef.current ? null : imageOf(src);
-      if (image && openSetRef.current) openSetRef.current(key, image);
+      if (image && openSetRef.current) openSetRef.current(key, image, index);
       else onImageClick(src, alt);
     },
     [imageOf, onImageClick],
@@ -1646,7 +1647,19 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+  /**
+   * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
+   * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
+   * and arrives after them no longer puts an older answer back in the field being typed in (pickQueue.ts).
+   */
+  const savedQuestions = useRef(new Map<string, InboxQuestion>());
+  const savesLanded = useRef(0);
+  const keptRead = useRef<{ read: InboxThread; saves: number; thread: InboxThread } | null>(null);
+  if (keptRead.current?.read !== threadRead || keptRead.current.saves !== savesLanded.current) {
+    keptRead.current = { read: threadRead, saves: savesLanded.current, thread: keepSavedQuestions(threadRead, savedQuestions.current) };
+  }
+  const thread = keptRead.current.thread;
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -2827,13 +2840,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    * through those alone, in choice order. Gone when the file on screen is not one of them (a linked page, a tile).
    */
   const namedSet = useMemo(() => optionSetOf(thread.messages, steps, file?.set ?? null), [thread.messages, steps, file?.set]);
-  const optionSet = namedSet && file && optionOf(namedSet, file.id) ? namedSet : null;
-  /** The set a file opened from the pane keeps: the one on screen when the file is one of its choices. */
-  const setFor = (attachmentId: string): string | null => (optionSet && optionOf(optionSet, attachmentId) ? optionSet.id : null);
-  /** A picture choice's zoom: the viewer over its question's choices (one picture alone is no set: the thread's files). */
-  const openOptionSet = (messageId: string, key: string, image: InboxInlineImage) => {
-    const id = optionSetId(messageId, key);
-    openFromMessage(image, null, undefined, optionSetOf(thread.messages, steps, id) ? id : null);
+  /** The choice on screen (the address's `@<choice>`; a link without one: the first choice that shows the file). */
+  const option = namedSet && file ? optionOf(namedSet, file.id, parseOptionSetId(file.set)?.choice ?? null) : null;
+  const optionSet = option ? namedSet : null;
+  /**
+   * The set a file opened from the pane keeps: the one on screen when the file is one of its choices. `at`: its
+   * place in the set when the pane stepped there, so a picture two choices share opens as the next choice.
+   */
+  const setFor = (attachmentId: string, at: number | null = null): string | null => {
+    if (!optionSet) return null;
+    const found = optionOf(optionSet, attachmentId, at === null ? null : (optionSet.choices[at]?.choice ?? null));
+    return found ? optionSetAddress(optionSet, found.choice.choice) : null;
+  };
+  /** A picture choice's zoom: the viewer over its question's choices, on the choice zoomed (one picture alone is no set: the thread's files). */
+  const openOptionSet = (messageId: string, key: string, image: InboxInlineImage, choice: number) => {
+    const set = optionSetOf(thread.messages, steps, optionSetId(messageId, key));
+    const shown = set ? optionOf(set, image.id, choice) : null;
+    openFromMessage(image, null, undefined, set && shown ? optionSetAddress(set, shown.choice.choice) : null);
   };
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
   const artifactsOn = artifactsRoute;
@@ -3015,6 +3038,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     sendKeys.current = null;
     sendContents.current = null;
     revisions.current.clear();
+    savedQuestions.current.clear();
   }, [thread.thread_id]);
 
   // The "↓ N new" pill while new messages the person has not seen are below
@@ -3856,7 +3880,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
         const result = await inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true });
-        for (const q of result.questions) revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
+        for (const q of result.questions) {
+          revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
+          savedQuestions.current.set(`${q.message_id}/${q.key}`, q);
+        }
+        savesLanded.current += 1;
         // A Send waiting on this save reads the thread right after it, before
         // React draws the saved picks: give it the saved questions now, or it
         // sends a stale revision (refused) or leaves out a note just saved.
@@ -6351,12 +6379,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The middle of a long read run: one fold ("Show 20 earlier · N hidden") in place of the part still hidden.
           // What is still hidden always starts at the run's first message, so no slice is needed here.
           const run = fold.hidden.findIndex((ids, i) => (fold.shown[i] ?? 0) < ids.length && ids[0] === message.id);
-          if (run >= 0) before.push(foldBand(run));
-          if (hiddenNow.has(message.id)) return before;
           const isNew = showNew && fresh.has(message.id);
           // "New since you looked", above the first new message (not above the first message of the thread).
           // "Back from snooze" takes that line's words when it sits there, and otherwise draws the same line itself.
+          // With more than 20 new, the older new ones start behind a fold (planFolds): the line sits above that fold.
           const backHere = snoozeBackPlace.current?.above === message.id;
+          if (run < 0 && hiddenNow.has(message.id)) return before;
           if (isNew && index > 0 && thread.messages.findIndex((m) => fresh.has(m.id)) === index) {
             before.push(
               <div className="ib-newdiv" key="new-divider" data-new-divider="" data-snooze-back-line={backHere ? '' : undefined} role="separator" aria-label={backHere ? `${snoozeBackWords}: ${plural(fresh.size, 'new message')}` : `New since you looked: ${plural(fresh.size, 'message')}`}>
@@ -6370,6 +6398,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </div>,
             );
           }
+          if (run >= 0) before.push(foldBand(run));
+          if (hiddenNow.has(message.id)) return before;
           const move = threadMoves.get(message.id);
           if (move) {
             const held = move.kind === 'handoff' && !message.handoff?.settled_at;
@@ -6690,7 +6720,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
-                  onOpenOptionSet={(key, image) => openOptionSet(message.id, key, image)}
+                  onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
@@ -7357,7 +7387,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         projectRoot={thread.project.root}
         repo={thread.project.repo ?? null}
         version={file!.version}
-        onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet?.id ?? null })}
+        onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet && option ? optionSetAddress(optionSet, option.choice.choice) : null })}
         full={shownFull}
         ask={phone ? null : askFileButton}
         fullLocked={phone || fileStacked}
@@ -7370,8 +7400,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}
         optionSet={optionSet}
+        // The choice on screen: a picture two choices share is one file, so the file alone cannot say which.
+        stepAt={optionSet && option ? option.index : null}
         // A step keeps the frame the person is in, and the option set it is in (a step out of it, from the sheet, leaves the set), and replaces the route.
-        onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null, view: currentView, set: setFor(attachmentId) }, { replace: true })}
+        onStep={(attachmentId, version, at) => onOpenFile({ id: attachmentId, version, focus: null, view: currentView, set: setFor(attachmentId, at ?? null) }, { replace: true })}
         // A link in an attached HTML page to another file of the thread: a new entry, so Back returns to the page; the frame stays.
         onOpenLinked={(attachmentId) => onOpenFile({ id: attachmentId, version: 'current', focus: null, view: currentView })}
         onInboxLink={onInboxLink}

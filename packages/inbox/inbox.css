@@ -10698,6 +10698,66 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
 
+/* ---- Others' threads on their lines (pulls/LineThreads.tsx; approval inbox-pr-page, q-530b62e0 and q-7d0a1587). ----
+   Flat on the diff's own surface, a hairline above and below: never the raised card of the person's own comment. */
+.ib-lt { display: block; box-sizing: border-box; width: 100%; margin-top: -1px; padding: 10px 16px; border-block: 1px solid var(--ib-sep-s, var(--ib-hair)); background: var(--background); color: var(--foreground); font-family: var(--font-sans, system-ui, sans-serif); font-size: var(--ib-fs-13, 13px); line-height: 1.5; text-align: left; white-space: normal; cursor: default; }
+.ib-lt-step + .ib-lt-step { margin-top: 10px; }
+.ib-lt-c { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; }
+.ib-lt-c > .ib-prd-face { margin-top: 1px; }
+.ib-lt-cm { min-width: 0; }
+.ib-lt-h { display: flex; align-items: baseline; gap: 6px; min-width: 0; min-height: 22px; }
+.ib-lt-name { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; color: var(--foreground); }
+.ib-lt-quiet, .ib-lt-at { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-lt-at { white-space: nowrap; }
+/* The forge's link: at the head's end, shown on hover or focus; always on a touch screen. */
+.ib-lt-open { flex: none; align-self: center; display: inline-flex; margin-left: auto; padding: 2px; border-radius: 4px; color: var(--muted-foreground); opacity: 0; transition: opacity 120ms ease; }
+.ib-lt:hover .ib-lt-open, .ib-lt-open:focus-visible { opacity: 1; }
+.ib-lt-open:hover { color: var(--foreground); }
+@media (hover: none) { .ib-lt-open { opacity: 1; } }
+.ib-lt-words { min-width: 0; overflow-wrap: anywhere; }
+.ib-lt-words[data-clamped] { max-height: calc(8 * 1.55em); overflow: hidden; }
+.pn-inbox .ib-lt-words .ib-body { font-size: var(--ib-fs-13, 13px); line-height: 1.55; }
+.pn-inbox .ib-lt-words .ib-body :is(p, ul, ol) { margin-block: 0 6px; font-size: inherit; }
+.pn-inbox .ib-lt-words .ib-body > :last-child { margin-bottom: 0; }
+.pn-inbox .ib-lt-words .ib-body :is(h1, h2, h3, h4, h5, h6) { margin: 6px 0 4px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.4; letter-spacing: normal; }
+.pn-inbox .ib-lt-words .ib-body pre { white-space: pre; overflow-x: auto; }
+.ib-lt-more, .ib-lt-between { display: inline-block; margin-top: 2px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-lt-more:hover, .ib-lt-between:hover, .ib-lt-refold:hover { color: var(--foreground); }
+.ib-lt-between { display: block; margin: 8px 0 0 30px; }
+/* Why the thread is where it is, or why it was folded: a quiet line above its first comment. */
+.ib-lt-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-lt-refold { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); }
+/* Folded: one line, who, the first words, how many, why. */
+.ib-lt-fold { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-block: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-lt-fold:hover { background: color-mix(in oklch, var(--muted) 45%, var(--background)); }
+.ib-lt-fold:focus-visible { outline: none; background: color-mix(in oklch, var(--muted) 60%, var(--background)); }
+.ib-lt-fold > svg { flex: none; }
+.ib-lt-fold .ib-lt-name { flex: 0 1 auto; max-width: 38%; font-weight: 500; color: var(--muted-foreground); }
+.ib-lt-line { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-lt-n { font-variant-numeric: tabular-nums; }
+/* The file rail: each file's open threads, after the person's own count. */
+.ib-prp-t { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-prp-t > svg { flex: none; }
+/* A thread on a whole file (FileThread; the owner's pick B, 2026-11-09): a full-width band under the file's header,
+   above its first lines, folded to one line ("On this file", who, the first words, when). Folded it rides in the
+   sticky header at a fixed height (FILE_BAND_HEIGHT, two rows on a phone), so the header is sized for it before it
+   draws; open it sits above the first hunk and scrolls away with the code. */
+.ib-ft { margin-top: 0; border-top: 0; padding: 0 14px; background: color-mix(in oklch, var(--muted) 35%, var(--background)); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-ft.ib-lt-fold { box-sizing: border-box; height: 32px; min-height: 0; padding-block: 0; overflow: hidden; }
+.ib-ft.ib-lt-fold:hover { background: color-mix(in oklch, var(--muted) 55%, var(--background)); }
+.ib-ft .ib-ft-on, .ib-ft .ib-ft-dot, .ib-ft .ib-ft-n { flex: none; }
+.ib-ft .ib-ft-dot { opacity: 0.5; }
+.ib-ft.ib-lt-fold .ib-lt-name { font-weight: 600; color: var(--foreground); }
+.ib-ft.ib-lt-fold .ib-lt-line { color: color-mix(in oklch, var(--foreground) 80%, transparent); }
+.ib-ft .ib-ft-top { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 0; border: 0; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
+.ib-ft .ib-ft-top:hover { color: var(--foreground); }
+.ib-ft .ib-ft-top:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: -2px; border-radius: 4px; }
+.ib-ft .ib-ft-body { padding: 2px 2px 10px; }
+/* A phone: the first words on a second row, the band still a fixed height. */
+.ib-ft.ib-lt-fold.ib-ft-phone { height: 52px; flex-wrap: wrap; align-content: center; row-gap: 0; }
+.ib-ft.ib-ft-phone .ib-lt-line { flex-basis: 100%; order: 9; padding-left: 21px; }
+.ib-ft.ib-ft-phone .ib-lt-at { margin-left: auto; }
+@media (pointer: coarse) { .ib-lt-fold { min-height: 44px; } }
 /* The bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07; footLine.ts). Its line, and a faint 18 px
    shadow above it, fade in only while thread text scrolls under the bar (`data-under`); with nothing under it (the
    thread all fits, or it is scrolled to its end) the bar sits on the page. A colour fade with no movement, so reduced

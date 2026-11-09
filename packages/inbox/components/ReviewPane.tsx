@@ -79,7 +79,7 @@ import { useLineInView } from './reviewLineInView';
 import type { ReviewAt } from '../shape/review';
 import { shapeReview } from '../shape/review';
 import type { InboxShapes } from '../shape/useInboxShapes';
-import type { GuideSelectionActions } from '../guide/types';
+import type { GuideSelection, GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName, whenTime } from '../format';
@@ -136,6 +136,11 @@ export interface ReviewPaneProps {
   onAsk?: (words: string) => void;
   /** Settings → Capabilities → Code review is on. */
   codeReview: boolean;
+  /**
+   * Settings → Capabilities → Shape is on: a review's Show me, its Overview picture and boards over it. Off or absent,
+   * none of them, whatever Code review says (approval "code-review-029-shape-off"); Ask on selected lines stays.
+   */
+  shape?: boolean;
   /** No verdict here (a guide, or Code review off): back to the thread with its reply box open. */
   onWriteReply?: () => void;
   /** The window's Shape host and boards. */
@@ -170,13 +175,15 @@ const NO_VIEWED: ReadonlySet<string> = new Set();
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, onWriteReply, shapeHost, shapes, board, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
   // while Code review is off, reads with none of it: no verdict, Viewed ticks, Show me, Overview picture or Post. With
   // Code review off the server refuses the verdict, Viewed ticks, Show me and posting; the rest is the window's choice.
   const isReview = codeReview && message.guide?.review === true;
+  // Shape off: no board over the review, whatever the address says.
+  const board = shape ? boardIn : null;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   // A walkthrough (approval "code-review-launch-build" item 6) is code as it is: nothing to approve, no counts, no Split.
@@ -477,9 +484,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   showMeFromBoard.current = showMe.fromBoard;
   const boardsNav = useBoardsNav({ shapes: shapes.shapes, threadId: thread.thread_id, board, parents: showMe.parents, onBoard });
   // The board's Show me again: the box, over the review, for what it was made of; the new version opens the board again.
+  // Show me (any of its buttons) only while Shape is on; the agent's readiness is read either way, for Ask.
+  const showMeOn = shape && showMe.state.canAsk;
   const boardHost = useMemo<ShapeHost>(
     () =>
-      showMe.state.canAsk
+      showMeOn
         ? {
             ...shapeHost,
             showMe: (id, part) => showMeFromShape(() => showMeFromBoard.current, id, part),
@@ -490,7 +499,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             },
           }
         : shapeHost,
-    [shapeHost, showMe.state.canAsk],
+    [shapeHost, showMeOn],
   );
   const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number; side?: 'old' } | null>(null);
   // Painted lines come into view, clear of the corner card.
@@ -631,11 +640,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // the latest render's open through this ref, so it sees the drawings and turns read since.
   const showMeOpen = useRef(showMe.open);
   showMeOpen.current = showMe.open;
+  // Shape off: Comment and Ask only (no Show me).
   const selectionActions = useMemo<GuideSelectionActions | undefined>(
     () =>
-      showMe.state.canAsk
+      showMe.state.canAsk && (showMeOn || onAsk)
         ? {
-            onShowMe: (selection) => showMeOpen.current({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }),
+            ...(showMeOn ? { onShowMe: (selection: GuideSelection) => showMeOpen.current({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }) } : {}),
             ...(onAsk
               ? {
                   onAsk: (selection) =>
@@ -644,11 +654,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
               : {}),
           }
         : undefined,
-    [showMe.state.canAsk, onAsk],
+    [showMe.state.canAsk, showMeOn, onAsk],
   );
   // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the
   // guide viewer's own. In a later round, which of its parts the agent redrew.
-  const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
+  // Shape off: no picture.
+  const overviewHtml = useMemo(() => (shape ? overviewPicture(snapshot?.guide.overview?.diagram) : null), [snapshot, shape]);
   // Narrowed (a stack badge): the PR's chapter with only the part's files, when it has any of them.
   const narrowed = useMemo(() => {
     if (!snapshot || !narrow) return null;
@@ -660,7 +671,14 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const sections = snapshot.guide.sections.map((s, i) => (i === narrow.chapter ? { ...s, diffs: kept } : s));
     return { snapshot: { ...snapshot, guide: { ...snapshot.guide, sections } }, shown: new Set(kept.map((d) => d.file)).size, total };
   }, [snapshot, narrow]);
-  const readerSnapshot = narrowed?.snapshot ?? snapshot;
+  const readerShown = narrowed?.snapshot ?? snapshot;
+  // Shape off: a drawn Overview picture is left out, with no note in its place (the guide viewer's "custom picture" note).
+  const readerSnapshot = useMemo(() => {
+    const overview = readerShown?.guide.overview;
+    if (shape || !readerShown || !overview || !overviewPicture(overview.diagram)) return readerShown;
+    const { diagram: _drawn, ...words } = overview;
+    return { ...readerShown, guide: { ...readerShown.guide, overview: words } };
+  }, [readerShown, shape]);
   useEffect(() => {
     const bar = narrowBar.current;
     const pane = paneRef.current;
@@ -747,9 +765,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   );
   // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
   const renderHeadActions = useCallback(
-    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+    (): ReactNode | null => (!overviewHtml && showMeOn ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overviewHtml, showMe.state.canAsk],
+    [overviewHtml, showMeOn],
   );
 
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
@@ -1295,6 +1313,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           )}
         </div>
       </div>
+      {shape && (
       <ShowMeBox
         state={showMe.state}
         agent={author}
@@ -1304,9 +1323,10 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
+      )}
       {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} review={boardReview} place={boardPlace} onNavigate={onBoardNavigate} headStart={boardsNav.back} headSide={boardsNav.list} />}
       {board && landed && (
-        <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMe.state.canAsk ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
+        <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMeOn ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}
     </section>
   );

@@ -4,8 +4,9 @@
  * budgets can be measured by hand on any binary with the same steps
  * (`measureHeavyThread` takes a raw CDP page and a running Inbox).
  *
- * The thread: MESSAGES agent messages in one thread, every message open (an
- * unread thread opens them all). Every MESSAGES / SHOTS-th message shows a
+ * The thread: MESSAGES agent messages in one thread, all unread. It opens on
+ * its newest 20 (approval "inbox-thread-fold-unread"), and the measure then
+ * presses Expand all, so every message is open. Every MESSAGES / SHOTS-th message shows a
  * full-size screenshot inline (SHOT_WIDTH × SHOT_HEIGHT, a Retina laptop's
  * screen), and the last message attaches GALLERY of them as files (the
  * gallery and the tiles). Synthetic only: the PNGs are drawn here.
@@ -74,7 +75,10 @@ export async function seedHeavyThread(binary: string, env: Record<string, string
 }
 
 export interface HeavyThreadMeasure {
-  /** Articles drawn, and open ones. */
+  /** Articles drawn when the unread thread opened, and open ones: its first message's line and its newest 20. */
+  openedDrawn: number;
+  openedOpen: number;
+  /** Articles drawn, and open ones, after Expand all. */
   messages: number;
   open: number;
   /** After two forced collections. */
@@ -168,7 +172,13 @@ export async function measureHeavyThread(page: RawPage, url: string, threadId: s
   await page.goto(`${url.replace(/\/+$/, '')}/`);
   if (!(await page.waitFor(`document.querySelector('.ib-lbody [data-thread-id]')`, 60_000))) throw new Error('the list never drew');
   await openThread(page, threadId);
-  if (!(await page.waitFor(`document.querySelectorAll('[data-message-article]').length === ${MESSAGES}`, 60_000))) throw new Error('the thread never drew');
+  const newestOpen = `(() => { const a = [...document.querySelectorAll('[data-message-article]')]; return a.length > 0 && !a[a.length - 1].hasAttribute('data-folded'); })()`;
+  if (!(await page.waitFor(newestOpen, 60_000))) throw new Error('the thread never drew');
+  await pause(1_000);
+  const opened = await page.evaluate<Record<string, number>>(STATS);
+  // Every message open, as a person who presses Expand all has it: the most the thread can hold.
+  await page.evaluate(`document.querySelector('[data-expand-all]').click()`);
+  if (!(await page.waitFor(`document.querySelectorAll('[data-message-article]:not([data-folded])').length === ${MESSAGES}`, 60_000))) throw new Error('Expand all never opened the thread');
   await pause(2_000);
   await scrollPane(page, 'bottom');
   await pause(1_000);
@@ -210,6 +220,8 @@ export async function measureHeavyThread(page: RawPage, url: string, threadId: s
   }
   const reclosedHeapMB = await closed();
   return {
+    openedDrawn: opened.messages!,
+    openedOpen: opened.open!,
     messages: stats.messages!,
     open: stats.open!,
     heapMB: round1(heap.jsHeapUsed / MB),
