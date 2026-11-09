@@ -7,7 +7,7 @@ import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
 import { filterLaunchProjects, otherFolderMatches, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
 import { HomeFolderBrowser } from './HomeFolderBrowser';
-import { cleanPastedPath, homeRelative, looksLikePath } from './homeFolders';
+import { cleanPastedPath, homeRelative, looksLikePath, placeOf, unpluggedDrive, type FolderDrive } from './homeFolders';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -48,6 +48,11 @@ import { cleanPastedPath, homeRelative, looksLikePath } from './homeFolders';
  * says how. A quiet check after the paste dims a machine whose git can't sign in to the host, still pickable (C11). An
  * unknown host is checked before it is offered ("Checking git.acme.dev…"); an account or a page that isn't a repo is
  * said in one line. An asleep machine's row is still offered, with no "another folder" row (its folders can't be read).
+ *
+ * Drives (approval "inbox-launch-any-folder"): after "Another folder…", one quiet row per drive the machine has
+ * mounted ("Studio SSD…", "Backup… · network drive"); picked, the folder browser opens at that drive. A project whose
+ * drive isn't plugged in is struck through with "· Archive isn't connected"; one on a network drive that isn't
+ * answering says "· Backup isn't responding".
  */
 /** "New scratch folder" in one place: the folder a Send would make, its root, and whether the agent trusts the root. */
 export interface ScratchRow {
@@ -75,6 +80,10 @@ export interface FolderGroup {
   asleep?: boolean;
   /** Where that machine clones a repo with no setting (`~/…`, from its launch block), for its row while it can't be asked. */
   cloneInto?: string | null;
+  /** The drives it has mounted (its launch block's): a row each, and the browser's places. Absent: an older Inbox. */
+  drives?: readonly FolderDrive[] | null;
+  /** "Choose in Finder…" in its browser: this computer, its own window, macOS. */
+  finder?: boolean;
 }
 
 /** A clone picked: the URL as pasted, the repo it names, and its own folder on that machine (`~/…`). */
@@ -91,6 +100,8 @@ const OTHER_PICK = '~other';
 /** A machine's clone row, and its "Clone into another folder…", in the keys' walk. */
 const CLONE_PICK = '~clone';
 const CLONE_OTHER_PICK = '~clone-other';
+/** A drive's row in the keys' walk. */
+const drivePick = (drive: FolderDrive) => `~drive:${drive.path}`;
 
 /** One machine's clone row: where it would clone the repo (`target`), or a guess while it can't be asked. */
 interface CloneRow {
@@ -106,6 +117,7 @@ type Row =
   | { key: string; kind: 'project'; project: LaunchProject; group: FolderGroup }
   | { key: string; kind: 'scratch'; scratch: ScratchRow; group: FolderGroup }
   | { key: string; kind: 'other'; group: FolderGroup }
+  | { key: string; kind: 'drive'; drive: FolderDrive; group: FolderGroup }
   | { key: string; kind: 'clone'; clone: CloneRow; group: FolderGroup }
   | { key: string; kind: 'cloneOther'; group: FolderGroup };
 
@@ -198,6 +210,8 @@ export function FolderMenu({
   cloneInto = null,
   initialQuery = '',
   clonePicked = null,
+  drives = null,
+  finder = false,
 }: {
   projects: readonly LaunchProject[];
   selected: string | null;
@@ -234,6 +248,10 @@ export function FolderMenu({
   initialQuery?: string;
   /** The clone To names now: ✓ on its machine's clone row. */
   clonePicked?: { folder: string; machine: string | null } | null;
+  /** Without linked machines: this computer's drives (its launch block's). */
+  drives?: readonly FolderDrive[] | null;
+  /** Without linked machines: "Choose in Finder…" in the browser (this computer's own window, macOS). */
+  finder?: boolean;
 }) {
   const [query, setQuery] = useState(initialQuery);
   // The folder browser open in place of the list, for one machine's group: by its id (null: this computer), so the
@@ -242,8 +260,8 @@ export function FolderMenu({
   const grouped = !!groups;
   // Without linked machines: one group with no caption, so the menu is exactly what it was.
   const all = useMemo<readonly FolderGroup[]>(
-    () => groups ?? [{ machine: null, name: '', quiet: null, home, projects, last: null, scratch: scratch && onScratch ? scratch : null, notice: null, cloneInto }],
-    [groups, home, projects, scratch, onScratch, cloneInto],
+    () => groups ?? [{ machine: null, name: '', quiet: null, home, projects, last: null, scratch: scratch && onScratch ? scratch : null, notice: null, cloneInto, drives, finder }],
+    [groups, home, projects, scratch, onScratch, cloneInto, drives, finder],
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
   // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
@@ -293,7 +311,7 @@ export function FolderMenu({
         if (git) {
           // A git URL: each machine's clone row (an asleep one's too: it clones when it's back), never its projects.
           const offered = repoShown && !group.notice;
-          return { group, projects: [], scratch: null, notice: repoShown ? group.notice : null, other: false, path: null as string | null, clone: offered ? cloneRowOf(group) : null, cloneOther: offered && !group.asleep && !cloneRowOf(group).already };
+          return { group, projects: [], scratch: null, notice: repoShown ? group.notice : null, other: false, drives: [] as FolderDrive[], path: null as string | null, clone: offered ? cloneRowOf(group) : null, cloneOther: offered && !group.asleep && !cloneRowOf(group).already };
         }
         if (typedPath !== null) {
           // A path: its projects (by where they are on that machine), and "Another folder…" carrying the path.
@@ -302,7 +320,7 @@ export function FolderMenu({
             const folder = tildePath(p.root, group.home);
             return folder === at || folder.startsWith(`${at}/`);
           });
-          return { group, projects: under, scratch: null, notice: null, other: !!onFolder && !group.notice && !group.asleep, path: homeRelative(typedPath, group.home), clone: null, cloneOther: false };
+          return { group, projects: under, scratch: null, notice: null, other: !!onFolder && !group.notice && !group.asleep, drives: [] as FolderDrive[], path: homeRelative(typedPath, group.home), clone: null, cloneOther: false };
         }
         return {
           group,
@@ -312,12 +330,17 @@ export function FolderMenu({
           // A group that offers anything to start in (not a machine's notice) ends with "Another folder on <machine>…".
           // Not for an asleep machine: its folders can't be read, and its caption already says it is asleep.
           other: !!onFolder && !group.notice && !group.asleep && (named || otherFolderMatches(query)),
+          // Its drives, after "Another folder…": all of them with no words, else the ones the words name.
+          drives:
+            onFolder && !group.notice && !group.asleep
+              ? (group.drives ?? []).filter((d) => named || words.length === 0 || words.every((w) => d.name.toLowerCase().includes(w) || (d.network === true && 'network drive'.includes(w))))
+              : [],
           path: null as string | null,
           clone: null as CloneRow | null,
           cloneOther: false,
         };
       })
-      .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other || g.clone);
+      .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other || g.drives.length > 0 || g.clone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, grouped, query, onFolder, typedPath, git, repoShown, cloneReads]);
   const rows = useMemo<Row[]>(
@@ -326,6 +349,7 @@ export function FolderMenu({
         ...g.projects.map((project) => ({ key: rowKey(g.group.machine, project.id), kind: 'project' as const, project, group: g.group })),
         ...(g.scratch ? [{ key: rowKey(g.group.machine, SCRATCH_PICK), kind: 'scratch' as const, scratch: g.scratch, group: g.group }] : []),
         ...(g.other ? [{ key: rowKey(g.group.machine, OTHER_PICK), kind: 'other' as const, group: g.group }] : []),
+        ...g.drives.map((drive) => ({ key: rowKey(g.group.machine, drivePick(drive)), kind: 'drive' as const, drive, group: g.group })),
         ...(g.clone ? [{ key: rowKey(g.group.machine, CLONE_PICK), kind: 'clone' as const, clone: g.clone, group: g.group }] : []),
         ...(g.cloneOther ? [{ key: rowKey(g.group.machine, CLONE_OTHER_PICK), kind: 'cloneOther' as const, group: g.group }] : []),
       ]),
@@ -370,10 +394,20 @@ export function FolderMenu({
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [onClose]);
 
+  /** The row the browser's back arrow returns to: "Another folder…", or the drive row it was opened from. */
+  const [backTo, setBackTo] = useState<string | null>(null);
   /** Into a machine's folder browser: at the path in the filter, else where it was left (D2). */
   const openOther = (machine: string | null) => {
     const path = shown.find((g) => g.group.machine === machine)?.path ?? null;
     setOpenAt(path);
+    setBackTo(null);
+    setOtherId(machine);
+  };
+  /** A drive's row: that machine's folder browser, at the drive. */
+  const openDrive = (machine: string | null, drive: FolderDrive) => {
+    setBrowseClone(null);
+    setOpenAt(`${drive.path}/`);
+    setBackTo(rowKey(machine, drivePick(drive)));
     setOtherId(machine);
   };
   /** "Clone into another folder…": that machine's folder browser in clone mode, at its clone folder (C14). */
@@ -395,7 +429,8 @@ export function FolderMenu({
     else if (row.kind === 'other') {
       setBrowseClone(null);
       openOther(row.group.machine);
-    } else if (row.kind === 'clone') pickClone(row.group, row.clone);
+    } else if (row.kind === 'drive') openDrive(row.group.machine, row.drive);
+    else if (row.kind === 'clone') pickClone(row.group, row.clone);
     else if (row.kind === 'cloneOther') openCloneOther(row.group);
     else onPick(row.project, row.group.machine);
   };
@@ -448,7 +483,7 @@ export function FolderMenu({
       <div className="ib-cp-picker ib-cp-folders" ref={ref} data-compose-folders="" data-other-folder={other.machine ?? 'self'} data-phone={phone ? '' : undefined}>
         <HomeFolderBrowser
           key={browseClone ? `clone:${browseClone.url}` : 'folder'}
-          machine={{ id: other.machine, name: named, asleep: other.asleep === true, home: other.home }}
+          machine={{ id: other.machine, name: named, asleep: other.asleep === true, home: other.home, drives: other.drives ?? null, finder: other.finder === true && !phone }}
           phone={phone}
           clone={browseClone ? { url: browseClone.url, repo: browseClone.repo.repo } : null}
           initialPath={
@@ -460,7 +495,7 @@ export function FolderMenu({
           }
           onTyped={(typed) => !browseClone && kept?.set(other.machine ?? '', typed)}
           onBack={() => {
-            setHlId(rowKey(other.machine, browseClone ? CLONE_OTHER_PICK : OTHER_PICK));
+            setHlId(browseClone ? rowKey(other.machine, CLONE_OTHER_PICK) : (backTo ?? rowKey(other.machine, OTHER_PICK)));
             setBrowseClone(null);
             setOtherId(undefined);
           }}
@@ -549,13 +584,16 @@ export function FolderMenu({
                 const i = at++;
                 const folder = tildePath(project.root, gHome);
                 const last = grouped && project.id === group.last;
+                // Its drive isn't plugged in, or (a network drive) isn't answering: said after its name.
+                const unplugged = project.exists ? null : unpluggedDrive(project.root, group.drives);
+                const slowDrive = project.exists && project.slow ? (placeOf(project.root, group.drives ?? [])?.name ?? null) : null;
                 return (
                   <div
                     key={project.id}
                     id={optionId(i)}
                     role="option"
                     aria-selected={i === hl}
-                    aria-label={`${project.name}${last ? ', you started it here last' : ''}, ${folder}${on ? `, on ${on}` : ''}${project.exists ? '' : ', not there any more'}`}
+                    aria-label={`${project.name}${last ? ', you started it here last' : ''}, ${folder}${on ? `, on ${on}` : ''}${unplugged ? `, ${unplugged} isn't connected` : project.exists ? (slowDrive ? `, ${slowDrive} isn't responding` : '') : ', not there any more'}`}
                     className={`ib-cp-opt ib-cp-fopt${i === hl ? ' ib-hl' : ''}`}
                     data-compose-folder-option={project.id}
                     data-compose-folder-machine={group.machine ?? undefined}
@@ -569,6 +607,12 @@ export function FolderMenu({
                       <span className="ib-cp-op" dir="auto">
                         {project.name}
                         {last && <span className="ib-cp-trust"> · you started it here last</span>}
+                        {slowDrive && <span className="ib-cp-trust"> · {slowDrive} isn't responding</span>}
+                      </span>
+                    ) : unplugged ? (
+                      <span className="ib-cp-op" dir="auto" data-compose-folder-unplugged={unplugged}>
+                        <s>{project.name}</s>
+                        <span className="ib-cp-trust"> · {unplugged} isn't connected</span>
                       </span>
                     ) : (
                       <s className="ib-cp-op" dir="auto">
@@ -648,6 +692,30 @@ export function FolderMenu({
                     </>
                   );
                 })()}
+              {g.drives.map((drive) => {
+                const i = at++;
+                return (
+                  <div
+                    key={drive.path}
+                    id={optionId(i)}
+                    role="option"
+                    aria-selected={hl === i}
+                    aria-label={`${drive.name}${drive.network ? ', network drive' : ''}, ${drive.path}${on ? `, on ${on}` : ''}`}
+                    className={`ib-cp-opt ib-cp-fopt ib-cp-other ib-cp-drive${hl === i ? ' ib-hl' : ''}`}
+                    data-compose-folder-drive={drive.path}
+                    onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, drivePick(drive)))}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => openDrive(group.machine, drive)}
+                  >
+                    <Icon name={drive.network ? 'globe' : 'drive'} size={15} />
+                    <span className="ib-cp-op" dir="auto">
+                      {drive.name}…{drive.network && <span className="ib-cp-trust"> · network drive</span>}
+                    </span>
+                    <FolderPath path={drive.path} />
+                    <span className="ib-cp-check" aria-hidden="true" />
+                  </div>
+                );
+              })}
               {g.clone &&
                 (() => {
                   const i = at++;

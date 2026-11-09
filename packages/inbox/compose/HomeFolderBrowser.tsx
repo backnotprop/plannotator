@@ -11,9 +11,11 @@ import {
   folderRefusalWords,
   homeRelative,
   needsNameRead,
-  normalizeFolderPath,
+  placeOf,
   splitFolderPath,
+  folderName,
   type CloneTargetRead,
+  type FolderDrive,
   type FolderRead,
   type FolderRow,
 } from './homeFolders';
@@ -50,28 +52,36 @@ export interface HomeFolderMachine {
   asleep?: boolean;
   /** Its home folder, so a pasted full path reads as `~/…`; null when not known. */
   home?: string | null;
+  /** Its drives (approval "inbox-launch-any-folder"): the places row, Home · each drive. None or absent: no row. */
+  drives?: readonly FolderDrive[] | null;
+  /** "Choose in Finder…": this computer's own window on macOS (never a phone, a tailnet window or a linked machine). */
+  finder?: boolean;
 }
 
-/** The read for one path: the listing's answer, or why there is none. */
-type Read = { path: string; answer: FolderRead } | { path: string; error: string };
+/** The read for one path: the listing's answer, or why there is none (`code`: the server's, `folder_slow` for a drive that didn't answer). */
+type Read = { path: string; retry: number; answer: FolderRead } | { path: string; retry: number; error: string; code: string | null };
 
 /** How long typing settles before the folders are read. */
 const READ_DEBOUNCE_MS = 150;
 
-/** One read of the listing for `path` (null: none), a moment after it settles; an answer for an older path is dropped. */
-function useFolderRead(path: string | null, machineId: string | null, asleep: boolean): Read | null {
+/**
+ * One read of the listing for `path` (null: none), a moment after it settles; an answer for an older path is dropped.
+ * `retry`: Try again after a drive didn't answer (its read asks the drive again at once, `fresh`).
+ */
+function useFolderRead(path: string | null, machineId: string | null, asleep: boolean, retry = 0): Read | null {
   const [read, setRead] = useState<Read | null>(null);
   useEffect(() => {
     if (asleep || path === null) return;
     const controller = new AbortController();
     let live = true;
     const timer = setTimeout(() => {
-      inboxApi.homeFolders(path, machineId, controller.signal).then(
+      inboxApi.homeFolders(path, machineId, controller.signal, retry > 0).then(
         (answer) => {
           if (!live) return;
           const nearest = answer.nearest && typeof answer.nearest.path === 'string' && Array.isArray(answer.nearest.folders) ? { path: answer.nearest.path, folders: answer.nearest.folders } : null;
           setRead({
             path,
+            retry,
             answer: {
               exists: answer.exists === true,
               ...(answer.state ? { state: answer.state } : {}),
@@ -80,12 +90,19 @@ function useFolderRead(path: string | null, machineId: string | null, asleep: bo
               ...(typeof answer.writable === 'boolean' ? { writable: answer.writable } : {}),
               nearest,
               blocked: answer.blocked ?? null,
+              ...(answer.start === false ? { start: false as const } : {}),
+              ...(Array.isArray(answer.nostart) ? { nostart: answer.nostart } : {}),
             },
           });
         },
         (cause) => {
           if (!live) return;
-          setRead({ path, error: cause instanceof InboxApiError ? folderRefusalWords(cause.code ?? null, cause.message) : "The folders couldn't be read." });
+          setRead({
+            path,
+            retry,
+            error: cause instanceof InboxApiError ? folderRefusalWords(cause.code ?? null, cause.message) : "The folders couldn't be read.",
+            code: cause instanceof InboxApiError ? (cause.code ?? null) : null,
+          });
         },
       );
     }, READ_DEBOUNCE_MS);
@@ -94,9 +111,23 @@ function useFolderRead(path: string | null, machineId: string | null, asleep: bo
       clearTimeout(timer);
       controller.abort();
     };
-  }, [path, machineId, asleep]);
-  return asleep || path === null || !read || read.path !== path ? null : read;
+  }, [path, machineId, asleep, retry]);
+  return asleep || path === null || !read || read.path !== path || read.retry !== retry ? null : read;
 }
+
+/** True once `key` has stayed as it is for `ms` (a read still under way by then is said: "Reading Backup…"). */
+function useSettled(key: string | null, ms: number): boolean {
+  const [settled, setSettled] = useState<string | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    const timer = setTimeout(() => setSettled(key), ms);
+    return () => clearTimeout(timer);
+  }, [key, ms]);
+  return key !== null && settled === key;
+}
+
+/** How long a read may take before the browser says it is reading (a drive waking up, a slow network drive). */
+const READING_SHOWN_MS = 700;
 
 /** Where a clone into `at` goes on that machine (null: not read yet, or no folder to clone into). */
 function useCloneTarget(at: string | null, url: string | null, machineId: string | null, asleep: boolean): CloneTargetRead | null {
@@ -180,12 +211,23 @@ export function HomeFolderBrowser({
   const shown = homeRelative(typed.trim(), machine.home ?? null);
   const { parent, tail } = splitFolderPath(shown);
   const asleep = machine.asleep === true;
-  // Outside home or hidden: said in one line (A11), never read.
-  const refused = !normalizeFolderPath(shown).startsWith('~') || parent.split('/').some((segment) => segment.startsWith('.'));
-  const read = useFolderRead(refused ? null : parent, machine.id, asleep);
+  const drives = machine.drives ?? [];
+  // Which place the path is in: a drive, else home (a full path elsewhere: none of them).
+  const here = placeOf(shown, drives);
+  const atHome = shown.startsWith('~');
+  // Hidden: said in one line (A11), never read. Any other folder is read; a system one is the server's to refuse.
+  const refused = parent.split('/').some((segment) => segment.startsWith('.'));
+  // Try again after a drive didn't answer.
+  const [retry, setRetry] = useState(0);
+  const read = useFolderRead(refused ? null : parent, machine.id, asleep, retry);
   const ok = read && 'answer' in read ? read.answer : null;
   // A name typed that is none of the folders read: the full path is read too (a file? a folder that can't be opened?).
-  const nameRead = useFolderRead(needsNameRead(ok, tail) ? `${parent === '~' ? '~' : parent}/${tail}` : null, machine.id, asleep);
+  const nameRead = useFolderRead(needsNameRead(ok, tail) ? `${parent === '~' ? '~' : parent === '/' ? '' : parent}/${tail}` : null, machine.id, asleep, retry);
+  const slow = !!read && 'error' in read && read.code === 'folder_slow';
+  // A read still under way after a moment: "Reading <drive>…" where the folders will be.
+  const reading = useSettled(!asleep && !refused && !read ? `${retry}\n${parent}` : null, READING_SHOWN_MS);
+  // "Choose in Finder…": waiting on the dialog on this computer.
+  const [finding, setFinding] = useState(false);
   const okName = nameRead && 'answer' in nameRead ? nameRead.answer : null;
   const target = useCloneTarget(clone ? cloneAt(shown, ok, okName) : null, clone?.url ?? null, machine.id, asleep);
   const view = asleep
@@ -282,6 +324,57 @@ export function HomeFolderBrowser({
     const end = input.selectionEnd ?? input.value.length;
     goTo(start === 0 && end === input.value.length ? clean : input.value.slice(0, start) + clean + input.value.slice(end));
   };
+
+  /** "Choose in Finder…": the folder picked there reads in the field as if typed, so the same rules say what it is. */
+  const chooseInFinder = () => {
+    if (finding) return;
+    setFinding(true);
+    inboxApi.chooseFolder().then(
+      (answer) => {
+        setFinding(false);
+        if (answer.path) goTo(`${homeRelative(answer.path.replace(/\/+$/, ''), machine.home ?? null).replace(/\/+$/, '')}/`);
+        else inputRef.current?.focus();
+      },
+      () => setFinding(false),
+    );
+  };
+  const placesRow = (drives.length > 0 || machine.finder === true) && !clone && (
+    <div className="ib-hfb-places" data-home-folders-places="">
+      {drives.length > 0 && (
+        <div className="ib-seg ib-seg-sm" role="radiogroup" aria-label="Places">
+          <button type="button" className="ib-seg-o" role="radio" aria-checked={atHome} data-on={atHome ? '' : undefined} onClick={() => goTo(HOME_FOLDER_START)} data-home-folders-place="home">
+            <Icon name="folder" size={14} />
+            Home
+          </button>
+          {drives.map((drive) => {
+            const on = here?.path === drive.path;
+            return (
+              <button
+                key={drive.path}
+                type="button"
+                className="ib-seg-o"
+                role="radio"
+                aria-checked={on}
+                aria-label={drive.network ? `${drive.name}, network drive` : drive.name}
+                data-on={on ? '' : undefined}
+                onClick={() => goTo(`${drive.path}/`)}
+                data-home-folders-place={drive.path}
+              >
+                <Icon name={drive.network ? 'globe' : 'drive'} size={14} />
+                {drive.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {machine.finder === true && (
+        <button type="button" className="ib-lnk ib-hfb-finder" disabled={finding} onClick={chooseInFinder} data-home-folders-finder="">
+          <Icon name="external" size={14} />
+          {finding ? 'Waiting for Finder…' : 'Choose in Finder…'}
+        </button>
+      )}
+    </div>
+  );
 
   const where = clone ? (
     <>
@@ -388,6 +481,7 @@ export function HomeFolderBrowser({
           <span>{where}</span>
         </div>
       )}
+      {placesRow}
       <div className="ib-cp-filter ib-hfb-field">
         <Icon name="folder" size={14} />
         <input
@@ -415,9 +509,23 @@ export function HomeFolderBrowser({
             {machine.name ?? 'This computer'} is asleep
           </div>
         )}
+        {reading && (
+          <div className="ib-cp-none ib-cp-checking" role="status" data-home-folders-note="reading">
+            <span className="ib-run-spin" aria-hidden="true" />
+            Reading {here?.name ?? (parent === '~' ? 'your home folder' : folderName(parent))}…
+          </div>
+        )}
         {view.note && (
-          <div className="ib-cp-none ib-hfb-note" role="status" data-home-folders-note="line">
+          <div className="ib-cp-none ib-hfb-note" role="status" data-home-folders-note={slow ? 'slow' : 'line'}>
             {view.note}
+            {slow && (
+              <>
+                {' '}
+                <button type="button" className="ib-lnk" onMouseDown={(event) => event.preventDefault()} onClick={() => setRetry((n) => n + 1)} data-home-folders-retry="">
+                  Try again
+                </button>
+              </>
+            )}
           </div>
         )}
         {rows.map((row, i) => (

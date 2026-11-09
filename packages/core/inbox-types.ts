@@ -3202,7 +3202,8 @@ export interface InboxComposeLaunch {
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
-  projects: { id: string; name: string; root: string; exists: boolean }[];
+  /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
+  projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
    * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
    * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
@@ -3216,6 +3217,13 @@ export interface InboxComposeLaunch {
    * (its real path): the folder last cloned into here, else where most of its projects live, else home. Absent from an older Inbox.
    */
   clone?: { into: string };
+  /**
+   * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
+   * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
+   */
+  drives?: { path: string; name: string; network?: true }[];
+  /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
+  finder?: true;
 }
 
 /**

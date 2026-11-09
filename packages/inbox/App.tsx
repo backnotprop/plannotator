@@ -7592,6 +7592,7 @@ function Inbox() {
           lastSent={lastSent}
           home={settings?.home ?? null}
           board={boardEnabled === true}
+          localWindow={!!settings && (settings.via ?? 'local') === 'local'}
           launched={composeLaunched}
           onHeld={composeHeld}
           reviewPulls={compose.review ? reviewPulls : undefined}
