@@ -99,8 +99,8 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
-/** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
+export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
+/** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
 export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
@@ -578,7 +578,7 @@ export interface SettingsModel {
   text_size?: InboxTextSize;
   /**
    * The favicon (config.json `favicon`), shared with plan review, code review and annotate: 'glass' unless chosen,
-   * 'totman' (shown as Face) or 'classic' (shown as P). Absent from an older Inbox.
+   * 'yellow' or 'totman' (shown as Face). Absent from an older Inbox.
    */
   favicon?: FaviconStyle;
   /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved. Absent from an older Inbox. */

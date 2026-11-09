@@ -211,6 +211,8 @@ test.beforeAll(async () => {
       inboxSound: { dialogShownFor: '0.0.0-dev' },
       inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
       inboxReveals: { lastShownAt: past },

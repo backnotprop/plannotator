@@ -88,6 +88,8 @@ async function world(): Promise<World> {
       inboxSound: { dialogShownFor: VERSION },
       inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxReveals: { lastShownAt: snoozeShown },
     }),

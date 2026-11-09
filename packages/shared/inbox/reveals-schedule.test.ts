@@ -68,6 +68,11 @@ test("the grill-me tip is registered beside the line, waiting for every other ca
   expect(INBOX_REVEALS[after]).toEqual({ id: GRILL_ME, kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true });
 });
 
+test("the tab icon dialog is registered in the real queue as its note places it: an update-day dialog right after voice, no tenure, no threads", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "voice") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true });
+});
+
 type Dialog = RevealId | "agent_note";
 
 interface User {
@@ -266,7 +271,7 @@ describe("the grill-me tip (the owner: \"Sooner: after 3 answered questions, wha
     ["a heavy user whose list is taller than the screen from the start", { ...HEAVY, moment: (id: RevealId, day: number) => id !== "snooze" || day >= 1 }, { 0: 7, 8: 8 }],
     ["a new user with Code review off", { ...HEAVY, codeReviewOff: true }, { 0: 8, 8: 8, 12: 12 }],
     ["a light user (Snooze on 7, the Checklist on 25, the Board never)", LIGHT, { 0: 18, 3: 18, 8: 18 }],
-    ["someone updating on day 0", UPGRADER, { 0: 7, 3: 7, 8: 8 }],
+    ["someone updating on day 0", UPGRADER, { 0: 8, 3: 8, 8: 8 }],
   ];
   for (const [name, user, tips] of SCENARIOS) {
     const without = days(simulate(user));
@@ -393,16 +398,18 @@ describe("30 days of a light user", () => {
 });
 
 describe("an update day", () => {
-  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 3: one a day, and nothing ahead of them", () => {
+  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 3, the tab icon on day 4: one a day, and nothing ahead of them", () => {
     const shown = simulate(UPGRADER);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["sound", 0],
       ["agent_note", 1],
       ["list_intro", 2],
       ["voice", 3],
-      [BRO, 4],
+      ["tab_icon", 4],
+      // The list outgrows the screen on day 5: List view goes ahead of Bro mode.
       [LIST_VIEW, 5],
-      ["star", 6],
+      [BRO, 6],
+      ["star", 7],
     ]);
     expectOnePerDay(shown);
   });

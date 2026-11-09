@@ -97,6 +97,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         inboxAgentNotes: { offered: true },
         // Due on a used Inbox, and its check would run the `codex` on this PATH.
         inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+        // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+        favicon: 'glass',
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
         ...(options.seenOld ? { inboxListIntro: { dueAt: '2026-10-20T10:00:00.000Z', shownAt: '2026-10-21T10:00:00.000Z' } } : {}),
       }),
