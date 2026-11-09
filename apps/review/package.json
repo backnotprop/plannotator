@@ -12,7 +12,7 @@
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.2",
     "dompurify": "^3.4.17",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -23,6 +23,6 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }
