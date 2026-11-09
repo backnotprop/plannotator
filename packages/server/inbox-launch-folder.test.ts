@@ -85,7 +85,7 @@ describe("to.launch.folder: never somewhere the listing doesn't offer", () => {
   test("a backslash or a NUL is refused before the folder is read: ~/\\.ssh, ~/x\\..\\.ssh, ~/x\\..\\.claude", async () => {
     const { send, store, resolvedCount } = setup();
     for (const folder of ["~/\\.ssh", "~/x\\..\\.ssh", "~/x\\..\\.claude", "~/x\0"]) {
-      expect([folder, await send(folder)]).toEqual([folder, { code: "validation_error", message: "Pick a folder inside the home folder. Nothing was sent." }]);
+      expect([folder, await send(folder)]).toEqual([folder, { code: "validation_error", message: "Pick a folder by its full path. Nothing was sent." }]);
     }
     expect(resolvedCount()).toBe(0);
     expect(store.listProjects()).toEqual([]);
@@ -97,10 +97,11 @@ describe("to.launch.folder: never somewhere the listing doesn't offer", () => {
     expect(resolvedCount()).toBe(0);
   });
 
-  test("a folder that isn't there under a hidden folder or outside home answers as that folder, not as missing", async () => {
+  test("a folder that isn't there under a hidden folder or a system one answers as that folder, not as missing", async () => {
     const { send, resolvedCount } = setup();
     expect(await send("~/code/sshlink/nope")).toEqual({ code: "validation_error", message: "Hidden folders can't be picked. Nothing was sent." });
-    expect(await send("~/outlink/nope")).toEqual({ code: "validation_error", message: "Pick a folder inside the home folder. Nothing was sent." });
+    // The temp folder is a system folder (macOS's /private, Linux's /tmp): a link there is one too.
+    expect(await send("~/outlink/nope")).toEqual({ code: "validation_error", message: "System folders can't be picked. Nothing was sent." });
     // Under a plain folder: just missing.
     expect((await send("~/code/nope")).code).toBe("folder_missing");
     expect(resolvedCount()).toBe(0);
@@ -253,5 +254,94 @@ describe("to.launch.folder with create", () => {
     writeFileSync(join(home, "code", "landing", "notes.md"), "kept");
     launch.abandon(second.launch, second.project);
     expect(existsSync(join(home, "code", "landing", "notes.md"))).toBe(true);
+  });
+});
+
+/**
+ * A folder on another drive (approval "inbox-launch-any-folder"): a Send may start in any folder but a system or hidden
+ * one, a drive's own root too; never in the folder drives are mounted in. A drive that doesn't answer is given up after
+ * the read's timeout and said by name, and never holds the Inbox: the next read of it answers at once. The temp folder
+ * is a system folder here, so the test names its own disk (`folderPlaces`).
+ */
+describe("to.launch.folder on another drive", () => {
+  function drives() {
+    const disk = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-drive-")));
+    restore.push(() => rmSync(disk, { recursive: true, force: true }));
+    const dataDir = join(disk, "data");
+    const home = join(disk, "Users", "me");
+    const volumes = join(disk, "Volumes");
+    for (const dir of [join(home, "code"), join(volumes, "Studio SSD", "footage"), join(volumes, "Backup", "jobs"), dataDir]) mkdirSync(dir, { recursive: true });
+    setEnv("PLANNOTATOR_DATA_DIR", dataDir);
+    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
+    // Backup stands in for a network drive that stopped answering: its reads never finish.
+    setEnv("PLANNOTATOR_TEST_DRIVES", JSON.stringify({ slow: [join(volumes, "Backup")] }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+    const store = InboxStore.open(dataDir);
+    const fake = fakeLaunchHost();
+    const chosen: (string | null)[] = [];
+    const launch = createInboxLaunch({
+      store,
+      live: { runStateOf: () => null },
+      dataDir,
+      serverSession: "srv",
+      homeDir: home,
+      platform: "darwin",
+      loginEnv: async () => ({ HOME: home, PATH: "" }),
+      ownEnv: () => ({ HOME: home }),
+      installDirs: [],
+      displayFolder: (path) => path,
+      readBody: async (req) => (await req.json().catch(() => ({}))) as Record<string, unknown>,
+      json: (body, status = 200) => Response.json(body, { status }),
+      onChange: () => {},
+      selfCommand: ["plannotator"],
+      hosts: () => [fake.host],
+      folderPlaces: { system: [join(disk, "System")], open: [], containers: ["/", volumes, join(disk, "Users")] },
+      folderReadTimeoutMs: 700,
+      chooseFolder: async () => chosen.shift() ?? null,
+    });
+    restore.push(() => launch.stop());
+    const prepare = (folder: string) => {
+      const target = launch.target({ launch: { agent: FAKE, folder } })!;
+      return launch.prepare(target, { name: "x", body: "x", resolveProject: async (path) => store.ensureProject({ name: path.split("/").pop()!, root: path }) });
+    };
+    const list = (path: string) =>
+      launch.route(new Request(`http://localhost/api/inbox/launch/folders?path=${encodeURIComponent(path)}`, { headers: { "sec-fetch-site": "same-origin" } }), "/api/inbox/launch/folders", "local", true, null);
+    return { volumes, prepare, list, launch, chosen };
+  }
+
+  test("starts in a folder on a drive, and in the drive's own root", async () => {
+    const { volumes, prepare } = drives();
+    expect((await prepare(join(volumes, "Studio SSD", "footage"))).launch.folder).toBe(join(volumes, "Studio SSD", "footage"));
+    expect((await prepare(join(volumes, "Studio SSD"))).project.root).toBe(join(volumes, "Studio SSD"));
+  });
+
+  test("never in the folder the drives are mounted in", async () => {
+    const { volumes, prepare } = drives();
+    await expect(prepare(volumes)).rejects.toMatchObject({ code: "validation_error", message: `Pick a folder inside ${volumes}. Nothing was sent.` });
+  });
+
+  test("a drive that doesn't answer is given up and said by name; the next read of it answers at once", async () => {
+    const { volumes, prepare, list } = drives();
+    const started = Date.now();
+    await expect(prepare(join(volumes, "Backup", "jobs"))).rejects.toMatchObject({ code: "folder_unavailable", message: "Backup isn't responding. Nothing was sent." });
+    expect(Date.now() - started).toBeLessThan(2500);
+    const again = Date.now();
+    const answer = (await list(join(volumes, "Backup", "jobs")))!;
+    expect(Date.now() - again).toBeLessThan(300);
+    expect([answer.status, await answer.json()]).toEqual([504, { error: "Backup isn't responding.", code: "folder_slow", drive: "Backup" }]);
+    // Another drive still reads.
+    expect(await (await list(`${join(volumes, "Studio SSD")}/`))!.json()).toMatchObject({ exists: true, folders: ["footage"] });
+  });
+
+  test("Choose in Finder: this computer's own window only; the folder picked, or cancelled", async () => {
+    const { launch, chosen } = drives();
+    const ask = (via: string, door: { platform: string; window: boolean } | null = null, site = "same-origin") =>
+      launch.route(new Request("http://localhost/api/inbox/launch/choose-folder", { method: "POST", headers: { "sec-fetch-site": site }, body: "{}" }), "/api/inbox/launch/choose-folder", via, true, door);
+    expect((await ask("tailnet"))!.status).toBe(403);
+    expect((await ask("local", { platform: "darwin", window: true }))!.status).toBe(403);
+    expect((await ask("local", null, "none"))!.status).toBe(403);
+    chosen.push("/Volumes/Studio SSD/footage/");
+    expect(await (await ask("local"))!.json()).toEqual({ path: "/Volumes/Studio SSD/footage/" });
+    expect(await (await ask("local"))!.json()).toEqual({ cancelled: true });
   });
 });
