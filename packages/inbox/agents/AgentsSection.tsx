@@ -170,7 +170,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                         onClick={(event) => open(entry, event)}
                         data-agent-open={entry.thread ? 'thread' : canMessage(entry) ? 'message' : 'none'}
                       >
-                        <AgentMark id={entry.agent.id} host={entry.agent.host} state={entry.agent.state} />
+                        <AgentMark id={entry.agent.id} host={entry.agent.host} />
                         <span className="ib-name" dir="auto">
                           {entry.name}
                         </span>

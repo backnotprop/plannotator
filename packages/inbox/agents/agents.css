@@ -60,8 +60,10 @@
   .pn-inbox .ib-sbagent .ib-proj { font-size: var(--ib-fs-15, 15px); }
 }
 
-/* ---------- the animated agent mark (motion.ts): 24 px, no tile ---------- */
+/* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* The layer that leans toward the pointer, around the mark's feet. */
+.am-look { grid-area: 1 / 1; display: grid; place-items: center; width: var(--am); height: var(--am); transform-origin: 50% 90%; will-change: transform; }
 .am-card { grid-area: 1 / 1; position: relative; width: var(--am); height: var(--am); display: grid; place-items: center; transform-style: preserve-3d; }
 .am-face { grid-area: 1 / 1; position: absolute; inset: 0; display: grid; place-items: center; backface-visibility: hidden; }
 .am-face[hidden] { display: none; }
@@ -71,12 +73,16 @@
 .am-glyph { width: var(--am); height: var(--am); display: block; overflow: visible; }
 /* A rig: every part an HTML layer the size of the glyph, holding its own small svg. */
 .am-rig { position: relative; }
-.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin { position: absolute; inset: 0; display: block; }
+.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin, .am-rig .am-e { position: absolute; inset: 0; display: block; }
 .am-l { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-/* The gesture layer is promoted up front, so a fidget never lays out or repaints the row. */
-.am-rig .am-x, .am-fb.am-x { will-change: transform; }
+/* The gesture layer and the eyes (the layer inside it that looks toward the pointer) are promoted up front, so a
+   gesture or a look never lays out or repaints the row. */
+.am-rig .am-x, .am-fb.am-x, .am-rig .am-e { will-change: transform; }
 /* Our faces (the favicon art) move as a whole. */
 .am-fb { display: block; width: 100%; height: 100%; transform-origin: 50% 97%; }
+/* A host with no rig: its plain mark, drawn in the same moving layer. */
+.am-fb.am-plain { display: grid; place-items: center; }
+.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 .am-art { display: block; width: 100%; height: 100%; }
 /* Transparent: the ink-frame mark on light, the yellow-frame pixel mark on dark. */
 .am-art-l { display: none; }
