@@ -763,11 +763,29 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
-/** Side on a message's words opens (or reopens) the thread's chat. */
-async function sideOpensChat(page: Page, message: Locator): Promise<void> {
+/** Side on a message's words opens (or reopens) the thread's chat: a drag inside the words themselves, never from the margin. */
+async function sideOpensChat(page: Page, message: Locator, words = 'The schedule is in'): Promise<void> {
   const side = page.locator('.annotation-toolbar [data-annotation-side]');
   await expect(async () => {
-    await dragAcross(page, message.getByText('The schedule is in', { exact: false }).first());
+    const at = await message.first().evaluate((root, needle) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.textContent?.indexOf(needle) ?? -1;
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + needle.length);
+        const r = range.getClientRects()[0]!;
+        return { x1: r.left + 1, x2: r.right - 1, y: r.top + r.height / 2 };
+      }
+      return null;
+    }, words);
+    expect(at, `"${words}" is on screen`).not.toBeNull();
+    await page.mouse.move(at!.x1, at!.y);
+    await page.mouse.down();
+    await page.mouse.move((at!.x1 + at!.x2) / 2, at!.y, { steps: 6 });
+    await page.mouse.move(at!.x2, at!.y, { steps: 6 });
+    await page.mouse.up();
     await expect(side).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
   await side.click();
