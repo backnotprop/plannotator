@@ -41,7 +41,7 @@ import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 export interface SidebarProps {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
   /**
-   * Artifacts (approval "inbox-artifact-stars"): the row in the top group, always shown with `onArtifacts`, that opens
+   * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
    * the Artifacts wall on All. No count.
    */
   onArtifacts?: () => void;
