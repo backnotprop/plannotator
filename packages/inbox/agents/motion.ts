@@ -43,8 +43,11 @@ export function agentRigOf(host: string | null | undefined): AgentRigKind | null
   return null;
 }
 
-/** Timers run at `clock` times their rate (a recorder that slows the page sets it); `fidgets` off: loops only. */
-export const agentMotionOptions = { clock: 1, fidgets: true };
+/**
+ * Timers run at `clock` times their rate (a recorder that slows the page sets it); `fidgets` off: loops only;
+ * `simulatedDom`: move in a simulated DOM too (the marks' own tests, which stand in for Web Animations).
+ */
+export const agentMotionOptions = { clock: 1, fidgets: true, simulatedDom: false };
 
 type Pose = { x: number; y: number; r: number; sx: number; sy: number; k: number; o: number };
 type PoseIn = Partial<Pose>;
@@ -113,10 +116,13 @@ const loop = (D: number, f: (t: number) => PoseIn): Clip => ({ D, loop: true, f 
 const once = (D: number, f: (t: number) => PoseIn): Clip => ({ D, loop: false, f });
 const same = (a: PoseIn, b: PoseIn) => KEYS.every((key) => full(a)[key] === full(b)[key]);
 
+// A simulated DOM (the DOM tests' happy-dom) runs Web Animations on timers, a loop finishing at once: the marks hold
+// still there, so the window's other tests never pay for them. The marks' own tests turn motion on (`simulatedDom`).
+const simulated = typeof navigator !== 'undefined' && /HappyDOM\//.test(navigator.userAgent ?? '');
 const reduceQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 /** Reduced motion, or a page that cannot animate (no Web Animations): every icon holds still poses. */
 export function agentMotionStill(): boolean {
-  return (reduceQuery?.matches ?? false) || typeof Element === 'undefined' || typeof Element.prototype.animate !== 'function';
+  return (reduceQuery?.matches ?? false) || typeof Element === 'undefined' || typeof Element.prototype.animate !== 'function' || (simulated && !agentMotionOptions.simulatedDom);
 }
 
 /* ---------- one icon: every animation it runs, so off screen pauses them all and unmount cancels them all ---------- */

@@ -161,7 +161,7 @@ export function AgentsSection(props: AgentsSectionProps) {
               {rows.map((entry) => {
                 const on = agentOn(entry);
                 return (
-                  <div key={entry.agent.id} className="ib-sbagent" data-agent={entry.agent.id} data-agent-state={entry.agent.state}>
+                  <div key={entry.agent.id} className="ib-sbagent" data-sidebar-agent={entry.agent.id} data-agent-state={entry.agent.state}>
                     <Tip content={<AgentTip entry={entry} machine={machine} />} side="right" align="start">
                       <button
                         type="button"

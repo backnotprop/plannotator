@@ -129,6 +129,7 @@ beforeEach(() => {
   reduce = false;
   made.length = 0;
   motion.agentMotionOptions.clock = 1;
+  motion.agentMotionOptions.simulatedDom = true;
   window.localStorage.clear();
   faces.resetAgentFaces();
   setInboxAgents(null);
@@ -214,8 +215,8 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toBe('Agents');
   const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
   expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook', 'Mini']);
-  expect(groups.map((g) => [...g.querySelectorAll('[data-agent]')].map((r) => r.getAttribute('data-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1'], []]);
-  expect(names(groups[0]!.querySelector('[data-agent]')!)).toEqual(['Fix login redirect']);
+  expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1'], []]);
+  expect(names(groups[0]!.querySelector('[data-sidebar-agent]')!)).toEqual(['Fix login redirect']);
   // Each caption is quiet (the grey of a quiet row) and an asleep machine says so to a screen reader; none counts.
   for (const caption of surface()!.querySelectorAll('[data-machine]')) expect(caption.classList.contains('ib-proj-quiet')).toBe(true);
   expect(surface()!.querySelector(`[data-machine="${MINI}"]`)!.hasAttribute('data-away')).toBe(true);
@@ -236,7 +237,7 @@ test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an In
   expect(surface()).not.toBeNull();
   expect(surface()!.querySelector('[data-agents-section]')!.hasAttribute('data-flat')).toBe(true);
   expect(surface()!.querySelector('[data-machine]')).toBeNull();
-  expect(surface()!.querySelectorAll('[data-agent]')).toHaveLength(2);
+  expect(surface()!.querySelectorAll('[data-sidebar-agent]')).toHaveLength(2);
   act(() => setInboxAgents([group([])]));
   expect(surface()!.textContent).toContain('Agents show here while they run.');
 });
@@ -269,10 +270,10 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   act(() => add.click());
   expect(opener === add).toBe(true);
   act(() => machine.click());
-  act(() => surface()!.querySelector<HTMLButtonElement>('[data-agent="ses_s1"] .ib-proj')!.click());
-  act(() => surface()!.querySelector<HTMLButtonElement>('[data-agent="ses_s2"] .ib-proj')!.click());
+  act(() => surface()!.querySelector<HTMLButtonElement>('[data-sidebar-agent="ses_s1"] .ib-proj')!.click());
+  act(() => surface()!.querySelector<HTMLButtonElement>('[data-sidebar-agent="ses_s2"] .ib-proj')!.click());
   expect(calls).toEqual(['add-agent', 'add-machine', 'open:thr_1', 'message:ses_s2']);
-  expect(names(surface()!.querySelector('[data-agent="ses_s1"]')!)).toEqual(['Invoice retries']);
+  expect(names(surface()!.querySelector('[data-sidebar-agent="ses_s1"]')!)).toEqual(['Invoice retries']);
   // An Inbox that cannot link here: Add agent alone.
   mount(<Sidebar {...sidebarProps({ machines: three(), onAddAgent: noop })} />);
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
