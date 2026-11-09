@@ -176,6 +176,7 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
+import type { Signal } from '../signal';
 import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
@@ -1209,6 +1210,12 @@ export interface ThreadPaneProps {
   draftChanged?: number;
   /** Raised each time records needed only this thread's files read again, not the thread (openThreadReads.ts). */
   filesChanged?: number;
+  /**
+   * The same two as signals (signal.ts), which draw nothing themselves: the window tells the pane to read its
+   * reply draft, or its files, again. A read that brings nothing new then draws nothing at all.
+   */
+  draftSignal?: Signal | null;
+  filesSignal?: Signal | null;
   onClose: () => void;
   /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
   file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
@@ -1419,7 +1426,7 @@ export interface ThreadPaneProps {
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh (read again when `revision` or `again` changes). */
-function useThreadAttachments(threadId: string, revision: unknown, again: number) {
+function useThreadAttachments(threadId: string, revision: unknown, again: number, signal: Signal | null = null) {
   const [model, setModel] = useState<AttachmentsModel | null>(null);
   const load = useCallback(async () => {
     try {
@@ -1443,6 +1450,8 @@ function useThreadAttachments(threadId: string, revision: unknown, again: number
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
+  // Read again when the window says so (a record that needs only the files, a re-read of the thread).
+  useEffect(() => signal?.subscribe(() => void load()), [signal, load]);
   const patch = useCallback((update: (records: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => {
     setModel((current) => (current ? { ...current, annotations: update(current.annotations) } : current));
   }, []);
@@ -1647,7 +1656,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -2442,7 +2451,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A saved pick moves neither: only a real read of the thread reads them again.
   const filesRevision = useRef(thread);
   if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged);
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
   const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -3679,8 +3688,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   boxRef.current = liveBox(box.open);
   const hasFilesRef = useRef(false);
   hasFilesRef.current = replyFiles.files.length > 0;
-  useEffect(() => {
-    if (draftChanged === 0) return;
+  /** Read the reply draft again: another window (or this one) saved or discarded it (`event: drafts`). */
+  const draftMoved = () => {
     // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there
     // win, and the next save is refused if the draft moved.
     void reloadDraft(() =>
@@ -3700,8 +3709,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         announce('This reply was sent or discarded in another window.');
       }
     });
+  };
+  const draftMovedNow = useRef(draftMoved);
+  draftMovedNow.current = draftMoved;
+  useEffect(() => {
+    if (draftChanged === 0) return;
+    draftMovedNow.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftChanged, reloadDraft]);
+  useEffect(() => draftSignal?.subscribe(() => draftMovedNow.current()), [draftSignal]);
 
   // A file finished uploading, or a tile was removed (its ×): the draft keeps the tiles as they are now (the words
   // unchanged). A Send on its way, a closed box (Cancel kept the draft as it was) and a draft's own tiles save nothing.

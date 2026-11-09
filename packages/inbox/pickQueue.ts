@@ -175,7 +175,7 @@ const sameFields = <T extends object>(a: T, b: T, except?: keyof T): boolean => 
  * `after` is `before` with nothing but messages' `questions` replaced: a saved
  * pick (App's `patchQuestions`). A read of the thread keeps what did not change
  * (shareUnchanged.ts), so it can look like one: App's `refreshThread` reads the
- * files again on every read itself (`filesChanged`).
+ * files again itself then (`filesSignal`).
  */
 export function onlyQuestionsChanged(before: InboxThread, after: InboxThread): boolean {
   if (before === after) return true;

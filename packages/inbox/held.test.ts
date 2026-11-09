@@ -104,6 +104,23 @@ describe('heldNotice', () => {
 });
 
 describe('refreshHeldRows', () => {
+  // The failure this guards: every list read drew the whole list (and the window with it) again, though most reads
+  // after a record or an own save change no row on screen.
+  test('a read that changes no row on screen keeps the list drawn, and a changed row changes only its section', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T10:01:00Z', 'agent');
+    const shown: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [a] },
+      { id: 'quiet', label: 'Quiet', threads: [b] },
+    ];
+    expect(refreshHeldRows(shown, [{ id: 'quiet', label: 'Quiet', threads: [b, a] }])).toBe(shown);
+    const seen = { ...b, unseen: 0, subject: 'Seen' } as InboxListRow;
+    const next = refreshHeldRows(shown, [{ id: 'quiet', label: 'Quiet', threads: [seen, a] }], { threadId: 'b' });
+    expect(next).not.toBe(shown);
+    expect(next[0]).toBe(shown[0]);
+    expect(next[1]!.threads[0]).toBe(seen);
+  });
+
   // The failure this guards: after the person's reply was delivered, the held
   // list kept the row's whole old state, so it said "Saved for <agent>" until
   // a reload while the thread beside it said "Delivered".
