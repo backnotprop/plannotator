@@ -4711,6 +4711,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!seen) throw new InboxError("validation_error", "head_sha: the head commit the person saw.", { field: "head_sha" });
         // The second click: a request that does not say so never merges.
         if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
+        // After a restart the list may not have been read yet: read it once, as the review route does.
+        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
