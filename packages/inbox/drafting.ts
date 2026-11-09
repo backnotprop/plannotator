@@ -7,11 +7,12 @@
  * frames stop coming.
  */
 import { useSyncExternalStore } from 'react';
-import type { InboxDraftingFrame } from '@plannotator/core/inbox-drafting';
+import type { InboxDraftingFrame, LiveSvgFence } from '@plannotator/core/inbox-drafting';
 
 export interface LiveDraft {
   call: string;
-  body: string;
+  /** The message's drawings so far, in order. */
+  drawings: readonly LiveSvgFence[];
   done: boolean;
 }
 
@@ -40,8 +41,13 @@ function drop(threadId: string, call: string): void {
 }
 
 export function noteDrafting(frame: InboxDraftingFrame): void {
+  // The response was cut off: no message follows, so the drawing goes now.
+  if (frame.dropped) {
+    drop(frame.thread_id, frame.call);
+    return;
+  }
   const drafts = threads.get(frame.thread_id) ?? NONE;
-  const draft: LiveDraft = { call: frame.call, body: frame.body, done: frame.done };
+  const draft: LiveDraft = { call: frame.call, drawings: frame.drawings, done: frame.done };
   threads.set(frame.thread_id, drafts.some((d) => d.call === frame.call) ? drafts.map((d) => (d.call === frame.call ? draft : d)) : [...drafts, draft]);
   const timer = timers.get(frame.call);
   if (timer) clearTimeout(timer);

@@ -611,6 +611,139 @@ describe('register', () => {
     expect(calls.some((c) => c.body?.method === 'tools/call')).toBe(true)
   })
 
+  // --- turn.step: the mod reads every main-loop response for a live drawing (drafting.ts) ---
+  //
+  // What regresses if these fail: the response the person sees is no longer
+  // exactly what the model sent; closing a response early (Esc, a hook above)
+  // no longer reaches the hooks and the request beneath the mod; a slow Inbox
+  // holds the response up.
+  const STEP = { turnId: 'turn-1', index: 0, model: 'opus' }
+  const STEP_RESULT = { turnId: 'turn-1', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage: null }
+  const DRAWING_CHUNKS = [
+    { kind: 'text', index: 0, text: 'Here.' },
+    { kind: 'tool', index: 1, id: 'toolu_1', name: INBOX_TOOL },
+    { kind: 'input', index: 1, json: '{"action":"send_message","reply_to":"msg_1","body":"See:\\n```svg\\n<svg>' },
+    { kind: 'input', index: 1, json: '<rect/></svg>\\n```"}' },
+    { kind: 'stop', stopReason: 'tool_use', usage: null },
+  ]
+  /** The model beneath the mod: yields `chunks`, says when it was closed, and may fail part-way. */
+  function modelBeneath(on: any, chunks: readonly unknown[], options: { failAfter?: number } = {}) {
+    const seen = { closed: 0, ended: 0 }
+    on('turn.step', async function* () {
+      try {
+        let sent = 0
+        for (const chunk of chunks) {
+          if (options.failAfter === sent) throw new Error('the request failed')
+          yield chunk
+          sent += 1
+        }
+        seen.ended += 1
+        return STEP_RESULT
+      } finally {
+        seen.closed += 1
+      }
+    })
+    return seen
+  }
+  const draftingPosts = (calls: { url: string; body: any }[]) => calls.filter((c) => c.body?.type === 'drafting').map((c) => c.body)
+
+  test('a response with a drawing comes out exactly as the model sent it, and the Inbox is told as it grows', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    const beneath = modelBeneath(on, DRAWING_CHUNKS)
+    await $.session.start(SESSION)
+    calls.length = 0
+
+    const stream = $.turn.step(STEP)
+    const out: unknown[] = []
+    let step = await stream.next()
+    for (; !step.done; step = await stream.next()) out.push(step.value)
+    expect(out).toEqual(DRAWING_CHUNKS)
+    expect(step.value).toEqual(STEP_RESULT)
+    expect(beneath).toEqual({ closed: 1, ended: 1 })
+
+    await w.clock.advance(1)
+    const posts = draftingPosts(calls)
+    expect(posts.length).toBeGreaterThan(0)
+    expect(posts.at(-1)).toMatchObject({ call: 'toolu_1', done: true, session: 'session-1' })
+    expect(posts.at(-1).json).toBe('{"action":"send_message","reply_to":"msg_1","body":"See:\\n```svg\\n<svg><rect/></svg>\\n```"}')
+    expect(posts.at(-1).dropped).toBeUndefined()
+    // The call's first post asked the registry's port whether it is still this Inbox.
+    expect(calls.findIndex((c) => c.url.endsWith('/api/inbox/health'))).toBeLessThan(calls.findIndex((c) => c.body?.type === 'drafting'))
+  })
+
+  test("a subagent's response, and a message with no drawing, tell the Inbox nothing", async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    modelBeneath(on, DRAWING_CHUNKS)
+    await $.session.start(SESSION)
+    for await (const _ of $.turn.step({ ...STEP, agentId: 'agent-1' })) void _
+    await w.clock.advance(1)
+    expect(draftingPosts(calls)).toEqual([])
+  })
+
+  // That the mod closes what is beneath it is proved in hooks/mod/stream.test.ts: this harness closes its own bottom either way.
+  test('a response closed early: the model request beneath is closed and the drawing is dropped', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    const beneath = modelBeneath(on, DRAWING_CHUNKS)
+    await $.session.start(SESSION)
+
+    const stream = $.turn.step(STEP)
+    // Up to the first piece of the drawing, then the person presses Esc.
+    for (let n = 0; n < 3; n++) await stream.next()
+    await stream.return(undefined)
+    expect(beneath).toEqual({ closed: 1, ended: 0 })
+    await w.clock.advance(1)
+    expect(draftingPosts(calls).at(-1)).toMatchObject({ call: 'toolu_1', done: true, dropped: true })
+  })
+
+  test('a request that fails part-way fails the same way through the mod', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    modelBeneath(on, DRAWING_CHUNKS, { failAfter: 3 })
+    await $.session.start(SESSION)
+
+    const out: unknown[] = []
+    let error: unknown = null
+    try {
+      for await (const chunk of $.turn.step(STEP)) out.push(chunk)
+    } catch (caught) {
+      error = caught
+    }
+    // The harness skips a test hook that throws, so what reaches the mod is the engine's own error for the
+    // broken request: it comes out of the mod as an error, after exactly the chunks that were sent.
+    expect(error).not.toBeNull()
+    expect(out).toEqual(DRAWING_CHUNKS.slice(0, 3))
+    await w.clock.advance(1)
+    expect(draftingPosts(calls).at(-1)).toMatchObject({ done: true, dropped: true })
+  })
+
+  test('an Inbox that never answers a post does not hold the response, and has one post waiting on it, not one per piece', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const answering = inbox(TOOLS, calls)
+    const w = world(on, {
+      files: withRegistry(),
+      fetch: (e: any) => {
+        const body = e.init?.body ? JSON.parse(e.init.body) : undefined
+        if (body?.type !== 'drafting') return answering(e)
+        calls.push({ url: e.url, body })
+        return new Promise(() => {})
+      },
+    })
+    const pieces = Array.from({ length: 40 }, (_, n) => ({ kind: 'input', index: 1, json: `<rect id=\\"r${n}\\"/>` }))
+    modelBeneath(on, [...DRAWING_CHUNKS.slice(0, 3), ...pieces, DRAWING_CHUNKS[4]])
+    await $.session.start(SESSION)
+
+    const out: unknown[] = []
+    for await (const chunk of $.turn.step(STEP)) {
+      out.push(chunk)
+      await w.clock.advance(150)
+    }
+    expect(out).toHaveLength(44)
+    expect(draftingPosts(calls)).toHaveLength(1)
+  })
+
   // --- The Inbox reminder: the first prompt's context (#2243) ---
   //
   // Claude Code 2.1.314's built-in cc-plugin-sec-default (Team/Enterprise

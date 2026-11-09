@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { themedSvg } from '@plannotator/core/html-embed';
-import { liveSvgFences } from '@plannotator/core/inbox-drafting';
 import { useEmbedTheme } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { draftingLanded, drawablePartialSvg, useLiveDrafts, type LiveDraft } from '../drafting';
 
@@ -27,26 +26,27 @@ export function LiveDrawings({ threadId, messages }: { threadId: string; message
 }
 
 function LiveDrawing({ draft }: { draft: LiveDraft }) {
-  const theme = useEmbedTheme();
-  // Per drawing of the message: when each of its shapes was first drawn, so each comes in once (drafting.ts).
-  const seen = useRef<Map<number, number>[]>([]);
-  const sources = useMemo(
-    () =>
-      liveSvgFences(draft.body)
-        .map((fence, index) => drawablePartialSvg(fence.source, { seen: (seen.current[index] ??= new Map()), now: performance.now(), reduced: lessMotion() }))
-        .filter((svg): svg is string => svg !== null)
-        .map((svg) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(themedSvg(svg, theme))}`),
-    [draft.body, theme],
-  );
-  if (sources.length === 0) return null;
+  if (!draft.drawings.some((drawing) => /<svg[\s>]/i.test(drawing.source))) return null;
   return (
     <div className="ib-drafting" data-drafting={draft.call} data-done={draft.done ? '' : undefined}>
       <p className="ib-drafting-line" role="status">
         {draft.done ? 'Sending…' : 'Drawing…'}
       </p>
-      {sources.map((src, index) => (
-        <img key={index} src={src} alt="" className="ib-drafting-svg" />
+      {draft.drawings.map((drawing, index) => (
+        <LiveFence key={index} source={drawing.source} />
       ))}
     </div>
   );
+}
+
+/** One drawing of the message. A finished one keeps its image: only the one being written is worked out again. */
+function LiveFence({ source }: { source: string }) {
+  const theme = useEmbedTheme();
+  // When each of its shapes was first drawn, so each comes in once (drafting.ts).
+  const seen = useRef(new Map<number, number>());
+  const src = useMemo(() => {
+    const svg = drawablePartialSvg(source, { seen: seen.current, now: performance.now(), reduced: lessMotion() });
+    return svg === null ? null : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(themedSvg(svg, theme))}`;
+  }, [source, theme]);
+  return src === null ? null : <img src={src} alt="" className="ib-drafting-svg" />;
 }

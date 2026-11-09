@@ -181,6 +181,19 @@ const SVG_QUIET_TEXT = ["muted", "border"]
   .concat("{fill:var(--muted-foreground,currentColor)}");
 
 /**
+ * The drawing's `<svg …>` opening tag: the first one outside a comment, read
+ * to its real end (a `>` inside a quoted attribute, as in
+ * `aria-label="a -> b"`, does not end it).
+ */
+function svgOpeningTag(source: string): RegExpExecArray | null {
+  const tags = /<!--[\s\S]*?-->|<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+  for (let match = tags.exec(source); match; match = tags.exec(source)) {
+    if (!match[0].startsWith("<!--")) return match;
+  }
+  return null;
+}
+
+/**
  * A ```svg fence's markup with the host's theme in it, for a drawing shown
  * through `<img>` (which reads nothing from the page around it): the tokens
  * as CSS variables of the same name on its root, `currentColor` as the
@@ -191,7 +204,7 @@ const SVG_QUIET_TEXT = ["muted", "border"]
  * with no `<svg …>` opening tag is returned as it is.
  */
 export function themedSvg(source: string, theme: EmbedTheme): string {
-  const open = /<svg\b[^>]*>/i.exec(source);
+  const open = svgOpeningTag(source);
   if (!open || open[0].endsWith("/>")) return source;
   let vars = SVG_BASE_VARS;
   for (const name of EMBED_THEME_TOKENS) {

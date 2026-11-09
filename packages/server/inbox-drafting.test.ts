@@ -78,30 +78,42 @@ function drafting(server: InboxServer, body: Record<string, unknown>): Promise<R
   });
 }
 
-test("a reply being written reaches the window with its thread and its body so far, and nothing is stored", async () => {
+test("a reply being written reaches the window with its thread and its drawings so far, never its words, and nothing is stored", async () => {
   const { server, first } = await setup();
   const stream = await windowStream(server);
-  const whole = JSON.stringify({ action: "send_message", reply_to: first.message_id, body: "Look:\n```svg\n<svg><rect/></svg>\n```" });
+  const whole = JSON.stringify({ action: "send_message", reply_to: first.message_id, body: "The secret plan:\n```svg\n<svg><rect/></svg>\n```" });
   const cut = whole.indexOf("<rect") + 3;
+  // Words only so far: nothing to draw, so nothing is told.
+  expect((await drafting(server, { call: "call-1", json: whole.slice(0, whole.indexOf("```")) })).status).toBe(200);
   expect((await drafting(server, { call: "call-1", json: whole.slice(0, cut) })).status).toBe(200);
   expect((await drafting(server, { call: "call-1", json: whole, done: true })).status).toBe(200);
   await stream.heard(2);
   expect(stream.frames).toEqual([
-    { call: "call-1", session: "s1", thread_id: first.thread_id, body: "Look:\n```svg\n<svg><re", done: false },
-    { call: "call-1", session: "s1", thread_id: first.thread_id, body: "Look:\n```svg\n<svg><rect/></svg>\n```", done: true },
+    { call: "call-1", session: "s1", thread_id: first.thread_id, drawings: [{ source: "<svg><re", closed: false }], done: false, dropped: false },
+    { call: "call-1", session: "s1", thread_id: first.thread_id, drawings: [{ source: "<svg><rect/></svg>", closed: true }], done: true, dropped: false },
   ]);
+  expect(JSON.stringify(stream.frames)).not.toContain("secret");
   const thread = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${first.thread_id}`)).json()) as { thread: { messages: unknown[] } };
   expect(thread.thread.messages).toHaveLength(1);
+});
+
+test("a response cut off mid-drawing tells the window the draft was dropped", async () => {
+  const { server, first } = await setup();
+  const stream = await windowStream(server);
+  const json = JSON.stringify({ action: "send_message", reply_to: first.message_id, body: "```svg\n<svg><rect/>" }).slice(0, -2);
+  await drafting(server, { call: "call-5", json, done: true, dropped: true });
+  await stream.heard(1);
+  expect(stream.frames[0]).toMatchObject({ call: "call-5", done: true, dropped: true });
 });
 
 test("a draft whose thread is not known yet is accepted and tells no window", async () => {
   const { server, first } = await setup();
   const stream = await windowStream(server);
-  // The body before `reply_to`, then a new thread's message: neither has a thread to draw in.
+  // The body before `reply_to`, then another action: neither has a thread to draw in.
   expect((await drafting(server, { call: "call-2", json: '{"action":"send_message","body":"```svg\\n<svg>' })).status).toBe(200);
-  expect((await drafting(server, { call: "call-3", json: '{"action":"read_thread","reply_to":"' + first.message_id + '","body":"x"}' })).status).toBe(200);
+  expect((await drafting(server, { call: "call-3", json: JSON.stringify({ action: "read_thread", reply_to: first.message_id, body: "```svg\n<svg>" }) })).status).toBe(200);
   // A known one after them is the first the window hears.
-  await drafting(server, { call: "call-4", json: JSON.stringify({ action: "send_message", reply_to: first.message_id, body: "b" }) });
+  await drafting(server, { call: "call-4", json: JSON.stringify({ action: "send_message", reply_to: first.message_id, body: "```svg\n<svg>" }) });
   await stream.heard(1);
   expect(stream.frames).toHaveLength(1);
   expect((stream.frames[0] as { call: string }).call).toBe("call-4");

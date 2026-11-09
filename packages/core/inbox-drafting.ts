@@ -15,16 +15,22 @@ export const INBOX_DRAFTING_EVENT_TYPE = 'drafting'
 /** The longest unfinished JSON the Inbox reads; a longer one is ignored (the message still lands whole). */
 export const INBOX_DRAFTING_MAX_JSON = 512 * 1024
 
-/** What the windows' streams carry as `event: drafting`. */
+/**
+ * What the windows' streams carry as `event: drafting`: the drawings of the
+ * message so far, never its words (a message that is refused or stopped
+ * before it lands leaves nothing but its drawing behind, and that goes too).
+ */
 export interface InboxDraftingFrame {
-  /** The tool call's id: one drawing per call. */
+  /** The tool call's id: one draft per call. */
   call: string
   session: string
   thread_id: string
-  /** The body so far. */
-  body: string
+  /** The ```svg fences of the body so far, in order. */
+  drawings: LiveSvgFence[]
   /** The call's arguments are all in: the real message is about to land. */
   done: boolean
+  /** With `done`: the response ended first, so no message follows and the draft goes at once. */
+  dropped: boolean
 }
 
 const ESCAPES: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }

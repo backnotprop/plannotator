@@ -89,17 +89,24 @@ describe('a shape comes in once', () => {
 });
 
 describe('LiveDrawings', () => {
-  const frame = (body: string, done = false) => ({ call: 'call-1', session: 's1', thread_id: 'thr-live', body, done });
+  const frame = (source: string | null, done = false, call = 'call-1') => ({
+    call,
+    session: 's1',
+    thread_id: 'thr-live',
+    drawings: source === null ? [] : [{ source, closed: done }],
+    done,
+    dropped: false,
+  });
 
   test.skipIf(!hasDom)('the open thread draws the drawing as it grows, and it goes when the message lands', () => {
     const view = mount('thr-live', 1);
     expect(view.host.querySelector('[data-drafting]')).toBeNull();
-    // Words only: nothing to draw yet.
-    act(() => noteDrafting(frame('Here it is:\n')));
+    // The fence is open but its svg tag is not written yet: nothing to draw.
+    act(() => noteDrafting(frame('<sv')));
     expect(view.host.querySelector('[data-drafting]')).toBeNull();
-    act(() => noteDrafting(frame('Here it is:\n```svg\n<svg viewBox="0 0 10 10"><rect id="a"/>')));
+    act(() => noteDrafting(frame('<svg viewBox="0 0 10 10"><rect id="a"/>')));
     expect(svgOf(view.host.querySelector('img')!)).toContain('id="a"');
-    act(() => noteDrafting(frame('Here it is:\n```svg\n<svg viewBox="0 0 10 10"><rect id="a"/><rect id="b"/></svg>\n```', true)));
+    act(() => noteDrafting(frame('<svg viewBox="0 0 10 10"><rect id="a"/><rect id="b"/></svg>', true)));
     expect(svgOf(view.host.querySelector('img')!)).toContain('id="b"');
     // Another thread's view never shows it.
     expect(mount('thr-other', 1).host.querySelector('[data-drafting]')).toBeNull();
@@ -110,8 +117,16 @@ describe('LiveDrawings', () => {
 
   test.skipIf(!hasDom)('a person replying while it is still being drawn does not take it away', () => {
     const view = mount('thr-live', 1);
-    act(() => noteDrafting({ ...frame('```svg\n<svg><rect/>'), call: 'call-2' }));
+    act(() => noteDrafting(frame('<svg><rect/>', false, 'call-2')));
     view.draw(2);
     expect(view.host.querySelector('[data-drafting="call-2"]')).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a drawing whose response was cut off goes at once: no message will follow', () => {
+    const view = mount('thr-live', 1);
+    act(() => noteDrafting(frame('<svg><rect/>', false, 'call-3')));
+    expect(view.host.querySelector('[data-drafting="call-3"]')).not.toBeNull();
+    act(() => noteDrafting({ ...frame('<svg><rect/>', true, 'call-3'), dropped: true }));
+    expect(view.host.querySelector('[data-drafting="call-3"]')).toBeNull();
   });
 });

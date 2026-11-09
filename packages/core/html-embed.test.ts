@@ -35,6 +35,12 @@ describe("themedSvg: a drawing takes the host's colors", () => {
     expect(out.match(/<style>/g)).toHaveLength(1);
   });
 
+  test("a > inside a quoted attribute does not end the opening tag, and an svg in a comment is not the drawing", () => {
+    const out = themedSvg('<!-- <svg> draft --><svg viewBox="0 0 1 1" aria-label="request -> response"><rect/></svg>', theme);
+    expect(out).toContain('aria-label="request -> response"><style>:root{');
+    expect(out.startsWith("<!-- <svg> draft --><svg viewBox")).toBe(true);
+  });
+
   test("markup with no svg opening tag is left as it is", () => {
     expect(themedSvg("<rect/>", theme)).toBe("<rect/>");
     expect(themedSvg("<svg/>", theme)).toBe("<svg/>");

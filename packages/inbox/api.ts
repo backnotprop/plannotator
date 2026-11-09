@@ -2395,8 +2395,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'drafting':
       try {
         const data = JSON.parse(frame.data) as Partial<InboxDraftingFrame>;
-        if (typeof data.call === 'string' && typeof data.thread_id === 'string' && typeof data.body === 'string') {
-          handlers.onDrafting?.({ call: data.call, session: typeof data.session === 'string' ? data.session : '', thread_id: data.thread_id, body: data.body, done: data.done === true });
+        if (typeof data.call === 'string' && typeof data.thread_id === 'string' && Array.isArray(data.drawings)) {
+          const drawings = data.drawings.filter((d) => d && typeof d.source === 'string').map((d) => ({ source: d.source, closed: d.closed === true }));
+          handlers.onDrafting?.({ call: data.call, session: typeof data.session === 'string' ? data.session : '', thread_id: data.thread_id, drawings, done: data.done === true, dropped: data.dropped === true });
         }
       } catch {
         // A malformed frame changes nothing.

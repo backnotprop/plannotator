@@ -1858,11 +1858,11 @@ export class PlannotatorMod {
   }
 
   /**
-   * A main-loop model response as it streams, from register.ts: an Inbox message with a drawing in it is
-   * told to the Inbox as the model writes it (drafting.ts). Null where this session has no Inbox link.
+   * A feed for one main-loop model response as it streams, from register.ts: an Inbox message with a drawing
+   * in it is told to the Inbox as the model writes it (drafting.ts). Null where this session has no Inbox link.
    */
-  get drafting(): { onChunk(chunk: unknown): void; end(): void } | null {
-    return this.inbox?.drafting ?? null
+  draftingFeed(toolName: string): { onChunk(chunk: unknown): void; close(): void } | null {
+    return this.inbox?.draftingFeed(toolName) ?? null
   }
 
   /** A model request of a turn is about to go out (turn.step), from register.ts. */

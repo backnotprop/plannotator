@@ -20,7 +20,12 @@ export function SvgFenceBlock({ block }: { block: Block }) {
   const [broken, setBroken] = useState(false);
   // The host's colors go in with the markup: an image reads nothing from the page around it (themedSvg).
   const theme = useEmbedTheme();
-  const src = useMemo(() => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(themedSvg(block.content, theme))}`, [block.content, theme]);
+  // A drawing the theme's style broke (it drew before this) is drawn once more as it was written, before it shows as code.
+  const [plain, setPlain] = useState(false);
+  const src = useMemo(
+    () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(plain ? block.content : themedSvg(block.content, theme))}`,
+    [block.content, theme, plain],
+  );
   const drawable = block.content.length <= SVG_MAX_CHARS && /<svg[\s>]/i.test(block.content);
   if (!drawable) return <CodeBlock block={block} isHovered={false} />;
   return (
@@ -28,7 +33,7 @@ export function SvgFenceBlock({ block }: { block: Block }) {
       {showCode || broken ? (
         <CodeBlock block={block} isHovered={false} />
       ) : (
-        <img src={src} alt="" className="block h-auto max-w-full" onError={() => setBroken(true)} />
+        <img src={src} alt="" className="block h-auto max-w-full" onError={() => (plain ? setBroken(true) : setPlain(true))} />
       )}
       <figcaption className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
         <Code aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
