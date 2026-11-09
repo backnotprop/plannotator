@@ -7,7 +7,7 @@ import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
 import { filterLaunchProjects, otherFolderMatches, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
 import { HomeFolderBrowser } from './HomeFolderBrowser';
-import { cleanPastedPath, homeRelative, looksLikePath, placeOf, unpluggedDrive, type FolderDrive } from './homeFolders';
+import { cleanPastedPath, drivePathOf, homeRelative, looksLikePath, placeOf, unpluggedDrive, type FolderDrive } from './homeFolders';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -357,6 +357,8 @@ export function FolderMenu({
   );
   // The keys walk the projects, then the scratch row, then "Another folder…", group after group.
   const ids = useMemo(() => rows.map((row) => row.key), [rows]);
+  // A project on a drive that isn't plugged in is said, never picked: its row is skipped by the keys and the pointer.
+  const unpickable = (row: Row | undefined) => row?.kind === 'project' && !row.project.exists && unpluggedDrive(row.project.root, row.group.drives) !== null;
   const [hlId, setHlId] = useState<string | null>(clonePicked && initialQuery ? rowKey(clonePicked.machine, CLONE_PICK) : selected ? rowKey(selectedMachine, selected) : null);
   // The row to highlight when the filter changes next, instead of its first (a URL back from the folder field: B5).
   const nextHl = useRef<string | null>(null);
@@ -425,6 +427,7 @@ export function FolderMenu({
     else onClone?.({ url: query.trim(), repo, folder: clone.path, name: clone.name, machine: group.machine });
   };
   const choose = (row: Row) => {
+    if (unpickable(row)) return;
     if (row.kind === 'scratch') onScratch?.(row.group.machine);
     else if (row.kind === 'other') {
       setBrowseClone(null);
@@ -459,7 +462,12 @@ export function FolderMenu({
       event.preventDefault();
       if (ids.length === 0) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setHlId(ids[(hl + step + ids.length) % ids.length]!);
+      let next = hl;
+      for (let n = 0; n < ids.length; n++) {
+        next = (next + step + ids.length) % ids.length;
+        if (!unpickable(rows[next])) break;
+      }
+      setHlId(ids[next]!);
       return;
     }
     if (event.key === 'Enter') {
@@ -587,20 +595,23 @@ export function FolderMenu({
                 // Its drive isn't plugged in, or (a network drive) isn't answering: said after its name.
                 const unplugged = project.exists ? null : unpluggedDrive(project.root, group.drives);
                 const slowDrive = project.exists && project.slow ? (placeOf(project.root, group.drives ?? [])?.name ?? null) : null;
+                // On a drive: "Studio SSD › footage-tools", not a path cut to "/Volu…".
+                const onDrive = drivePathOf(project.root, group.drives);
                 return (
                   <div
                     key={project.id}
                     id={optionId(i)}
                     role="option"
-                    aria-selected={i === hl}
-                    aria-label={`${project.name}${last ? ', you started it here last' : ''}, ${folder}${on ? `, on ${on}` : ''}${unplugged ? `, ${unplugged} isn't connected` : project.exists ? (slowDrive ? `, ${slowDrive} isn't responding` : '') : ', not there any more'}`}
-                    className={`ib-cp-opt ib-cp-fopt${i === hl ? ' ib-hl' : ''}`}
+                    aria-selected={!unplugged && i === hl}
+                    aria-disabled={unplugged ? 'true' : undefined}
+                    aria-label={`${project.name}${last ? ', you started it here last' : ''}, ${folder}${on ? `, on ${on}` : ''}${unplugged ? `, ${unplugged} isn't connected. Connect it to start here.` : project.exists ? (slowDrive ? `, ${slowDrive} isn't responding` : '') : ', not there any more'}`}
+                    className={`ib-cp-opt ib-cp-fopt${unplugged ? ' ib-cp-unplugged' : ''}${!unplugged && i === hl ? ' ib-hl' : ''}`}
                     data-compose-folder-option={project.id}
                     data-compose-folder-machine={group.machine ?? undefined}
                     data-missing={project.exists ? undefined : ''}
-                    onPointerMove={() => i !== hl && setHlId(rowKey(group.machine, project.id))}
+                    onPointerMove={() => !unplugged && i !== hl && setHlId(rowKey(group.machine, project.id))}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => onPick(project, group.machine)}
+                    onClick={() => !unplugged && onPick(project, group.machine)}
                   >
                     <Icon name="folder" size={15} />
                     {project.exists ? (
@@ -612,14 +623,17 @@ export function FolderMenu({
                     ) : unplugged ? (
                       <span className="ib-cp-op" dir="auto" data-compose-folder-unplugged={unplugged}>
                         <s>{project.name}</s>
-                        <span className="ib-cp-trust"> · {unplugged} isn't connected</span>
+                        <span className="ib-cp-trust">
+                          {' '}
+                          · {unplugged} isn't connected<span className="ib-cp-unplug-why">. Connect it to start here.</span>
+                        </span>
                       </span>
                     ) : (
                       <s className="ib-cp-op" dir="auto">
                         {project.name}
                       </s>
                     )}
-                    <FolderPath path={folder} />
+                    {unplugged ? <span className="ib-cp-of">Connect it to start here</span> : <FolderPath path={folder} drive={onDrive} />}
                     <span className="ib-cp-check" aria-hidden="true">
                       {project.id === selected && group.machine === selectedMachine && <Icon name="check" size={15} />}
                     </span>

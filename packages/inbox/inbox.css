@@ -10523,6 +10523,15 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-hfb-places .ib-seg-o { border: 0; background: transparent; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-hfb-places .ib-seg-o[data-on] { background: var(--card); color: var(--foreground); }
 .ib-hfb-places .ib-seg-o svg.ib-ic { flex: none; }
+.ib-hfb-places .ib-seg-o { white-space: nowrap; }
+.ib-hfb-places .ib-hfb-quiet { color: var(--muted-foreground); }
+/* More places than fit: the row scrolls sideways, its cut side fades out. */
+.ib-hfb-places[data-more-before] { mask-image: linear-gradient(to right, transparent, #000 28px); }
+.ib-hfb-places[data-more-after] { mask-image: linear-gradient(to left, transparent, #000 28px); }
+.ib-hfb-places[data-more-before][data-more-after] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+.ib-cp-ofd { flex: none; }
+.ib-cp-picker .ib-cp-unplug-why { display: none; }
+.ib-cp-picker .ib-cp-opt.ib-cp-unplugged { color: var(--muted-foreground); }
 .pn-inbox .ib-hfb-places .ib-hfb-finder { margin: 0 0 0 auto; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
 .pn-inbox .ib-hfb .ib-hfb-note .ib-lnk { margin-top: 0; display: inline; font-size: inherit; }
 .ib-cp-drive > svg.ib-ic { color: var(--muted-foreground); }
@@ -10550,7 +10559,9 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .ib-cp-picker[data-phone] .ib-hfb-two { padding-top: 7px; padding-bottom: 7px; }
   .ib-cp-picker[data-phone] .ib-hfb-two .ib-cp-op { white-space: normal; }
   .ib-cp-picker[data-phone] .ib-hfb-after { font-size: var(--ib-fs-13-5, 13.5px); }
-  .ib-cp-picker[data-phone] .ib-hfb-places { padding: 8px 10px; }
+  .ib-cp-picker[data-phone] .ib-cp-unplug-why { display: inline; }
+  .ib-cp-picker[data-phone] .ib-cp-unplugged .ib-cp-op { white-space: normal; }
+  .ib-cp-picker[data-phone] .ib-hfb-places { padding: 8px 10px; overscroll-behavior-x: contain; scroll-padding-inline: 10px; -webkit-overflow-scrolling: touch; }
   .ib-cp-picker[data-phone] .ib-hfb-places .ib-seg-o { height: 34px; font-size: var(--ib-fs-14, 14px); }
   /* A phone's "no access" row: the word has its own place at the end (it dropped under the lock). */
   .ib-cp-picker[data-phone] .ib-hfb-noaccess { grid-template-areas: "mark agent word check"; }

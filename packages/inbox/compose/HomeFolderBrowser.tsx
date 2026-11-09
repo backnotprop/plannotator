@@ -126,6 +126,13 @@ function useSettled(key: string | null, ms: number): boolean {
   return key !== null && settled === key;
 }
 
+/**
+ * Drives that didn't answer (by machine and drive path), until one of their folders is read again: the places row
+ * says so, and the browser says it at once there instead of waiting on the drive again. Try again asks it.
+ */
+const quietDrives = new Set<string>();
+const quietKey = (machineId: string | null, drivePath: string) => `${machineId ?? ''}\n${drivePath}`;
+
 /** How long a read may take before the browser says it is reading (a drive waking up, a slow network drive). */
 const READING_SHOWN_MS = 700;
 
@@ -219,20 +226,63 @@ export function HomeFolderBrowser({
   const refused = parent.split('/').some((segment) => segment.startsWith('.'));
   // Try again after a drive didn't answer.
   const [retry, setRetry] = useState(0);
-  const read = useFolderRead(refused ? null : parent, machine.id, asleep, retry);
+  // A drive that didn't answer is said at once, not asked again (until Try again).
+  const [, setQuietSeen] = useState(0);
+  const quietHere = here !== null && quietDrives.has(quietKey(machine.id, here.path));
+  const read = useFolderRead(refused || quietHere ? null : parent, machine.id, asleep, retry);
   const ok = read && 'answer' in read ? read.answer : null;
   // A name typed that is none of the folders read: the full path is read too (a file? a folder that can't be opened?).
   const nameRead = useFolderRead(needsNameRead(ok, tail) ? `${parent === '~' ? '~' : parent === '/' ? '' : parent}/${tail}` : null, machine.id, asleep, retry);
-  const slow = !!read && 'error' in read && read.code === 'folder_slow';
+  const slow = quietHere || (!!read && 'error' in read && read.code === 'folder_slow');
+  // Remember which drive didn't answer, and forget it once one of its folders is read.
+  useEffect(() => {
+    if (!here || !read) return;
+    const key = quietKey(machine.id, here.path);
+    const was = quietDrives.has(key);
+    if ('error' in read && read.code === 'folder_slow') quietDrives.add(key);
+    else if ('answer' in read) quietDrives.delete(key);
+    if (was !== quietDrives.has(key)) setQuietSeen((n) => n + 1);
+  }, [read, here, machine.id]);
+  // Many drives scroll sideways (a phone): the place the path is in stays in sight.
+  const placesRef = useRef<HTMLDivElement>(null);
+  const placeOn = atHome ? 'home' : (here?.path ?? null);
+  useEffect(() => {
+    if (placeOn === null) return;
+    const button = placesRef.current?.querySelector<HTMLElement>(`[data-home-folders-place="${CSS.escape(placeOn)}"]`);
+    button?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [placeOn]);
+  // Which side of the places row has more out of sight (it fades there).
+  const [more, setMore] = useState({ before: false, after: false });
+  const measurePlaces = () => {
+    const row = placesRef.current;
+    if (!row) return;
+    const before = row.scrollLeft > 1;
+    const after = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+    setMore((was) => (was.before === before && was.after === after ? was : { before, after }));
+  };
+  useEffect(() => {
+    const row = placesRef.current;
+    if (!row) return;
+    measurePlaces();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measurePlaces);
+    observer.observe(row);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drives.length]);
+  const tryAgain = () => {
+    if (here) quietDrives.delete(quietKey(machine.id, here.path));
+    setRetry((n) => n + 1);
+  };
   // A read still under way after a moment: "Reading <drive>…" where the folders will be.
-  const reading = useSettled(!asleep && !refused && !read ? `${retry}\n${parent}` : null, READING_SHOWN_MS);
+  const reading = useSettled(!asleep && !refused && !quietHere && !read ? `${retry}\n${parent}` : null, READING_SHOWN_MS);
   // "Choose in Finder…": waiting on the dialog on this computer.
   const [finding, setFinding] = useState(false);
   const okName = nameRead && 'answer' in nameRead ? nameRead.answer : null;
   const target = useCloneTarget(clone ? cloneAt(shown, ok, okName) : null, clone?.url ?? null, machine.id, asleep);
   const view = asleep
     ? { note: null, rows: [] as FolderRow[], after: null }
-    : folderBrowserView({ typed: shown, read: ok, nameRead: okName, error: read && 'error' in read ? read.error : null, clone: clone ? { repo: clone.repo, target } : null });
+    : folderBrowserView({ typed: shown, read: ok, nameRead: okName, error: quietHere ? `${here!.name} isn't responding.` : read && 'error' in read ? read.error : null, clone: clone ? { repo: clone.repo, target } : null });
   const rows = view.rows;
   const rowsKey = rows.map((row) => `${row.kind}>${row.path}`).join('\n');
 
@@ -339,7 +389,7 @@ export function HomeFolderBrowser({
     );
   };
   const placesRow = (drives.length > 0 || machine.finder === true) && !clone && (
-    <div className="ib-hfb-places" data-home-folders-places="">
+    <div className="ib-hfb-places" data-home-folders-places="" ref={placesRef} onScroll={measurePlaces} data-more-before={more.before ? '' : undefined} data-more-after={more.after ? '' : undefined}>
       {drives.length > 0 && (
         <div className="ib-seg ib-seg-sm" role="radiogroup" aria-label="Places">
           <button type="button" className="ib-seg-o" role="radio" aria-checked={atHome} data-on={atHome ? '' : undefined} onClick={() => goTo(HOME_FOLDER_START)} data-home-folders-place="home">
@@ -348,6 +398,7 @@ export function HomeFolderBrowser({
           </button>
           {drives.map((drive) => {
             const on = here?.path === drive.path;
+            const quiet = quietDrives.has(quietKey(machine.id, drive.path));
             return (
               <button
                 key={drive.path}
@@ -355,13 +406,15 @@ export function HomeFolderBrowser({
                 className="ib-seg-o"
                 role="radio"
                 aria-checked={on}
-                aria-label={drive.network ? `${drive.name}, network drive` : drive.name}
+                aria-label={`${drive.name}${drive.network ? ', network drive' : ''}${quiet ? ", isn't responding" : ''}`}
                 data-on={on ? '' : undefined}
                 onClick={() => goTo(`${drive.path}/`)}
                 data-home-folders-place={drive.path}
+                data-quiet={quiet ? '' : undefined}
               >
                 <Icon name={drive.network ? 'globe' : 'drive'} size={14} />
                 {drive.name}
+                {quiet && <span className="ib-hfb-quiet"> · isn't responding</span>}
               </button>
             );
           })}
@@ -521,7 +574,7 @@ export function HomeFolderBrowser({
             {slow && (
               <>
                 {' '}
-                <button type="button" className="ib-lnk" onMouseDown={(event) => event.preventDefault()} onClick={() => setRetry((n) => n + 1)} data-home-folders-retry="">
+                <button type="button" className="ib-lnk" onMouseDown={(event) => event.preventDefault()} onClick={tryAgain} data-home-folders-retry="">
                   Try again
                 </button>
               </>

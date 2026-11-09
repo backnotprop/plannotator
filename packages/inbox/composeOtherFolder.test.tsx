@@ -533,7 +533,11 @@ test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in a
 test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the browser at the drive; an unplugged project says so; a slow drive says it and offers Try again', async () => {
   here = {
     ...HERE,
-    projects: [...HERE.projects, { id: 'prj_old', name: 'old-site', root: '/Volumes/Archive/old-site', exists: false }],
+    projects: [
+      ...HERE.projects,
+      { id: 'prj_old', name: 'old-site', root: '/Volumes/Archive/old-site', exists: false },
+      { id: 'prj_tools', name: 'footage-tools', root: '/Volumes/Studio SSD/clients/footage-tools', exists: true },
+    ],
     drives: [
       { path: '/Volumes/Backup', name: 'Backup', network: true },
       { path: '/Volumes/Studio SSD', name: 'Studio SSD' },
@@ -544,14 +548,16 @@ test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the 
   await open();
   await startAndOpenMenu();
   // The unplugged drive's project: struck through, with its drive's name.
-  expect(inDialog('[data-compose-folder-option="prj_old"]')!.textContent).toContain("old-site · Archive isn't connected");
-  // Picked anyway: the note says the drive isn't connected, not that the folder was moved or deleted.
-  act(() => inDialog('[data-compose-folder-option="prj_old"]')!.click());
-  await until(() => inDialog('[data-compose-note="folder-missing"]') !== null, 'the missing note');
-  expect(inDialog('[data-compose-note="folder-missing"] b')!.textContent).toBe("Archive isn't connected.");
-  expect(inDialog('[data-compose-note="folder-missing"]')!.textContent).not.toContain('moved or deleted');
-  act(() => inDialog('[data-compose-folder]')!.click());
-  await until(() => inDialog('[data-compose-folder-drive]') !== null, 'the menu again');
+  const old = inDialog('[data-compose-folder-option="prj_old"]')!;
+  expect(old.textContent).toContain("old-site · Archive isn't connected");
+  expect(old.textContent).toContain('Connect it to start here');
+  // It explains itself and can't be picked: a click, or Enter on the keys, leaves the menu as it is.
+  expect(old.getAttribute('aria-disabled')).toBe('true');
+  act(() => old.click());
+  expect(inDialog('[data-compose-folder-option="prj_old"]')).not.toBeNull();
+  expect(inDialog('[data-compose-note="folder-missing"]')).toBeNull();
+  // A folder on a drive reads by the drive's name, not a cut path.
+  expect(inDialog('[data-compose-folder-option="prj_tools"] [data-folder-drive-path]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('Studio SSD › clients › footage-tools');
   expect(all('[data-compose-folder-drive]').map((r) => r.textContent)).toEqual(['Backup… · network drive/Volumes/Backup', 'Studio SSD…/Volumes/Studio SSD']);
   // Not this computer's own window (no `localWindow`): no Finder.
   act(() => inDialog('[data-compose-folder-drive="/Volumes/Studio SSD"]')!.click());
@@ -566,11 +572,22 @@ test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the 
   act(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.click());
   await until(() => inDialog('[data-home-folders-note="slow"]') !== null, 'the slow line');
   expect(inDialog('[data-home-folders-note="slow"]')!.textContent).toBe("Backup isn't responding. Try again");
+  // The places row says so, and going back there says it at once, without asking the drive again.
+  await until(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet'), 'Backup marked');
+  expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.textContent).toBe("Backup · isn't responding");
+  act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());
+  await until(() => shownFolders().includes('footage'), "the drive's folders");
+  const asked = requests.filter((r) => r.path.includes(encodeURIComponent('/Volumes/Backup'))).length;
+  act(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.click());
+  expect(inDialog('[data-home-folders-note="slow"]')!.textContent).toBe("Backup isn't responding. Try again");
+  await new Promise((r) => setTimeout(r, 300));
+  expect(requests.filter((r) => r.path.includes(encodeURIComponent('/Volumes/Backup'))).length).toBe(asked);
   slowDrive = null;
   TREES.self!['/Volumes/Backup'] = ['jobs'];
   act(() => inDialog('[data-home-folders-retry]')!.click());
   await until(() => shownFolders().join() === 'jobs', "Backup's folders after Try again");
   expect(requests.some((r) => r.path.includes('fresh=1'))).toBe(true);
+  expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet')).toBe(false);
 
   // Back on the drive, into a folder and Send: the folder is named by its full path.
   act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());

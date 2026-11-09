@@ -220,6 +220,21 @@ export function unpluggedDrive(root: string, drives: readonly FolderDrive[] | nu
 }
 
 /**
+ * A folder on a drive as the folder menu says it: the drive's name, then the folders under it
+ * (`/Volumes/Studio SSD/clients/acme` → "Studio SSD", ["clients", "acme"]). A drive that isn't plugged in is named by
+ * its folder in the drives folder. Null for a folder on no drive.
+ */
+export function drivePathOf(root: string, drives: readonly FolderDrive[] | null | undefined): { name: string; folders: string[] } | null {
+  if (!drives) return null;
+  const parts = root.split('/').filter(Boolean);
+  const mounted = placeOf(root, drives);
+  if (mounted) return { name: mounted.name, folders: parts.slice(mounted.path.split('/').filter(Boolean).length) };
+  const name = unpluggedDrive(root, drives);
+  if (!name) return null;
+  return { name, folders: parts.slice(parts.indexOf(name) + 1) };
+}
+
+/**
  * What the folder browser shows for a typed path (approval "launch-create-clone", A1-A12; the rules: a folder that is
  * there always leads; a name that isn't there becomes a new folder, last and quiet while a folder still starts with
  * it; only the last folder in a path can be made). Pure: `read` is the listing of the typed path's parent (null: not

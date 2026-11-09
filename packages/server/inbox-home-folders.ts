@@ -94,10 +94,17 @@ const hiddenUnder = (real: string, realHome: string) => relative(realHome, real)
  */
 function judge(real: string, realHome: string, places: FolderPlaces): { refused: HomeFolderRefusal | null; start: boolean } {
   if (inside(real, realHome)) return hiddenUnder(real, realHome) ? { refused: "hidden", start: false } : { refused: null, start: real !== realHome };
-  if (real.split(sep).some((segment) => segment.startsWith("."))) return { refused: "hidden", start: false };
-  if (places.system.some((root) => under(real, root)) && !places.open.some((root) => under(real, root))) return { refused: "system", start: false };
+  const refused = refusedOutside(real, places);
+  if (refused) return { refused, start: false };
   const above = realHome === real || under(realHome, real);
   return { refused: null, start: !above && !places.containers.includes(real) };
+}
+
+/** Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. */
+function refusedOutside(real: string, places: FolderPlaces): HomeFolderRefusal | null {
+  if (real.split(sep).some((segment) => segment.startsWith("."))) return "hidden";
+  if (places.system.some((root) => under(real, root)) && !places.open.some((root) => under(real, root))) return "system";
+  return null;
 }
 
 /** A folder this process can read and enter (list and start in). */
@@ -181,8 +188,9 @@ function parseTyped(home: string, realHome: string, typed: string): { base: Base
 
 /** Where a typed path is, by the rules above. `places`: the machine's system and drives folders (tests name their own). */
 export function resolveHomeFolder(home: string, typed: string, places: FolderPlaces = defaultPlaces()): HomeFolder {
+  const text = typed.trim();
   const realHome = realOr(home) ?? home;
-  const parsed = parseTyped(home, realHome, typed);
+  const parsed = parseTyped(home, realHome, text);
   if ("refused" in parsed) return { ok: false, refused: parsed.refused };
   const { base, segments } = parsed;
   const shown = shownOf(base, segments);

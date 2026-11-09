@@ -291,7 +291,39 @@ function detailCut(trigger: Element): boolean {
 }
 
 /** A project folder on one line, cut in the middle: the leading folders shrink with "…", the last name stays; the whole path in a tooltip while it is cut. */
-export function FolderPath({ path }: { path: string }) {
+export function FolderPath({ path, drive }: { path: string; drive?: { name: string; folders: readonly string[] } | null }) {
+  if (drive) {
+    // A folder on a drive: "Studio SSD › footage-tools". The drive's name and the last folder stay whole; the folders
+    // between are cut first.
+    const last = drive.folders[drive.folders.length - 1];
+    const middle = drive.folders.slice(0, -1);
+    const SEP = '\u00a0›\u00a0';
+    return (
+      <Tip content={path} when={(trigger) => isTextCut(trigger.querySelector('.ib-cp-ofh')) || isTextCut(trigger.querySelector('.ib-cp-oft')) || isTextCut(trigger)}>
+        <span className="ib-cp-of" dir="ltr" data-folder-drive-path="">
+          <span className="ib-cp-ofd">
+            <bdi>{drive.name}</bdi>
+          </span>
+          {middle.length > 0 && (
+            <span className="ib-cp-ofh">
+              {middle.map((name, index) => (
+                <Fragment key={index}>
+                  {SEP}
+                  <bdi>{name}</bdi>
+                </Fragment>
+              ))}
+            </span>
+          )}
+          {last !== undefined && (
+            <span className="ib-cp-oft">
+              {SEP}
+              <bdi>{last}</bdi>
+            </span>
+          )}
+        </span>
+      </Tip>
+    );
+  }
   const split = splitPath(path);
   // The slash before the last name stays with it, so a cut reads "~/pando/proj…/main".
   const moveSlash = split.head.endsWith('/') && split.head.length > 1;
