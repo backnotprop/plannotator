@@ -134,7 +134,7 @@ async function sideOn(page: Page, words: string): Promise<void> {
 
 /** A phone has no Side: a thread that has a chat opens it from the corner's round button (its sheet, with drafts too). */
 async function cornerOn(phone: Page): Promise<void> {
-  await phone.locator('button[data-rf-corner]').tap();
+  await phone.locator('button[data-rf-corner]').tap({ timeout: 10_000 });
   const row = phone.locator('[data-rf-sheet] [data-rf-row="ask"]');
   if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.tap();
 }
@@ -377,6 +377,7 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
   const { threads, url } = world;
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
+  let noted = '';
   try {
     // The first test's chat: the corner's round button opens it (a phone has no Side, and the top bar no Ask icon).
     await phone.goto(`${url}#thread=${threads.push}`);
@@ -397,24 +398,32 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
 
     // After the pictures, so this thread stays out of them: its own session, so its own thread, with a live agent.
     world.agents.push(startScriptedAskAgent({ port: world.target.port, token: world.token, session: 'ses-phone', project: world.projects.web, reply: () => 'Scripted answer.' }));
-    const noted = await world.send(world.projects.web, 'ses-phone', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
+    noted = await world.send(world.projects.web, 'ses-phone', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
     expect(Object.values(threads)).not.toContain(noted);
     writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(noted, 'ses-phone', 'claude-code', 5, 'What was the plan?', null, false));
     await phone.goto(`${url}#thread=${noted}`);
-    // A draft first: Reply in the thread must join it, never replace it.
-    await phone.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).tap();
-    const reply = phone.locator('section.ib-pane textarea');
-    await reply.fill('A draft from the phone');
-    await reply.blur();
+    // An open reply box hides a phone's corner, so the chat opens first; the window fills a phone: it steps aside for the reply.
     await cornerOn(phone);
-    // The window fills a phone: it steps aside for the reply.
     await frame(phone).getByRole('button', { name: 'Reply in the thread' }).tap();
     await expect(frame(phone)).toHaveCount(0);
+    const reply = phone.locator('section.ib-pane textarea');
     await expect(reply).toBeVisible();
-    await expect(reply).toHaveValue('A draft from the phone\n\nWhat was the plan?');
+    await expect(reply).toHaveValue('What was the plan?');
   } finally {
     await context.close();
   }
+  // A draft first: Reply in the thread joins it, never replaces it. On the desktop, where Side opens the chat over a draft.
+  const { page } = world;
+  await page.goto(`${url}#thread=${noted}`);
+  const reply = page.locator('section.ib-pane textarea');
+  await expect(async () => {
+    if ((await reply.count()) === 0) await page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).click({ timeout: 2_000 });
+    await expect(reply).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
+  await reply.fill('A draft first');
+  await sideOn(page, 'Ask me');
+  await frame().getByRole('button', { name: 'Reply in the thread' }).click();
+  await expect(reply).toHaveValue('A draft first\n\nWhat was the plan?');
 });
 
 test('no page error, and the agent got the surface from the thread', async () => {
