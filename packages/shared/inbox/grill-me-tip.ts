@@ -8,9 +8,9 @@
  * "A gap in consistent use": the person has answered `REVEAL_GRILL_ME_GAP.answers` question blocks or more (a skip is
  * not an answer), in `threads` threads or more, on `days` different local days or more; and nothing says they already
  * run grill-me: no thread subject or name and no agent message matches `GRILL_ME_TEXT`, and no skills block of theirs
- * names a grill-me skill (grill-me.ts `isGrillMeSkill`).
+ * names a grill-me skill (`@plannotator/core/grill-me` `isGrillMeSkill`).
  */
-import { isGrillMeSkill } from "./grill-me";
+import { isGrillMeSkill } from "@plannotator/core/grill-me";
 import { revealDay } from "./reveals";
 
 /** Answered question blocks, threads and local days the tip needs. */

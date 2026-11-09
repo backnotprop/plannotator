@@ -1,19 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { grillMeNoteText } from './grill-me'
 import { inboxRegistryPathOf } from './inbox'
 
-// The grill-me note through the real registered hooks. The failures this
-// catches: a typed `/grill-me` (any author's, namespaced too) or a grill-me
-// skill the model runs through the Skill tool no longer carrying the note; Matt
-// Pocock's `/grill-me`, which calls the Skill tool with `grilling` in the same
-// turn, getting it twice; and the note reaching a session it should not: an
-// unrelated skill, a subagent, a computer where the Inbox never ran, or a
-// person who turned the Inbox reminder off.
+// The grill-me note is the Inbox's alone: it rides a grill-me skill the person
+// picks in the Inbox's reply box, New message or a comment (the owner,
+// 2026-11-08: "if it's a skill ran from our UI, that's it";
+// packages/inbox/skills.ts). The failure this catches: the Claude Code mod
+// adding anything of ours to a session's own `/grill-me` or to the Skill tool
+// running one, even where the Inbox has run and its tool is registered.
 
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
-const TOOL = 'mcp__plugin_plannotator__plannotator_inbox'
-const NOTE = grillMeNoteText(TOOL)
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
@@ -107,38 +103,12 @@ async function started(name: string, options?: Parameters<typeof engineOver>[0])
   return { typed, skill, turnEnds, end }
 }
 
-describe('the grill-me note through the registered hooks', () => {
-  test('a typed grill-me command carries it; the Skill call it makes in that turn does not add it again; a later run does', async () => {
-    const s = await started('grill-typed')
-    expect(await s.typed('grill-me')).toEqual([NOTE])
-    expect(await s.skill('grilling')).toEqual([])
+describe('a grill-me run in a terminal session gets nothing from the mod', () => {
+  test('a typed /grill-me (any spelling) and the Skill tool running one pass through untouched', async () => {
+    const s = await started('grill-terminal')
+    for (const command of ['grill-me', 'mattpocock:grill-me', 'grill_me']) expect(await s.typed(command)).toEqual([])
+    for (const skill of ['grilling', 'grill-me', 'team:grill_me']) expect(await s.skill(skill)).toEqual([])
     await s.turnEnds()
-    expect(await s.skill('team:grill_me')).toEqual([NOTE])
-    await s.turnEnds()
-    expect(await s.typed('mattpocock:grill-me')).toEqual([NOTE])
-    await s.end()
-  })
-
-  test('never for another skill or command, nor a subagent\'s grill-me', async () => {
-    const s = await started('grill-others')
-    expect(await s.typed('grilled-cheese')).toEqual([])
-    expect(await s.typed('review')).toEqual([])
-    expect(await s.skill('grill-menu')).toEqual([])
-    expect(await s.skill('grill-me', { agentId: 'agent-1' })).toEqual([])
-    await s.end()
-  })
-
-  test('only where the Inbox has run on this computer', async () => {
-    const s = await started('grill-no-inbox', { inboxRan: false })
-    expect(await s.typed('grill-me')).toEqual([])
-    expect(await s.skill('grill-me')).toEqual([])
-    await s.end()
-  })
-
-  test('the Inbox reminder switch turns it off too', async () => {
-    const s = await started('grill-reminder-off', { config: { inboxReminder: false } })
-    expect(await s.typed('grill-me')).toEqual([])
-    expect(await s.skill('grill-me')).toEqual([])
     await s.end()
   })
 })

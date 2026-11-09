@@ -273,10 +273,6 @@ shell `plannotator` command: its `tool_call` event can only block a call, which
 the model reads as an error, so the skill's "use the tool" line is what steers
 it.
 
-### Pi: the grill-me note
-
-DRAFT, the words wait on the owner's OK; see "The grill-me note" in `inbox-notifications-and-agents.md`. When a grill-me skill runs (any name `isGrillMeSkill` matches), the extension adds the grill-me note (`packages/shared/inbox/grill-me.ts`, vendored to `generated/inbox/`), so the interview's questions can go to the Inbox as `:::question` cards. Code: `apps/pi-extension/grill-me.ts` (`registerPiGrillMe`), called from `registerPiInbox` with the reminder. A typed `/skill:grill-me` arrives in `before_agent_start` as Pi's expanded `<skill name="…">` block and gets the note as a hidden custom message (`plannotator-grill-me`, `display: false`); the type differs from the reminder's so `entriesCarryReminder` never counts it as the reminder. A skill the model loads itself with `read` gets the note as one more text part of that `tool_result`, matched by the `SKILL.md` folder, its frontmatter `name:`, or the loaded skill whose file it is. Gate: the reminder's (`inboxReminder`), and nothing while `plannotator_inbox` is inactive (print/JSON runs, so subagent extensions' child Pi get none). Once per run (every `before_agent_start` resets it). Gaps: a skill read through `bash` gets no note; Oh My Pi's in-process subagents are not verified; not yet tried against a running Pi. Tests: `apps/pi-extension/grill-me.test.ts`.
-
 ### Pi: session events and the checklist window
 
 **`plannotator:session-opened` / `plannotator:session-closed` (#1589).** One

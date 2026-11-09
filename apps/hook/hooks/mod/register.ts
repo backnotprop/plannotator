@@ -112,7 +112,6 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
-import { grillMeNoteText, isGrillMeSkill } from './grill-me'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
@@ -329,26 +328,6 @@ let endedAt: number | null = null
  */
 function reminderOn(): boolean {
   return !!allowed?.inboxReminder && inboxRanHere && !!inboxToolName
-}
-
-/** The Skill tool's name in Claude Code: a grill-me skill the model runs itself arrives as a call to it. */
-const SKILL_TOOL = 'Skill'
-
-/**
- * The grill-me note went into the main loop's current turn (a typed `/grill-me`):
- * the Skill call it makes next (Matt Pocock's `/grill-me` calls `grilling`)
- * does not add it again. Cleared at the main turn's `turn.complete`.
- */
-let grillMeNotedThisTurn = false
-
-/**
- * The note for a grill-me run (grill-me.ts), under the reminder's gate: the
- * `inboxReminder` switch, an Inbox that has run here and plannotator_inbox
- * registered. Null when the gate is closed or not decided in time.
- */
-async function grillMeNoteFor($: Engine): Promise<string | null> {
-  if ((await reminderGateDecided($)) !== true || !inboxToolName) return null
-  return grillMeNoteText(inboxToolName)
 }
 
 /**
@@ -939,15 +918,6 @@ export function register(on: On) {
       if (!instance) return next(e)
       return answerShellCall(instance, input)
     }
-    // A grill-me skill the main loop runs through the Skill tool, any author's
-    // (grill-me.ts): the note rides the tool's result as context, once a turn.
-    if (allowed && e.tool === SKILL_TOOL && !e.agentId && isGrillMeSkill(e.skill) && !grillMeNotedThisTurn) {
-      const note = await grillMeNoteFor($)
-      const result = await next(e)
-      if (!note || !result || 'deny' in result || result.isError === true || grillMeNotedThisTurn) return result
-      grillMeNotedThisTurn = true
-      return { ...result, context: [...(Array.isArray(result.context) ? result.context : []), note] }
-    }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
     if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) return next(e)
     const instance = await currentMod($)
@@ -1076,16 +1046,6 @@ export function register(on: On) {
         recordFor = null
       }
     }
-    // A typed grill-me command, any author's (`/grill-me`, `/team:grill_me`):
-    // the note rides after the skill's text as context (grill-me.ts).
-    let grillMe = false
-    if (allowed && !ref.fromUs && e.command && isGrillMeSkill(e.command.name)) {
-      const note = await grillMeNoteFor($).catch(() => null)
-      if (note) {
-        entering = { ...entering, context: [...(Array.isArray(entering.context) ? entering.context : []), note] }
-        grillMe = true
-      }
-    }
     let result
     try {
       result = await next(entering)
@@ -1093,7 +1053,6 @@ export function register(on: On) {
       if (live) instance.onPromptDropped(ref)
       throw error
     }
-    if (grillMe && result && typeof result.text === 'string') grillMeNotedThisTurn = true
     // Entered: the conversation has its first prompt's context now (a dropped prompt does not), or, resumed with no open thread, needs none.
     if (reminderFor && result && typeof result.text === 'string') {
       reminderFor.delivered = true
@@ -1154,7 +1113,6 @@ export function register(on: On) {
   })
 
   on('turn.complete', async ($: Engine, e: any, next: Next) => {
-    if (!e.agentId) grillMeNotedThisTurn = false
     if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)
     }

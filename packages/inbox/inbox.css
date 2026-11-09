@@ -7043,24 +7043,40 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
-/* GRILL-ME-TIP-START The grill-me tip (DRAFT; packages/inbox/components/GrillMeTip.tsx): Bro mode's card as it is (navy,
-   dot grid, Experimental chip, orange button), with a title line in place of the poster name and a small picture of
-   one question card. Only the `ib-gm` rules are its own. */
-dialog.ib-dlg.ib-bro.ib-gm h2 { position: relative; margin: 0; padding: 24px 132px 0 26px; font-size: var(--ib-fs-34, 34px); font-weight: 800; line-height: 1.04; letter-spacing: -0.035em; color: #fbfaf5; text-wrap: balance; }
+/* GRILL-ME-TIP-START The grill-me tip (DRAFT; packages/inbox/components/GrillMeTip.tsx): Bro mode's card (navy, dot grid,
+   orange button; no Experimental chip), with a title line in place of the poster name and a small picture of one
+   question card in the light palette's colours, drawn from the real card's parts: picture tiles (the picked one a soft
+   tint, no outline), ui's Recommended tag (primary/15), the `Why <choice>:` line and the note field. */
+dialog.ib-dlg.ib-bro.ib-gm h2 { position: relative; margin: 0; padding: 24px 26px 0; font-size: var(--ib-fs-34, 34px); font-weight: 800; line-height: 1.04; letter-spacing: -0.035em; color: #fbfaf5; text-wrap: balance; }
 dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0.86em; font-weight: 600; letter-spacing: -0.04em; color: #f69d25; }
-/* The picture: one question card as the Inbox draws it, small, on the navy. */
-.ib-gm .ib-gm-art { position: relative; margin: 20px 26px 0; padding: 14px 16px 12px; border-radius: 12px; background: #fbfaf5; color: #1d2433; box-shadow: 0 10px 26px -12px #0009; transform: rotate(-1.2deg); }
-.ib-gm .ib-gm-art .q { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 650; margin: 0 0 8px; letter-spacing: -0.01em; }
-.ib-gm .ib-gm-art ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
-.ib-gm .ib-gm-art li { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); padding: 6px 8px; border-radius: 7px; border: 1px solid #1d243317; }
-.ib-gm .ib-gm-art li::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid #1d243366; flex: none; }
-.ib-gm .ib-gm-art li.rec { border-color: #f69d2588; background: #f69d2514; }
-.ib-gm .ib-gm-art li.rec::before { border-color: #c96f00; background: radial-gradient(circle, #c96f00 0 3px, transparent 3.5px); }
-.ib-gm .ib-gm-art li .tag { margin-left: auto; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; color: #9a5600; }
-.ib-gm .ib-gm-art .meta { margin-top: 8px; font-size: var(--ib-fs-11, 11px); color: #1d243399; }
+.ib-gm .ib-gm-art { --gm-fg: oklch(0.18 0.02 260); --gm-muted: oklch(0.40 0.02 260); --gm-primary: oklch(0.50 0.25 280); --gm-line: oklch(0.88 0.01 260); position: relative; margin: 20px 26px 0; padding: 14px 14px 12px; border-radius: 12px; background: #fff; color: var(--gm-fg); box-shadow: 0 12px 28px -14px #000a; transform: rotate(-1deg); }
+.ib-gm .ib-gm-art .q { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 650; letter-spacing: -0.01em; }
+.ib-gm .ib-gm-art .ctx { margin: 2px 0 10px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--gm-muted); }
+.ib-gm .ib-gm-art .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ib-gm .ib-gm-art .tile { border-radius: 9px; overflow: hidden; background: color-mix(in oklch, var(--gm-line) 45%, #fff); }
+.ib-gm .ib-gm-art .tile.on { background: color-mix(in oklch, var(--gm-primary) 11%, #fff); }
+.ib-gm .ib-gm-art .pic { display: grid; align-content: start; gap: 5px; aspect-ratio: 16 / 8; padding: 9px 10px; margin: 5px 5px 0; border-radius: 6px; }
+.ib-gm .ib-gm-art .pic i { display: block; height: 5px; border-radius: 3px; background: currentColor; opacity: 0.55; }
+.ib-gm .ib-gm-art .pic i:first-child { width: 42%; height: 6px; opacity: 0.95; color: #4493f8; }
+.ib-gm .ib-gm-art .pic i:nth-child(2) { width: 88%; }
+.ib-gm .ib-gm-art .pic i:nth-child(3) { width: 70%; }
+.ib-gm .ib-gm-art .pic.dim { background: #2d333b; color: #adbac7; }
+.ib-gm .ib-gm-art .pic.night { background: #0d1117; color: #c9d1d9; }
+.ib-gm .ib-gm-art .cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 7px 8px 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; }
+.ib-gm .ib-gm-art .dot { width: 12px; height: 12px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--gm-muted) 55%, transparent); }
+.ib-gm .ib-gm-art .on .dot { box-shadow: inset 0 0 0 1.5px var(--gm-primary); background: radial-gradient(circle, var(--gm-primary) 0 3px, transparent 3.5px); }
+.ib-gm .ib-gm-art .tag { margin-left: auto; display: inline-flex; align-items: center; height: 17px; padding: 0 5px; border-radius: 4px; background: color-mix(in oklch, var(--gm-primary) 15%, transparent); color: var(--gm-primary); font-size: var(--ib-fs-10, 10px); font-weight: 650; letter-spacing: 0.03em; white-space: nowrap; }
+.ib-gm .ib-gm-art .why { margin: 9px 0 0; font-size: var(--ib-fs-11-5, 11.5px); line-height: 1.45; color: var(--gm-muted); }
+.ib-gm .ib-gm-art .why b { font-weight: 650; color: color-mix(in oklch, var(--gm-fg) 85%, transparent); }
+.ib-gm .ib-gm-art .note { display: flex; align-items: center; margin-top: 8px; padding: 6px 9px; border-radius: 7px; background: color-mix(in oklch, var(--gm-line) 35%, #fff); box-shadow: inset 0 0 0 1px var(--gm-line); font-size: var(--ib-fs-12, 12px); }
+.ib-gm .ib-gm-art .caret { display: inline-block; width: 1.5px; height: 13px; margin-left: 1px; background: var(--gm-primary); animation: ib-gm-caret 1.1s steps(1) infinite; }
+@keyframes ib-gm-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-gm .ib-gm-art .caret { animation: none; }
+}
 .ib-gm .ib-bi-text p + p { margin-top: 8px; }
 @media (max-width: 560px) {
-  dialog.ib-dlg.ib-bro.ib-gm h2 { font-size: var(--ib-fs-29, 29px); padding-right: 26px; padding-top: 52px; }
+  dialog.ib-dlg.ib-bro.ib-gm h2 { font-size: var(--ib-fs-29, 29px); padding: 22px 22px 0; }
   .ib-gm .ib-gm-art { margin: 16px 20px 0; }
   .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
 }

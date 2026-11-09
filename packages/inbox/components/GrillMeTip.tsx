@@ -13,26 +13,34 @@ export interface GrillMeTipCopy {
 export const GRILL_ME_TIP_COPY_A: GrillMeTipCopy = {
   title: 'Have you tried /grill-me?',
   body: 'Plannotator gives grill-me an optimized experience: its questions come to your Inbox as cards you can answer anytime.',
-  reach: 'Nothing to turn on. Works with any grill-me skill, in Claude Code, Pi and OpenCode.',
+  reach: 'Pick /grill-me in a reply or a new message. Nothing to turn on.',
 };
 
 /** Variant B, kept for the owner to swap in (`GRILL_ME_TIP_COPY`). */
 export const GRILL_ME_TIP_COPY_B: GrillMeTipCopy = {
   title: '/grill-me, in your Inbox',
-  body: 'Run /grill-me and its interview comes here, one card per question: pick an answer, add a note, take your time.',
-  reach: 'Plannotator does this for any grill-me skill. Nothing to turn on.',
+  body: 'Pick /grill-me in a reply or a new message, and its interview comes back here, one card per question: pick an answer, add a note, take your time.',
+  reach: 'Works with any grill-me skill you have. Nothing to turn on.',
 };
 
 /** The words the card shows. */
 export const GRILL_ME_TIP_COPY: GrillMeTipCopy = GRILL_ME_TIP_COPY_A;
 
-/** The picture: one question card as the Inbox draws it (decorative). */
+/**
+ * The picture: one question card as the Inbox draws it (decorative), showing what a question can hold: picture
+ * choices, the Recommended tag, the `Why <choice>:` line and a note being typed.
+ */
 export const GRILL_ME_TIP_ART = {
-  question: 'How should dark mode turn on?',
-  choices: ['Follow the system setting only', 'A toggle only', 'Follow the system, plus a toggle'],
-  /** The choice marked Recommended (its index). */
-  recommended: 2,
-  meta: 'grill-me · 1 of a few · answer anytime',
+  question: 'Which dark palette?',
+  context: 'Each picture is your app in that palette.',
+  choices: [
+    { label: 'Dim', tone: 'dim' },
+    { label: 'Night', tone: 'night' },
+  ],
+  /** The choice marked Recommended and picked (its index). */
+  recommended: 1,
+  why: "your light theme already uses GitHub's colours.",
+  note: 'Keep the blue accent',
 } as const;
 
 const COMMAND = '/grill-me';
@@ -50,7 +58,7 @@ function withCommand(text: string) {
 /**
  * The grill-me tip (DRAFT; the owner, 2026-11-08: "similar to the bro mode pop-up ... have you tried /grill-me yet?
  * ... There's nothing to turn on"): a one-time card of the line (reveals.ts `grill_me_tip`) on Bro mode's card (navy,
- * dot grid, the Experimental chip), with a small picture of one question card. Nothing to turn on, so one button:
+ * dot grid; no Experimental chip, the owner 2026-11-08), with a small picture of one question card. Nothing to turn on, so one button:
  * "Got it". Escape and a click outside close it too; every way out is final, as the claim already stamped it. No
  * keyboard shortcut.
  */
@@ -58,23 +66,32 @@ export function GrillMeTip({ phone, onClose, copy = GRILL_ME_TIP_COPY }: { phone
   return (
     <Modal labelledBy="ib-gm-title" describedBy="ib-gm-desc" testId="grill-me-tip" onClose={onClose} ownKeys className={`ib-bi ib-bro ib-gm${phone ? ' ib-bi-phone' : ''}`}>
       <h2 id="ib-gm-title">{withCommand(copy.title)}</h2>
-      <span className="ib-chip ib-bro-exp" data-grill-me-tip-experimental="">
-        Experimental
-      </span>
       <div className="ib-gm-art" aria-hidden="true">
         <p className="q">{GRILL_ME_TIP_ART.question}</p>
-        <ul>
-          {GRILL_ME_TIP_ART.choices.map((choice, i) =>
-            i === GRILL_ME_TIP_ART.recommended ? (
-              <li key={choice} className="rec">
-                {choice} <span className="tag">Recommended</span>
-              </li>
-            ) : (
-              <li key={choice}>{choice}</li>
-            ),
-          )}
-        </ul>
-        <div className="meta">{GRILL_ME_TIP_ART.meta}</div>
+        <p className="ctx">{GRILL_ME_TIP_ART.context}</p>
+        <div className="tiles">
+          {GRILL_ME_TIP_ART.choices.map((choice, i) => (
+            <div key={choice.label} className={i === GRILL_ME_TIP_ART.recommended ? 'tile on' : 'tile'}>
+              <span className={`pic ${choice.tone}`}>
+                <i />
+                <i />
+                <i />
+              </span>
+              <span className="cap">
+                <span className="dot" />
+                {choice.label}
+                {i === GRILL_ME_TIP_ART.recommended && <span className="tag">Recommended</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="why">
+          <b>Why {GRILL_ME_TIP_ART.choices[GRILL_ME_TIP_ART.recommended].label}:</b> {GRILL_ME_TIP_ART.why}
+        </p>
+        <div className="note">
+          {GRILL_ME_TIP_ART.note}
+          <span className="caret" />
+        </div>
       </div>
       <div className="ib-bi-text">
         <p id="ib-gm-desc">{withCommand(copy.body)}</p>

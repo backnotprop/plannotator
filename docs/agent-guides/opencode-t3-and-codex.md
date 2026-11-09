@@ -135,13 +135,6 @@ reload, and `plugin update` needs no idle gate. Details and knobs:
 `PLANNOTATOR_OPENCODE2_TIMEOUT` in [environment.md](environment.md).
 `install.ps1` / `install.cmd` have no OpenCode 2 step yet.
 
-### OpenCode: the grill-me note
-
-DRAFT, the words wait on the owner's OK; see "The grill-me note" in `inbox-notifications-and-agents.md`. Code: `apps/opencode-plugin/grill-me.ts`. Neither runtime was tried against a running OpenCode yet (OpenCode 1's hook payloads were read from the 1.18.23 binary).
-- **OpenCode 1** (`addGrillMeOpenCode1` in `index.ts`, inside the Inbox block's reminder branch): with `plannotator_inbox` registered and the reminder on, the no-wake note (it says to read the thread). OpenCode 1.18 makes each skill a slash command, so a typed `/grill-me` gets the note as a `synthetic: true` text part of the command's message (`command.execute.before`): the model reads it, the person's message does not show it. The built-in `skill` tool's `tool.execute.after` appends it to `output.output`. A command that runs as a subtask and a child session (`parentID`) get none. Once per turn: the command's own `chat.message` keeps the mark, the next user message clears it. Gap: an agent whose `tools` config turns the Inbox tool off still gets it.
-- **OpenCode 2** (`registerGrillMeOpenCode2`, called from the Inbox block in `server.ts`): with the Inbox found, session hooks present and the reminder on, `ctx.tool.hook("execute.after")` (probed like the other domains): a completed `skill` call whose `input.name` is a grill-me skill gets the note appended to `result.content` (string or text parts), with the wake wording where `session.prompt` exists. The tool hook, not `ctx.skill.transform`, so the skill's text is never rewritten for every agent. Subagent calls (mode `subagent`, or a child session by `resolveRootSession`) get none. The `prompt` session hook starts a new turn, so `grill-me` then `grilling` gets one note. The callback never throws (the adapter treats a rejected `execute.after` as a defect). Gap: a skill the person attaches to a prompt (`prompt.skills`) gets none.
-- Tests: `apps/opencode-plugin/grill-me.test.ts` (both runtimes, plus the real plugin entries over a temp data dir whose Inbox is only remembered: reminder on gives the note, `inboxReminder: false` none).
-
 ### OpenCode: in-process servers in `plannotator sessions` (#1567)
 
 The plugin's own servers (submit_plan's plan review, `/plannotator-review`,

@@ -53,7 +53,6 @@ import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
-import { registerPiGrillMe } from "./grill-me.ts";
 
 /** How long a read of package.json on disk is reused: every poll asks. */
 const ON_DISK_FRESH_MS = 2_000;
@@ -462,9 +461,6 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		pi.on("session_tree", (_event, treeCtx: ExtensionContext) => {
 			reminderDelivered = branchHasReminder(treeCtx);
 		});
-		// The grill-me note (grill-me.ts): under the reminder's own switch, and
-		// only while the tool is active, so never in a print/JSON run.
-		registerPiGrillMe(pi, { isActive: () => toolActive, toolName: spec.name });
 	}
 
 	pi.on("session_shutdown", () => {
