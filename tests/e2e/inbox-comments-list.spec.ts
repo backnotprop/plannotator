@@ -220,6 +220,8 @@ test('the full-screen card count opens the list above the card; Escape takes the
   const page = await desk(browser);
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  // The card opens on Comment, as an image's does; the count is the Reply tab's (it says what rides the Send).
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   const chip = cardChip(page);
   await expect(chip).toBeVisible();
   await expect(chip).toHaveJSProperty('tagName', 'BUTTON');
@@ -266,8 +268,10 @@ test('over a tall card in a short window the list stays on screen, with its Clos
   const page = await desk(browser, 1000, 560);
   const t = await seededThread(world, 8);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   await expect(cardChip(page)).toBeVisible();
-  await page.locator('[data-fcomp] textarea').first().fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
+  // The reply's field: the page's comment row stays drawn, hidden, on the Reply tab.
+  await page.locator('[data-fcomp] [data-fcomp-field] textarea').fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
   await cardChip(page).click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
