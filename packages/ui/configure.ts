@@ -14,6 +14,7 @@ import { setIdentityGenerator, type IdentityGenerator } from './utils/generateId
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
 import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
+import { setCodeHighlightWorker, setDeferOffscreenCodeHighlight, type CodeHighlightWorker } from './utils/codeHighlight';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
@@ -51,6 +52,7 @@ export type {
   AlertIconRenderer,
   FenceThemeResolver,
   RefCardTransport,
+  CodeHighlightWorker,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -184,6 +186,25 @@ export interface PlannotatorUIConfig {
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
    */
   refCardTransport?: RefCardTransport;
+  /**
+   * Highlight a code fence only when it comes near the screen (a screen
+   * above or below it), and the rest in idle time, nearest first
+   * (`utils/codeHighlight`). A fence on screen is still highlighted before
+   * it is drawn; one farther away keeps its plain text (the same characters
+   * and size) until then. For a host that shows many fences at once (a long
+   * thread), where highlighting all of them at once blocks the page for
+   * seconds. Default: false, every fence highlighted when it mounts, as
+   * before. The Plannotator Inbox passes true.
+   */
+  deferOffscreenCodeHighlight?: boolean;
+  /**
+   * With `deferOffscreenCodeHighlight`: make a waiting fence's markup off the
+   * main thread (`utils/codeHighlight` `CodeHighlightWorker`, e.g. a Web
+   * Worker with its own Shiki core). Only the markup is written on the page.
+   * Default: none, every fence's tokens made on the page. The Plannotator
+   * Inbox passes one (`packages/inbox/codeHighlightWorker.ts`).
+   */
+  codeHighlightWorker?: CodeHighlightWorker;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -215,6 +236,8 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
+  if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
+  if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }
