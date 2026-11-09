@@ -1227,45 +1227,28 @@ function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: 
   );
 }
 
-/** How long the pointer rests on a group's header before its chevron shows (GroupBand). */
-export const GROUP_CHEV_DWELL_MS = 500;
-
 /**
- * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron stays hidden
- * until the pointer rests on the header for GROUP_CHEV_DWELL_MS, or keyboard focus lands on it (owner, 2026-11-08):
- * passing over a header shows nothing, staying a moment says it closes. A touch never shows it, as before.
- * `data-chev` shows it; inbox.css fades it in and out. Its own state, so only this header redraws.
+ * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron shows at once
+ * while the pointer is on the header, as the sidebar's sections do (owner, 2026-11-08: no wait), or while keyboard
+ * focus is on it. A touch never shows it, as before. `data-chev` shows it; inbox.css fades it in and out. Its own
+ * state, so only this header redraws.
  */
 function GroupBand({ open, onToggle, children }: { open: boolean; onToggle: (band: HTMLButtonElement) => void; children: ReactNode }) {
-  const [dwelt, setDwelt] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [focusShown, setFocusShown] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stop = () => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  useEffect(() => stop, []);
   return (
     <button
       type="button"
       className="ib-band"
       aria-expanded={open}
-      data-chev={dwelt || focusShown ? '' : undefined}
+      data-chev={hovered || focusShown ? '' : undefined}
       onClick={(event) => onToggle(event.currentTarget)}
       onPointerEnter={(event) => {
-        if (event.pointerType === 'touch') return;
-        stop();
-        timer.current = setTimeout(() => {
-          timer.current = null;
-          setDwelt(true);
-        }, GROUP_CHEV_DWELL_MS);
+        if (event.pointerType !== 'touch') setHovered(true);
       }}
-      onPointerLeave={() => {
-        stop();
-        setDwelt(false);
-      }}
+      onPointerLeave={() => setHovered(false)}
       onFocus={(event) => {
-        // Keyboard focus only: a click's focus (or a tap's) waits for the dwell like the pointer does.
+        // Keyboard focus only: a click's focus (or a tap's) shows nothing by itself.
         let keyboard = true;
         try {
           keyboard = event.currentTarget.matches(':focus-visible');
