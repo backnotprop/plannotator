@@ -15,7 +15,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInlineImage, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { resetImageSrcResolver, setImageSrcResolver } from '@plannotator/ui/components/ImageThumbnail';
-import { inboxImageSrcResolver, inlineImageRefFromSrc } from './images';
+import { inboxImageSrcResolver, inlineImageRefFromSrc, markTallImage } from './images';
 
 const hasDom = typeof document !== 'undefined';
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -160,6 +160,50 @@ test.skipIf(!hasDom)('a captured image opens in the viewer on a click, Enter or 
     });
   }
   expect(opened.map((i) => i.id)).toEqual([B.id, C.id, C.id, C.id]);
+});
+
+// A thread of 245 messages with 89 screenshots of 3840 by 2242 held 1.5 GB of decoded pictures (its tab died):
+// a captured picture wider than the body draws loads as a copy 1600 wide (`?w=1600`), laid out at its own width,
+// and still opens the original's record.
+test.skipIf(!hasDom)('a captured picture wider than 1600 loads as a smaller copy at its own width; a narrower or uncaptured one as it is', async () => {
+  const opened: InboxInlineImage[] = [];
+  const wide = { ...image('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'shots/wide.png'), width: 3840, height: 2242 };
+  const narrow = { ...image('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'shots/narrow.png'), width: 1200, height: 800 };
+  const body = ['![wide](shots/wide.png)', '', '![narrow](shots/narrow.png)', '', '<p><img src="shots/wide.png" alt="raw"></p>', '', '![later](shots/later.png)'].join('\n');
+  await render(body, [wide, narrow], opened);
+  const img = (alt: string) => host!.querySelector<HTMLImageElement>(`img[alt="${alt}"]`)!;
+  const route = (ref: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(ref)}`;
+  expect(img('wide').getAttribute('src')).toBe(`${route('shots/wide.png')}&w=1600`);
+  expect(img('wide').getAttribute('width')).toBe('3840');
+  expect(img('wide').getAttribute('decoding')).toBe('async');
+  expect(img('raw').getAttribute('src')).toBe(`${route('shots/wide.png')}&w=1600`);
+  expect(img('raw').getAttribute('width')).toBe('3840');
+  expect(img('narrow').getAttribute('src')).toBe(route('shots/narrow.png'));
+  expect(img('narrow').hasAttribute('width')).toBe(false);
+  expect(img('later').getAttribute('src')).toBe(route('shots/later.png'));
+  // The copy is still the captured picture: a click opens its record (the viewer shows the original).
+  expect(img('wide').getAttribute('data-inline-image')).toBe(wide.id);
+  await act(async () => img('wide').click());
+  expect(opened.map((i) => i.id)).toEqual([wide.id]);
+});
+
+test.skipIf(!hasDom)('a tall picture loaded as a smaller copy is measured as the original: its own width, cropped from the top', () => {
+  const tall = document.createElement('img');
+  tall.setAttribute('src', `/api/inbox/messages/${ID}/image?path=t.png&w=1600`);
+  tall.setAttribute('width', '2400');
+  Object.defineProperty(tall, 'naturalWidth', { value: 1600 });
+  Object.defineProperty(tall, 'naturalHeight', { value: 6400 });
+  markTallImage(tall);
+  expect(tall.hasAttribute('data-ib-tall')).toBe(true);
+  expect(tall.style.getPropertyValue('--ib-nw')).toBe('2400px');
+  // A width the agent wrote on a picture it did not ask a copy of is not the picture's own: its natural size counts.
+  const sized = document.createElement('img');
+  sized.setAttribute('src', `/api/inbox/messages/${ID}/image?path=s.png`);
+  sized.setAttribute('width', '200');
+  Object.defineProperty(sized, 'naturalWidth', { value: 390 });
+  Object.defineProperty(sized, 'naturalHeight', { value: 4000 });
+  markTallImage(sized);
+  expect(sized.style.getPropertyValue('--ib-nw')).toBe('390px');
 });
 
 test.skipIf(!hasDom)('an image that fails to load is its alt text and opens nothing, markdown and raw HTML alike; a data: image is not a button', async () => {

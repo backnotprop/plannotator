@@ -63,7 +63,7 @@ import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
-import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
+import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
@@ -629,9 +629,20 @@ export function MessageBody({
   // ```html fences draw as live, sandboxed pages, ```svg as images (approval "inbox-inline-html").
   const embedAuthor = message.author.kind === 'agent' ? agentName(message.author) : undefined;
   const htmlEmbeds = useMemo<HtmlEmbedHost>(() => ({ frameUrl: inboxEmbedUrl, author: embedAuthor }), [embedAuthor]);
+  // A captured picture wider than a message draws it is loaded as a smaller copy (`?w=`), laid out at its own
+  // width: the browser decodes the copy, not a 3840-wide screenshot (a heavy thread's tab died of them). A click
+  // still opens the original in the viewer.
+  const widthsKey = (message.inline_images ?? []).map((image) => `${image.width ?? ''}:${image.ref}`).join('\n');
+  const widths = useMemo(() => new Map((message.inline_images ?? []).map((image) => [image.ref, image.width] as const)), [widthsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const resolveImage = useCallback<ImageResolver>(
-    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
-    [imageBaseDir],
+    (src) => {
+      if (/^(https?:|data:|blob:)/i.test(src)) return { kind: 'src', src };
+      const url = getImageSrc(src, imageBaseDir);
+      const width = widths.get(src);
+      const drawn = drawnImageUrl(url, width, MESSAGE_IMAGE_WIDTH);
+      return drawn === url ? { kind: 'src', src: url } : { kind: 'src', src: drawn, width };
+    },
+    [imageBaseDir, widths],
   );
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.

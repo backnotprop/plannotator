@@ -160,6 +160,25 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(refused.innerHTML).not.toContain('dark');
   });
 
+  // A host that serves a smaller copy of a big picture (the Inbox's `?w=`) names the original's width: the picture
+  // lays out as the original would, and decodes off the main thread only when it nears the view.
+  test("a resolved image with the original's width draws at that width, lazily and decoded async", async () => {
+    const doc = ['![shot](img/a.png)', '', '<p><img src="img/b.png" alt="raw"> <img src="img/c.png" width="300" alt="sized"></p>'].join('\n');
+    const resolveImage = (src: string) => ({ kind: 'src' as const, src: `/copy/${src}?w=1600`, width: 3840 });
+    const host = await render(<RenderedMarkdown markdown={doc} resolveImage={resolveImage} />);
+    const shot = host.querySelector<HTMLImageElement>('img[data-image-src="img/a.png"]')!;
+    expect(shot.getAttribute('src')).toBe('/copy/img/a.png?w=1600');
+    expect(shot.getAttribute('width')).toBe('3840');
+    expect(shot.getAttribute('loading')).toBe('lazy');
+    expect(shot.getAttribute('decoding')).toBe('async');
+    expect(host.querySelector('img[alt="raw"]')?.getAttribute('width')).toBe('3840');
+    // Raw HTML that sized its picture keeps its own size.
+    expect(host.querySelector('img[alt="sized"]')?.getAttribute('width')).toBe('300');
+    // A resolution without a width leaves the picture at its own size, as before.
+    const plain = await render(<RenderedMarkdown markdown="![shot](img/a.png)" resolveImage={(src) => ({ kind: 'src', src: `/copy/${src}` })} />);
+    expect(plain.querySelector('img')?.hasAttribute('width')).toBe(false);
+  });
+
   // A `data:` candidate's comma is part of its URL. Split there, the tail
   // (`AAAA`) became a relative candidate and an `/api/image?path=AAAA` fetch.
   test('responsiveImages keeps a data: srcset candidate whole', async () => {
