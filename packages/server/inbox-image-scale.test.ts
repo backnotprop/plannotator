@@ -6,18 +6,24 @@
  */
 import { describe, expect, test } from "bun:test";
 import { deflateSync } from "node:zlib";
-import { inboxImageWidth, isAnimatedPng } from "./inbox-image-scale";
+import { inboxImageWidth, isAnimatedPng, scaleInboxImage } from "./inbox-image-scale";
 import { inboxImageResponse } from "./inbox-message-images";
 
 const hasImage = typeof (globalThis as { Bun?: { Image?: unknown } }).Bun?.Image === "function";
 
-/** A real PNG `width` by `height` (8-bit RGB, a gradient), encoded here: zlib for the data, CRC-32 by hand. */
-async function png(width: number, height: number): Promise<Uint8Array> {
-  const raw = new Uint8Array((width * 3 + 1) * height);
-  for (let y = 0; y < height; y++) {
+/**
+ * A real PNG `width` by `height` (8-bit RGB, a gradient), encoded here: zlib for the data, CRC-32 by hand. `gray`: one
+ * flat 8-bit gray row repeated, cheap to build at tens of megapixels.
+ */
+async function png(width: number, height: number, gray = false): Promise<Uint8Array> {
+  const channels = gray ? 1 : 3;
+  const raw = new Uint8Array((width * channels + 1) * height);
+  if (gray) raw.fill(128);
+  for (let y = 0; y < height && !gray; y++) {
     const row = y * (width * 3 + 1);
     for (let x = 0; x < width; x++) raw.set([x % 256, y % 256, 90], row + 1 + x * 3);
   }
+  if (gray) for (let y = 0; y < height; y++) raw[y * (width + 1)] = 0;
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -40,7 +46,7 @@ async function png(width: number, height: number): Promise<Uint8Array> {
   const ihdr = new Uint8Array(13);
   new DataView(ihdr.buffer).setUint32(0, width);
   new DataView(ihdr.buffer).setUint32(4, height);
-  ihdr.set([8, 2, 0, 0, 0], 8);
+  ihdr.set([8, gray ? 0 : 2, 0, 0, 0], 8);
   const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array(0))];
   return new Uint8Array(parts.flatMap((part) => [...part]));
 }
@@ -117,5 +123,36 @@ describe.if(hasImage)("a message's picture asked for at a width", () => {
     const response = await inboxImageResponse(get(), served(animated, 2000, 100), 1600);
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(animated);
+  });
+});
+
+describe.if(hasImage)("the scaling work is bounded", () => {
+  // Two requests for the same copy (a body picture and its attachment share the file's hash) scale it once: a second
+  // scale wasted a full decode and, before, counted the copy twice in the cache, which then shrank to one entry.
+  test("the same copy asked for twice at once is scaled once", async () => {
+    const original = await png(2400, 1200);
+    const [a, b] = await Promise.all([scaleInboxImage(original, "image/png", 800, "same-key"), scaleInboxImage(original, "image/png", 800, "same-key")]);
+    expect(a).not.toBeNull();
+    expect(b).toBe(a);
+  });
+
+  // A phone's scroll capture (1170 by 25000) at 800 wide would be 17094 tall, past WebP's 16383: it is scaled to fit
+  // instead of failing (and failing again on every request).
+  test("a very tall picture is scaled to fit WebP's limit", async () => {
+    const original = await png(1700, 25000, true);
+    const scaled = await scaleInboxImage(original, "image/png", 1600, "tall-key");
+    expect(scaled).not.toBeNull();
+    expect(scaled!.height).toBeLessThanOrEqual(16383);
+    expect(scaled!.width).toBeLessThan(1600);
+  });
+
+  // A small file can declare a huge picture (16000 by 16000 in 775 KB took 1.1 GB to decode): past the pixel cap it is
+  // not decoded at all, the original is served as before, and the refusal is remembered.
+  test("a picture past the pixel cap is not decoded to be scaled", async () => {
+    const original = await png(8000, 6400, true);
+    const started = performance.now();
+    expect(await scaleInboxImage(original, "image/png", 1600, "big-key")).toBeNull();
+    expect(await scaleInboxImage(original, "image/png", 1600, "big-key")).toBeNull();
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });
