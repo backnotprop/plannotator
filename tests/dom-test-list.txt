@@ -135,6 +135,7 @@ packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
 packages/inbox/fileCloseKeepsDraft.test.tsx
+packages/inbox/htmlPageComment.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx

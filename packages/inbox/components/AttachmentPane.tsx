@@ -66,7 +66,7 @@ import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from
 import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
-import { useHtmlPageComment } from './HtmlPageComment';
+import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from './HtmlPageComment';
 import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
@@ -712,8 +712,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const capturing = useRef<FileCommentDraft[] | null>(null);
   /** Drafts of this file not on screen: waiting since it opened (not shown yet), or set aside by Escape. */
   const waiting = useRef<FileCommentDraft[]>([]);
-  /** The file's own comment row (an image's, a film's), read as the file closes (`useRowDraft`). */
+  /** The file's own comment row (an image's, a film's, an HTML page's), read as the file closes (`useRowDraft`). */
   const rowReaders = useRef(new Set<() => FileCommentDraft | null>());
+  /** An HTML page's row words while the row is off screen and the file still open (out of full screen, a linked page over it). */
+  const pageParking = useRef<{ key: string; text: string } | null>(null) as PageCommentParking;
   /** The comment popovers' boxes this pane opened (focused, typed in, or shown with put-back words). */
   const ownBoxes = useRef(new WeakSet<HTMLTextAreaElement>());
   /** The comment box last typed in, with what it is on then: read if the pane goes without `leave`. */
@@ -1772,6 +1774,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       const row = read();
       if (row && draftHasWords(row)) taken.push(row);
     }
+    // An HTML page's row words, its row off screen (out of full screen): kept as the row's draft, as if it were drawn.
+    const parked = pageParking.current;
+    if (parked?.key === draftKeyRef.current && parked.text.trim() !== '') taken.push({ kind: 'row', text: parked.text, markup: null });
+    pageParking.current = null;
     const page = htmlComment.kept() ?? null;
     if (page) taken.push({ kind: 'comment', annotation: page });
     const caught: FileCommentDraft[] = [];
@@ -2095,6 +2101,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // Each file (and version) as it opens: what waited for it is its own again, back in its boxes.
   useLayoutEffect(() => {
     kept.current = false;
+    // The last file's parked page words went with its drafts (`takeComposers`), or with the file.
+    if (pageParking.current?.key !== draftKey) pageParking.current = null;
     savedHere.current = [];
     waiting.current = [];
     waitingKey.current = draftKey;
@@ -3041,8 +3049,26 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       {hasComposer && isHtml && composerValue && (
         <FullScreenComposer
           value={composerValue}
-          noun={htmlComment.card ? 'page' : null}
-          comment={htmlComment.card}
+          noun="page"
+          // Comment and Reply, Comment first, as on an image: the Comment tab is a comment on the whole page, or a
+          // phone's pin or selection while one is open (its row stays drawn under it, hidden, words kept). A linked page
+          // over the file is read-only (comments belong to attachments): Reply only, the row's words parked.
+          comment={
+            props.readOnly || linkedTop ? null : (
+              <>
+                {htmlComment.card}
+                <HtmlPageCommentRow
+                  key={draftKey}
+                  fileKey={draftKey}
+                  name={attachment.name}
+                  tags={props.composer?.reply.tags}
+                  parking={pageParking}
+                  hidden={htmlComment.card !== null}
+                  onSave={save}
+                />
+              </>
+            )
+          }
           foldedByDefault={phoneHtml}
           onMinimized={htmlComment.onMinimized}
         />
