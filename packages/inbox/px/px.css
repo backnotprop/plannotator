@@ -9,6 +9,9 @@
  * 32 on a computer. Radius 28 / 24 (= padding + half a chip, so the corner chips sit concentric). Text 16 / 14.
  * Sheet radius 20, rows 56 / r12. Popover radius 14, rows 46 / r9.
  */
+/* PHONE ONLY (owner, after trying it): a computer keeps today's reply box, New message and pickers untouched, so
+   every rule here sits inside the phone query (the same one phone.ts and inbox.css use). */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
 :root[data-px] {
   --px-gap: 8px; --px-pad: 8px; --px-chip: 32px; --px-radius: 24px; --px-text: 14px;
   --px-fill: color-mix(in oklch, var(--foreground) 7%, transparent);
@@ -108,7 +111,10 @@
   /* No flat strip and no hairline under the thread: the card floats 8 px from the edges and from the keyboard. */
   :root[data-px] .pn-inbox .ib-pfoot:has(.ib-rbox) { padding: 0 var(--px-gap) var(--px-gap); border-top-color: transparent; background: transparent; box-shadow: none; }
   :root[data-px] .pn-inbox .ib-pfoot .ib-rbox { margin: 0; }
-  :root[data-px] .pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { min-height: 48px; }
+  /* The typing area (owner: "a little taller, like the actual input area"): today's is 64 px at rest; this one is a line
+     taller, grows with the words, and scrolls inside once the words take 40% of what the keyboard leaves. */
+  :root[data-px] .pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { min-height: 90px; max-height: none; }
+  :root[data-px] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll, :root[data-px][data-ib-keyboard] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll, :root[data-px][data-ib-keyboard-pin] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll { max-height: calc(var(--ib-vvh, 100dvh) * 0.4); }
   :root[data-px] .pn-inbox .ib-rline { padding-left: calc(var(--px-pad) - 2px); padding-right: var(--px-pad); min-height: 36px; }
 }
 
@@ -234,3 +240,5 @@
 :root[data-px] .ib-px-seg button[data-on] { background: var(--popover); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 1px var(--px-line); }
 :root[data-px]:not(.light) .ib-px-seg button[data-on] { background: color-mix(in oklch, var(--popover) 70%, var(--foreground) 12%); }
 :root[data-px-model="off"] .ib-px-lset { display: none; }
+
+}

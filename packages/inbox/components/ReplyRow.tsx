@@ -50,7 +50,7 @@ export function ReplyRow({
   chips: ReactNode;
   /** A computer: the same as one line, drawn instead of the chips when they don't fit (`fold`). */
   summary: ReactNode;
-  /** A computer: who gets the reply, when the thread has several agents. */
+  /** Who gets the reply: a computer's when the thread has several agents; a phone's (the prototype) in its row. */
   pill: ReactNode;
   /** A computer: the bin. */
   discard: ReactNode;
@@ -112,8 +112,8 @@ export function ReplyRow({
     };
   }, []);
 
-  // PROTOTYPE (proto/composer-picker): one row for a phone and a computer: paperclip, Skills, the agent pill, what
-  // goes with the reply, then the bin (a computer), the mic and Send at the right end.
+  // PROTOTYPE (proto/composer-picker), a phone only: the agent pill joins the row, after the paperclip and Skills.
+  // A computer's row below is today's, untouched.
   if (phone) {
     return (
       <div className={`ib-rrow ib-px-row${keepOpen ? ' ib-keep' : ''}`} data-reply-row="" data-phone="">
@@ -137,11 +137,12 @@ export function ReplyRow({
     );
   }
   return (
-    <div className={`ib-rrow ib-px-row${keepOpen ? ' ib-keep' : ''}`} data-reply-row="">
+    <div className={`ib-rrow${keepOpen ? ' ib-keep' : ''}`} data-reply-row="">
       <div className="ib-rlead">
+        {send}
         {clip}
         {skills}
-        {pill}
+        {mic}
       </div>
       <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined} data-hint={hint ? '' : undefined}>
         <div
@@ -153,6 +154,7 @@ export function ReplyRow({
         >
           {files}
           {fold ? summary : <span className="ib-rchips">{chips}</span>}
+          {pill && <span className="ib-rto-cell">{pill}</span>}
         </div>
         {hint && (
           <span className="ib-rhint" data-reply-hint="">
@@ -162,8 +164,6 @@ export function ReplyRow({
         {status}
       </div>
       {discard}
-      {mic}
-      {send}
     </div>
   );
 }

@@ -5633,15 +5633,38 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
     if (foot && now !== was) foot.scrollTop += now - was;
   }, [draftAboveShows]);
-  // PROTOTYPE (proto/composer-picker): the pill is in the row for every thread with an agent to name, not only one
-  // with several. With one agent it names that session by its title; its list offers the `@`.
+  // PROTOTYPE (proto/composer-picker), a phone only: the pill is in the row for every thread with an agent to name,
+  // not only one with several. A computer keeps today's pill (ReplyRecipient). With one agent it names that session by its title; its list offers the `@`.
   const pxRows: RecipientRow[] = pillActive
     ? rcptAgents
     : asking
       ? [{ session: asking.session, host: asking.host || null, label: asking.name, short: asking.name, state: askerEnded ? 'ended' : 'live' }]
       : [];
-  const rcptPill =
-    !resolved && pxRows.length > 0 ? (
+  const rcptPill = !phone ? (
+    pillActive ? (
+      <ReplyRecipient
+        rows={rcptAgents}
+        chosen={rcptChosen}
+        open={rcptOpen}
+        onOpen={setRcptOpen}
+        onOnly={(row) => {
+          aimReply([row.session]);
+          setRcptOpen(false);
+          announce(`This reply goes to ${row.label}.`);
+        }}
+        onToggle={(row) => {
+          // The agents typed with `@` count toward the most one reply goes to.
+          const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
+          const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
+          aimReply(next);
+          announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+        }}
+        onTagAnother={tagAnother}
+        phone={phone}
+        section={sectionRef.current}
+      />
+    ) : null
+  ) : !resolved && pxRows.length > 0 ? (
       <PxReplyPicker
         rows={pxRows}
         chosen={pillActive ? rcptChosen : pxRows}
@@ -7251,7 +7274,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
                     {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                     {sending && <span className="ib-spin" aria-hidden="true" />}
-                    <Icon name="arrowUp" size={phone ? 20 : 16} className="ib-px-send-i" />
+                    {phone && <Icon name="arrowUp" size={20} className="ib-px-send-i" />}
                     <span className="ib-rsend-w">Send</span>
                   </button>
                   )

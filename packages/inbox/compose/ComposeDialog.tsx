@@ -573,7 +573,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // PROTOTYPE (proto/composer-picker): the three live switches, the pill's place in the row, and Model and Effort
   // (shown only: the launch ignores them).
   const px = usePxFlags();
-  const toInRow = px.to === 'row';
+  // A phone only (the owner, after trying it): a computer's New message is today's, untouched.
+  const toInRow = phone && px.to === 'row';
   const pxPillRef = useRef<HTMLButtonElement>(null);
   const [pxChoice, setPxChoiceState] = useState<PxLaunchChoice>(readPxLaunchChoice);
   const setPxChoice = (choice: PxLaunchChoice) => {
@@ -1438,7 +1439,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </span>
         </p>
       )}
-      {
+      {phone ? (
         <PxToPicker
           open={picker}
           anchor={toInRow ? pxPillRef : toRef}
@@ -1477,7 +1478,41 @@ export function ComposeDialog(props: ComposeDialogProps) {
             else ((toInRow ? pxPillRef.current : toRef.current) ?? textRef.current)?.focus();
           }}
         />
-      }
+      ) : (
+        picker && (
+        <ToPicker
+          groups={groups}
+          selected={target?.session ?? (start ? startKey(start.agent) : null)}
+          home={home}
+          phone={phone}
+          start={launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
+          onStart={(picked) => {
+            setToFilled(false);
+            setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
+            // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
+            void inboxApi.launchSettingsRead(true).catch(() => {});
+            setChosen(null);
+            setPicker(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
+          onPick={(picked) => {
+            setToFilled(false);
+            setChosen(picked.session);
+            setStartPick(null);
+            setPicker(false);
+            setError(null);
+            afterPicker();
+          }}
+          onClose={() => {
+            setPicker(false);
+            // Still nobody in To: back on To, where the choice is made.
+            if (target) afterPicker();
+            else (toRef.current ?? textRef.current)?.focus();
+          }}
+        />
+        )
+      )}
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}
@@ -1655,7 +1690,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </div>
         </div>
       )}
-      <div className="ib-px-card" data-px-card="">
+      <div className={phone ? 'ib-px-card' : undefined} style={phone ? undefined : { display: 'contents' }} data-px-card="">
       <div className="ib-cp-body">
         {/* The Inbox's composer field (#1914): the / and $ skill picker; the Send composes the block. */}
         <div className="ib-cp-field" data-compose-text="">
@@ -1723,7 +1758,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       )}
       {pxContext}
-      <div className="ib-cp-foot ib-px-foot">
+      <div className={phone ? 'ib-cp-foot ib-px-foot' : 'ib-cp-foot'}>
         {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
         {takesFiles ? (
           // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
@@ -1735,13 +1770,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             </span>
           </Tip>
         )}
-        {!box && (
+        {phone && !box && (
           <button type="button" className="ib-px-chip" aria-label="Skills" data-compose-skills="" onClick={pxOpenSkills}>
-            <Icon name="cube" size={phone ? 20 : 16} />
+            <Icon name="cube" size={20} />
           </button>
         )}
         {pxPill}
-        {pxNoSkills && <span className="ib-px-hint">No skills are installed</span>}
+        {phone && pxNoSkills && <span className="ib-px-hint">No skills are installed</span>}
         {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
         {phone && attached > 0 && (
           <span className="ib-cp-clipn" data-compose-file-count="">
@@ -1801,7 +1836,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         )}
         <button
           type="button"
-          className={`ib-btn ib-pri ib-px-send${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+          className={`ib-btn ib-pri${phone ? ' ib-px-send ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
           data-px-word={sendLabel === 'Send' ? undefined : ''}
           aria-disabled={!sendable || undefined}
           aria-keyshortcuts={sendKeys}
@@ -1809,8 +1844,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
           disabled={busy !== null || voice.busy}
           data-compose-send=""
         >
-          <Icon name="arrowUp" size={phone ? 20 : 16} className="ib-px-send-i" />
-          <span className="ib-cp-sendl ib-px-sendw">{sendLabel}</span>
+          {phone ? (
+            <>
+              <Icon name="arrowUp" size={20} className="ib-px-send-i" />
+              <span className="ib-cp-sendl ib-px-sendw">{sendLabel}</span>
+            </>
+          ) : (
+            <>
+              <Icon name="send" size={15} />
+              {sendLabel}
+            </>
+          )}
         </button>
       </div>
       </div>
