@@ -73,17 +73,23 @@ POSIX scripts as they are except where MSYS reports something differently: its `
 the stop check reads the pid's command line from `/proc`, and `pwd` prints
 `/c/…`, so the scripts that print a folder use `pwd -W`. In PowerShell each
 script has a twin with the same arguments, output and exit codes; it travels as
-`-EncodedCommand` with its arguments written in as single-quoted literals,
-prints lines ending in `\n` alone, and reads stdin as bytes (with no console a
+`-EncodedCommand` with each argument written in as base64 (PowerShell also ends
+a string at `‘ ’ ‚ ‛`, so escaping `'` would not be enough), prints lines ending in `\n` alone, and reads stdin as bytes (with no console a
 process decodes stdin in the system code page). Its launch hands the CLI to a
-hidden watcher process that writes the CLI's (Windows) pid and exit code, and
-its transcript peek prints no file id (NTFS's needs a compiled call per read).
+hidden watcher process that writes the CLI's (Windows) pid and exit code; the
+watcher looks a bare CLI name up as an `.exe` on `PATH` only, since
+`Process.Start` would search the session's folder first and run a
+`plannotator.exe` committed to a repository. Its transcript peek prints no file id (NTFS's needs a compiled call per read).
 Each bash call takes about 15 ms and each PowerShell call about 200 ms. The variables `resolveShell` reads are read in `register.ts`
 (`shellEnvOf`), each named as a literal: Claude Code refuses to load a hooks
 module whose `$.env.get` takes anything else (`env-get-literal.test.ts`).
 Every check for an absolute path goes through `isAbsolutePath`, since Claude
 Code gives a Windows session its folders as `C:\…`, and the home folder is
-`HOME`, else `USERPROFILE`.
+`USERPROFILE` on Windows (as the CLI's `homedir()` reads it), else `HOME`. Off
+Windows a review's target and name keep a backslash as an ordinary character
+in a file name. The
+`claude-code-mod-windows` job of `windows.yml` runs the mod's Windows tests
+(paths, Git Bash, the shell pick, every PowerShell twin, the compaction hook).
 
 **Detached launch.** `$.process.run` is one-shot (10 minutes at most) and a hook
 has a 10 s budget of its own time, so the mod runs a tiny `/bin/sh` wrapper
