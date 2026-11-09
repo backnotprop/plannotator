@@ -2629,6 +2629,8 @@ pre code.pn-code {
 pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
+  /* As wide as its longest line, so the background follows the text when the block scrolls sideways. */
+  min-width: max-content;
 }
 
 /* a guided review: the card at the foot of its message (the record's 4.1) and the guide open over the window (4.2) */
