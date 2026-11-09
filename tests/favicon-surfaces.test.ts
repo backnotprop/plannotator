@@ -10,11 +10,26 @@ import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../packages/core/favicon
 // declaration. A re-added type="image/png" would be a lie for classic users.
 const SERVED_FAVICON_LINK = '<link rel="icon" href="/favicon.png">';
 // The portal is a static site with no Plannotator server, so its favicon really
-// is always the 64px PNG the vite plugin emits and it keeps the typed hints.
+// is always the 192px PNG the vite plugin emits and it keeps the typed hints.
 const STATIC_FAVICON_LINK =
-  '<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">';
-const MARKETING_FAVICON_LINK =
-  '<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">';
+  '<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">';
+// The marketing site serves the brand studio's web set as plain files, linked
+// with the studio's own head snippet (the .ico first, so non-retina tabs get
+// the hand-pixelled 16). It has no web manifest, so the manifest line is left out.
+const MARKETING_FAVICON_LINKS = [
+  '<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">',
+  '<link rel="icon" type="image/svg+xml" href="/favicon.svg">',
+  '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
+];
+// The studio's files, byte for byte. Never redrawn, resized or re-encoded here.
+const MARKETING_ICON_SHA256: Record<string, string> = {
+  "apps/marketing/public/favicon.ico":
+    "e9a26dc9e012d8eb2d58cc8a07283611ae578070855af680c60ff52f923a2a0e",
+  "apps/marketing/public/favicon.svg":
+    "c864fbefe0ca22c825e105e61d99b281c8486f8d962702f5085af16c711393a9",
+  "apps/marketing/public/apple-touch-icon.png":
+    "fd15a0e13e5a6309cc1971b935557e17081504f2989cf922912cd19c3f725176",
+};
 
 interface PngStats {
   width: number;
@@ -34,7 +49,7 @@ function paethPredictor(left: number, above: number, upperLeft: number): number 
   return aboveDistance <= upperLeftDistance ? above : upperLeft;
 }
 
-function inspectRgbaPng(bytes: Uint8Array): PngStats {
+function inspectPng(bytes: Uint8Array): PngStats {
   const buffer = Buffer.from(bytes);
   expect(Array.from(buffer.subarray(0, 8))).toEqual([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -43,7 +58,9 @@ function inspectRgbaPng(bytes: Uint8Array): PngStats {
   const width = buffer.readUInt32BE(16);
   const height = buffer.readUInt32BE(20);
   expect(buffer[24]).toBe(8);
-  expect(buffer[25]).toBe(6);
+  // Colour type 2 is RGB, 6 is RGBA. The goggles icons are opaque RGB tiles.
+  const colorType = buffer[25];
+  expect([2, 6]).toContain(colorType);
   expect(buffer[28]).toBe(0);
 
   const idatChunks: Buffer[] = [];
@@ -58,7 +75,7 @@ function inspectRgbaPng(bytes: Uint8Array): PngStats {
   }
 
   const inflated = inflateSync(Buffer.concat(idatChunks));
-  const bytesPerPixel = 4;
+  const bytesPerPixel = colorType === 6 ? 4 : 3;
   const stride = width * bytesPerPixel;
   const pixels = Buffer.alloc(stride * height);
   let inputOffset = 0;
@@ -93,8 +110,8 @@ function inspectRgbaPng(bytes: Uint8Array): PngStats {
   let transparentPixels = 0;
   let partialAlphaPixels = 0;
   let opaquePixels = 0;
-  for (let offset = 3; offset < pixels.length; offset += bytesPerPixel) {
-    const alpha = pixels[offset];
+  for (let offset = bytesPerPixel - 1; offset < pixels.length; offset += bytesPerPixel) {
+    const alpha = colorType === 6 ? pixels[offset] : 0xff;
     if (alpha === 0) transparentPixels += 1;
     else if (alpha === 0xff) opaquePixels += 1;
     else partialAlphaPixels += 1;
@@ -119,9 +136,14 @@ describe("favicon surfaces", () => {
       STATIC_FAVICON_LINK,
     );
 
-    expect((await readRepoFile("apps/marketing/src/layouts/Base.astro")).toString()).toContain(
-      MARKETING_FAVICON_LINK,
-    );
+    for (const path of [
+      "apps/marketing/src/layouts/Base.astro",
+      "apps/marketing/public/tui-annotate/index.html",
+    ]) {
+      const html = (await readRepoFile(path)).toString();
+      for (const link of MARKETING_FAVICON_LINKS) expect(html).toContain(link);
+      expect(html).not.toContain("/favicon.png");
+    }
   });
 
   test("the share portal emits its favicon from the shared application asset", async () => {
@@ -130,15 +152,15 @@ describe("favicon surfaces", () => {
     expect(portalConfig).toContain("source: FAVICON_PNG_BYTES");
   });
 
-  test("the shared application favicon is the selected production 64px asset", () => {
+  test("the shared application favicon is the studio's 192px goggles icon", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
+      "e7d047d1a462a92f14b0222856c1939f60edef4be2485576d32c88dfa2492e92",
     );
-    const stats = inspectRgbaPng(FAVICON_PNG_BYTES);
-    expect(stats).toMatchObject({ width: 64, height: 64 });
-    expect(stats.transparentPixels).toBeGreaterThan(0);
-    expect(stats.partialAlphaPixels).toBeGreaterThan(0);
-    expect(stats.opaquePixels).toBeGreaterThan(0);
+    const stats = inspectPng(FAVICON_PNG_BYTES);
+    expect(stats).toMatchObject({ width: 192, height: 192 });
+    expect(stats.transparentPixels).toBe(0);
+    expect(stats.partialAlphaPixels).toBe(0);
+    expect(stats.opaquePixels).toBe(192 * 192);
   });
 
   test("the optional classic style is the archival pre-Totman asset", () => {
@@ -150,15 +172,12 @@ describe("favicon surfaces", () => {
     );
   });
 
-  test("the marketing site ships the selected production 256px asset", async () => {
-    const favicon = await readRepoFile("apps/marketing/public/favicon.png");
-    expect(createHash("sha256").update(favicon).digest("hex")).toBe(
-      "4e99a26b076e421f654df83472c6186b62830d5db8fcd8e97d01947dffac28fd",
-    );
-    const stats = inspectRgbaPng(favicon);
-    expect(stats).toMatchObject({ width: 256, height: 256 });
-    expect(stats.transparentPixels).toBeGreaterThan(0);
-    expect(stats.partialAlphaPixels).toBeGreaterThan(0);
-    expect(stats.opaquePixels).toBeGreaterThan(0);
+  test("the marketing site ships the studio's web icon set unchanged", async () => {
+    for (const [path, sha256] of Object.entries(MARKETING_ICON_SHA256)) {
+      const bytes = await readRepoFile(path);
+      expect(createHash("sha256").update(bytes).digest("hex"), path).toBe(sha256);
+    }
+    const touch = inspectPng(await readRepoFile("apps/marketing/public/apple-touch-icon.png"));
+    expect(touch).toMatchObject({ width: 180, height: 180 });
   });
 });

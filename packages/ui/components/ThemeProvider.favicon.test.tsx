@@ -82,7 +82,7 @@ describe('ThemeProvider favicon synchronization', () => {
     expect(link).not.toBeNull();
     expect(link?.href).toBe(FAVICON_PNG_DATA_URL);
     expect(link?.type).toBe('image/png');
-    expect(link?.getAttribute('sizes')).toBe('64x64');
+    expect(link?.getAttribute('sizes')).toBe('192x192');
 
     await act(async () => {
       configStore.set('faviconStyle', 'classic');
@@ -100,7 +100,7 @@ describe('ThemeProvider favicon synchronization', () => {
     const revertedLink = getFaviconLink();
     expect(revertedLink?.href).toBe(FAVICON_PNG_DATA_URL);
     expect(revertedLink?.type).toBe('image/png');
-    expect(revertedLink?.getAttribute('sizes')).toBe('64x64');
+    expect(revertedLink?.getAttribute('sizes')).toBe('192x192');
   });
 
   test.skipIf(!hasDom)('initializes with classic style when stored in backend', async () => {
