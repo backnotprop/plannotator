@@ -521,7 +521,7 @@ describe("a reply to a Codex thread", () => {
 describe("a Tidy through the Codex wake", () => {
   const QUESTION = ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::";
   const fromShell = (client: Client, project: string, args: Record<string, unknown>) =>
-    client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex", ...args } }) as Promise<{ content: { text: string }[]; structuredContent: { message_id: string } }>;
+    client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex", ...args } }) as Promise<{ content: { text: string }[]; structuredContent: { message_id: string; thread_id: string } }>;
 
   /** A question old enough to Tidy, then the Tidy; `file` holds what the fake `codex` reads from its `flag` file. */
   async function tidied(options: { codex?: boolean; env?: (root: string) => Record<string, string>; file?: string; now?: () => number; queueTimeoutMs?: number; trigger?: string } = {}) {
@@ -609,7 +609,9 @@ describe("a Tidy through the Codex wake", () => {
     await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
     await w.server.codexWake.sweep();
     expect(w.server.codexWake.status(THREAD)).toBe("dead");
-    const wakesOf = async (result: { structuredContent: { message_id: string } }) => (await thread(w.server, sent.thread_id)).messages.find((m) => m.id === result.structuredContent.message_id)!.wakes;
+    // A shell's send names no thread, so each starts its own: read it there.
+    const wakesOf = async (result: { structuredContent: { message_id: string; thread_id: string } }) =>
+      (await thread(w.server, result.structuredContent.thread_id)).messages.find((m) => m.id === result.structuredContent.message_id)!.wakes;
 
     const script = await fromShell(w.client, w.project, { body: "From a script." });
     expect(script.content[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
