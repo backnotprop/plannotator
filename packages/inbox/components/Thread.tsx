@@ -5903,12 +5903,27 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
   const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
-  // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
-  // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
+  // The thread's full screen: the control pressed goes away or hides (the list's edge, ‹ Inbox), so focus follows to
+  // ‹ Inbox, or back to the thread, when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
   // frame, so focus is checked again until the frame ends, and falls back to the stacked ‹ Inbox, then the subject.
   const aloneWas = useRef(threadAlone);
   const aloneFocus = useRef(false);
+  const lastKey = useRef(false);
+  useEffect(() => {
+    const key = () => {
+      lastKey.current = true;
+    };
+    const press = () => {
+      lastKey.current = false;
+    };
+    window.addEventListener('keydown', key, true);
+    window.addEventListener('pointerdown', press, true);
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      window.removeEventListener('pointerdown', press, true);
+    };
+  }, []);
   useLayoutEffect(() => {
     if (aloneWas.current !== threadAlone) {
       aloneWas.current = threadAlone;
@@ -5919,13 +5934,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     if (!aloneFocus.current) return;
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    // The list's edge hides the list (a click, Enter): the list stays drawn, hidden, so focus left on it is lost too.
+    const lost = !active || active === document.body || !active.isConnected || (threadAlone && active.closest('.ib-listcol') !== null);
+    if (!lost) return;
+    // After a pointer press (the list's edge, ‹ Inbox) the control focused draws no ring (nor its tooltip), the browser's
+    // own rule for a click; after a key it does.
+    const quiet = !lastKey.current;
     const section = sectionRef.current;
-    const order = threadAlone ? ['[data-full-back]'] : ['[data-full-in]', '[data-stack-back]', 'h2.ib-subject'];
+    const order = threadAlone ? ['[data-full-back]'] : ['[data-stack-back]', 'h2.ib-subject'];
     for (const selector of order) {
       const el = section?.querySelector<HTMLElement>(selector);
       if (el) {
-        el.focus({ preventScroll: true });
+        el.focus(quiet ? { preventScroll: true, focusVisible: false } : { preventScroll: true });
         return;
       }
     }
@@ -6177,16 +6197,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
-            {!threadAlone && !stacked && !backBesideFile && onFull && (
-              <>
-                <Tip content={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'}>
-                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'} data-full-in="">
-                    <Icon name="panelsHide" size={17} />
-                  </button>
-                </Tip>
-                <span className="ib-vsep" aria-hidden="true" />
-              </>
-            )}
+            {/* Hiding the list is the list column's edge (click it, drag to resize), not a button here. */}
             {/* A file beside the thread hides the list: the same way back leads; it closes the file. */}
             {backBesideFile && (
               <>

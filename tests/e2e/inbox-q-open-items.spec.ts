@@ -494,8 +494,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
       await press('Escape');
       await page.waitForTimeout(500);
 
-      // 9b. A full-screen thread: the Full screen button (keys), then Q.
-      const fullIn = page.locator('[data-full-in]');
+      // 9b. A full-screen thread: the list's edge (Enter on it), then Q.
+      const fullIn = page.locator('.ib-listcol [role="separator"][aria-label="List width"]');
       if (await fullIn.count()) {
         await fullIn.focus();
         await press('Enter');
@@ -508,7 +508,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
         await shot('full-screen-thread-popup');
         await press('Escape');
       } else {
-        test.info().annotations.push({ type: 'full-screen thread', description: 'no [data-full-in] button at this width' });
+        test.info().annotations.push({ type: 'full-screen thread', description: 'no list edge at this width' });
       }
     } finally {
       await finish(title);

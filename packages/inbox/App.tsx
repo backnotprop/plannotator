@@ -3078,7 +3078,7 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
-  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide, without
+  // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
   // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
   // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
   // as full screen (`full` below), so widening it again returns to full screen.
@@ -6266,6 +6266,7 @@ function Inbox() {
       state={pulls}
       stackId={route.stack ?? null}
       threadId={threadId}
+      onHide={threadId && !stack.thread ? () => setThreadFull(true) : undefined}
       project={project}
       filter={view}
       projects={projects}
@@ -6714,6 +6715,7 @@ function Inbox() {
           onHideAway={setHideAway}
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
           narrow={(route.thread !== null || panelView) && !stack.thread}
+          onHide={route.thread !== null && !stack.thread ? () => setThreadFull(true) : undefined}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
           selectedThreadId={route.thread}
