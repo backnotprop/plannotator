@@ -258,6 +258,15 @@ describe.if(hasDom)('CodeFileView comment folds', () => {
     expect(chosen).toEqual([null]);
   });
 
+  test('an edit put back opens its comment\'s fold, its edit box holding those words', async () => {
+    const onEditAnnotation = () => {};
+    const redraw = await view({ annotations: [A, RANGE], commentMarkers: 'bubble', onEditAnnotation });
+    await redraw({ annotations: [A, RANGE], commentMarkers: 'bubble', onEditAnnotation, reopenEdit: { id: 'r', text: 'Retry only the 409.' } });
+    expect(isOpen(52)).toBe(true);
+    expect(isOpen(42)).toBe(false);
+    expect(reveal(52).querySelector('textarea')?.value).toBe('Retry only the 409.');
+  });
+
   test('a view gone before its fold closed never lets go of the comment afterwards', async () => {
     const chosen: (string | null)[] = [];
     await view({ annotations: [RANGE], commentMarkers: 'bubble', selectedAnnotationId: 'r', onSelectAnnotation: (id) => chosen.push(id) });
