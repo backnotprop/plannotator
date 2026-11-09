@@ -4477,9 +4477,8 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .pn-inbox .ib-cp-conflict .ib-lnk { margin-top: 0; }
 
 /* The footer: attach, the saved line, the status line, Save draft and Send. */
-.ib-cp-foot, .ib-cp-ask { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px 10px 10px; border-top: 1px solid var(--ib-line); flex: none; flex-wrap: wrap; }
-.ib-cp-foot .ib-sp, .ib-cp-ask .ib-sp { flex: 1; }
-.ib-cp-ask { background: var(--ib-band); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; padding-left: 16px; border-radius: 0 0 10px 10px; }
+.ib-cp-foot { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px 10px 10px; border-top: 1px solid var(--ib-line); flex: none; flex-wrap: wrap; }
+.ib-cp-foot .ib-sp { flex: 1; }
 /* The reply box's paperclip (approval "inbox-reply-attach"): first in the box's toolbar, left of the chips. On a phone
    36 px with a 44 px tap area (the ::after), so phone and desktop put it in the same place. */
 .pn-inbox .ib-rclip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 26px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; position: relative; }
@@ -4641,8 +4640,6 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   :root[data-ib-keyboard] .ib-cp-body { padding-top: 8px; padding-bottom: 6px; overscroll-behavior: contain; }
   :root[data-ib-keyboard] .pn-inbox .ib-cp-field :is(.ib-rtext, .ib-rmirror) { min-height: 72px; }
   :root[data-ib-keyboard] :is(.ib-cp-thread, .ib-cp-error) { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-  .ib-cp-ask { flex-wrap: wrap; border-radius: 0; }
-  .ib-cp-ask > span:first-child { flex-basis: 100%; }
   .ib-cp-picker[data-phone] { position: fixed; inset: 0; top: 0; left: 0; width: 100%; max-height: none; height: var(--ib-vvh, 100%); border-radius: 0; border: 0; box-shadow: none; background: var(--card); padding-top: env(safe-area-inset-top); z-index: 60; }
   .ib-cp-picker[data-phone] .ib-cp-pickhead { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); font-weight: 650; }
   .pn-inbox .ib-cp-back { display: inline-flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border: 0; background: none; color: var(--primary); font-size: var(--ib-fs-16-in, 16px); }

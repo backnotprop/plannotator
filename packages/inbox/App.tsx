@@ -2847,18 +2847,21 @@ function Inbox() {
     storage.setItem(COMPOSE_LAST_COOKIE, session);
   };
   const composeSaved = (draft: DraftView) => {
+    // What opened compose: a reopened draft hands focus back to it when it closes again.
+    const opener = composeOpener.current;
     closeCompose();
     setDrafts((current) => [draft, ...(current ?? []).filter((d) => d.id !== draft.id)]);
     void refreshDrafts();
     showToast({
       icon: 'check',
       lead: 'Draft saved',
-      // Drafts (the action) says where it waits; one line on a phone too (design record "inbox-toasts-break-fixes").
+      // Closing compose keeps what was written (approval "inbox-compose-escape-keeps"): Reopen brings it back as it
+      // was. One line on a phone too (design record "inbox-toasts-break-fixes").
       detail: 'It never sends itself',
       speech: 'Draft saved. It waits under Drafts and never sends itself.',
-      action: { label: 'Drafts', onPress: () => {
+      action: { label: 'Reopen', onPress: () => {
         dismissToast();
-        go({ page: 'drafts', project: null, thread: null });
+        openCompose({ draft }, opener?.isConnected ? opener : null);
       } },
     });
   };
