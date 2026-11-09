@@ -160,14 +160,14 @@ async function settle() {
   }
 }
 
-async function render(on: InboxThread = thread) {
+async function render(on: InboxThread = thread, review: InboxMessageWire = message) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={message} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={on} message={review} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
@@ -226,6 +226,33 @@ test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): 
   };
   expect(card(true)).toContain('Waiting on you');
   expect(card(false)).not.toContain('Waiting on you');
+});
+
+test.skipIf(!hasDom)('a walkthrough (code as it is) reads with no Approve or Request changes and no Split, and its card has no verdict or +/- counts', async () => {
+  const walk = { ...message, guide: { ...message.guide!, additions: 0, deletions: 0, walkthrough: true as const } } as InboxMessageWire;
+  await render({ ...thread, messages: [walk] }, walk);
+  expect(document.querySelector('[data-review-message]')?.getAttribute('aria-label')).toBe('Walkthrough');
+  expect(!!document.querySelector('[data-review-decision]')).toBe(false);
+  expect(!!document.querySelector('[data-decision-primary]')).toBe(false);
+  // Nothing is marked as changed, so Split would draw the same code twice: the bar keeps its other controls only.
+  const controls = document.querySelector<HTMLElement>('[data-review-message] [data-diff-controls]')!;
+  expect(!!controls).toBe(true);
+  expect(!!controls.querySelector('[data-diff-layout-toggle]')).toBe(false);
+  expect(!!controls.querySelector('[data-diff-display-options]')).toBe(true);
+  expect(posted).toEqual([]);
+  act(() => root?.unmount());
+  host?.remove();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<ReviewCard guide={walk.guide!} outcome={null} verdict={false} onOpen={() => {}} />);
+  });
+  const words = host!.textContent ?? '';
+  expect(words).toContain('Walkthrough');
+  expect(words).toContain('Open walkthrough');
+  expect(words).not.toContain('Waiting on you');
+  expect(words).not.toContain('+0');
 });
 
 test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while its agent path stays verdict-free (no reply, no choice)", async () => {

@@ -186,7 +186,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const board = shape ? boardIn : null;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
-  const verdict = isReview && !thread.pull_theirs;
+  // A walkthrough (approval "code-review-launch-build" item 6) is code as it is: nothing to approve, no counts, no Split.
+  const walkthrough = !!message.guide?.walkthrough;
+  const verdict = isReview && !thread.pull_theirs && !walkthrough;
+  // Nor does a walkthrough take ticks (the owner, on the walkthrough's pictures): no chapter "Reviewed", no file
+  // "Viewed", and so no "N of M" line in the chapter menu. A review keeps all three.
+  const viewedTicks = isReview && !walkthrough;
   // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
   // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
@@ -778,12 +783,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     [viewed, message.id, setSaveError],
   );
   // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
-  const viewedProp = useMemo(() => (readOnly || !isReview ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, isReview, viewedSet, toggleViewed]);
+  const viewedProp = useMemo(() => (readOnly || !viewedTicks ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedTicks, viewedSet, toggleViewed]);
   // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
-  const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
+  const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: !walkthrough && (reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false) }));
   const jumpFiles = groupByFileKind(files, (file) => file.path)
     .flatMap((group) => group.items)
-    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: isReview && viewedSet.has(file.path) }));
+    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedTicks && viewedSet.has(file.path) }));
   const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
@@ -938,7 +943,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     <section
       ref={paneRef}
       className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}${showTree ? ' ib-rv-tree' : ''}${filesSheet ? ' ib-files-open' : ''}`}
-      aria-label="Review"
+      aria-label={walkthrough ? 'Walkthrough' : 'Review'}
       data-review-message={message.id}
       data-review-mode={mode}
       {...(narrow && narrowed ? { 'data-review-narrowed': '' } : {})}
@@ -953,7 +958,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         {!phone && (
           <span className="ib-rv-nav" data-review-nav="">
             {railModes}
-            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} viewedTicks={isReview} />}
+            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} counts={!walkthrough} viewedTicks={viewedTicks} progress={!walkthrough} />}
           </span>
         )}
         {/* A phone's bar is one row: the place, and in its menu the title and the switch that had rows of their own. */}
@@ -965,7 +970,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             current={jumpAt}
             onChapter={toChapter}
             onFile={toFile}
-            viewedTicks={isReview}
+            counts={!walkthrough}
+            viewedTicks={viewedTicks}
+            progress={!walkthrough}
             head={
               <>
                 <div className="ib-rj-head">
@@ -1016,7 +1023,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           </span>
         )}
         <span className="ib-sp" />
-        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} layout={!walkthrough} />}
         {threadBoard && <ShapePebbleButton shape={threadBoard} open={!!board} onToggle={() => onBoard(board ? null : threadBoard.id)} />}
         {phone && showTree && tree && (
           <button
@@ -1233,6 +1240,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
+                chapterTicks={!walkthrough}
                 comments={readerComments}
                 mode={mode}
                 reveal={reveal}

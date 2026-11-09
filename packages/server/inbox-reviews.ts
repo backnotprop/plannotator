@@ -73,6 +73,11 @@ export function inboxReviewThreadOf(
       answered = null;
       continue;
     }
+    // A walkthrough is a conversation: the agent's answer brings it back to the person.
+    if (latestReview?.guide?.walkthrough && message.author.kind === "agent") {
+      answered = null;
+      continue;
+    }
     if (!latestReview || message.author.kind !== "person") continue;
     const mark = message.review_verdict;
     // A verdict on an earlier review card answers that card, not the newest one.
@@ -96,6 +101,7 @@ export function inboxReviewThreadOf(
     deletions: guide.deletions,
     agent: author.kind === "agent" ? { host: author.host, session: author.session, name: author.name } : null,
     source: guide.source ?? sourceOf(latestReview),
+    ...(guide.walkthrough ? { walkthrough: true as const } : {}),
     verdict,
     answered,
     reviewed_at: latestReview.created_at,

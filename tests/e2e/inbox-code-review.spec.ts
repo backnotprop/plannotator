@@ -295,8 +295,10 @@ test('on: the "/" list offers /review-curate as Plannotator\'s, and a reply that
   await box.pressSequentially('/review-', { delay: 30 });
   const menu = page.locator('[data-skill-menu]');
   await expect(menu).toBeVisible();
-  await expect(plannotatorOptions(page)).toHaveCount(1);
+  // /review-curate first, then /review-walkthrough; /review-recheck waits for a review in this thread.
+  await expect(plannotatorOptions(page)).toHaveCount(2);
   await expect(menu.getByRole('option').first()).toContainText('review-curate');
+  await expect(plannotatorOptions(page).nth(1)).toContainText('review-walkthrough');
   await expect(menu).not.toContainText('review-recheck');
   await shot(page, '2-slash-list');
   await page.keyboard.press('ArrowDown');
@@ -408,8 +410,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await box.click();
   await box.pressSequentially('/review-', { delay: 20 });
   const menu = page.locator('[data-skill-menu]');
-  await expect(plannotatorOptions(page)).toHaveCount(2);
-  await expect(menu).toContainText('review-recheck');
+  await expect(plannotatorOptions(page)).toHaveCount(3);
+  await expect(plannotatorOptions(page).nth(2)).toContainText('review-recheck');
   await shot(page, '7-slash-list-recheck');
   await page.keyboard.press('Escape');
   await box.fill('');

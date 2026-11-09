@@ -8979,6 +8979,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-cp-rvpick :is(b, .ib-cp-tod) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrow, the title keeps more of its room than the repository before it. */
 .ib-cp-rvpick .ib-cp-tod { flex-shrink: 3; max-width: 45%; }
+.ib-rv-nocode { margin: 0; padding: 20px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-rvnum { flex: none; color: var(--muted-foreground); }
 .ib-cp-rvread { padding: 2px 10px 8px; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-rvread p { margin: 0; color: var(--muted-foreground); }

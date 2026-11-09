@@ -2049,6 +2049,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const one = thread.messages.length < 2;
   // The thread's name as the list shows it: nothing when unnamed or when the subject already starts with it.
   const nameChip = threadChipName(thread.thread_name, thread.subject ?? '(no subject)');
+  // The bar's name: in Reviews, the review's title once it landed, the name its row and heading show (`ReviewView.name`).
+  const barName = reviewView?.name ?? nameChip;
   // The agent sessions this thread involves (approval "inbox-tag-agents"): overlapping marks in the head.
   const participants = useMemo(() => threadParticipants(thread), [thread]);
   const lookRef = useRef<{ threadId: string; seq: number | null } | null>(null);
@@ -6111,20 +6113,20 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <>
             {markReadButton}
             {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} openRequest={snoozeRequest} />}
-            {one && !artifactsOn && !nameChip ? (
+            {one && !artifactsOn && !barName ? (
               <span className="ib-sp" />
             ) : (
-              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`), always; with no name,
+              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`; in Reviews, `barName`), always; with no name,
               // the subject once the body's heading has scrolled away, so its words never show twice; always over the
               // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
               // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut. The box takes the
               // bar's free room, so the tooltip hangs on the words inside it (`.ib-phsubj-t`, as wide as they are, cut
               // with "…" at the box's edge): it opens under the title, not centred on the empty room after a short one.
-              <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+              <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={barName ? '' : undefined} data-on={barName || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                <Tip content={thread.subject ?? '(no subject)'} cut={!barName}>
                   <span className="ib-phsubj-t" data-header-title="">
                     <HeadMark thread={thread} where="bar" />
-                    {nameChip ?? thread.subject ?? '(no subject)'}
+                    {barName ?? thread.subject ?? '(no subject)'}
                   </span>
                 </Tip>
               </span>
@@ -6772,7 +6774,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
-                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}
@@ -6908,7 +6910,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
-        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">Curating the review…</p>}
+        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         {showNew && !phone && newPill}

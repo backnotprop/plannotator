@@ -164,7 +164,7 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
   /** A session's long poll, as an agent's connection makes it: it is live for a while after. */
   const poll = (session: string) =>
     fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` }, body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false }) });
-  return { project, dataDir, base, forge: f, posts, poll, server, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
+  return { client, project, dataDir, base, forge: f, posts, poll, server, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
 }
 
 const rowsOf = (answer: InboxReviewsAnswer, threadId: string): InboxReviewRow[] => answer.rows.filter((row) => row.thread_id === threadId);
@@ -840,3 +840,97 @@ function snapshotOf(source: Record<string, unknown>, review: Record<string, unkn
     source,
   };
 }
+
+describe("a walkthrough", () => {
+  const guide = (file = "src/retry.ts", lines: unknown = "2-3") => ({ title: "How retries work", intent: "Follow one failed charge.", sections: [{ title: "The loop", overview: "It waits, then tries again.", diffs: [{ file, lines, summary: "The wait." }] }] });
+  const source = (w: Awaited<ReturnType<typeof world>>, text = "one\ntwo\nthree\nfour\n") => {
+    mkdirSync(join(w.project, "src"), { recursive: true });
+    writeFileSync(join(w.project, "src/retry.ts"), text);
+  };
+  const guideOf = (w: Awaited<ReturnType<typeof world>>, id: string) => w.server.store.message(id)!.guide!;
+  /** A refusal comes back as the tool's error text. */
+  const refusal = async (w: Awaited<ReturnType<typeof world>>, args: Record<string, unknown>) => {
+    const answer = (await w.client.callTool({ name: "submit_guide", arguments: { project_path: w.project, agent_session: "ses_retries", agent_name: "Claude Code", agent_host: "claude-code", ...args } })) as { isError?: boolean; content: { text: string }[] };
+    expect(answer.isError).toBe(true);
+    return answer.content[0]!.text;
+  };
+
+  test("the agent names lines; the Inbox reads them when sent and keeps them, whatever the file does after", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    const ref = guideOf(w, sent.message_id);
+    expect(ref).toMatchObject({ walkthrough: true, review: true, additions: 0, deletions: 0 });
+    source(w, "changed\n");
+    const stored = JSON.parse(readFileSync(inboxBlobPath(w.server.store.dir, ref.sha256), "utf8")) as { review: { rawPatch: string } };
+    expect(stored.review.rawPatch).toContain(" two\n three\n");
+    expect(stored.review.rawPatch).not.toContain("changed");
+  });
+
+  test("its row asks for no verdict: On you, and it's the thread's, by the guide's word", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ reviewed: true, move: "on_you", reason: "review_ready", review: { walkthrough: true } }]);
+  });
+
+  test("the person's reply leaves On you, and the agent's answer, a plain message, brings it back", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    await w.say(sent.message_id, "00000000-0000-4000-8000-000000000012", "Where does the 200 come from?");
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "agents", reason: "feedback_sent" }]);
+    await w.call("send_message", { reply_to: sent.message_id, body: "From charge.ts, line 4." });
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+  });
+
+  test("the agent's own patch, or an empty one, can't break it: what it named is what shows", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    for (const [index, patch] of ["", "diff --git a/other.ts b/other.ts\n--- a/other.ts\n+++ b/other.ts\n@@ -1 +1 @@\n-a\n+b\n", "not a diff"].entries()) {
+      const sent = await w.call("submit_guide", { guide: guide(), patch, walkthrough: true, thread: `retries-${index}` });
+      expect(guideOf(w, sent.message_id)).toMatchObject({ walkthrough: true, additions: 0, deletions: 0, files: 1 });
+    }
+  });
+
+  test("in a thread the box started as one, every guide is a walkthrough, flag or no flag", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    await w.poll("ses-live");
+    const started = await w.post("/api/inbox/messages", { to: { host: "claude-code", session: "ses-live" }, body: "Please walk me through this.", idempotency_key: "00000000-0000-4000-8000-000000000011", review: { kind: "walkthrough" } });
+    expect(started.status).toBe(200);
+    const { thread_id, message } = (await started.json()) as { thread_id: string; message: { id: string } };
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ reason: "curating", started: { kind: "walkthrough" } }]);
+    const sent = await w.call("submit_guide", { guide: guide(), patch: "", reply_to: message.id });
+    expect(sent.thread_id).toBe(thread_id);
+    expect(guideOf(w, sent.message_id).walkthrough).toBe(true);
+    expect(createInboxPullLinks(w.dataDir).started().get(thread_id)?.kind).toBe("walkthrough");
+  });
+
+  test("a refusal names the file and nothing lands", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    expect(await refusal(w, { guide: guide("src/gone.ts"), walkthrough: true, thread: "retries" })).toContain("src/gone.ts isn't a file in the project.");
+    expect((await w.reviews()).rows.filter((row) => row.reviewed)).toEqual([]);
+  });
+
+  test("Code review off: not a field, and refused rather than sent", async () => {
+    const w = await world();
+    source(w);
+    expect((await w.client.listTools()).tools.find((tool) => tool.name === "submit_guide")!.inputSchema.properties).not.toHaveProperty("walkthrough");
+    await refusal(w, { guide: guide(), walkthrough: true, thread: "retries" });
+  });
+
+  test("a guide without the flag, in another thread, is still a review of a diff", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const sent = await w.sendReview("retries", "r1");
+    expect(guideOf(w, sent.message_id).walkthrough).toBeUndefined();
+  });
+});

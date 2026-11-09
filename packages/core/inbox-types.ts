@@ -1220,6 +1220,11 @@ export interface InboxGuideRef {
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
   /**
+   * A walkthrough: the code as it is, with nothing changed (submit_guide `walkthrough`, or any guide in a thread the
+   * New review box started as one). Always with `review`; it takes no verdict, and its patch is context lines only.
+   */
+  walkthrough?: true;
+  /**
    * A review's source (Reviews, approval "inbox-reviews-page"): the
    * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
    * git ref), each one line. Only with `review`; absent on reviews sent
@@ -1739,6 +1744,8 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
+  guide_walkthrough?: boolean;
   /**
    * On a thread the person started (`started_by_person`): the agent session
    * it is addressed to now (the root's `to`, which "Send to another session"

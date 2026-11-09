@@ -103,6 +103,8 @@ export const GuideDiff: FC<
     comments?: GuideDiffComments;
     /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
     diffStyleOverride?: 'split' | 'unified';
+    /** A walkthrough's code isn't a change: no "N unmodified lines" between its ranges. */
+    plainSeparators?: boolean;
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
@@ -117,7 +119,7 @@ export const GuideDiff: FC<
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -142,6 +144,7 @@ export const GuideDiff: FC<
       disableLineNumbers={!showLineNumbers}
       disableBackground={!showBackground}
       expandUnchanged={expandUnchanged}
+      hunkSeparators={plainSeparators ? 'simple' : 'line-info'}
       fontFamily={fontFamily || undefined}
       fontSize={fontSize || undefined}
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
@@ -170,12 +173,14 @@ function newCommentId(): string {
  * A review's "All files" (code review in the Inbox): every changed file in the patch's order, under one heading, so
  * the same chain draws the same diffs and comments without the agent's chapters.
  */
-function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }[], threadHeading: boolean): CodeGuideData {
+function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string; additions: number; deletions: number }[], threadHeading: boolean): CodeGuideData {
+  // A walkthrough's files are code as it is, not changes.
+  const asItIs = files.length > 0 && files.every((file) => file.additions === 0 && file.deletions === 0);
   return {
     title: snapshot.guide.title,
     intent: '',
     // Under a top bar whose switch says All files: no heading of its own (the pane's CSS draws one column, no card).
-    sections: [{ title: threadHeading ? '' : 'Every changed file', overview: threadHeading ? '' : 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
+    sections: [{ title: threadHeading ? '' : asItIs ? 'Every file' : 'Every changed file', overview: threadHeading ? '' : asItIs ? 'In the order they were sent.' : 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
     unplacedFiles: [],
     reviewed: [false],
   };
@@ -197,6 +202,7 @@ function Reader({
   snapshot,
   reviewed,
   onReviewedChange,
+  chapterTicks = true,
   comments,
   mode = 'walkthrough',
   reveal = null,
@@ -397,6 +403,8 @@ function Reader({
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing marked as changed (a walkthrough): Split would draw the same code twice.
+  const asItIs = files.length > 0 && files.every((file) => file.additions === 0 && file.deletions === 0);
   // The pull request page's flat review, whose bar holds its actions, draws the tab as two marks.
   const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={!!controlsHost} /> : null), [controlsHost]);
 
@@ -445,6 +453,7 @@ function Reader({
     ({ file }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
       diffStyleOverride?: 'unified';
+      plainSeparators?: boolean;
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
@@ -462,7 +471,8 @@ function Reader({
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
       // A host's context notes: only a file that has one gets the seam (the others draw exactly as before).
       ...(contextNotes && renderContextNote && contextNotes.some((note) => note.filePath === file.path) ? { contextNotes, renderContextNote } : {}),
-      ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...((phone || asItIs) && { diffStyleOverride: 'unified' as const }),
+      ...(asItIs && { plainSeparators: true }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
@@ -483,7 +493,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -518,20 +528,22 @@ function Reader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone || hostDiffControls ? {} : { renderSectionTab }),
+      ...(phone || asItIs || hostDiffControls ? {} : { renderSectionTab }),
+      // A walkthrough's chapter can be words alone: nothing is missing, so it says that and not "out of date".
+      ...(asItIs && { renderSectionEmpty: () => <p className="ib-rv-nocode" data-section-no-code="">No code in this chapter.</p> }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
-      diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      diffStyle: phone || asItIs ? ('unified' as const) : savedDiffStyle,
       // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
       opensWholeFiles: !!fetchFileContent && !bare,
       // The PR page: files edge to edge, each box exactly its header and code.
       ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
+    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
@@ -544,6 +556,7 @@ function Reader({
         guide={guide}
         reviewed={ticks}
         onToggleReviewed={toggle}
+        showReviewed={chapterTicks}
         // All files under the thread's heading: the repository, branch and range alone (no agent's chapters to credit).
         engineLabel={threadHeading && mode === 'files' ? undefined : engineLabel(snapshot.generator?.engine, snapshot.generator?.model)}
         focusedFile={focusedFile}

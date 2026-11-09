@@ -1353,6 +1353,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
+        walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
         // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
         shapeOn: () => shapeOn(),
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
