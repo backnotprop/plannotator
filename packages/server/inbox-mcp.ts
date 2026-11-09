@@ -340,6 +340,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
    */
   shapeOn?: () => boolean;
+  /**
+   * Whether Chapter diagrams is on (Settings → Capabilities, config.json `inboxChapterDiagrams`, on unless false; read
+   * on every request). With Code review on and this off, get_guide_brief and submit_guide name no chapter diagram.
+   * Absent: on.
+   */
+  chapterDiagramsOn?: () => boolean;
 }
 
 

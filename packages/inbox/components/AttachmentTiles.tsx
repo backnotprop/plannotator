@@ -46,6 +46,20 @@ function sizeParts(attachment: InboxAttachmentState): { words: string; size: str
   return { words: inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), size: `, ${size}` };
 }
 
+/**
+ * A video's or a recording's line as whole parts, in the order a narrow tile
+ * keeps them: `keep` loses its first part before its last (the kind, then the
+ * length, never the comment count) and `drop` goes before any of `keep` does,
+ * its last part first (the size, then the frame). No part is ever cut.
+ */
+function timedParts(attachment: InboxAttachmentState, count: number): { keep: string[]; drop: string[] } {
+  const frame = inboxVideoMeta({ width: attachment.width, height: attachment.height });
+  return {
+    keep: [inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), inboxVideoMeta({ duration_ms: attachment.duration_ms }), count > 0 ? plural(count, 'comment') : ''].filter(Boolean),
+    drop: [frame, formatBytes(attachment.current?.size ?? attachment.size)].filter(Boolean),
+  };
+}
+
 export function sizeLine(attachment: InboxAttachmentState): string {
   const { words, size } = sizeParts(attachment);
   return `${words}${size}`;
@@ -214,7 +228,7 @@ export function AttachmentTiles({
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
-  /** The file open beside the thread: its tile says "Open beside" (`aria-current`); the thread does not scroll to it. */
+  /** The file open beside the thread: its tile is marked (`aria-current`, the highlight) and keeps its words; the thread does not scroll to it. */
   openId?: string | null;
   /** Where the tiles sit: at the foot of the message (with their heading and the image gallery), or in the header's band. */
   placement?: 'foot' | 'header';
@@ -251,8 +265,9 @@ export function AttachmentTiles({
           const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
           // A video or a recording: played, with comments at moments.
           const isVideo = isInboxTimedKind(attachment.kind);
-          // A video's (and a recording's) caption keeps one separator throughout: "WebM video · 81.8 KB · 2 comments".
+          // A video's (and a recording's) caption keeps one separator throughout: "WebM video · 0:12 · 2 comments · 81.8 KB".
           const counted = count > 0 ? (isVideo ? ` · ${plural(count, 'comment')}` : `, ${plural(count, 'annotation')}`) : '';
+          const timed = isVideo ? timedParts(attachment, count) : null;
           const detail = `${changed ?? sizeLine(attachment)}${counted}`;
           const detailLong = `${changedLong ?? sizeLine(attachment)}${counted}`;
           // The header's band shows the same tiles while the foot's are on the page: ids stay unique.
@@ -278,6 +293,20 @@ export function AttachmentTiles({
                     </span>
                   </span>
                 </Tip>
+              ) : timed ? (
+                // The count sits before the size, so a narrow tile drops whole parts from the ends and cuts none (inbox.css, .ib-kd-timed).
+                <span className="ib-kd ib-kd-split ib-kd-timed" id={detailId}>
+                  <span className="ib-kd-keep">
+                    {timed.keep.map((part, index) => (
+                      <span key={index}>{index < timed.keep.length - 1 ? `${part} · ` : part}</span>
+                    ))}
+                  </span>
+                  <span className="ib-kd-drop">
+                    {timed.drop.map((part, index) => (
+                      <span key={index}>{` · ${part}`}</span>
+                    ))}
+                  </span>
+                </span>
               ) : (
                 <span className="ib-kd ib-kd-split" id={detailId}>
                   <span className="ib-kd-w">{sizeParts(attachment).words}</span>
@@ -341,7 +370,7 @@ export function AttachmentTiles({
               className={`ib-att-t${isOpen ? ' ib-open-beside' : ''}`}
               key={attachment.id}
               onClick={() => onOpen(attachment)}
-              aria-label={isOpen ? `${attachment.name}, open beside the thread` : `${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
+              aria-label={`${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
               aria-current={isOpen ? 'true' : undefined}
               aria-describedby={detailId}
               aria-keyshortcuts={attachment.id === newestId ? newestKeys : undefined}
@@ -353,7 +382,7 @@ export function AttachmentTiles({
               {text}
               {attachment.id === newestId && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
               <span className="ib-open" aria-hidden="true">
-                {isOpen ? 'Open beside' : isVideo ? 'Play' : 'Open'}
+                {isVideo ? 'Play' : 'Open'}
               </span>
             </button>,
           );

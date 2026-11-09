@@ -62,8 +62,10 @@ export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If a chapter of the earlier re
  * Every review skill Plannotator knows, by name, as an agent reads it with Shape off or on. A chapter's diagram is
  * offered either way (Mermaid needs no Shape; approval "guide-chapter-diagrams"); with Shape off the curate line names
  * Mermaid only, and no skill asks for an overview drawing (approval "code-review-029-shape-off").
+ * `diagrams` false (Settings → Capabilities → Chapter diagrams off): the curate and recheck diagram lines are left
+ * out, with the blank line before each, and nothing takes their place.
  */
-function reviewSkillTexts(shape: boolean): Readonly<Record<string, InboxReviewSkill>> {
+function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<string, InboxReviewSkill>> {
   return {
     'review-curate': {
       name: 'review-curate',
@@ -74,8 +76,7 @@ function reviewSkillTexts(shape: boolean): Readonly<Record<string, InboxReviewSk
         'By default, sort every changed file into two groups. Needs the person: logic, security, data, money, public interfaces, and anything you are unsure of. Safe to skim: renames, formatting, generated and lock files, and tests that only mirror the new code. Write chapters for the first group only, at most 6, the one you are least sure of first, and put the second group in `unplacedFiles`. In the overview, list the second group in one line per kind, with why it is safe. Start the message body with how many of the changed files need them. For a full review, every changed file goes in a chapter and `unplacedFiles` stays empty.',
         '',
         `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
-        '',
-        shape ? INBOX_REVIEW_CURATE_DRAWING_LINE : INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE,
+        ...(diagrams ? ['', shape ? INBOX_REVIEW_CURATE_DRAWING_LINE : INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE] : []),
       ].join('\n'),
     },
     'review-walkthrough': {
@@ -98,8 +99,7 @@ function reviewSkillTexts(shape: boolean): Readonly<Record<string, InboxReviewSk
         '',
         'Give one chapter to each comment you acted on, titled with the comment\'s file and line. In the message body, list each comment you did not act on, with why.',
         '',
-        INBOX_REVIEW_RECHECK_DRAWING_LINE,
-        '',
+        ...(diagrams ? [INBOX_REVIEW_RECHECK_DRAWING_LINE, ''] : []),
         `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} If you changed nothing since that review, say so in one sentence instead.`,
       ].join('\n'),
     },
@@ -124,9 +124,25 @@ export const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE: Readonly<Record<string, InboxR
 /** The review skills the "/" list offers, in the list's order. One entry adds or removes a skill. */
 export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-walkthrough', 'review-recheck'];
 
-/** The offered skills, in order, as an agent reads them with Shape off (`{ shape: true }`: with Shape on). */
-export function inboxReviewSkills(options: { shape?: boolean } = {}): readonly InboxReviewSkill[] {
-  const texts = options.shape ? INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE : INBOX_REVIEW_SKILL_TEXTS;
+/** Every review skill with Chapter diagrams off (no diagram line), Shape off and on. */
+const INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false, false);
+const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true, false);
+
+/**
+ * The review skills' choices of text: Shape (`shape`, off unless true) and Chapter diagrams (`diagrams`, on unless
+ * false: Settings → Capabilities → Chapter diagrams, config.json `inboxChapterDiagrams`).
+ */
+export interface InboxReviewSkillOptions {
+  shape?: boolean;
+  diagrams?: boolean;
+}
+
+/** The offered skills, in order, as an agent reads them with Shape off (`{ shape: true }`: with Shape on; `{ diagrams: false }`: no diagram lines). */
+export function inboxReviewSkills(options: InboxReviewSkillOptions = {}): readonly InboxReviewSkill[] {
+  const diagrams = options.diagrams !== false;
+  const texts = options.shape
+    ? diagrams ? INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE : INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE_NO_DIAGRAMS
+    : diagrams ? INBOX_REVIEW_SKILL_TEXTS : INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS;
   return INBOX_REVIEW_SKILL_NAMES.map((name) => texts[name]!);
 }
 
@@ -136,8 +152,8 @@ export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = inboxReviewSkill
 /** The skill catalog's root for a built-in skill (the "/" list's right column: "Plannotator"). */
 export const INBOX_BUILTIN_SKILL_ROOT = 'plannotator';
 
-/** A built-in review skill by name, or undefined (offered skills only); its instructions as read with Shape off unless `shape`. */
-export function inboxReviewSkill(name: string, options: { shape?: boolean } = {}): InboxReviewSkill | undefined {
+/** A built-in review skill by name, or undefined (offered skills only); its instructions as read with Shape off unless `shape`, with diagram lines unless `diagrams` is false. */
+export function inboxReviewSkill(name: string, options: InboxReviewSkillOptions = {}): InboxReviewSkill | undefined {
   return inboxReviewSkills(options).find((skill) => skill.name === name);
 }
 
@@ -455,6 +471,8 @@ export const INBOX_REVIEW_NOTES_RULE =
 export const INBOX_GUIDE_FIELD_DESCRIPTION =
   'The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief\'s output_schema), as an object or its JSON.';
 export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRIPTION.replace('overview, diffs: [{ file, summary }]', 'overview, diagram?, diffs: [{ file, summary, notes? }]');
+/** The same with Chapter diagrams off (Settings → Capabilities): no `diagram?`, nothing in its place. */
+export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM = INBOX_GUIDE_FIELD_DESCRIPTION.replace('overview, diffs: [{ file, summary }]', 'overview, diffs: [{ file, summary, notes? }]');
 
 /**
  * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`, served only while

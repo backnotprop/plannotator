@@ -11,7 +11,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { isBareRemovalAsk, personGuardsRemovals, REMOVAL_ASK_TTL_MS, removalAskKey, RemovalAsks } from './skip-rm-prompts'
+import { isBareRemovalAsk, personGuardsRemovals, REMOVAL_ASK_TTL_MS, removalAskKey, removalAskParts, RemovalAsks } from './skip-rm-prompts'
 
 type Hook = ($: unknown, e: any, next: (e: unknown) => unknown) => unknown
 
@@ -46,7 +46,7 @@ afterAll(() => rmSync(TEMP, { recursive: true, force: true }))
 /** Files under TEMP are real (the plugin tests' registry and hooks); every other path is as before: only /bin/sh exists. */
 const inTemp = (path: string) => path.startsWith(`${TEMP}/`)
 
-function engine(options: { env?: Record<string, string>; settings?: unknown; settingsThrows?: boolean; ran?: string[] } = {}) {
+function engine(options: { env?: Record<string, string>; settings?: unknown; settingsThrows?: boolean; ran?: string[]; partVerdict?: (command: string) => unknown } = {}) {
   const env = new Map<string, string>(Object.entries({ HOME: '/home/me', PLANNOTATOR_DATA_DIR: '/data', ...options.env }))
   const store = new Map<string, unknown>()
   return {
@@ -82,7 +82,14 @@ function engine(options: { env?: Record<string, string>; settings?: unknown; set
       },
     },
     http: { fetch: async () => ({ status: 404, ok: false, text: '' }) },
-    tool: { register: async (spec: { name: string }) => ({ tool: `mcp__plugin_plannotator__${spec.name}` }) },
+    tool: {
+      register: async (spec: { name: string }) => ({ tool: `mcp__plugin_plannotator__${spec.name}` }),
+      // Claude Code's own verdict for one command, as `$.tool.check` gives it; none set: the query fails.
+      check: async (query: { tool: string; input: { command: string } }) => {
+        if (!options.partVerdict) throw new Error('no tool.check here')
+        return options.partVerdict(query.input.command)
+      },
+    },
     command: { list: async () => [], register: async () => undefined },
     ui: { log: () => undefined, status: () => undefined, toast: () => undefined },
     prompt: { submit: async () => undefined, suggest: async () => undefined },
@@ -107,10 +114,12 @@ async function removalPrompt(options: {
   env?: Record<string, string>
   skipCheck?: boolean
   ran?: string[]
+  /** What Claude Code answers for one part of a several-parts command, asked by itself. */
+  partVerdict?: (command: string) => unknown
 }) {
   const hooks = await freshHooks(`skip-rm-${fresh++}`)
   const env = { ...(options.variable === undefined ? {} : { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: options.variable }), ...options.env }
-  const $ = engine({ env, settings: options.settings, settingsThrows: options.settingsThrows, ran: options.ran })
+  const $ = engine({ env, settings: options.settings, settingsThrows: options.settingsThrows, ran: options.ran, partVerdict: options.partVerdict })
   for (const { hook } of hooks('session.start', {})) await hook($, { isInteractive: true }, async () => ({ cwd: '/w/proj' }))
   if (!options.skipCheck) {
     const check = { tool: 'Bash', input: { command: COMMAND }, tool_use_id: 'toolu_1', ...(options.agentId ? { agentId: options.agentId } : {}) }
@@ -194,17 +203,30 @@ describe("the person's own rules and hooks win", () => {
     }
   })
 
-  test('a PreToolUse hook that could run for Bash (the "ask before rm" hook that was overridden before)', async () => {
+  test('a PreToolUse hook on Bash that asked keeps its prompt (the "ask before rm" hook): its ask is on the verdict', async () => {
+    const settings = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'ask-before-rm.sh' }] }] } }
+    const verdict = { ...RM_ASK, hook: 'PreToolUse' }
+    expect(await removalPrompt({ variable: '1', settings, verdict })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', settings, verdict, agentId: 'agent-7' })).toEqual(BENEATH)
+  })
+
+  // Claude Code keeps the waiver on beside a PreToolUse hook (it turns it off for a PermissionRequest hook only),
+  // and the hook has run before the prompt whatever the mod answers: stepping aside for it kept every removal
+  // prompt for anyone with a Bash or catch-all PreToolUse hook (a logger, a formatter, a guard that only denies).
+  test('a PreToolUse hook that could run for Bash and did not ask leaves the waiver on, as in Claude Code itself', async () => {
     for (const matcher of ['Bash', '*', '', undefined, 'Bash|Monitor', 'Ba.*', '(unclosed']) {
-      const settings = { hooks: { PreToolUse: [{ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command: 'ask-before-rm.sh' }] }] } }
-      expect(await removalPrompt({ variable: '1', settings })).toEqual(BENEATH)
-      expect(await removalPrompt({ variable: '1', settings, agentId: 'agent-7' })).toEqual(BENEATH)
+      const settings = { hooks: { PreToolUse: [{ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command: 'log-commands.sh' }] }] } }
+      expect(await removalPrompt({ variable: '1', settings })).toEqual(ALLOWED)
+      expect(await removalPrompt({ variable: '1', settings, agentId: 'agent-7' })).toEqual(ALLOWED)
     }
   })
 
-  test('a PermissionRequest hook of their own on Bash', async () => {
-    const settings = { hooks: { PermissionRequest: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'notify' }] }] } }
-    expect(await removalPrompt({ variable: '1', settings })).toEqual(BENEATH)
+  test('a PermissionRequest hook of their own that could run for Bash', async () => {
+    for (const matcher of ['Bash', '*', '', undefined, 'Bash|Monitor', 'Ba.*', '(unclosed']) {
+      const settings = { hooks: { PermissionRequest: [{ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command: 'notify' }] }] } }
+      expect(await removalPrompt({ variable: '1', settings })).toEqual(BENEATH)
+      expect(await removalPrompt({ variable: '1', settings, agentId: 'agent-7' })).toEqual(BENEATH)
+    }
   })
 
   test("a hook or rule that asked on this call, a plugin's included (seen on the call's own verdict)", async () => {
@@ -216,7 +238,7 @@ describe("the person's own rules and hooks win", () => {
   test('settings the mod cannot read', async () => {
     expect(await removalPrompt({ variable: '1', settingsThrows: true })).toEqual(BENEATH)
     expect(personGuardsRemovals(null)).toBe(true)
-    expect(personGuardsRemovals({ hooks: { PreToolUse: 'not a list' } })).toBe(true)
+    expect(personGuardsRemovals({ hooks: { PermissionRequest: 'not a list' } })).toBe(true)
     expect(personGuardsRemovals({ permissions: { ask: [42] } })).toBe(true)
   })
 })
@@ -233,6 +255,69 @@ describe('the removal asks it recognizes', () => {
     ).toBe(true)
     expect(isBareRemovalAsk({ decision: 'ask', reason: 'The permission check for this command did not finish, so its safety checks did not run.' })).toBe(false)
     expect(isBareRemovalAsk({ decision: 'deny', reason: RM_ASK.reason })).toBe(false)
+  })
+})
+
+// Claude Code words the ask for a command of several parts by listing them, without the check that asked
+// (real 2.1.321 verdicts). With Plannotator installed every such removal still prompted: `cd /tmp/x && rm -rf
+// logs/*/*`, two removals in one command, a removal outside the working directories beside a mkdir.
+describe('a removal inside a command of several parts', () => {
+  const DANGEROUS = (target: string) => ({ decision: 'ask', reason: `Dangerous rm operation detected: '${target}'\n\nThis command's glob pattern traverses directories that cannot be statically enumerated.` })
+  const parts = (...list: string[]) => ({ decision: 'ask', reason: `This Bash command contains multiple operations. The following ${list.length === 1 ? 'part requires' : 'parts require'} approval: ${list.join(', ')}` })
+  const CD_RM = parts('cd /tmp/scratch', 'rm -rf build/*/*')
+  /** Claude Code's verdict for each part by itself, in bypass mode: the removal check's ask, else allow. */
+  const perPart = (command: string) => (/\*\/\*/.test(command) ? DANGEROUS(command) : { decision: 'allow' })
+
+  test('is answered with allow when each part, asked by itself, is allowed or a removal-check ask', async () => {
+    for (const verdict of [CD_RM, parts('mkdir -p /tmp/s/a/b', 'rm -rf /tmp/s/*/*'), parts('rm -rf t/logs/a/*', 'rm -rf t/logs/*/*'), parts('ls /tmp/s', 'head -3; rm -rf /tmp/s/*/* || true')]) {
+      expect(await removalPrompt({ variable: '1', verdict, partVerdict: perPart })).toEqual(ALLOWED)
+      expect(await removalPrompt({ variable: '1', verdict, partVerdict: perPart, agentId: 'agent-7' })).toEqual(ALLOWED)
+    }
+    // A `cd` before a relative removal: each part is allowed by itself, and only the removal check reads them together.
+    expect(await removalPrompt({ variable: '1', verdict: parts('cd /tmp/scratch', 'rm -rf build/*'), partVerdict: () => ({ decision: 'allow' }) })).toEqual(ALLOWED)
+  })
+
+  test('keeps its prompt when a part asks for any other reason, or cannot be checked', async () => {
+    const other = (command: string) => (command.startsWith('cd') ? { decision: 'ask', reason: 'The permission check for this command did not finish, so its safety checks did not run.' } : perPart(command))
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: other })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: (command) => ({ ...perPart(command), ...(command.startsWith('rm') ? { rule: 'Bash(rm *)' } : {}) }) })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: () => ({ decision: 'deny', reason: 'no' }) })).toEqual(BENEATH)
+    expect(
+      await removalPrompt({
+        variable: '1',
+        verdict: CD_RM,
+        partVerdict: () => {
+          throw new Error('tool.check failed')
+        },
+      }),
+    ).toEqual(BENEATH)
+    // An engine with no `$.tool.check`.
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM })).toEqual(BENEATH)
+  })
+
+  test('keeps its prompt when no part runs rm or rmdir, or a rule, hook, setting or plugin stands on the verdict', async () => {
+    const allowAll = () => ({ decision: 'allow' })
+    expect(await removalPrompt({ variable: '1', verdict: parts('cd /tmp/scratch', 'git clean -fdx'), partVerdict: allowAll })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', verdict: parts('echo rm', 'confirm-rm.sh'), partVerdict: allowAll })).toEqual(BENEATH)
+    for (const extra of [{ hook: 'PreToolUse' }, { rule: 'Bash(rm *)' }, { plugin: 'safety-net' }, { setting: 'permissions.blockReadsOutsideWorkingDirectories' }]) {
+      expect(await removalPrompt({ variable: '1', verdict: { ...CD_RM, ...extra }, partVerdict: perPart })).toEqual(BENEATH)
+    }
+    expect(removalAskParts({ decision: 'ask', reason: 'This Bash command contains multiple operations that require approval' })).toBeNull()
+    expect(removalAskParts({ decision: 'deny', reason: CD_RM.reason })).toBeNull()
+  })
+
+  test('changes nothing without the variable, outside bypass mode, or beside a rule or a PermissionRequest hook', async () => {
+    let asked = 0
+    const counting = (command: string) => {
+      asked++
+      return perPart(command)
+    }
+    expect(await removalPrompt({ verdict: CD_RM, partVerdict: counting })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', mode: 'default', verdict: CD_RM, partVerdict: counting })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: counting, settings: { permissions: { ask: ['Bash(rm *)'] } } })).toEqual(BENEATH)
+    expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: counting, settings: { hooks: { PermissionRequest: [{ hooks: [{ type: 'command', command: 'notify' }] }] } } })).toEqual(BENEATH)
+    // Claude Code is not even asked about the parts there.
+    expect(asked).toBe(0)
   })
 })
 
@@ -270,13 +355,12 @@ const PLANNOTATOR = { files: { 'hooks/hooks.json': PLANNOTATOR_HOOKS } }
 const command = (name: string) => [{ type: 'command', command: name }]
 
 describe("another enabled plugin's permission hooks win (the mod answers above them, so they would never run)", () => {
-  test('a PermissionRequest or PreToolUse hook that could run for Bash, in hooks/hooks.json or plugin.json', async () => {
+  test('a PermissionRequest hook that could run for Bash, in hooks/hooks.json or plugin.json', async () => {
     const shapes: Record<string, string | object>[] = [
       // A remote-approval plugin: every permission prompt goes to it.
       { 'hooks/hooks.json': { hooks: { PermissionRequest: [{ hooks: command('notify-phone') }] } } },
-      { 'hooks/hooks.json': { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: command('ask-before-rm') }] } } },
       { '.claude-plugin/plugin.json': { name: 'guard', hooks: { PermissionRequest: [{ matcher: '*', hooks: command('approve') }] } } },
-      { '.claude-plugin/plugin.json': { name: 'guard', hooks: './more-hooks.json' }, 'more-hooks.json': { hooks: { PreToolUse: [{ matcher: 'Bash|Write', hooks: command('scan') }] } } },
+      { '.claude-plugin/plugin.json': { name: 'guard', hooks: './more-hooks.json' }, 'more-hooks.json': { hooks: { PermissionRequest: [{ matcher: 'Bash|Write', hooks: command('scan') }] } } },
       { '.claude-plugin/plugin.json': { name: 'guard', hooks: ['${CLAUDE_PLUGIN_ROOT}/h.json'] }, 'h.json': { hooks: { PermissionRequest: [{ matcher: 'Ba.*', hooks: command('scan') }] } } },
     ]
     for (const files of shapes) {
@@ -284,6 +368,22 @@ describe("another enabled plugin's permission hooks win (the mod answers above t
       const settings = enabling('plannotator@plannotator', 'guard@tools')
       expect(await removalPrompt({ variable: '1', settings, env: { CLAUDE_CONFIG_DIR: world.configDir } })).toEqual(BENEATH)
       expect(await removalPrompt({ variable: '1', settings, env: { CLAUDE_CONFIG_DIR: world.configDir }, agentId: 'agent-7' })).toEqual(BENEATH)
+    }
+  })
+
+  test("a plugin's PreToolUse hook on Bash: the waiver stays on while it does not ask, and its ask (on the verdict) keeps the prompt", async () => {
+    const shapes: Record<string, string | object>[] = [
+      { 'hooks/hooks.json': { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: command('scan') }] } } },
+      { 'hooks/hooks.json': { hooks: { PreToolUse: [{ hooks: command('log') }] } } },
+      { '.claude-plugin/plugin.json': { name: 'guard', hooks: './more-hooks.json' }, 'more-hooks.json': { hooks: { PreToolUse: [{ matcher: 'Bash|Write', hooks: command('scan') }] } } },
+    ]
+    for (const files of shapes) {
+      const world = pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files } })
+      const settings = enabling('plannotator@plannotator', 'guard@tools')
+      const env = { CLAUDE_CONFIG_DIR: world.configDir }
+      expect(await removalPrompt({ variable: '1', settings, env })).toEqual(ALLOWED)
+      expect(await removalPrompt({ variable: '1', settings, env, agentId: 'agent-7' })).toEqual(ALLOWED)
+      expect(await removalPrompt({ variable: '1', settings, env, verdict: { ...RM_ASK, hook: 'PreToolUse' } })).toEqual(BENEATH)
     }
   })
 
@@ -314,7 +414,7 @@ describe("another enabled plugin's permission hooks win (the mod answers above t
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { '.claude-plugin/plugin.json': '{ not json' } } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { '.claude-plugin/plugin.json': { name: 'guard', hooks: './missing.json' } } } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { '.claude-plugin/plugin.json': { name: 'guard', hooks: '${OTHER_ROOT}/h.json' } } } }),
-      pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { 'hooks/hooks.json': { hooks: { PreToolUse: 'not a list' } } } } }),
+      pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { 'hooks/hooks.json': { hooks: { PermissionRequest: 'not a list' } } } } }),
       // Enabled, but not in the registry: what Claude Code loaded for it is unknown.
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { registered: false } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': {} }, { registry: null }),
@@ -374,6 +474,25 @@ describe('the debug log', () => {
     expect(await removalPrompt({ variable: '1', env: { PLANNOTATOR_MOD_DEBUG: '1' }, ran })).toEqual(ALLOWED)
     await settle()
     expect(lines(ran)).toHaveLength(2)
+  })
+
+  // "left to the dialog" alone could not tell a person which of their rules, hooks or plugins kept the prompt.
+  test('a prompt left to the dialog says what kept it', async () => {
+    const world = pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'notify@tools': { files: { 'hooks/hooks.json': { hooks: { PermissionRequest: [{ hooks: command('notify-phone') }] } } } } })
+    const cases: [Parameters<typeof removalPrompt>[0], RegExp][] = [
+      [{ settings: { permissions: { deny: ['Bash(git push --force*)'] } } }, /left to the dialog: a permissions\.deny rule on Bash/],
+      [{ settings: { hooks: { PermissionRequest: [{ matcher: 'Bash', hooks: command('notify') }] } } }, /left to the dialog: a PermissionRequest hook in the settings/],
+      [{ settings: enabling('plannotator@plannotator', 'notify@tools'), env: { CLAUDE_CONFIG_DIR: world.configDir } }, /left to the dialog: the enabled plugin notify@tools has a PermissionRequest hook/],
+      [{ settings: enabling('ghost@builtin'), env: { CLAUDE_CONFIG_DIR: world.configDir } }, /left to the dialog: the enabled plugin ghost@builtin is not in the plugin registry/],
+      [{ mode: 'default' }, /left to the dialog: not in bypass permissions mode/],
+      [{ verdict: { ...RM_ASK, hook: 'PreToolUse' } }, /left to the dialog: not a removal-check ask alone/],
+    ]
+    for (const [options, expected] of cases) {
+      const ran: string[] = []
+      expect(await removalPrompt({ variable: '1', ...options, env: { PLANNOTATOR_MOD_DEBUG: '1', ...options.env }, ran })).toEqual(BENEATH)
+      await settle()
+      expect(lines(ran).at(-1)).toMatch(expected)
+    }
   })
 })
 
