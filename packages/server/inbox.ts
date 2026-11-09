@@ -2440,6 +2440,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
     if (next) saveConfig({ inboxListIntro: next });
   }
+
+  /**
+   * The tab icon dialog ("Which favicon do you prefer?", an update-day dialog; `tab_icon` in shared/inbox/reveals.ts):
+   * decided at the first release start of the version that ships it, as the sound's is. Someone who used an earlier
+   * Inbox gets it due (`dueAt`); a fresh install is marked (`freshAt`) and never sees it: it starts on Glass and has
+   * the Settings row. Someone who already chose a favicon is never asked, so nothing is written for them. Kept with the
+   * line's own record (`inboxReveals`), wherever that is saved.
+   */
+  if (normalizeStableVersion(version) !== null && loadConfig().inboxReveals?.tab_icon === undefined && !isFaviconStyle(loadConfig().favicon)) {
+    const at = new Date().toISOString();
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, tab_icon: usedBefore ? { dueAt: at } : { freshAt: at } } });
+  }
+  /** Due, and the person never chose a favicon (config.json `favicon` unset: here, in plan review or code review). */
+  const tabIconUndecided = () => {
+    const config = loadConfig();
+    return typeof config.inboxReveals?.tab_icon?.dueAt === "string" && !isFaviconStyle(config.favicon);
+  };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
    * never both show it. Only on this computer (a page through the tailnet leaves it for the next page opened here).
@@ -2729,7 +2746,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The line of one-time dialogs (approval "inbox-feature-reveal", and its schedule, "inbox-one-time-dialogs"; the queue
-   * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice), then Snooze, the Board
+   * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice, the tab icon), then Snooze, the Board
    * and the Checklist, with the agent note keeping the day. Read live: the days pass while the Inbox runs. A dev build
    * decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
@@ -2777,6 +2794,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
     list_view: () => true,
+    // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
+    // pick in Settings (here, plan review or code review) before its moment drops it.
+    tab_icon: tabIconUndecided,
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
@@ -2922,7 +2942,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
     const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
     const saved = loadConfig().inboxReveals;
-    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
+    // The entry's own record keeps what it already held (the tab icon's `dueAt`), so the same page's retry still holds.
+    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { ...lineOfferSaved(id), shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return lineOfferSaved(id)?.shownAt === at;
   };

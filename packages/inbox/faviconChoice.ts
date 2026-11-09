@@ -22,6 +22,8 @@ import { inboxApi } from './api';
 let current: FaviconStyle | null = null;
 /** The icon picked on this page: the tab shows it from then on. */
 let chosenHere: FaviconStyle | null = null;
+/** An icon tried on this tab only (the tab icon dialog's choices), never saved; null when none is. */
+let previewing: FaviconStyle | null = null;
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -44,12 +46,31 @@ export function adoptSavedFavicon(style: unknown): void {
 export function chooseFavicon(style: FaviconStyle): Promise<void> {
   current = style;
   chosenHere = style;
+  previewing = null;
   notify();
   return inboxApi.saveFavicon(style).then(
     () => {},
     () => {},
   );
 }
+
+/**
+ * Try an icon on this tab only, without saving it (the tab icon dialog, TabIconChoice.tsx: each choice shows at once).
+ * Null puts back the icon the tab showed before the first try: the one it loaded with, or one picked on this page.
+ */
+export function previewFavicon(style: FaviconStyle | null): void {
+  if (style === previewing) return;
+  previewing = style;
+  notify();
+}
+
+/** A favicon was picked on this page (Settings' row): the tab icon dialog no longer asks. */
+export function faviconPickedHere(): boolean {
+  return chosenHere !== null;
+}
+
+/** What the tab shows: a try, else a pick made on this page; null for the icon it loaded with. */
+const onTab = (): FaviconStyle | null => previewing ?? chosenHere;
 
 export function useInboxFavicon(): FaviconStyle | null {
   return useSyncExternalStore(subscribe, () => current, () => null);
@@ -59,7 +80,10 @@ export function useInboxFavicon(): FaviconStyle | null {
 export function useInboxFaviconHref(): string | null {
   return useSyncExternalStore(
     subscribe,
-    () => (chosenHere ? faviconDataUrl(chosenHere) : null),
+    () => {
+      const style = onTab();
+      return style ? faviconDataUrl(style) : null;
+    },
     () => null,
   );
 }
@@ -68,7 +92,10 @@ export function useInboxFaviconHref(): string | null {
 export function useInboxFaviconBadgeHref(): string | null {
   return useSyncExternalStore(
     subscribe,
-    () => (chosenHere ? faviconPngDataUrl(chosenHere) : null),
+    () => {
+      const style = onTab();
+      return style ? faviconPngDataUrl(style) : null;
+    },
     () => null,
   );
 }
@@ -77,5 +104,6 @@ export function useInboxFaviconBadgeHref(): string | null {
 export function resetInboxFaviconForTests(): void {
   current = null;
   chosenHere = null;
+  previewing = null;
   notify();
 }
