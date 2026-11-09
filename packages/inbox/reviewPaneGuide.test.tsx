@@ -123,8 +123,9 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(review: boolean, codeReview: boolean, threadPatch: Partial<InboxThread> = {}) {
-  const message = messageOf(review);
+async function render(review: boolean, codeReview: boolean, threadPatch: Partial<InboxThread> = {}, walkthrough = false) {
+  const plain = messageOf(review);
+  const message = walkthrough ? ({ ...plain, guide: { ...plain.guide!, additions: 0, deletions: 0, walkthrough: true } } as InboxMessageWire) : plain;
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -196,6 +197,31 @@ test.skipIf(!hasDom)('with Code review on, the same review keeps its verdict and
   expect(document.querySelector('[data-review-decision] [data-decision-primary]')?.textContent).toContain('Approve');
   expect(has('[data-review-write-reply]')).toBe(false);
   expect(readerProps!.viewed).toBeDefined();
+});
+
+/** Opens the top bar's chapter menu and says whether it has the "N of M" line at its foot. */
+async function menuProgress(): Promise<string | null> {
+  await act(async () => {
+    document.querySelector<HTMLElement>('[data-review-jump]')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  return document.querySelector('[data-review-jump-menu] [data-review-progress]')?.textContent ?? null;
+}
+
+test.skipIf(!hasDom)('a walkthrough takes no ticks: no chapter Reviewed, no file Viewed, and no "N of M" line in the chapter menu', async () => {
+  await render(true, true, {}, true);
+  expect(has('section[aria-label="Walkthrough"][data-review-message]')).toBe(true);
+  expect(readerProps!.chapterTicks).toBe(false);
+  expect(readerProps!.viewed).toBeUndefined();
+  expect(await menuProgress()).toBeNull();
+  expect(has('[data-review-jump-menu] [data-done]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a review keeps its ticks: chapter Reviewed, file Viewed and the chapter menu\'s "N of M" line (the control for the one above)', async () => {
+  await render(true, true);
+  expect(readerProps!.chapterTicks).not.toBe(false);
+  expect(readerProps!.viewed).toBeDefined();
+  expect(await menuProgress()).toBe('0 of 1 chapter reviewed');
 });
 
 test.skipIf(!hasDom)("a guide's comments wait for the next Send: the panel says so, Write the reply goes back to the thread, and the review sends nothing", async () => {

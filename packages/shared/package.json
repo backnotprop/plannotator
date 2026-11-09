@@ -133,6 +133,7 @@
     "./request-origin": "./request-origin.ts",
     "./ref-cards": "./ref-cards.ts",
     "./ref-cards-node": "./ref-cards-node.ts",
+    "./inbox-pull-merge": "./inbox-pull-merge.ts",
     "./request-host": "./request-host.ts",
     "./local-image": "./local-image.ts",
     "./browser-intent": "./browser-intent.ts",

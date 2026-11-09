@@ -210,6 +210,8 @@ export interface AllFilesCodeViewProps {
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
   expandUnchanged?: boolean;
+  /** 'simple': no "N unmodified lines" row between hunks, for code that isn't a change. */
+  hunkSeparators?: 'line-info' | 'simple';
   fontFamily?: string;
   fontSize?: string;
   // Annotation state (P4). Mirrors AllFilesDiffView's annotation surface so
@@ -784,6 +786,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   disableLineNumbers,
   disableBackground,
   expandUnchanged,
+  hunkSeparators = 'line-info',
   fontFamily,
   fontSize,
   annotations,
@@ -3557,7 +3560,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
     () => ({
       diffHeaderHeight: (compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT) + hostHeaderExtra,
-      hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
+      // The 32 is the line-info row's; a simple one's height is the library's own.
+      ...(hunkSeparators === 'line-info' && { hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT }),
       // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
       // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
       // float in that room; in the scroller, a list that just outgrows the view is pushed down by it, under the
@@ -3568,7 +3572,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, hostHeaderExtra],
+    [compactTouchLayout, customLineHeight, hunkSeparators, hostHeaderExtra],
   );
   itemMetricsRef.current = itemMetrics;
 
@@ -3590,7 +3594,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       ...(scrollsWithPage && { pointerEventsOnScroll: true }),
       enableLineSelection: !readOnly,
       enableGutterUtility: !readOnly,
-      hunkSeparators: 'line-info',
+      hunkSeparators,
       stickyHeaders: true,
       // Flush files together (no inter-file gap) — file boundaries already read
       // via the sticky header. Keep Pierre's default 8px list edge padding.
@@ -3654,6 +3658,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      hunkSeparators,
       opensWholeFiles,
       loadWholeFile,
       readOnly,

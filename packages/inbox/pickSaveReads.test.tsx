@@ -3,7 +3,11 @@
  * change, and each save used to read the list, the thread, the drafts and the
  * files (twice for the list and the files): the owner's debug log, 2026-11-02,
  * shows that burst behind each of 81 saves on a phone. Each save's answer
- * already brought its questions, so those reads wait for the last save. The
+ * already brought its questions, so those reads wait for the last save, and
+ * then read only what shows the pick besides the pane: the list once and the
+ * drafts, never the thread or its files (its records are echoes, ownSaves.ts;
+ * the owner's debug log, 2026-11-09: a full re-read behind each key typed). A
+ * list read that brings nothing new draws nothing (listSame.ts). The
  * window over a REAL Inbox (tests/helpers/inbox-dom-server.ts); the saves are
  * slowed and their records handed to the stream by hand, as the record frame
  * comes while the save's answer is still on its way.
@@ -11,7 +15,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, Profiler } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -46,6 +50,10 @@ let hang = false;
 /** The next saves land only on `land()`, and their record never comes. */
 let gated = false;
 let land: () => void = () => {};
+/** The window's commits (React's Profiler): a read that brings nothing new must add none. */
+let commits = 0;
+/** The question the last save answered with: what the Inbox's record of that save carries. */
+let lastPicked: object | null = null;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -62,7 +70,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
 
-const TESTS = 8;
+const TESTS = 9;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -113,6 +121,8 @@ beforeEach(() => {
   hang = false;
   gated = false;
   land = () => {};
+  commits = 0;
+  lastPicked = null;
   frames = new Map();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -121,13 +131,15 @@ beforeEach(() => {
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
+      lastPicked = (JSON.parse(answer.text) as { questions: object[] }).questions[0] ?? null;
       if (hang) await new Promise(() => {});
       if (gated) await new Promise<void>((r) => (land = r));
       if (slow) {
         const { questions } = JSON.parse(answer.text) as { questions: { key: string }[] };
         // The record frame beats the save's own answer.
         seq += 1;
-        frame('record', { seq, kind: 'question', id: 'qst_any', question: questions[0] });
+        // As the Inbox sends it: the question with its thread.
+        frame('record', { seq, kind: 'question', id: 'qst_any', thread_id: world.waiting, question: questions[0] });
         await new Promise((r) => setTimeout(r, SAVE_MS));
       }
     }
@@ -174,7 +186,11 @@ async function open() {
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<InboxApp />);
+    root.render(
+      <Profiler id="inbox" onRender={() => (commits += 1)}>
+        <InboxApp />
+      </Profiler>,
+    );
   });
   const field = () => host!.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
@@ -203,7 +219,7 @@ async function closePane() {
   await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
 }
 
-test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list, thread, drafts and files once', async () => {
+test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {
   const field = await open();
   slow = true;
   let words = '';
@@ -216,13 +232,35 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
   // Saves went through, and the window read nothing for them.
   expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
 
-  await until(() => field.value === words && count(threadRoute()) > 0, 'the read after the last save');
+  await until(() => field.value === words && count('/api/inbox/drafts') > 0, 'the read after the last save');
   await wait(SAVE_MS + 120);
-  expect(count(threadRoute())).toBe(1);
-  expect(count(`${threadRoute()}/attachments`)).toBe(1);
-  expect(count('/api/inbox/threads')).toBeLessThanOrEqual(2);
-  expect(count('/api/inbox/threads')).toBeGreaterThanOrEqual(1);
+  // One save's echo is not a whole re-read: the list once, the drafts once (the pick is unsent work), and nothing of
+  // the thread, whose pane drew each save's answer already.
+  expect(count('/api/inbox/threads')).toBe(1);
   expect(count('/api/inbox/drafts')).toBe(1);
+  expect(count(threadRoute())).toBe(0);
+  expect(count(`${threadRoute()}/attachments`)).toBe(0);
+});
+
+test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
+  const field = await open();
+  type(field, 'a');
+  // The save landed with no record yet: what its record will owe is read at once (the list, the drafts).
+  await until(() => saves === 1 && count('/api/inbox/threads') === 1 && count('/api/inbox/drafts') === 1, 'the reads after the save');
+  await wait(200);
+  reads = [];
+  // The record of that save, after its answer (the stream was slower than the save): an echo, already read for.
+  expect(lastPicked).not.toBeNull();
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', thread_id: world.waiting, question: lastPicked });
+  await wait(250);
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+  // Nothing changed since the last list read: it draws nothing.
+  const drawn = commits;
+  frame('pins', {});
+  await until(() => count('/api/inbox/threads') === 1, 'the list read for the pins');
+  await wait(80);
+  expect(commits).toBe(drawn);
 });
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {

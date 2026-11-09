@@ -2183,6 +2183,7 @@ export class InboxStore {
       unseen,
       sent,
       guide: messages.some((m) => m.guide != null),
+      ...(messages.filter((m) => m.guide != null).at(-1)?.guide?.walkthrough ? { guide_walkthrough: true } : {}),
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
@@ -2514,9 +2515,20 @@ export class InboxStore {
       if (!row) continue;
       for (const { message, question } of waiting) {
         const author = message.author as Extract<InboxAuthor, { kind: "agent" }>;
+        const ownChoices = new Set(question.choices.flatMap((c) => (c.image ? [c.image.src] : [])));
         const inBlock = (ref: string) =>
+          ownChoices.has(ref) ||
           [question.context ?? "", ...question.choices.flatMap((c) => [c.label, c.description ?? ""])].some((text) => text.includes(ref));
-        const images = [...(message.inline_images ?? [])].sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
+        // Another question's picture choices are that question's options, not this one's context: left out, unless
+        // this question shows the same picture too.
+        const otherChoices = new Set(
+          this.questionsOf(message.id)
+            .filter((other) => other.key !== question.key)
+            .flatMap((other) => other.choices.flatMap((c) => (c.image ? [c.image.src] : []))),
+        );
+        const images = (message.inline_images ?? [])
+          .filter((image) => !otherChoices.has(image.ref) || inBlock(image.ref))
+          .sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
         candidates.push({
           seq: this.messageSeq.get(message.id) ?? 0,
           decision: {

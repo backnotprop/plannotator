@@ -15,7 +15,7 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedWords, type PullFilter } from './model';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
 
@@ -98,7 +98,7 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
     case 'approved':
       return { status: `You approved${checks ? ` · ${lower(checks)}` : ''}`, tone: 'ok' };
     case 'requested':
-      return { status: pull?.author ? `${pull.author} asked for your review` : 'Your review was asked for', tone: null };
+      return { status: requestedWords(pull?.author), tone: null };
     case 'assigned':
       return { status: 'assigned to you', tone: null };
     case 'changes':
@@ -119,6 +119,8 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
   }
 }
 
+const reviewIsWalkthrough = (row: InboxReviewRow) => !!row.review?.walkthrough || row.started?.kind === 'walkthrough';
+
 /** The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. */
 export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][number] | null {
   const handed = row.started?.pull;
@@ -131,6 +133,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
   const agent = row.reviewed && name ? { host, name } : null;
   const { status, tone } = statusOf(row);
+  // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
+  if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status: row.reason === 'review_ready' ? 'Ready' : row.reason === 'curating' ? 'Writing…' : status, tone };
   if (stack) {
     const many = stack.layers.length > 1;
     if (many) {
@@ -156,7 +160,7 @@ export function reviewContextLine(row: InboxReviewRow, projectName: string | nul
   const line = reviewRowLine(row);
   const started = row.started;
   const what =
-    line.kind !== 'local'
+    line.kind !== 'local' || reviewIsWalkthrough(row)
       ? line.lead
       : source?.branch
         ? `Local changes on ${source.branch}${source.base ? `, against ${source.base.replace(/^origin\//, '')}` : ''}`
@@ -177,12 +181,21 @@ export interface ReviewView {
   kind: 'local' | 'pr';
   /** The review's title, once one arrived. */
   title: string | null;
+  /**
+   * The name the thread's bar shows instead of the thread's own: the review's title, which the Reviews row and the
+   * heading show (`reviewRowTitle`), so the bar does not keep New review's name once the guide lands. Null for a PR
+   * row (its row is the PR's title) and before a review arrived (the row shows the thread's name then).
+   */
+  name: string | null;
   /** The first review: the messages before it stay out of this view (`reviewEarlierHidden`). Null when the thread was started for the review. */
   firstReviewId: string | null;
   /** The latest review: open in this view however long ago it was read. */
   latestReviewId: string | null;
-  /** An agent is still curating the first review: the thread says so under the request. */
-  curating: boolean;
+  /**
+   * An agent is still writing the first review: what the thread says under the request ("Curating the review…", for a
+   * walkthrough "Writing the walkthrough…"). Null once a review arrived.
+   */
+  curating: string | null;
   /** New review's own label on the request: "New review · Guided review". */
   asked: string | null;
   /** The thread the review came from, when it was an ordinary one. */
@@ -266,10 +279,11 @@ export function reviewViewOf(
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
+    name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason === 'curating',
-    asked: ask ? `New review · ${ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

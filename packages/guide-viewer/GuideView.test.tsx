@@ -115,6 +115,7 @@ async function renderView(
     sourceLine?: string;
     engineLabel?: string;
     fitFileHeights?: boolean;
+    showReviewed?: boolean;
   } = {},
 ) {
   const Harness = () => {
@@ -138,6 +139,7 @@ async function renderView(
           sourceLine={options.sourceLine}
           engineLabel={options.engineLabel}
           fitFileHeights={options.fitFileHeights}
+          {...(options.showReviewed === undefined ? {} : { showReviewed: options.showReviewed })}
         />
       </GuideHostProvider>
     );
@@ -573,6 +575,25 @@ describe('GuideView threadHeading (the Inbox review, under its top bar)', () => 
   test.skipIf(!hasDom)('a guide moved since it was written says so among the facts', async () => {
     await renderView(makeGuide({ moved: true }), { threadHeading: true });
     expect(host!.querySelector('[data-guide-facts]')?.textContent).toContain('Generated on a different version of this branch');
+  });
+});
+
+describe('GuideView showReviewed (the Inbox walkthrough: nothing to review)', () => {
+  const reviewedButtons = () => [...host!.querySelectorAll('button')].filter((button) => /Mark as reviewed|Un-mark as reviewed/.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''));
+
+  // Guards the hosts that never pass it (the review app, guides.show, VS Code, an Inbox review): each chapter keeps its tick.
+  test.skipIf(!hasDom)('by default each chapter has its Reviewed tick', async () => {
+    await renderView(makeGuide(), { threadHeading: true });
+    expect(reviewedButtons()).toHaveLength(1);
+    expect(reviewedButtons()[0]!.textContent).toContain('Reviewed');
+  });
+
+  // Guards the walkthrough: no tick on a chapter, open or folded, even one stored as reviewed.
+  test.skipIf(!hasDom)('off: no chapter has a Reviewed tick, and a chapter stored as reviewed opens rather than folding', async () => {
+    await renderView(makeGuide({ reviewed: [true] }), { threadHeading: true, showReviewed: false });
+    expect(reviewedButtons()).toHaveLength(0);
+    expect(host!.textContent).not.toContain('Reviewed');
+    expect(host!.querySelector('[data-guide-section-grid]')).not.toBeNull();
   });
 });
 

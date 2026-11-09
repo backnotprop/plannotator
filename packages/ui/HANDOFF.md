@@ -2990,6 +2990,13 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **Unchanged either way:** a caller that passes `githubRepo` (its `repoHost` decides), bare `#123` and `@user` (they still need `githubRepo`), and link labels.
 - **A host that passes nothing sees no change**, apart from one subscription per mounted `InlineMarkdown`. The Plannotator Inbox passes `true` at start and then `{ host }` with the host most of its projects use (`packages/inbox/defaultRefHost.ts`). Workspaces needs it only where it renders agent text with `InlineMarkdown` and no repo. Its own native renderers are not affected.
 
+## `ImageLightbox` `at`: which of two images with the same URL opens (unreleased; additive, opt-in, no core change)
+
+`ImageLightbox` with `images` opened on the first image whose `src` is `src`. When two entries share a URL (the Plannotator Inbox's decision mode shows one picture for two choices, each named for its choice), the second could never open as itself.
+
+- **New prop `at?: number`**: the place in `images` to open on. It is used only when `images[at].src === src`; otherwise the first match opens, as before.
+- **A host that passes nothing sees no change.** The Plannotator Inbox's decision mode passes the place of the tile zoomed.
+
 ## `MermaidBlock` / `GraphvizBlock` `sourceOnError` (unreleased; additive, opt-in, no core change)
 
 - **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.

@@ -1228,7 +1228,7 @@ export interface StartThreadInput {
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
   /** New review on local changes: what it is of, so its row shows "Curating…" before a review arrives. */
-  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' };
+  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
 }
@@ -1795,8 +1795,9 @@ export const inboxApi = {
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
   /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
-  pulls: (refresh = false, signal?: AbortSignal, others = false) => {
-    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
+  /** `everywhere`: the Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). */
+  pulls: (refresh = false, signal?: AbortSignal, others = false, everywhere = false) => {
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : '', everywhere ? 'everywhere=1' : ''].filter(Boolean).join('&');
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
   /** The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. */
@@ -1839,6 +1840,8 @@ export const inboxApi = {
       body: JSON.stringify(pageSession ? { ...rest, serverSession: pageSession } : rest),
     });
   },
+  /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
+  pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */

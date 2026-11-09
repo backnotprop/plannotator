@@ -132,6 +132,7 @@ packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
+packages/inbox/sharedPictureChoice.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
@@ -646,3 +647,4 @@ packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx
 packages/review-editor/components/guide/GuideDiffControls.test.tsx
 packages/review-editor/components/ReviewHeaderMenu.test.tsx
+packages/inbox/prs/prsInReviews.test.tsx
