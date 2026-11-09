@@ -10,6 +10,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { messageSideSource } from '../ask/sideSource';
+import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -967,6 +968,14 @@ export function MessageBody({
     });
   }, []);
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
+  // Side (ask/useInboxAsk.tsx): read through refs, as every kept closure here (#2948): naming `comments`, the message
+  // or its blocks in a closure would let this body's kept closures hold a render of the whole thread view per read.
+  const sideFrom = useRef({ message, blocks, annotations: commentList });
+  sideFrom.current = { message, blocks, annotations: commentList };
+  const side = useCallback((text: string, context: SelectionActionContext) => {
+    const from = sideFrom.current;
+    commentsRef.current?.onSide?.(text, messageSideSource(from.message, { selected: text, blockId: context.blockId, blocks: from.blocks, annotations: from.annotations }));
+  }, []);
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
   const answerQuestion = useCallback((_blockId: string, answer: QuestionAnswer | null, key: string) => pickRef.current(key, answer), []);
@@ -1085,11 +1094,7 @@ export function MessageBody({
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
-        onSide={
-          comments?.onSide
-            ? (text, context) => comments.onSide!(text, messageSideSource(message, { selected: text, blockId: context.blockId, blocks, annotations: commentList }))
-            : undefined
-        }
+        onSide={comments?.onSide ? side : undefined}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
