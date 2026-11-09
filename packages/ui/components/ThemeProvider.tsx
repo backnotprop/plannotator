@@ -225,7 +225,7 @@ export function ThemeProvider({
       link.removeAttribute('sizes');
     } else {
       link.type = 'image/png';
-      link.setAttribute('sizes', '64x64');
+      link.setAttribute('sizes', '192x192');
     }
     link.href = faviconDataUrl(faviconStyle);
   }, [faviconStyle, manageFavicon]);
