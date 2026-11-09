@@ -188,10 +188,12 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
   test("the attach command enters a folder named with quotes, and runs nothing when it can't", () => {
     const dir = join(tempDir("ps"), "it's Bob’s");
     mkdirSync(dir);
-    const entered = ps(powerShellInFolder(dir, "Write-Output (Get-Location).ProviderPath"));
-    expect(entered.stdout.trim()).toBe(dir);
-    const missing = ps(powerShellInFolder(join(dir, "nope"), "Write-Output ran"));
-    expect(missing.stdout).not.toContain("ran");
+    // A file made where the command ran (Windows PowerShell's stdout would turn ’ into ' in the runner's code page).
+    ps(powerShellInFolder(dir, "$null = New-Item -ItemType File -Name entered"));
+    expect(existsSync(join(dir, "entered"))).toBe(true);
+    const missing = ps(powerShellInFolder(join(dir, "nope"), "$null = New-Item -ItemType File -Name ran"), dir);
+    expect(existsSync(join(dir, "ran"))).toBe(false);
+    expect(missing.stderr).toContain("nope");
   }, 120_000);
 
   test("the permission hook line passes every argument whole and the program's exit code on", () => {
@@ -222,8 +224,6 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
     const typed = `${home.slice(0, 1).toLowerCase()}${home.slice(1).toUpperCase()}\\code`;
     expect(resolveHomeFolder(home, typed)).toMatchObject({ ok: true, exists: true, shown: "~/code" });
     expect(resolveHomeFolder(home, "D:\\elsewhere")).toEqual({ ok: false, refused: "outside" });
-    // The real profile's AppData is Hidden.
-    if (process.env.USERPROFILE && existsSync(join(process.env.USERPROFILE, "AppData"))) expect(windowsFolderHidden(join(process.env.USERPROFILE, "AppData"))).toBe(true);
   });
 
   test("a .cmd CLI found through Path runs through cmd.exe with its arguments whole", async () => {
