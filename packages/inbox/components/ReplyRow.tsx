@@ -112,13 +112,16 @@ export function ReplyRow({
     };
   }, []);
 
+  // PROTOTYPE (proto/composer-picker): one row for a phone and a computer: paperclip, Skills, the agent pill, what
+  // goes with the reply, then the bin (a computer), the mic and Send at the right end.
   if (phone) {
     return (
-      <div className={`ib-rrow${keepOpen ? ' ib-keep' : ''}`} data-reply-row="" data-phone="">
+      <div className={`ib-rrow ib-px-row${keepOpen ? ' ib-keep' : ''}`} data-reply-row="" data-phone="">
         <div className="ib-rmid">
           <div className="ib-rlayer">
             {clip}
             {skills}
+            {pill}
             {files}
             {hint && (
               <span className="ib-rhint" data-reply-hint="">
@@ -134,12 +137,11 @@ export function ReplyRow({
     );
   }
   return (
-    <div className={`ib-rrow${keepOpen ? ' ib-keep' : ''}`} data-reply-row="">
+    <div className={`ib-rrow ib-px-row${keepOpen ? ' ib-keep' : ''}`} data-reply-row="">
       <div className="ib-rlead">
-        {send}
         {clip}
         {skills}
-        {mic}
+        {pill}
       </div>
       <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined} data-hint={hint ? '' : undefined}>
         <div
@@ -151,7 +153,6 @@ export function ReplyRow({
         >
           {files}
           {fold ? summary : <span className="ib-rchips">{chips}</span>}
-          {pill && <span className="ib-rto-cell">{pill}</span>}
         </div>
         {hint && (
           <span className="ib-rhint" data-reply-hint="">
@@ -161,6 +162,8 @@ export function ReplyRow({
         {status}
       </div>
       {discard}
+      {mic}
+      {send}
     </div>
   );
 }

@@ -45,6 +45,8 @@
 @import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+/* PROTOTYPE (proto/composer-picker): the composer and picker redesign. */
+@import "../../packages/inbox/px/px.css";
 
 /* Window controls (inbox-window.md): read-only, for a desktop host, the line the panes' heads centre on while it has
    set its variables; its buttons go there. A length once computed, so a host reads a number. Here and not in inbox.css:

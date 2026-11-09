@@ -123,6 +123,7 @@ import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
+import { PxReplyPicker } from '../px/PxReplyPicker';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
 import { spaced } from '../voiceField';
@@ -5632,29 +5633,40 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
     if (foot && now !== was) foot.scrollTop += now - was;
   }, [draftAboveShows]);
-  const rcptPill = pillActive ? (
-    <ReplyRecipient
-      rows={rcptAgents}
-      chosen={rcptChosen}
-      open={rcptOpen}
-      onOpen={setRcptOpen}
-      onOnly={(row) => {
-        aimReply([row.session]);
-        setRcptOpen(false);
-        announce(`This reply goes to ${row.label}.`);
-      }}
-      onToggle={(row) => {
-        // The agents typed with `@` count toward the most one reply goes to.
-        const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
-        const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
-        aimReply(next);
-        announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
-      }}
-      onTagAnother={tagAnother}
-      phone={phone}
-      section={sectionRef.current}
-    />
-  ) : null;
+  // PROTOTYPE (proto/composer-picker): the pill is in the row for every thread with an agent to name, not only one
+  // with several. With one agent it names that session by its title; its list offers the `@`.
+  const pxRows: RecipientRow[] = pillActive
+    ? rcptAgents
+    : asking
+      ? [{ session: asking.session, host: asking.host || null, label: asking.name, short: asking.name, state: askerEnded ? 'ended' : 'live' }]
+      : [];
+  const rcptPill =
+    !resolved && pxRows.length > 0 ? (
+      <PxReplyPicker
+        rows={pxRows}
+        chosen={pillActive ? rcptChosen : pxRows}
+        open={rcptOpen}
+        onOpen={setRcptOpen}
+        several={pillActive}
+        project={thread.project.name}
+        onOnly={(row) => {
+          setRcptOpen(false);
+          if (!pillActive) return;
+          aimReply([row.session]);
+          announce(`This reply goes to ${row.label}.`);
+        }}
+        onToggle={(row) => {
+          // The agents typed with `@` count toward the most one reply goes to.
+          const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
+          const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
+          aimReply(next);
+          announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+        }}
+        onTagAnother={tagAnother}
+        phone={phone}
+        section={sectionRef.current}
+      />
+    ) : null;
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}
@@ -7222,9 +7234,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               )}
               {/* A phone: what goes with the reply and who gets it, on one quiet line over the row. */}
               {phone && (
-                <div className="ib-rline" data-reply-line="" data-recipient-anchor="" data-empty={replySummaryShown || pillActive ? undefined : ''}>
+                <div className="ib-rline" data-reply-line="" data-recipient-anchor="" data-empty={replySummaryShown ? undefined : ''}>
                   <ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null} />
-                  {pillActive && rcptPill}
                 </div>
               )}
               <ReplyRow
@@ -7240,6 +7251,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
                     {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                     {sending && <span className="ib-spin" aria-hidden="true" />}
+                    <Icon name="arrowUp" size={phone ? 20 : 16} className="ib-px-send-i" />
                     <span className="ib-rsend-w">Send</span>
                   </button>
                   )
@@ -7276,7 +7288,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={!phone && pillActive ? rcptPill : null}
+                pill={rcptPill}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's

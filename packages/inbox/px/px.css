@@ -1,0 +1,236 @@
+/*
+ * PROTOTYPE ONLY (branch proto/composer-picker; never merged): the composer and picker redesign.
+ *
+ * One composer for the reply box and New message: a rounded card with one bottom row (paperclip, Skills, the agent
+ * pill, a spacer, the mic, Send). One picker behind the pill: a bottom sheet on a phone, a 360 px popover on a
+ * computer. The Inbox's own theme tokens only; the fills are the mixes inbox.css already makes (--ib-fill, --ib-line).
+ *
+ * The scale (FINDINGS.md): gap 8. Card padding 10 on a phone, 8 on a computer. Chips 36 (44 to the touch) on a phone,
+ * 32 on a computer. Radius 28 / 24 (= padding + half a chip, so the corner chips sit concentric). Text 16 / 14.
+ * Sheet radius 20, rows 56 / r12. Popover radius 14, rows 46 / r9.
+ */
+:root[data-px] {
+  --px-gap: 8px; --px-pad: 8px; --px-chip: 32px; --px-radius: 24px; --px-text: 14px;
+  --px-fill: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --px-fill-2: color-mix(in oklch, var(--foreground) 11%, transparent);
+  --px-line: color-mix(in oklch, var(--border) 70%, transparent);
+  --px-raised: var(--card);
+  --px-scrim: oklch(0 0 0 / 0.45);
+  --px-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+:root[data-px].light { --px-scrim: oklch(0.2 0.02 260 / 0.28); }
+:root[data-px]:not(.light) { --px-raised: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  :root[data-px] { --px-pad: 10px; --px-chip: 36px; --px-radius: 28px; --px-text: 16px; }
+}
+
+/* ---------- Chips: every round control of the row (44 px to the touch whatever its drawn size) ---------- */
+:root[data-px] .pn-inbox .ib-px-chip,
+:root[data-px] .pn-inbox .ib-px-row :is(.ib-rclip, .ib-ricon, .ib-vmic),
+:root[data-px] .pn-inbox .ib-px-foot :is(.ib-cp-clip, .ib-vmic) {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: var(--px-chip); height: var(--px-chip); padding: 0; margin: 0; border: 0; border-radius: 999px;
+  background: var(--px-fill); color: var(--muted-foreground); cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out;
+}
+:root[data-px] .pn-inbox .ib-px-chip::after,
+:root[data-px] .pn-inbox .ib-px-row :is(.ib-rclip, .ib-ricon, .ib-vmic)::after,
+:root[data-px] .pn-inbox .ib-px-foot :is(.ib-cp-clip, .ib-vmic)::after { content: ''; position: absolute; inset: calc((var(--px-chip) - 44px) / 2); border-radius: 999px; }
+:root[data-px] .pn-inbox .ib-px-chip:active,
+:root[data-px] .pn-inbox .ib-px-row :is(.ib-rclip, .ib-ricon, .ib-vmic):active,
+:root[data-px] .pn-inbox .ib-px-foot :is(.ib-cp-clip, .ib-vmic):active { transform: scale(0.96); }
+@media (hover: hover) {
+  :root[data-px] .pn-inbox .ib-px-chip:hover,
+  :root[data-px] .pn-inbox .ib-px-row :is(.ib-rclip, .ib-ricon, .ib-vmic):hover,
+  :root[data-px] .pn-inbox .ib-px-foot :is(.ib-cp-clip, .ib-vmic):hover { background: var(--px-fill-2); color: var(--foreground); }
+}
+:root[data-px] .pn-inbox :is(.ib-px-chip, .ib-px-row .ib-ricon, .ib-px-pill):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:root[data-px] .pn-inbox .ib-px-row .ib-rdiscard { background: transparent; }
+
+/* ---------- The pill ---------- */
+:root[data-px] .ib-px-pill {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%;
+  height: var(--px-chip); padding: 0 10px 0 7px; margin: 0; border: 0; border-radius: 999px;
+  background: var(--px-fill); color: var(--foreground); font: inherit; font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer;
+  transition: background-color 120ms ease-out, transform 120ms ease-out;
+}
+:root[data-px] .ib-px-pill::after { content: ''; position: absolute; inset: calc((var(--px-chip) - 44px) / 2) 0; border-radius: 999px; }
+:root[data-px] .ib-px-pill:active { transform: scale(0.98); }
+:root[data-px] .ib-px-pill[data-open] { background: var(--px-fill-2); }
+@media (hover: hover) { :root[data-px] .ib-px-pill:hover { background: var(--px-fill-2); } }
+:root[data-px] .ib-px-pill[data-ask] { color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); padding-left: 12px; }
+:root[data-px] .ib-px-pill:disabled, :root[data-px] .ib-px-pill-none { color: var(--muted-foreground); cursor: default; padding-left: 12px; }
+:root[data-px] .ib-px-pill-marks { display: inline-flex; flex: none; }
+:root[data-px] .ib-px-pill-marks .ib-atile + .ib-atile { margin-left: -6px; box-shadow: 0 0 0 1.5px var(--px-raised); }
+:root[data-px] .ib-px-pill-n { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+:root[data-px] .ib-px-pill-d { flex: none; color: var(--muted-foreground); font-weight: 450; }
+:root[data-px] .ib-px-pill-c { flex: none; color: var(--muted-foreground); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  :root[data-px] .ib-px-pill { font-size: 14px; }
+}
+
+/* ---------- Send: the round arrow, or a pill with the word (the prototype's first switch) ---------- */
+:root[data-px] .pn-inbox :is(.ib-px-row .ib-rsend, .ib-px-foot .ib-px-send) {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
+  height: var(--px-chip); min-width: var(--px-chip); width: auto; padding: 0 16px; margin: 0; border: 0; border-radius: 999px; font-weight: 600; font-size: 14px;
+  transition: background-color 120ms ease-out, opacity 120ms ease-out, transform 120ms ease-out;
+}
+:root[data-px] .pn-inbox :is(.ib-px-row .ib-rsend, .ib-px-foot .ib-px-send)::after { content: ''; position: absolute; inset: calc((var(--px-chip) - 44px) / 2); border-radius: 999px; }
+:root[data-px] .pn-inbox :is(.ib-px-row .ib-rsend, .ib-px-foot .ib-px-send):active { transform: scale(0.96); }
+:root[data-px] .pn-inbox .ib-px-send-i { stroke-width: 2.2; flex: none; }
+:root[data-px] .pn-inbox .ib-px-foot .ib-px-sendw { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: nowrap; }
+/* The round arrow: the word stays for a screen reader. A Send that says more than "Send" (Trust and start) keeps its words. */
+:root[data-px-send="round"] .pn-inbox .ib-px-row .ib-rsend,
+:root[data-px-send="round"] .pn-inbox .ib-px-foot .ib-px-send:not([data-px-word]) { width: var(--px-chip); padding: 0; }
+:root[data-px-send="round"] .pn-inbox .ib-px-row .ib-rsend .ib-rsend-w,
+:root[data-px-send="round"] .pn-inbox .ib-px-foot .ib-px-send:not([data-px-word]) .ib-px-sendw { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:root[data-px-send="round"] .pn-inbox .ib-px-foot .ib-px-send[data-px-word] .ib-px-send-i { display: none; }
+/* The pill: the word, no arrow. */
+:root[data-px-send="pill"] .pn-inbox .ib-px-send-i { display: none; }
+:root[data-px] .pn-inbox .ib-px-row .ib-rsend:has(> .ib-spin) > .ib-px-send-i { visibility: hidden; }
+
+/* ---------- The reply box: the card and its row ---------- */
+:root[data-px] .pn-inbox .ib-pfoot .ib-rbox {
+  display: flex; flex-direction: column; border-radius: var(--px-radius); background: var(--px-raised);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18);
+}
+:root[data-px]:not(.light) .pn-inbox .ib-pfoot .ib-rbox { box-shadow: 0 10px 28px -14px rgb(0 0 0 / 0.6); }
+:root[data-px] .pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: calc(var(--px-pad) + 6px) 48px 6px calc(var(--px-pad) + 8px); min-height: 52px; font-size: var(--px-text); }
+:root[data-px] .pn-inbox .ib-rclose { top: var(--px-pad); right: calc(var(--px-pad) + var(--ib-rsb, 0px)); width: var(--px-chip); height: var(--px-chip); background: transparent; }
+:root[data-px] .pn-inbox .ib-px-row { gap: var(--px-gap); padding: var(--px-gap) var(--px-pad) var(--px-pad); }
+:root[data-px] .pn-inbox .ib-px-row .ib-rlead { gap: var(--px-gap); flex: 0 1 auto; min-width: 0; }
+:root[data-px] .pn-inbox .ib-px-row .ib-rmid { height: var(--px-chip); }
+:root[data-px] .pn-inbox .ib-px-row .ib-rlayer { gap: var(--px-gap); padding-left: 0; }
+:root[data-px] .pn-inbox .ib-px-row[data-phone] .ib-rlayer > .ib-px-pill { flex: 0 1 auto; }
+:root[data-px] .pn-inbox .ib-px-row .ib-rsend { margin: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* No flat strip and no hairline under the thread: the card floats 8 px from the edges and from the keyboard. */
+  :root[data-px] .pn-inbox .ib-pfoot:has(.ib-rbox) { padding: 0 var(--px-gap) var(--px-gap); border-top-color: transparent; background: transparent; box-shadow: none; }
+  :root[data-px] .pn-inbox .ib-pfoot .ib-rbox { margin: 0; }
+  :root[data-px] .pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { min-height: 48px; }
+  :root[data-px] .pn-inbox .ib-rline { padding-left: calc(var(--px-pad) - 2px); padding-right: var(--px-pad); min-height: 36px; }
+}
+
+/* ---------- New message: the same card ---------- */
+:root[data-px] .ib-px-card { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+:root[data-px] dialog.ib-cp .ib-px-foot { gap: var(--px-gap); min-height: 0; padding: var(--px-gap) var(--px-pad) var(--px-pad); border-top: 0; flex-wrap: nowrap; }
+:root[data-px] dialog.ib-cp .ib-px-foot > .ib-sp { flex: 1 1 0; min-width: 0; }
+:root[data-px] dialog.ib-cp .ib-px-foot .ib-dtfoot { display: flex; align-items: center; gap: var(--px-gap); }
+:root[data-px] dialog.ib-cp .ib-px-foot .ib-btn:not(.ib-px-send) { height: var(--px-chip); border-radius: 999px; }
+:root[data-px] dialog.ib-cp .ib-px-foot .ib-cp-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root[data-px] .ib-px-hint { color: var(--muted-foreground); font-size: 12.5px; white-space: nowrap; }
+:root[data-px] .ib-px-ctx { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 calc(var(--px-pad) + 8px); color: var(--muted-foreground); font-size: 13px; }
+:root[data-px] .ib-px-ctxb { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; margin-left: -2px; border: 0; border-radius: 999px; background: var(--px-fill); color: var(--foreground); font: inherit; font-weight: 500; cursor: pointer; position: relative; }
+:root[data-px] .ib-px-ctxb::after { content: ''; position: absolute; inset: -8px 0; }
+:root[data-px] .ib-px-ctxs { margin-left: auto; }
+/* A computer: the dialog is the card already; it takes the card's radius and the words its padding. */
+:root[data-px] .pn-inbox dialog.ib-cp:not([data-phone]), :root[data-px] dialog.ib-cp:not([data-phone]) { border-radius: var(--px-radius); }
+:root[data-px] dialog.ib-cp:not([data-phone]) .ib-cp-body { padding: 12px calc(var(--px-pad) + 8px) 8px; }
+:root[data-px][data-px-to="row"] dialog.ib-cp:not([data-phone]) .ib-cp-thread { border-top: 0; padding-top: 10px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone: the sheet's ground is the page's, and the words and the row are one card on it, 8 px from the edges and
+     from the keyboard. No squared strip at the bottom. */
+  :root[data-px] .pn-inbox dialog.ib-cp[data-phone], :root[data-px] dialog.ib-cp[data-phone] { background: var(--background); }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-cp-head, :root[data-px][data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-head { border-bottom: 0; }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-cp-thread { border: 0; }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-px-card {
+    margin: 0 var(--px-gap) calc(var(--px-gap) + env(safe-area-inset-bottom, 0px)); border-radius: var(--px-radius); background: var(--px-raised);
+    border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18); overflow: hidden;
+  }
+  :root[data-px][data-ib-keyboard] dialog.ib-cp[data-phone] .ib-px-card { margin-bottom: var(--px-gap); }
+  :root[data-px]:not(.light) dialog.ib-cp[data-phone] .ib-px-card { box-shadow: 0 10px 28px -14px rgb(0 0 0 / 0.6); }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-cp-body, :root[data-px][data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-body { padding: calc(var(--px-pad) + 6px) calc(var(--px-pad) + 8px) 6px; }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-px-foot { padding: var(--px-gap) var(--px-pad) var(--px-pad); gap: var(--px-gap); }
+  :root[data-px] .pn-inbox dialog.ib-cp[data-phone] .ib-px-foot .ib-vmic { width: var(--px-chip); height: var(--px-chip); }
+  :root[data-px] .pn-inbox dialog.ib-cp[data-phone] .ib-px-foot .ib-vmic::after { inset: calc((var(--px-chip) - 44px) / 2); }
+  :root[data-px] .pn-inbox .ib-px-foot .ib-px-send.ib-cp-send { padding: 0 16px; }
+  :root[data-px] .pn-inbox .ib-cp-foot .ib-dtfoot + .ib-cp-send { margin-left: 0; }
+  :root[data-px] dialog.ib-cp[data-phone] .ib-px-foot > .ib-cp-clipn { margin-left: -4px; }
+  :root[data-px] .ib-px-ctx { font-size: 14px; }
+  :root[data-px] .ib-px-ctxb { height: 30px; }
+}
+
+/* ---------- The picker ---------- */
+:root[data-px] .ib-px-scrim { position: absolute; inset: 0; z-index: 70; background: var(--px-scrim); opacity: 0; transition: opacity 220ms ease-out; }
+:root[data-px] .ib-px-scrim[data-shown] { opacity: 1; }
+:root[data-px] .ib-px-pk { display: flex; flex-direction: column; z-index: 71; background: var(--popover); color: var(--foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--px-line), 0 16px 40px -10px rgb(0 0 0 / 0.5)); overflow: hidden; font-size: 14px; text-align: start; }
+/* A computer: a 360 px popover at the pill. */
+:root[data-px] .ib-px-pop { position: fixed; width: 360px; max-width: calc(100vw - 16px); border-radius: 14px; opacity: 0; transform: translateY(4px) scale(0.98); transition: opacity 140ms ease-out, transform 140ms ease-out; }
+:root[data-px] .ib-px-pop[data-shown] { opacity: 1; transform: none; }
+/* A phone: a sheet from the bottom, 8 px from the edges. */
+:root[data-px] .ib-px-sheet { position: absolute; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: calc(100% - 64px); border-radius: 20px; transform: translateY(calc(100% + 24px)); transition: transform 260ms var(--px-ease); will-change: transform; touch-action: none; }
+:root[data-px] .ib-px-sheet[data-shown] { transform: none; }
+:root[data-px] .ib-px-sheet[data-dragging] { transition: none; }
+:root[data-px] section > .ib-px-scrim, :root[data-px] section > .ib-px-sheet { position: fixed; }
+:root[data-px] section > .ib-px-sheet { max-height: calc(var(--ib-vvh, 100dvh) - 64px); bottom: calc(100dvh - var(--ib-vvh, 100dvh) + 8px + env(safe-area-inset-bottom, 0px)); }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-px] .ib-px-sheet, :root[data-px] .ib-px-pop { transition: opacity 120ms ease-out; transform: none; opacity: 0; }
+  :root[data-px] .ib-px-sheet[data-shown], :root[data-px] .ib-px-pop[data-shown] { opacity: 1; }
+}
+:root[data-px] .ib-px-head { position: relative; display: flex; align-items: center; justify-content: center; flex: none; height: 52px; padding-top: 8px; font-size: 16px; font-weight: 600; touch-action: none; user-select: none; }
+:root[data-px] .ib-px-grab { position: absolute; top: 7px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 999px; background: var(--px-fill-2); }
+:root[data-px] .ib-px-back { position: absolute; left: 6px; bottom: 0; display: inline-flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border: 0; background: none; color: var(--primary); font: inherit; font-size: 16px; font-weight: 400; cursor: pointer; }
+:root[data-px] .ib-px-pop .ib-px-head { height: 40px; padding-top: 0; font-size: 13.5px; border-bottom: 1px solid var(--px-line); }
+:root[data-px] .ib-px-pop .ib-px-back { font-size: 13px; height: 36px; bottom: 2px; }
+:root[data-px] .ib-px-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+:root[data-px] .ib-px-filter { display: flex; align-items: center; gap: 8px; flex: none; height: 44px; margin: 0 8px 4px; padding: 0 12px; border-radius: 12px; background: var(--px-fill); color: var(--muted-foreground); cursor: text; }
+:root[data-px] .ib-px-filter input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: 16px; }
+:root[data-px] .ib-px-filter input::placeholder { color: var(--muted-foreground); }
+:root[data-px] .ib-px-pop .ib-px-filter { height: 34px; margin: 8px 8px 4px; border-radius: 9px; }
+:root[data-px] .ib-px-pop .ib-px-filter input { font-size: 13px; }
+:root[data-px] .ib-px-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 8px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; touch-action: pan-y; }
+:root[data-px] .ib-px-sep { height: 1px; flex: none; margin: 6px 4px; background: var(--px-line); }
+:root[data-px] .ib-px-cap { padding: 8px 10px 4px; font-size: 13px; color: var(--muted-foreground); }
+:root[data-px] .ib-px-cap b { color: var(--foreground); font-weight: 500; }
+:root[data-px] .ib-px-pop .ib-px-cap { font-size: 12px; }
+:root[data-px] .ib-px-none { padding: 14px 10px; color: var(--muted-foreground); }
+:root[data-px] .ib-px-startrow { display: flex; flex-direction: column; gap: 2px; }
+:root[data-px] .ib-px-opt { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; flex: none; min-height: 56px; padding: 8px 10px; border-radius: 12px; cursor: pointer; }
+:root[data-px] .ib-px-opt[aria-disabled] { opacity: 0.5; cursor: default; }
+:root[data-px] .ib-px-opt.ib-hl { background: var(--px-fill); }
+:root[data-px] .ib-px-opt[data-px-bare] { grid-template-columns: 0 minmax(0, 1fr) auto; column-gap: 0; min-height: 52px; padding-left: 12px; }
+:root[data-px] .ib-px-pop .ib-px-opt { min-height: 46px; padding: 6px 8px; border-radius: 9px; column-gap: 10px; }
+:root[data-px] .ib-px-pop .ib-px-opt[data-px-bare] { min-height: 36px; column-gap: 0; padding-left: 10px; }
+:root[data-px] .ib-px-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-24, 24px); height: var(--ib-mark-24, 24px); border-radius: var(--ib-mark-24-r, 6px); background: var(--px-fill); }
+:root[data-px] .ib-px-mark .ib-mk, :root[data-px] .ib-px-mark .ib-mk > :is(svg, img) { width: var(--ib-mark-24-g, 14px); height: var(--ib-mark-24-g, 14px); }
+:root[data-px] .ib-px-mark-30 { width: var(--ib-mark-30, 30px); height: var(--ib-mark-30, 30px); border-radius: var(--ib-mark-30-r, 8px); }
+:root[data-px] .ib-px-mark-30 .ib-mk, :root[data-px] .ib-px-mark-30 .ib-mk > :is(svg, img) { width: var(--ib-mark-30-g, 17px); height: var(--ib-mark-30-g, 17px); }
+:root[data-px] .ib-px-lead { display: grid; place-items: center; width: 30px; height: 30px; color: var(--muted-foreground); }
+:root[data-px] .ib-px-pop .ib-px-lead { width: 24px; height: 24px; }
+:root[data-px] .ib-px-lead:empty { display: none; }
+:root[data-px] .ib-px-words { display: block; min-width: 0; }
+:root[data-px] .ib-px-t { display: block; font-size: 15.5px; font-weight: 500; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root[data-px] .ib-px-d { display: block; margin-top: 1px; font-size: 13px; line-height: 1.3; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root[data-px] .ib-px-pop .ib-px-t { font-size: 13.5px; }
+:root[data-px] .ib-px-pop .ib-px-d { font-size: 12px; }
+:root[data-px] .ib-px-plain { min-height: 48px; }
+:root[data-px] .ib-px-plain .ib-px-t { font-weight: 450; color: var(--muted-foreground); }
+:root[data-px] .ib-px-end { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; }
+:root[data-px] .ib-px-end:empty { display: none; }
+:root[data-px] .ib-px-ck { color: var(--primary); stroke-width: 2; }
+:root[data-px] .ib-px-tick { position: relative; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 60%, transparent); cursor: pointer; }
+:root[data-px] .ib-px-tick::after { content: ''; position: absolute; inset: -10px; }
+:root[data-px] .ib-px-tick[data-on] { background: var(--primary); color: var(--primary-foreground); box-shadow: none; }
+:root[data-px] .ib-px-tick:disabled { opacity: 0.4; cursor: default; }
+:root[data-px] .ib-px-tick .ib-ic { stroke-width: 2.6; }
+:root[data-px] .ib-px-pop .ib-px-tick { width: 20px; height: 20px; }
+/* Model and Effort, under the chosen new-session row (the prototype's second switch). */
+:root[data-px] .ib-px-lset { display: flex; flex-direction: column; gap: 2px; margin: 0 0 4px 52px; padding: 2px 0 6px; }
+:root[data-px] .ib-px-pop .ib-px-lset { margin-left: 42px; }
+:root[data-px] .ib-px-lrow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--foreground); font: inherit; font-size: 15px; text-align: start; }
+:root[data-px] button.ib-px-lrow { cursor: pointer; }
+@media (hover: hover) { :root[data-px] button.ib-px-lrow:hover { background: var(--px-fill); } }
+:root[data-px] .ib-px-pop .ib-px-lrow { min-height: 34px; padding: 0 8px; font-size: 13px; }
+:root[data-px] .ib-px-lk { flex: none; width: 52px; color: var(--muted-foreground); }
+:root[data-px] .ib-px-lv { flex: 1; font-weight: 500; }
+:root[data-px] .ib-px-lc { color: var(--muted-foreground); }
+:root[data-px] .ib-px-segrow { flex-direction: column; align-items: stretch; gap: 6px; padding-top: 6px; padding-bottom: 4px; }
+:root[data-px] .ib-px-seg { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 3px; margin-left: -8px; border-radius: 999px; background: var(--px-fill); }
+:root[data-px] .ib-px-seg button { position: relative; display: grid; place-items: center; height: 36px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 140ms ease-out, color 140ms ease-out; }
+:root[data-px] .ib-px-seg button::after { content: ''; position: absolute; inset: -4px 0; }
+:root[data-px] .ib-px-pop .ib-px-seg button { height: 26px; font-size: 12px; }
+:root[data-px] .ib-px-seg button[data-on] { background: var(--popover); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 1px var(--px-line); }
+:root[data-px]:not(.light) .ib-px-seg button[data-on] { background: color-mix(in oklch, var(--popover) 70%, var(--foreground) 12%); }
+:root[data-px-model="off"] .ib-px-lset { display: none; }

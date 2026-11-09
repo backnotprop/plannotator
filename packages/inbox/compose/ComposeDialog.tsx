@@ -33,6 +33,10 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
+import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
+import { usePxFlags } from '../px/flags';
+import { PxPill } from '../px/PxPicker';
+import { PxToPicker, pxHasLaunchChoice, pxLaunchWords, readPxLaunchChoice, savePxLaunchChoice, type PxLaunchChoice } from '../px/PxToPicker';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
@@ -566,6 +570,32 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [target, model, chosen]);
 
   const [picker, setPicker] = useState(false);
+  // PROTOTYPE (proto/composer-picker): the three live switches, the pill's place in the row, and Model and Effort
+  // (shown only: the launch ignores them).
+  const px = usePxFlags();
+  const toInRow = px.to === 'row';
+  const pxPillRef = useRef<HTMLButtonElement>(null);
+  const [pxChoice, setPxChoiceState] = useState<PxLaunchChoice>(readPxLaunchChoice);
+  const setPxChoice = (choice: PxLaunchChoice) => {
+    setPxChoiceState(choice);
+    savePxLaunchChoice(choice);
+  };
+  const [pxNoSkills, setPxNoSkills] = useState(false);
+  const pxOpenSkills = () => {
+    const field = textRef.current;
+    if (!field) return;
+    const slash = () => {
+      field.focus();
+      const at = field.selectionStart ?? field.value.length;
+      document.execCommand('insertText', false, at === 0 || /\s$/.test(field.value.slice(0, at)) ? '/' : ' /');
+    };
+    const none = () => {
+      setPxNoSkills(true);
+      setTimeout(() => setPxNoSkills(false), 2600);
+    };
+    if (getCachedSkillCatalog().length > 0) return slash();
+    void fetchSkillCatalog().then((catalog) => (catalog.length > 0 ? slash() : none()));
+  };
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
@@ -1108,7 +1138,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // the room it leaves "Press Send" would have no card to read.
   const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
-  const toRow = (
+  const toRowTop = (
     <div ref={toRowRef} className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
       {model && !anyLive && !canStart && !endedNote ? (
@@ -1223,6 +1253,60 @@ export function ComposeDialog(props: ComposeDialogProps) {
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
   );
+
+  // PROTOTYPE: To in the bottom row (the recommended choice) leaves no To line at the top.
+  const toRow = toInRow ? null : toRowTop;
+  const pxLaunch = start && px.model && pxHasLaunchChoice(start.agent) ? pxLaunchWords(pxChoice) : null;
+  const pxPill = !toInRow ? null : model && !anyLive && !canStart && !endedNote ? (
+    <span className="ib-px-pill ib-px-pill-none" data-compose-to="none">
+      No agent is running
+    </span>
+  ) : (
+    <PxPill
+      buttonRef={pxPillRef}
+      hosts={start ? [start.agent] : target ? [target.host] : endedNote ? [endedNote.host] : []}
+      label={start ? (pxLaunch ? pxLaunch.label : `New ${start.name} session`) : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for agents…'}
+      detail={start ? (pxLaunch ? pxLaunch.detail : null) : target ? null : endedNote ? 'ended' : null}
+      ask={!start && !target && !endedNote}
+      open={picker}
+      disabled={!loading && !anyLive && !canStart && !endedNote}
+      ariaLabel={
+        target
+          ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
+          : start
+            ? `To: a new ${start.name} session${pxLaunch ? `, ${pxLaunch.label} ${pxLaunch.detail}` : ''}. Change`
+            : endedNote
+              ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
+              : loading
+                ? 'To: looking for agents'
+                : 'To: choose an agent'
+      }
+      attrs={{ 'data-compose-to': target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose', 'data-px-start': start?.agent }}
+      onClick={() => !loading && setPicker((open) => !open)}
+    />
+  );
+  // The folder a new session starts in, as the card's context line (the To line's "in <folder>" button).
+  const pxContext = toInRow && start ? (
+    <div className="ib-px-ctx" data-px-context="">
+      <span>New {start.name} session in</span>
+      <button
+        type="button"
+        className="ib-px-ctxb"
+        data-compose-folder={start.project.id}
+        aria-haspopup="listbox"
+        aria-expanded={folderMenu}
+        aria-label={`Start in: ${start.project.name}. Change`}
+        onClick={() => {
+          setPicker(false);
+          setFolderMenu((open) => !open);
+        }}
+      >
+        {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
+        <Icon name="chevD" size={13} />
+      </button>
+      {draft && !phone && <span className="ib-px-ctxs">Draft · saved {whenTime(draft.updated_at)}</span>}
+    </div>
+  ) : null;
 
   const reviewRows = box && (
     <ReviewRows
@@ -1354,21 +1438,28 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </span>
         </p>
       )}
-      {picker && (
-        <ToPicker
+      {
+        <PxToPicker
+          open={picker}
+          anchor={toInRow ? pxPillRef : toRef}
+          host={null}
+          showLaunchChoice={px.model}
+          choice={pxChoice}
+          onChoice={setPxChoice}
           groups={groups}
           selected={target?.session ?? (start ? startKey(start.agent) : null)}
-          home={home}
           phone={phone}
           start={launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
-          onStart={(picked) => {
+          onStart={(picked, stay) => {
             setToFilled(false);
             setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
             // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
             void inboxApi.launchSettingsRead(true).catch(() => {});
             setChosen(null);
-            setPicker(false);
             setError(null);
+            // A row with Model and Effort under it keeps the list open on them.
+            if (stay) return;
+            setPicker(false);
             textRef.current?.focus();
           }}
           onPick={(picked) => {
@@ -1383,10 +1474,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
             setPicker(false);
             // Still nobody in To: back on To, where the choice is made.
             if (target) afterPicker();
-            else (toRef.current ?? textRef.current)?.focus();
+            else ((toInRow ? pxPillRef.current : toRef.current) ?? textRef.current)?.focus();
           }}
         />
-      )}
+      }
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}
@@ -1564,6 +1655,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </div>
         </div>
       )}
+      <div className="ib-px-card" data-px-card="">
       <div className="ib-cp-body">
         {/* The Inbox's composer field (#1914): the / and $ skill picker; the Send composes the block. */}
         <div className="ib-cp-field" data-compose-text="">
@@ -1630,7 +1722,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
         </div>
       )}
-      <div className="ib-cp-foot">
+      {pxContext}
+      <div className="ib-cp-foot ib-px-foot">
         {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
         {takesFiles ? (
           // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
@@ -1642,6 +1735,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             </span>
           </Tip>
         )}
+        {!box && (
+          <button type="button" className="ib-px-chip" aria-label="Skills" data-compose-skills="" onClick={pxOpenSkills}>
+            <Icon name="cube" size={phone ? 20 : 16} />
+          </button>
+        )}
+        {pxPill}
+        {pxNoSkills && <span className="ib-px-hint">No skills are installed</span>}
         {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
         {phone && attached > 0 && (
           <span className="ib-cp-clipn" data-compose-file-count="">
@@ -1701,16 +1801,18 @@ export function ComposeDialog(props: ComposeDialogProps) {
         )}
         <button
           type="button"
-          className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+          className={`ib-btn ib-pri ib-px-send${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+          data-px-word={sendLabel === 'Send' ? undefined : ''}
           aria-disabled={!sendable || undefined}
           aria-keyshortcuts={sendKeys}
           onClick={() => void send()}
           disabled={busy !== null || voice.busy}
           data-compose-send=""
         >
-          <Icon name="send" size={15} />
-          {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
+          <Icon name="arrowUp" size={phone ? 20 : 16} className="ib-px-send-i" />
+          <span className="ib-cp-sendl ib-px-sendw">{sendLabel}</span>
         </button>
+      </div>
       </div>
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">
         {pasteSaid}
