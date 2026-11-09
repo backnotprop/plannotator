@@ -637,3 +637,5 @@ packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx
+packages/review-editor/components/guide/GuideDiffControls.test.tsx
+packages/review-editor/components/ReviewHeaderMenu.test.tsx
