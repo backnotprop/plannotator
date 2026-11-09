@@ -89,8 +89,9 @@ describe("hooks.json's SessionStart compact hook", () => {
   /** The command as a hook process runs it: a clean environment, plus the variable when given. */
   function run(shell: string, args: string[], value?: string, timeout = 10_000) {
     const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin' }
-    // PowerShell needs the Windows folder to start.
-    for (const name of ['SystemRoot', 'windir']) if (process.env[name]) env[name] = process.env[name] as string
+    // PowerShell needs the Windows folder to start, and the profile folders a hook gets from Claude Code: without
+    // them Windows PowerShell 5.1 can't keep its module cache and takes 20 s or more to start on a CI runner.
+    for (const name of ['SystemRoot', 'windir', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'PSModulePath']) if (process.env[name]) env[name] = process.env[name] as string
     if (value !== undefined) env[INBOX_REMINDER_ENV] = value
     return spawnSync(shell, [...args, command], { env, encoding: 'utf8', timeout })
   }

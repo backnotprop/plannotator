@@ -66,7 +66,17 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     useShell(POSIX_SHELL)
     // inbox-guard: own child (a renamed copy of ping this test started, never an Inbox)
     for (const pid of pids.splice(0)) Bun.spawnSync(['taskkill', '/F', '/PID', pid])
-    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+    // Windows frees a killed process's folder a moment later.
+    for (const dir of dirs.splice(0)) {
+      for (let i = 0; i < 20; i++) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+          break
+        } catch {
+          Bun.sleepSync(100)
+        }
+      }
+    }
   })
   const scratch = () => {
     // Not named after the CLI: the stop check looks for "plannotator" in the whole command line.
