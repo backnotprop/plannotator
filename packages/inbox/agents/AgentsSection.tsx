@@ -1,4 +1,4 @@
-import { useMemo, type MouseEvent, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { useInboxAgents } from '../agentsList';
 import { Icon } from '../icons';
@@ -96,6 +96,49 @@ function AgentTip({ entry, machine }: { entry: AgentEntry; machine: MachineView 
   );
 }
 
+/** How a row opens: its thread, New message to its live agent, or nothing (a launch not yet joined, an agent gone quiet). */
+type AgentOpens = 'thread' | 'message' | 'none';
+
+/**
+ * One agent's row. Drawn again only when what it shows changed (its agent as the list read it, its name, its thread,
+ * its machine, the selection): the window draws on every read and keystroke, and a full section is 40 rows a machine.
+ */
+const AgentRow = memo(
+  function AgentRow(props: { entry: AgentEntry; machine: MachineView | null; on: boolean; away: boolean; opens: AgentOpens; onOpen: (entry: AgentEntry, opener: HTMLElement) => void }) {
+    const { entry, machine, on, away } = props;
+    return (
+      <div className="ib-sbagent" data-sidebar-agent={entry.agent.id} data-agent-state={entry.agent.state}>
+        <Tip content={<AgentTip entry={entry} machine={machine} />} side="right" align="start">
+          <button
+            type="button"
+            className={`ib-proj${on ? ' ib-on' : ''}${away ? ' ib-proj-quiet' : ''}`}
+            aria-current={on ? 'page' : undefined}
+            onClick={(event) => props.onOpen(entry, event.currentTarget)}
+            data-agent-open={props.opens}
+          >
+            <AgentMark id={entry.agent.id} host={entry.agent.host} />
+            <span className="ib-name" dir="auto">
+              {entry.name}
+            </span>
+            <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
+          </button>
+        </Tip>
+      </div>
+    );
+  },
+  (a, b) =>
+    a.entry.agent === b.entry.agent &&
+    a.entry.name === b.entry.name &&
+    a.entry.machine === b.entry.machine &&
+    a.entry.thread?.id === b.entry.thread?.id &&
+    a.entry.thread?.subject === b.entry.thread?.subject &&
+    a.machine === b.machine &&
+    a.on === b.on &&
+    a.away === b.away &&
+    a.opens === b.opens &&
+    a.onOpen === b.onOpen,
+);
+
 export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
   const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows), [groupsRead, props.machines, props.rows]);
@@ -105,11 +148,14 @@ export function AgentsSection(props: AgentsSectionProps) {
   const agentOn = (entry: AgentEntry) => props.page === 'inbox' && !!entry.thread && props.openThreadId === entry.thread.id;
   // A launch not yet joined by its agent has no session to write to, only its thread.
   const canMessage = (entry: AgentEntry) => entry.agent.live && !entry.agent.session.startsWith('launch:');
-  const open = (entry: AgentEntry, event: MouseEvent<HTMLButtonElement>) => {
-    const opener = event.currentTarget;
+  const open = (entry: AgentEntry, opener: HTMLElement) => {
     if (entry.thread) return props.pick(() => props.onOpenThread(entry.thread!.id))();
     if (canMessage(entry)) return props.pick(() => props.onMessageAgent(entry.agent.session, opener))();
   };
+  // One function for every row, for as long as the section lasts: a row is not drawn again for a new closure.
+  const openNow = useRef(open);
+  openNow.current = open;
+  const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
   return (
     <div className="ib-sbagents" data-agents-surface="">
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
@@ -158,28 +204,9 @@ export function AgentsSection(props: AgentsSectionProps) {
                   {notice && <MachineSidebarWord notice={notice} name={machine.name} onPress={props.pick(() => props.onMachineUpdate?.(machine.id))} />}
                 </div>
               )}
-              {rows.map((entry) => {
-                const on = agentOn(entry);
-                return (
-                  <div key={entry.agent.id} className="ib-sbagent" data-sidebar-agent={entry.agent.id} data-agent-state={entry.agent.state}>
-                    <Tip content={<AgentTip entry={entry} machine={machine} />} side="right" align="start">
-                      <button
-                        type="button"
-                        className={`ib-proj${on ? ' ib-on' : ''}${away ? ' ib-proj-quiet' : ''}`}
-                        aria-current={on ? 'page' : undefined}
-                        onClick={(event) => open(entry, event)}
-                        data-agent-open={entry.thread ? 'thread' : canMessage(entry) ? 'message' : 'none'}
-                      >
-                        <AgentMark id={entry.agent.id} host={entry.agent.host} />
-                        <span className="ib-name" dir="auto">
-                          {entry.name}
-                        </span>
-                        <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
-                      </button>
-                    </Tip>
-                  </div>
-                );
-              })}
+              {rows.map((entry) => (
+                <AgentRow key={entry.agent.id} entry={entry} machine={machine} on={agentOn(entry)} away={away} opens={entry.thread ? 'thread' : canMessage(entry) ? 'message' : 'none'} onOpen={onOpen} />
+              ))}
             </div>
           );
         })}
