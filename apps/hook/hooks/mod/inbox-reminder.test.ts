@@ -97,7 +97,8 @@ describe("hooks.json's SessionStart compact hook", () => {
 
   const text = inboxReminderText(TOOL)
   // dash is Debian's and Ubuntu's /bin/sh (CI); its echo read backslashes, which is why the hook uses printf.
-  const shells = ['/bin/sh', '/bin/bash', ...['/usr/bin/dash', '/bin/dash'].filter((path) => existsSync(path)).slice(0, 1)]
+  // Windows has no /bin/sh or /bin/bash: the PowerShell legs below cover it.
+  const shells = process.platform === 'win32' ? [] : ['/bin/sh', '/bin/bash', ...['/usr/bin/dash', '/bin/dash'].filter((path) => existsSync(path)).slice(0, 1)]
   for (const shell of shells) {
     test(`${shell}: set, prints the text and one newline; exit 0`, () => {
       const result = run(shell, ['-c'], text)
