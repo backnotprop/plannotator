@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
@@ -2271,7 +2272,7 @@ export interface InboxEventHandlers {
    * With a shared stream (sharedEvents.ts) also called when the tab whose
    * stream serves this one changes, so the report names it (`served_by`).
    */
-  onConnect?: () => void;
+  onConnect?: (hello?: RestartHello) => void;
   /**
    * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
@@ -2371,7 +2372,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       // Only proof the stream is alive: no read, nothing to show.
       return;
     case 'hello':
-      handlers.onConnect?.();
+      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
+      handlers.onConnect?.(readHello(frame.data) ?? undefined);
       return;
     case 'reach':
       try {
