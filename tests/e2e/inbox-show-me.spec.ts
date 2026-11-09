@@ -1183,6 +1183,8 @@ test('a Change it while the session answers another thread: no storm of requests
     // Refused while the other turn holds the session: seven seconds, and at most a try a pause (the loop was 1,600 a second).
     const readsBefore = reads.length;
     await second.waitForTimeout(7_000);
+    // MEASURE (temporary, removed before review): the reads and posts in the window.
+    console.log(`[ask-reads] reads=${reads.length - readsBefore} posts=${posts.length} before=${readsBefore}`);
     expect(posts.length).toBeLessThanOrEqual(3);
     expect(reads.length - readsBefore).toBeLessThanOrEqual(6);
     expect(wakes()).toBe(0);

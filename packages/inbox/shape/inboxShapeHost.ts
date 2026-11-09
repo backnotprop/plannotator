@@ -21,8 +21,9 @@ import { shapeNoteWaits, type ShapeNote, type ShapeNoteInput, type ShapeVersion 
 import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { generateId } from '@plannotator/ui/utils/generateId';
-import { InboxApiError, inboxApi, type ShapeLoadedWire } from '../api';
+import { InboxApiError, inboxApi, type InboxAskModel, type ShapeLoadedWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
+import { readAsk } from '../ask/askReads';
 import { OpenInFile } from '../components/OpenIn';
 import { shapeEventsBetween } from './events';
 
@@ -100,12 +101,15 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     return loaded;
   };
 
-  /** Through the thread's Ask to the live session; null when none can answer now. */
-  const askSession = async (loaded: ShapeLoadedWire, prompt: string, onText: (text: string) => void, busyPolicy?: 'wait', onBusy?: () => void): Promise<{ text: string; provider: string } | null> => {
+  /**
+   * Through the thread's Ask to the live session; null when none can answer now. `known`: the thread's Ask as a
+   * read just now found it, so it is not read again.
+   */
+  const askSession = async (loaded: ShapeLoadedWire, prompt: string, onText: (text: string) => void, busyPolicy?: 'wait', onBusy?: () => void, known?: InboxAskModel): Promise<{ text: string; provider: string } | null> => {
     const thread = loaded.shape.thread;
     if (!thread || loaded.session.state === 'gone') return null;
     try {
-      const model = await inboxApi.askRead(thread);
+      const model = known ?? (await readAsk(thread));
       if (!model.can_ask) return null;
       const posted = await inboxApi.askSend(thread, generateId('ask'), prompt);
       if (!posted.provider_id) return null;
@@ -143,13 +147,14 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     const look = () => {
       if (looking) return;
       looking = true;
-      inboxApi.askRead(thread).then(
+      readAsk(thread).then(
         (model) => {
           looking = false;
           if (model.running || !untilFree.delete(id)) return;
           clearInterval(pause);
           stop();
-          void wake(id);
+          // The read just made says whether it can ask: the wake does not read it again.
+          void wake(id, model);
         },
         () => {
           looking = false;
@@ -160,7 +165,7 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     const pause = setInterval(look, options.busyRetryMs ?? BUSY_RETRY_MS);
     (pause as { unref?: () => void }).unref?.();
   };
-  const wake = async (id: string): Promise<void> => {
+  const wake = async (id: string, known?: InboxAskModel): Promise<void> => {
     if (waking.has(id)) {
       waking.set(id, true);
       return;
@@ -169,9 +174,16 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     try {
       const loaded = await load(id);
       if (loaded.notes.some(shapeNoteWaits)) {
-        await askSession(loaded, shapeChangePrompt(loaded), () => {}, 'wait', () => {
-          if (loaded.shape.thread) wakeWhenFree(id, loaded.shape.thread);
-        });
+        await askSession(
+          loaded,
+          shapeChangePrompt(loaded),
+          () => {},
+          'wait',
+          () => {
+            if (loaded.shape.thread) wakeWhenFree(id, loaded.shape.thread);
+          },
+          known,
+        );
       }
     } catch {
       // Not woken: the note waits for the agent's next turn, as it always may.
