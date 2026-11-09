@@ -66,7 +66,7 @@ describe("artifact pins in the store", () => {
     const b = file("notes.md");
     const c = file("diagram.mmd", undefined, "mermaid");
     const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Files", attachments: [a, b] }).message;
-    store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One more", attachments: [c] });
+    store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One more", attachments: [c], reply_to: root.id });
     const before = lines(dir);
     expect(before).toBeGreaterThan(0);
     store.setArtifactPinned(root.thread_id, b.id, true);
