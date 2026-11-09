@@ -3,9 +3,11 @@
  * Chromium against the compiled binary.
  *
  *  - a phone, the worst case (four open questions, three comments, two files, the mic, a long agent name), at 390 and
- *    320: the summary line on its own line over the row, then ONE row: the paperclip at the left and Skills, the mic and
- *    Send at the right edge; no bin (the owner: "maybe we don't need delete icon. I like attachment on left"); every
- *    control 44 px to press; nothing runs past the box;
+ *    320: the summary line on its own line over the row, then ONE row: the paperclip at the left, Skills and who gets
+ *    the reply (approval "inbox-phone-composer-picker"), the mic and Send (a round arrow) at the right edge; no bin
+ *    (the owner: "maybe we don't need delete icon. I like attachment on left"); every control drawn 36 px and 44 px
+ *    to press; nothing runs past the box;
+ *  - two agents: who gets the reply is a pill in that row, after Skills, never on the line over it;
  *  - a tap on the summary sheet's scrim closes it and presses nothing under it; Skip them, Review comments; a long
  *    agent name in the list stays on one line;
  *  - recording (decision D5): the status takes the paperclip's and Skills' place; the mic, Send and the box never move;
@@ -40,7 +42,7 @@ test.describe.configure({ mode: 'serial' });
 
 let world: ListWorld;
 let thread = '';
-/** A thread both agents wrote in: the box has the recipient pill. */
+/** A thread both agents wrote in: the box's row names who gets the reply (a pill, not the mark alone). */
 let twoAgents = '';
 let serverSession = '';
 
@@ -137,7 +139,8 @@ function oneRow(row: Awaited<ReturnType<typeof readRow>>, press = 44): void {
   const middles = row.controls.map((c) => (c.top + c.bottom) / 2);
   for (const middle of middles) expect(Math.abs(middle - middles[0]!), 'every control on one line').toBeLessThanOrEqual(2);
   for (const c of row.controls) expect(c.right, `"${c.name}" inside the box`).toBeLessThanOrEqual(row.boxRight + 0.5);
-  // The row's own controls (Send, the paperclip, Skills, the mic, the bin, the summary line); a chip's button is the chip's size.
+  // The row's own controls (Send, the paperclip, Skills, who gets the reply, the mic, the bin, the summary line); a
+  // chip's button is the chip's size. A phone draws them 36 px and makes up the rest with `::after` (`readRow`).
   for (const c of row.controls.filter((c) => !c.chip)) expect(Math.min(c.width, c.height), `"${c.name}" is ${press} px to press`).toBeGreaterThanOrEqual(press);
 }
 
@@ -155,7 +158,7 @@ const spots = (page: Page) =>
 const MIC = 'Dictate: hold to talk, or tap';
 
 for (const width of [390, 320] as const) {
-  test(`a phone at ${width} wide, the worst case: the line over one row of the paperclip, Skills, the mic and Send; no bin`, async ({ browser }) => {
+  test(`a phone at ${width} wide, the worst case: the line over one row of the paperclip, Skills, who gets the reply, the mic and Send; no bin`, async ({ browser }) => {
     const page = await phone(browser, width);
     await openBox(page);
     // On its own line over the row the whole words fit even at 320 (on main they shared Send's row and were cut to
@@ -179,8 +182,27 @@ for (const width of [390, 320] as const) {
     });
     expect(placed).toEqual({ above: true, inside: true, lines: 1 });
     const row = await readRow(page);
-    expect(row.controls.map((c) => c.name)).toEqual(['Attach files', 'Skills', MIC, 'Send']);
+    // One agent wrote here: who gets the reply is its mark alone, in the row after Skills. Send is the round arrow,
+    // still named "Send".
+    expect(row.controls.map((c) => c.name)).toEqual(['Attach files', 'Skills', expect.stringMatching(/^Reply goes to .+\. Change$/), MIC, 'Send']);
     oneRow(row);
+    const drawn = await pane(page).locator('.ib-rbox [data-reply-row]').evaluate((el) => {
+      const size = (selector: string) => {
+        const r = el.querySelector(selector)!.getBoundingClientRect();
+        return [r.width, r.height];
+      };
+      const word = el.querySelector('[data-reply-send] .ib-rsend-w')!.getBoundingClientRect();
+      return {
+        sizes: ['.ib-rclip', '[data-reply-skills]', '[data-recipient]', '[data-voice-mic]', '[data-reply-send]'].map(size),
+        mark: el.querySelector('[data-recipient]')!.matches('[data-agent-mark]') && el.querySelector('[data-recipient]')!.textContent!.trim() === '',
+        arrow: el.querySelector('[data-reply-send] svg.ib-rsend-i')!.getClientRects().length > 0,
+        word: Math.max(word.width, word.height),
+      };
+    });
+    expect(drawn.sizes, 'every control is drawn 36 px round').toEqual(Array.from({ length: 5 }, () => [36, 36]));
+    expect({ mark: drawn.mark, arrow: drawn.arrow }).toEqual({ mark: true, arrow: true });
+    expect(drawn.word, 'the word "Send" is not drawn (it is the name)').toBeLessThanOrEqual(1);
+    await expect(pane(page).locator('.ib-rbox [data-reply-line] [data-recipient]'), 'never on the line over the row').toHaveCount(0);
     // The paperclip at the left edge, Send at the right edge.
     expect(row.controls[0]!.left - row.boxLeft).toBeLessThanOrEqual(12);
     expect(row.boxRight - row.controls.at(-1)!.right).toBeLessThanOrEqual(12);
@@ -193,20 +215,36 @@ for (const width of [390, 320] as const) {
 }
 
 for (const width of [390, 320] as const) {
-  test(`a phone at ${width} wide, two agents: the recipient pill on the line over the row is 44 px to press, its folder alone, no "to"`, async ({ browser }) => {
+  test(`a phone at ${width} wide, two agents: who gets the reply is a pill in the row after Skills, 36 px drawn and 44 px to press, never on the line over it`, async ({ browser }) => {
     const page = await phone(browser, width);
     await page.goto(`${world.url}#thread=${twoAgents}`);
     await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
-    const pill = pane(page).locator('.ib-rbox [data-reply-line] .ib-rto');
+    const pill = pane(page).locator('.ib-rbox [data-reply-row] [data-recipient]');
     await expect(pill).toBeVisible();
+    await expect(pill).toHaveAttribute('data-agent-pill', '');
+    await expect(pill).toHaveAccessibleName(/^Reply goes to .+\. Change$/);
+    await expect(pane(page).locator('.ib-rbox [data-reply-line] [data-recipient]')).toHaveCount(0);
+    await expect(pane(page).locator('.ib-rbox .ib-rto')).toHaveCount(0);
+    await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-voice-mic]')).toBeVisible();
     const drawn = await pill.evaluate((el) => {
       const r = el.getBoundingClientRect();
-      const to = el.querySelector('.ib-rto-l');
       const box = el.closest('.ib-rbox')!.getBoundingClientRect();
-      return { height: r.height, to: to ? to.getClientRects().length > 0 : false, inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5 };
+      const skills = el.closest('[data-reply-row]')!.querySelector('[data-reply-skills]')!.getBoundingClientRect();
+      const mic = el.closest('[data-reply-row]')!.querySelector('[data-voice-mic]')!.getBoundingClientRect();
+      const name = el.querySelector<HTMLElement>('.ib-apill-n')!;
+      return {
+        height: r.height,
+        press: parseFloat(getComputedStyle(el, '::after').height),
+        name: name.textContent!.trim().length > 0 && name.getClientRects().length > 0,
+        afterSkills: r.left >= skills.right - 0.5 && Math.abs((r.top + r.bottom) / 2 - (skills.top + skills.bottom) / 2) <= 2,
+        beforeMic: r.right <= mic.left + 0.5,
+        inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+      };
     });
-    expect(drawn.height, 'the pill is 44 px to press').toBeGreaterThanOrEqual(44);
-    expect({ to: drawn.to, inside: drawn.inside }).toEqual({ to: false, inside: true });
+    expect(drawn.height, 'the pill is drawn 36 px tall').toBe(36);
+    expect(drawn.press, 'the pill is 44 px to press').toBeGreaterThanOrEqual(44);
+    expect({ name: drawn.name, afterSkills: drawn.afterSkills, beforeMic: drawn.beforeMic, inside: drawn.inside }).toEqual({ name: true, afterSkills: true, beforeMic: true, inside: true });
+    oneRow(await readRow(page));
     await page.context().close();
   });
 }

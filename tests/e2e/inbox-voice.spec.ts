@@ -1395,11 +1395,13 @@ test.describe('New message dictates as the reply box does', () => {
     if (options.agent !== false) await page.route('**/api/inbox/sessions*', (route) => route.fulfill({ json: liveAgent }));
     await page.goto(w.url);
     await page.locator('.ib-lhead [data-open-compose], .ib-side [data-open-compose]').filter({ visible: true }).first().click();
-    await expect(sheet(page).locator('.ib-cp-tobtn, .ib-cp-none-to').first()).toBeVisible();
+    // To: a computer's line at the top, a phone's pill in the foot's row ("No agent is running" is a span in either).
+    await expect(sheet(page).locator('[data-compose-to]').first()).toBeVisible();
     await expect(sheet(page).locator('[data-loading]')).toHaveCount(0);
     if (options.pick) {
-      await sheet(page).locator('.ib-cp-tobtn').click();
+      await sheet(page).locator('[data-compose-to]').click();
       await sheet(page).locator(`[data-compose-session="${SESSION}"]`).click();
+      await expect(sheet(page).locator('[data-compose-to]')).toHaveAttribute('data-compose-to', SESSION);
     }
   }
 
@@ -1483,7 +1485,7 @@ test.describe('New message dictates as the reply box does', () => {
   const SIZES = [
     { width: 390, height: 660, keyboard: 403 },
     { width: 320, height: 568, keyboard: 353 },
-    // The tightest: Send is the bare arrow under 360, so 360 to 389 have the least room for the status.
+    // Between the narrowest and the owner's phone (New message's Send is the round arrow at every phone width now).
     { width: 360, height: 640, keyboard: 383 },
     { width: 375, height: 667, keyboard: 410 },
     { width: 389, height: 660, keyboard: 403 },
@@ -1761,22 +1763,33 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
-  test('a phone: To in the middle of a take stops the microphone and keeps the words', async () => {
+  test('a phone: To steps aside for a take with the rest of the row; the take over, its sheet opens with no microphone left open and the words kept', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     const mics = await watchMic(page);
     await openCompose(page, w);
     await field(page).fill('Before.');
     await field(page).blur();
+    // A phone's To is the pill in the foot's row, and the row is the status while a take runs (only the clip, the mic
+    // and Send stay): To cannot be pressed in the middle of a take, as it could from the head's To line.
+    const to = sheet(page).locator('.ib-cp-foot [data-compose-to]');
+    await expect(to).toBeVisible();
     w.send({ upstream: [{ text: 'After.', hold: true }] });
     await mic(sheet(page)).tap();
     await expect(line(sheet(page), 'tap')).toBeVisible();
+    await expect(to).toBeHidden();
     await page.waitForTimeout(1200);
-    await sheet(page).locator('.ib-cp-tobtn').tap();
-    await expect(page.locator(`[data-compose-session="${SESSION}"]`)).toBeVisible();
-    await expect.poll(mics, { message: 'the To sheet took the status and Cancel: no microphone stays open behind it' }).toBe(0);
+    await mic(sheet(page)).tap();
+    await expect(line(sheet(page), 'sending')).toBeVisible();
     w.send({ release: true });
-    await page.locator(`[data-compose-session="${SESSION}"]`).tap();
+    await expect(field(page)).toHaveValue('Before. After.');
+    // The take is over: To is back, and its sheet opens over a row with no microphone open behind it.
+    await to.tap();
+    const row = sheet(page).locator(`[data-compose-to-sheet] [data-compose-session="${SESSION}"]`);
+    await expect(row).toBeVisible();
+    await expect.poll(mics, { message: 'no microphone stays open behind the To sheet' }).toBe(0);
+    await row.tap();
+    await expect(to).toHaveAttribute('data-compose-to', SESSION);
     await expect(field(page)).toHaveValue('Before. After.');
     await expect(sheet(page).locator('[data-compose-send]')).toBeEnabled();
     await context.close();

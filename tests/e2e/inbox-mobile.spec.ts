@@ -396,7 +396,15 @@ for (const phone of [
       expect(await box.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
       await shot(page, '5-reply');
       expect(await sideways(page)).toEqual([]);
-      expect(await smallTargets(page, '.ib-pfoot .ib-btn')).toEqual([]);
+      // The box's Send is a round 36 px arrow that takes a 44 px tap (approval "inbox-phone-composer-picker"), still
+      // named "Send"; every other action in the foot is 44 px as drawn.
+      expect(await smallTargets(page, '.ib-pfoot .ib-btn:not([data-reply-send])')).toEqual([]);
+      const send = pane.locator('.ib-rbox [data-reply-send]');
+      await expect(send).toHaveAccessibleName('Send');
+      expect(await send.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([36, 36]);
+      const sendHit = await shortHitAreas(page, '.ib-rbox [data-reply-send]');
+      expect(sendHit.measured).toBe(1);
+      expect(sendHit.short).toEqual([]);
       await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // Back: the list, and the address of the list (the history is the stack it looks like).

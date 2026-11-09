@@ -566,8 +566,8 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
 
 /**
  * A phone's open reply box (approval "inbox-reply-box", T6): no chip; the line naming the questions and comments on its
- * own line over the row, its words on one line; the row (paperclip, Skills, mic, Send) one row inside the box. Problems
- * as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
+ * own line over the row, its words on one line; the row (paperclip, Skills, who gets the reply, mic, Send) one row
+ * inside the box. Problems as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
  */
 async function phoneFootProblems(page: Page, narrow = false): Promise<string[]> {
   return page.evaluate((narrow) => {
@@ -696,7 +696,8 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
       // Measure the layout this size settles on, not the frame before the window's own resize reaches React
       // (the docked sidebar still beside a 134 px reply box at 390 px; the narrow-box step below proves that frame).
       await replyBoxSettled(page);
-      // A phone draws no chips: one line over the row, then the paperclip, Skills, the mic and Send (approval "inbox-reply-box").
+      // A phone draws no chips: one line over the row, then the paperclip, Skills, who gets the reply, the mic and Send
+      // (approvals "inbox-reply-box", "inbox-phone-composer-picker").
       expect(await ('phone' in size ? phoneFootProblems(page) : replyChipProblems(page)), `${size.width} by ${size.height}`).toEqual([]);
       expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {

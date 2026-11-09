@@ -211,6 +211,12 @@ test.skipIf(!hasDom)('Send: the tip leaves on the press', async () => {
 test.skipIf(!hasDom)('a phone: the card leaves once the message is tapped', async () => {
   await openWithTip({ phone: true });
   expect(tip()!.hasAttribute('data-phone')).toBe(true);
+  // A phone has no To line: the card stands in the foot's row, over To's pill, its arrow pointing down at it.
+  expect(tip()!.closest('.ib-cp-foot')).not.toBeNull();
+  expect(inDialog('.ib-cp-to')).toBeNull();
+  expect(tip()!.getAttribute('data-side')).toBe('above');
+  expect(tip()!.querySelector('.ib-lt-arrow')!.getAttribute('data-side')).toBe('down');
+  expect(inDialog('.ib-cp-foot [data-compose-to]')!.hasAttribute('data-launch-tip')).toBe(true);
   act(() => field().focus());
   await until(() => tip() === null, 'the tip gone');
   expect(document.activeElement === field()).toBe(true);

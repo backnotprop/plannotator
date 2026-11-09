@@ -163,8 +163,8 @@ async function openCompose(page: Page, opener: string): Promise<void> {
   await page.locator(opener).first().click();
   const dialog = page.locator('dialog[data-compose]');
   await expect(dialog).toBeVisible();
-  // A plain New message opens with To empty: pick the live session.
-  const to = dialog.locator('.ib-cp-tobtn');
+  // A plain New message opens with To empty: pick the live session (a computer's To line, a phone's pill in the foot's row).
+  const to = dialog.locator('[data-compose-to]');
   await expect(to).not.toHaveAttribute('data-loading', /.*/);
   await to.click();
   await dialog.locator('[data-compose-session="ses_picker"]').click();
