@@ -779,9 +779,10 @@ async function openAskFromCorner(page: Page, phone = false): Promise<void> {
     await page.locator('[data-rf-card="ask"] .ib-rf-cardopen').click();
     return;
   }
-  await page.locator('button[data-rf-corner]').tap();
+  // click, not tap: a 700 px window is the phone layout too, with a mouse.
+  await page.locator('button[data-rf-corner]').click();
   const row = page.locator('[data-rf-sheet] [data-rf-row="ask"]');
-  if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.tap();
+  if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.click();
 }
 
 /** Press in the text before `words`, and drag past them into the text after. */
@@ -899,7 +900,8 @@ test('Ask AI\'s window in a small window keeps its place, and a code span in it 
   const { context, page } = await windowAt(browser, 700, 500, 'dark');
   try {
     await page.goto(`${world.url}#thread=${world.prReviewThread}`);
-    await openAskFromCorner(page);
+    // 700 px is the phone layout (PHONE_QUERY): no Side there, so the corner's round button opens the chat.
+    await openAskFromCorner(page, true);
     const ask = page.locator('[data-chat-window]');
     await expect(ask).toContainText('from the table in');
     const box = (await ask.boundingBox())!;
