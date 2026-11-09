@@ -189,8 +189,8 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   const roots = Object.fromEntries(Object.entries(WORST_CASE_FOLDERS).map(([role, folder]) => [role, repo(src, folder)])) as Record<keyof typeof WORST_CASE_FOLDERS, string>;
   const project = (root: string) => store.ensureProject({ root, name: extractRepoName(root) ?? extractDirName(root) ?? 'project' });
   const ids = Object.fromEntries(Object.entries(roots).map(([role, root]) => [role, project(root).id])) as Record<keyof typeof WORST_CASE_FOLDERS, string>;
-  // A message with no thread name and no reply_to joins its session's open
-  // thread: each such message gets a session of its own, so it starts its own.
+  // A message with no thread name and no reply_to starts its own thread. Each
+  // such message also keeps a session of its own, so the data stays as it was.
   let sessions = 0;
   const send = (projectRole: keyof typeof WORST_CASE_FOLDERS, author: Agent, body: string, extra: { subject?: string; thread?: string; reply_to?: string; wakes?: boolean } = {}) => {
     tick();

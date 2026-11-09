@@ -1422,123 +1422,15 @@
       "created": [
         "m7"
       ],
-      "lands_in": "t2",
-      "expect": {
-        "sections": {
-          "stopped": [
-            "t3"
-          ],
-          "holding": [],
-          "waiting": [
-            "t2"
-          ],
-          "new": [
-            "t4"
-          ],
-          "sent": [],
-          "quiet": [
-            "t1"
-          ]
-        },
-        "sections_exclude_archived": {
-          "stopped": [
-            "t3"
-          ],
-          "holding": [],
-          "waiting": [
-            "t2"
-          ],
-          "new": [
-            "t4"
-          ],
-          "sent": [],
-          "quiet": []
-        },
-        "archived": [
-          "t1"
-        ],
-        "counts": {
-          "waiting": 2,
-          "unread": 3
-        },
-        "threads": {
-          "t1": {
-            "section": "quiet",
-            "unread": false,
-            "unseen": 2,
-            "read": false,
-            "archived": true,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m2",
-            "questions": {
-              "m1/q-c0f244f5": "superseded"
-            }
-          },
-          "t2": {
-            "section": "waiting",
-            "unread": true,
-            "unseen": 3,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m7",
-            "questions": {
-              "m3/q-eeceb667": "picked",
-              "m6/q-5ca0ee11": "open",
-              "m7/q-5ca0ee11": "open"
-            }
-          },
-          "t3": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m4",
-            "questions": {
-              "m4/q-4c7ff6e3": "open",
-              "m4/q-24de5340": "open"
-            }
-          },
-          "t4": {
-            "section": "new",
-            "unread": true,
-            "unseen": 1,
-            "read": false,
-            "archived": false,
-            "agent_after_archive": false,
-            "back_from_archive": false,
-            "last": "m5",
-            "questions": {}
-          }
-        }
-      }
-    },
-    {
-      "event": {
-        "type": "agent_message",
-        "project": "repo0",
-        "session": null,
-        "reply_to": null,
-        "body": ":::question\nWhich layout should the list use?\n\nStopped: the list cannot be built without this.\n\n- [ ] Cards\n- [ ] Table\n:::"
-      },
-      "outcome": "ok",
-      "created": [
-        "m8"
-      ],
       "lands_in": "t5",
       "expect": {
         "sections": {
           "stopped": [
-            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [
+            "t5",
             "t2"
           ],
           "new": [
@@ -1551,11 +1443,11 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t5",
             "t3"
           ],
           "holding": [],
           "waiting": [
+            "t5",
             "t2"
           ],
           "new": [
@@ -1588,16 +1480,15 @@
           "t2": {
             "section": "waiting",
             "unread": true,
-            "unseen": 3,
+            "unseen": 2,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m7",
+            "last": "m6",
             "questions": {
               "m3/q-eeceb667": "picked",
-              "m6/q-5ca0ee11": "open",
-              "m7/q-5ca0ee11": "open"
+              "m6/q-5ca0ee11": "open"
             }
           },
           "t3": {
@@ -1626,6 +1517,143 @@
             "questions": {}
           },
           "t5": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m7",
+            "questions": {
+              "m7/q-5ca0ee11": "open"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": {
+        "type": "agent_message",
+        "project": "repo0",
+        "session": null,
+        "reply_to": null,
+        "body": ":::question\nWhich layout should the list use?\n\nStopped: the list cannot be built without this.\n\n- [ ] Cards\n- [ ] Table\n:::"
+      },
+      "outcome": "ok",
+      "created": [
+        "m8"
+      ],
+      "lands_in": "t6",
+      "expect": {
+        "sections": {
+          "stopped": [
+            "t6",
+            "t3"
+          ],
+          "holding": [],
+          "waiting": [
+            "t5",
+            "t2"
+          ],
+          "new": [
+            "t4"
+          ],
+          "sent": [],
+          "quiet": [
+            "t1"
+          ]
+        },
+        "sections_exclude_archived": {
+          "stopped": [
+            "t6",
+            "t3"
+          ],
+          "holding": [],
+          "waiting": [
+            "t5",
+            "t2"
+          ],
+          "new": [
+            "t4"
+          ],
+          "sent": [],
+          "quiet": []
+        },
+        "archived": [
+          "t1"
+        ],
+        "counts": {
+          "waiting": 4,
+          "unread": 5
+        },
+        "threads": {
+          "t1": {
+            "section": "quiet",
+            "unread": false,
+            "unseen": 2,
+            "read": false,
+            "archived": true,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m1/q-c0f244f5": "superseded"
+            }
+          },
+          "t2": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 2,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m6",
+            "questions": {
+              "m3/q-eeceb667": "picked",
+              "m6/q-5ca0ee11": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m4",
+            "questions": {
+              "m4/q-4c7ff6e3": "open",
+              "m4/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {}
+          },
+          "t5": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m7",
+            "questions": {
+              "m7/q-5ca0ee11": "open"
+            }
+          },
+          "t6": {
             "section": "stopped",
             "unread": true,
             "unseen": 1,

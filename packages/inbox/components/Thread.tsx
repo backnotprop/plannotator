@@ -63,7 +63,8 @@ import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
-import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
+import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
+import { ArmScope, createMessageArms } from '../messageArming';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
@@ -83,6 +84,7 @@ import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model'
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
+import { shareUnchanged } from '../shareUnchanged';
 import { pickComposerMode } from '../fullScreenComposer';
 import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
@@ -587,9 +589,20 @@ export function MessageBody({
   // ```html fences draw as live, sandboxed pages, ```svg as images (approval "inbox-inline-html").
   const embedAuthor = message.author.kind === 'agent' ? agentName(message.author) : undefined;
   const htmlEmbeds = useMemo<HtmlEmbedHost>(() => ({ frameUrl: inboxEmbedUrl, author: embedAuthor }), [embedAuthor]);
+  // A captured picture wider than a message draws it is loaded as a smaller copy (`?w=`), laid out at its own
+  // width: the browser decodes the copy, not a 3840-wide screenshot (a heavy thread's tab died of them). A click
+  // still opens the original in the viewer.
+  const widthsKey = (message.inline_images ?? []).map((image) => `${image.width ?? ''}:${image.ref}`).join('\n');
+  const widths = useMemo(() => new Map((message.inline_images ?? []).map((image) => [image.ref, image.width] as const)), [widthsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const resolveImage = useCallback<ImageResolver>(
-    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
-    [imageBaseDir],
+    (src) => {
+      if (/^(https?:|data:|blob:)/i.test(src)) return { kind: 'src', src };
+      const url = getImageSrc(src, imageBaseDir);
+      const width = widths.get(src);
+      const drawn = drawnImageUrl(url, width, MESSAGE_IMAGE_WIDTH);
+      return drawn === url ? { kind: 'src', src: url } : { kind: 'src', src: drawn, width };
+    },
+    [imageBaseDir, widths],
   );
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
@@ -804,11 +817,18 @@ export function MessageBody({
     },
     [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
   );
+  // The host's callbacks are new on every render of the thread. A closure here that React keeps (an effect, a
+  // memoized callback, a listener) holds this render's scope, so none names them directly: they are read through
+  // refs. Else each message drawn after a re-read pinned that read's whole thread view (#2948, a window left open
+  // on a busy thread grew without end).
+  const footerRef = useRef(footerFor);
+  footerRef.current = footerFor;
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
-      const text = footerFor(question.question.key);
+      const text = footerRef.current(question.question.key);
       return text ? <span className="ib-qfoot-st">{text}</span> : null;
     },
+    // A new identity when the footers may have changed, so the cards redraw.
     [footerFor],
   );
   // Replaced questions: the host's Quiet card in place of the answer card, and
@@ -877,7 +897,8 @@ export function MessageBody({
   // a new comment paints itself (the selection becomes its mark), and one the
   // person removes elsewhere (the reply box's list) leaves the text.
   const viewerRef = useRef<ViewerHandle>(null);
-  const commentList = useMemo<Annotation[]>(() => (comments ? [...comments.annotations] : NO_ANNOTATIONS), [comments?.annotations]);
+  const savedComments = comments?.annotations;
+  const commentList = useMemo<Annotation[]>(() => (savedComments ? [...savedComments] : NO_ANNOTATIONS), [savedComments]);
   // A diagram's numbered badge, in the message or its popout, shows its comment selected. A text highlight's press is
   // openHighlight's, and reaches here too, so it is passed over.
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
@@ -900,8 +921,12 @@ export function MessageBody({
     });
   }, []);
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
+  const pickRef = useRef(onPick);
+  pickRef.current = onPick;
+  const answerQuestion = useCallback((_blockId: string, answer: QuestionAnswer | null, key: string) => pickRef.current(key, answer), []);
+  const commentsOn = comments !== undefined;
   useEffect(() => {
-    if (!comments) return;
+    if (!commentsOn) return;
     const ids = new Set(commentList.map((a) => a.id));
     for (const id of [...painted.current]) {
       if (ids.has(id)) continue;
@@ -923,7 +948,7 @@ export function MessageBody({
       cancelAnimationFrame(frame);
       for (const a of fresh) painted.current.delete(a.id);
     };
-  }, [comments !== undefined, commentList]);
+  }, [commentsOn, commentList]);
 
   // The whole card, per question: only an open or picked question can be
   // answered. A sent one, one a Mark read or the archive closed, and a
@@ -987,7 +1012,7 @@ export function MessageBody({
     // A link in the highlight stays a link. A comment not sent yet (its draft mark) is the Viewer's: it opens the box.
     if (!id || target.closest('a, button') || mark?.classList.contains('comment-draft')) return;
     // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
-    comments?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
+    commentsRef.current?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
   // Read on the way down: the highlighter takes the selection away at this mouseup, so the click finds none.
   const readPress = () => {
@@ -1031,7 +1056,7 @@ export function MessageBody({
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
-        onAnswerQuestion={(_blockId, answer, key) => onPick(key, answer)}
+        onAnswerQuestion={answerQuestion}
         renderQuestionFooter={renderFooter}
         // The Inbox records no decisions: a `Decision:` line an older agent wrote is context.
         questionDecisionLines={false}
@@ -1333,7 +1358,9 @@ function useThreadAttachments(threadId: string, revision: unknown, again: number
   const load = useCallback(async () => {
     try {
       const next = await inboxApi.attachments(threadId);
-      setModel((current) => (current === null || current.serverSession === next.serverSession ? next : current));
+      // Read again on every record: what did not change stays the same objects (shareUnchanged.ts), so an earlier
+      // read a kept callback still reaches does not hold a full copy of every file's record.
+      setModel((current) => (current === null ? next : current.serverSession === next.serverSession ? shareUnchanged(current, next) : current));
     } catch {
       // The thread went away; the pane closes with it.
     }
@@ -1962,6 +1989,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     snoozeBackPlace.current = { threadId: thread.thread_id, until: snoozeBack, above: snoozeBackAbove(thread.messages, fresh) };
   }
   const snoozeBackWords = snoozeBack ? `Back from snooze · ${inboxSnoozeWhen(snoozeBack)}` : '';
+  // A long thread's far messages draw their tooltips and menus plain until they come near the view (messageArming.tsx).
+  const [arms] = useState(createMessageArms);
+  useEffect(() => () => arms.disconnect(), [arms]);
   // The fold is decided once, when the thread opens: opening a message never
   // makes others appear or disappear.
   const [foldState, setFoldState] = useState<FoldState | null>(null);
@@ -6336,7 +6366,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 data-arrival={arrivalIds.has(message.id) ? '' : undefined}
                 data-arrived={arrivedIds.has(message.id) ? '' : undefined}
                 tabIndex={-1}
+                ref={arms.ref(message.id)}
               >
+                <ArmScope arms={arms} id={message.id}>
                 <button type="button" className={`ib-fline${isNew ? ' ib-fl-unread' : ''}`} data-fold-head="" aria-expanded={false} aria-label={label} onClick={() => toggleMessage(message.id)}>
                   {isAgent ? (
                     <AuthorMark author={message.author} big />
@@ -6362,6 +6394,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     </span>
                   </Tip>
                 </button>
+                </ArmScope>
               </article>,
             );
             return before;
@@ -6449,7 +6482,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               data-arrival={arrivalIds.has(message.id) ? '' : undefined}
               data-arrived={arrivedIds.has(message.id) ? '' : undefined}
               tabIndex={-1}
+              ref={arms.ref(message.id)}
             >
+              <ArmScope arms={arms} id={message.id}>
               <MessageMenu
                 {...copyHost}
                 message={message}
@@ -6735,6 +6770,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   />
                 )}
               </div>
+              </ArmScope>
             </article>,
           );
           return before;

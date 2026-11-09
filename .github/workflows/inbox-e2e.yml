@@ -43,7 +43,10 @@ name: Inbox window e2e
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
 # One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
 # store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
-# creep or a hung window fails the run on main.
+# creep or a hung window fails the run on main. Another is the heavy-thread
+# budget (inbox-heavy-thread-budget.spec.ts, #2948: 120 open messages with 30
+# full-size screenshots), so pictures loaded at full size, a JS heap or
+# listener count over budget, or a copy of the thread kept per read fails it.
 #
 # On a PR, a run whose own change is the same as an earlier run's (a merge of
 # main to pick up a fix or a quarantine after a red run, or a run cancelled

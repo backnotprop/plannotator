@@ -400,15 +400,16 @@
       "created": [
         "m3"
       ],
-      "lands_in": "t1",
+      "lands_in": "t3",
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -416,11 +417,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -428,23 +430,21 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
+          "waiting": 3,
           "unread": 2
         },
         "threads": {
           "t1": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
+            "section": "waiting",
+            "unread": false,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "open",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "open"
             }
           },
           "t2": {
@@ -458,6 +458,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -473,11 +487,12 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -485,11 +500,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -497,23 +513,21 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
+          "waiting": 3,
           "unread": 1
         },
         "threads": {
           "t1": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
+            "section": "waiting",
+            "unread": false,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "open",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "open"
             }
           },
           "t2": {
@@ -527,6 +541,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -542,11 +570,12 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -554,11 +583,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -566,23 +596,21 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
+          "waiting": 3,
           "unread": 1
         },
         "threads": {
           "t1": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
+            "section": "waiting",
+            "unread": false,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "open",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "open"
             }
           },
           "t2": {
@@ -596,6 +624,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -611,11 +653,12 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -623,11 +666,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -635,23 +679,21 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
+          "waiting": 3,
           "unread": 1
         },
         "threads": {
           "t1": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
+            "section": "waiting",
+            "unread": false,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "open",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "open"
             }
           },
           "t2": {
@@ -665,6 +707,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -680,11 +736,12 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -692,11 +749,12 @@
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
-            "t2"
+            "t2",
+            "t1"
           ],
           "new": [],
           "sent": [],
@@ -704,23 +762,21 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
+          "waiting": 3,
           "unread": 1
         },
         "threads": {
           "t1": {
-            "section": "stopped",
-            "unread": true,
-            "unseen": 1,
+            "section": "waiting",
+            "unread": false,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "open",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "open"
             }
           },
           "t2": {
@@ -734,6 +790,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -751,47 +821,49 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
             "t2"
           ],
-          "new": [],
+          "new": [
+            "t1"
+          ],
           "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
             "t2"
           ],
-          "new": [],
+          "new": [
+            "t1"
+          ],
           "sent": [],
           "quiet": []
         },
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 1
+          "unread": 2
         },
         "threads": {
           "t1": {
-            "section": "stopped",
+            "section": "new",
             "unread": true,
-            "unseen": 1,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "picked",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "picked"
             }
           },
           "t2": {
@@ -805,6 +877,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }
@@ -822,47 +908,49 @@
       "expect": {
         "sections": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
             "t2"
           ],
-          "new": [],
+          "new": [
+            "t1"
+          ],
           "sent": [],
           "quiet": []
         },
         "sections_exclude_archived": {
           "stopped": [
-            "t1"
+            "t3"
           ],
           "holding": [],
           "waiting": [
             "t2"
           ],
-          "new": [],
+          "new": [
+            "t1"
+          ],
           "sent": [],
           "quiet": []
         },
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 1
+          "unread": 2
         },
         "threads": {
           "t1": {
-            "section": "stopped",
+            "section": "new",
             "unread": true,
-            "unseen": 1,
+            "unseen": 0,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
-            "last": "m3",
+            "last": "m1",
             "questions": {
-              "m1/q-c0f244f5": "picked",
-              "m3/q-4c7ff6e3": "open",
-              "m3/q-24de5340": "open"
+              "m1/q-c0f244f5": "picked"
             }
           },
           "t2": {
@@ -876,6 +964,20 @@
             "last": "m2",
             "questions": {
               "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m3",
+            "questions": {
+              "m3/q-4c7ff6e3": "open",
+              "m3/q-24de5340": "open"
             }
           }
         }

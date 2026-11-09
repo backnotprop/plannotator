@@ -173,11 +173,13 @@ test('an agent sends three messages: images in their text are captured at send, 
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id,
     body: ['The empty orders page, and its copy:', '', '![Empty orders](design/empty-orders.png)'].join('\n'),
     attachments: ['docs/empty-states.md'],
   });
   const third = await world.claude.send({
     project_path: world.project,
+    reply_to: second.message_id,
     body: 'The phone checkout and the receipt spec.',
     attachments: ['shots/checkout-mobile.png', 'docs/receipt-spec.pdf'],
   });

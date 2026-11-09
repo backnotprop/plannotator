@@ -421,7 +421,7 @@ describe('Inbox project of a Claude Code session that moves (spec/inbox-project.
   }, 120_000)
 
   // Audit D1: a session started above a repository that cd's into it. Main filed its tool's sends under the start
-  // folder and its shell's `inbox call` and `card` under the repository: two default threads in two projects.
+  // folder and its shell's `inbox call` and `card` under the repository: one session's messages in two projects.
   test('every client of one session lands in one project across a shell cd', async () => {
     const { model, real, done } = await setup('top')
     try {

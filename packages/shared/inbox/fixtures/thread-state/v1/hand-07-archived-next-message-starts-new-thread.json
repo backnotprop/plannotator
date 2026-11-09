@@ -2,7 +2,7 @@
   "format": "plannotator-inbox-thread-state",
   "version": 1,
   "name": "hand-07-archived-next-message-starts-new-thread",
-  "description": "Archive means done: the session's next message without reply_to starts a new thread; after Unarchive the session's default thread is the newest one.",
+  "description": "Every message without reply_to starts a new thread, before an Archive, after it and after Unarchive alike.",
   "source": "hand",
   "seed": null,
   "clock": {
@@ -261,7 +261,7 @@
       "created": [
         "m3"
       ],
-      "lands_in": "t2",
+      "lands_in": "t3",
       "expect": {
         "sections": {
           "stopped": [],
@@ -270,6 +270,7 @@
             "t2"
           ],
           "new": [
+            "t3",
             "t1"
           ],
           "sent": [],
@@ -282,6 +283,7 @@
             "t2"
           ],
           "new": [
+            "t3",
             "t1"
           ],
           "sent": [],
@@ -290,7 +292,7 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 2
+          "unread": 3
         },
         "threads": {
           "t1": {
@@ -307,15 +309,26 @@
           "t2": {
             "section": "waiting",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m2",
+            "questions": {
+              "m2/q-c0f244f5": "open"
+            }
+          },
+          "t3": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m3",
-            "questions": {
-              "m2/q-c0f244f5": "open"
-            }
+            "questions": {}
           }
         }
       }

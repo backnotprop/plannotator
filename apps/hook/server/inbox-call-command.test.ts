@@ -347,9 +347,6 @@ describe("who is calling", () => {
       expect(byScript.code).toBe(0);
       const [first, second] = (await threadOf(box.server, byTool.thread_id)).messages;
       expect(second!.author).toEqual(first!.author);
-      // Its default thread too: no reply_to, no name, and it joins the session's open thread.
-      const joined = await cli(box, [...(flag ? ["--session", flag] : []), "send_message", '{"body":"Same thread."}'], { env });
-      expect(JSON.parse(joined.stdout).thread_id).toBe(byTool.thread_id);
       // "Your" threads and cards are this session's.
       const listed = await cli(box, [...(flag ? ["--session", flag] : []), "read_thread", "{}"], { env });
       expect(JSON.parse(listed.stdout).threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([byTool.thread_id]);

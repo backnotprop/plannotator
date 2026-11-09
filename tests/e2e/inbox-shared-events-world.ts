@@ -334,13 +334,16 @@ export async function expectEveryRecordOnce(
   return { total: world.reference.length, perTab, exactTabs };
 }
 
+/** The thread the agent's work goes into: one thread, however many messages (a message with no thread name starts a new one). */
+export const WORK_THREAD = 'billing work';
+
 /** Write messages continuously until stopped (each one a few store lines); answers how many went. */
 export function keepSending(sim: SimAgent, project: string, everyMs = 60): { stop: () => Promise<number> } {
   let running = true;
   let sent = 0;
   const loop = (async () => {
     while (running) {
-      await sim.send({ project_path: project, body: `Progress note ${sent + 1}: still going.` });
+      await sim.send({ project_path: project, thread: WORK_THREAD, body: `Progress note ${sent + 1}: still going.` });
       sent += 1;
       await new Promise((done) => setTimeout(done, everyMs));
     }
