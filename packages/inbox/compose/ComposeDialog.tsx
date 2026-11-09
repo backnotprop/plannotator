@@ -83,6 +83,7 @@ import {
   type ComposeClone,
   type ComposeCloneRequest,
   cloneOfUrl,
+  defaultStartProject,
   launchGroups,
   type LaunchHistory,
   type MachineLaunchProject,
@@ -132,6 +133,12 @@ export interface ComposeRequest {
    * agent the person started last when that machine has it (`agent`), else its first; the cursor is in the message.
    */
   start?: { projectId: string; machine: string | null; agent: string | null } | null;
+  /**
+   * The sidebar's Add agent (approval "inbox-agents-section"): To reads "New <agent> session" in the project the
+   * person is looking at, else the most recently active (`defaultStartProject`), once the launch block is read; the
+   * agent the person started last when it can start (`agent`), else the first. Nothing to start: To stays empty.
+   */
+  launch?: { agent: string | null } | null;
 }
 
 export interface ComposeSent {
@@ -438,14 +445,26 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
-  // "+" on a project row: an agent that machine doesn't have (or none started yet) becomes its first, once its block is read.
+  // Add agent: the default start, once the launch block is read, unless the person chose To already.
+  const launchPicked = useRef(false);
   useEffect(() => {
-    if (!request.start || !startPick || startPick.folder) return;
+    if (!request.launch || launchPicked.current || startPick || chosen || !launch || !canStart) return;
+    const project = defaultStartProject(launch, current);
+    if (!project) return;
+    launchPicked.current = true;
+    const agent = launch.agents.find((a) => a.agent === request.launch!.agent) ?? launch.agents[0]!;
+    setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.launch, launch, canStart, startPick, chosen, current]);
+  // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
+  // once its block is read.
+  useEffect(() => {
+    if (!(request.start || request.launch) || !startPick || startPick.folder) return;
     const block = blockOf(startPick.machine);
     if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent)) return;
     setStartPick({ ...startPick, agent: block.agents[0]!.agent });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.start, startPick, model?.launch, there.reads]);
+  }, [request.start, request.launch, startPick, model?.launch, there.reads]);
   // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
   const startMachine = start?.machine ? (there.machines.find((m) => m.id === start.machine) ?? null) : null;
   const startMachineName = start?.machine ? (startMachine?.name ?? machineGroups.groups.find((g) => g.machine === start.machine)?.name ?? null) : null;
