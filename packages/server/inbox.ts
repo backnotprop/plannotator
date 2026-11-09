@@ -2177,8 +2177,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The favicon (config.json `favicon`, the value plan review, code review and
    * annotate write through POST /api/config, and the one `/favicon.png`
-   * answers with): 'glass' (the default, also when nothing is stored),
-   * 'totman' (the Face icon) or 'classic'.
+   * answers with): 'glass' (the default, also when nothing is stored or when
+   * it holds a value that is no longer a style, such as 0.28.57's 'classic'),
+   * 'yellow' or 'totman' (the Face icon).
    */
   const faviconState = (): FaviconStyle => {
     const value = loadConfig().favicon;
@@ -2186,7 +2187,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   const saveFavicon = (input: unknown, validateOnly = false): FaviconStyle => {
-    if (!isFaviconStyle(input)) throw new InboxError("validation_error", "favicon: glass, totman (Face) or classic.", { field: "favicon" });
+    if (!isFaviconStyle(input)) throw new InboxError("validation_error", "favicon: glass, yellow or totman (Face).", { field: "favicon" });
     if (validateOnly) return faviconState();
     saveConfig({ favicon: input });
     if (loadConfig().favicon !== input) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");

@@ -664,8 +664,15 @@ describe("the tab icon dialog (\"Which favicon do you prefer?\", an update-day d
     expect(await glass.next()).toBe("board");
   });
 
+  test("a 'classic' left by 0.28.57 (the removed P icon) counts as never chosen: due, and the file keeps it", async () => {
+    const w = await unchosen({ config: { favicon: "classic" as never } });
+    expect(typeof w.saved().inboxReveals.tab_icon.dueAt).toBe("string");
+    expect(await w.next()).toBe("tab_icon");
+    expect(w.saved().favicon).toBe("classic");
+  });
+
   test("a favicon chosen before the update: nothing written, never asked", async () => {
-    const w = await world({ config: { favicon: "classic" } });
+    const w = await world({ config: { favicon: "totman" } });
     expect(w.saved().inboxReveals?.tab_icon).toBeUndefined();
     expect(await w.next()).toBe("board");
     expect((await w.claim("tab_icon", KEY)).show).toBe(false);

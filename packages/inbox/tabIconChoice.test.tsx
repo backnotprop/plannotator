@@ -197,7 +197,7 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
 
   test('a favicon picked in Settings on this page before the moment: dropped, no claim', async () => {
     const set = mount(READING);
-    await act(() => favicon.chooseFavicon('classic'));
+    await act(() => favicon.chooseFavicon('yellow'));
     await wait(TIMES.pageAgeMs + 20);
     set({ thread: null });
     await wait(TIMES.settledMs * 4);
@@ -216,12 +216,14 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
     expect(primary().textContent).toBe('Keep Glass');
     expect(tabIcon()).toBe(LOADED);
 
+    // Three choices in Settings' order; P is gone.
+    expect([...d.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)).toEqual(['glass', 'yellow', 'totman']);
+    choose('yellow');
+    expect(primary().textContent).toBe('Use Yellow');
+    expect(tabIcon()).toBe(core.faviconDataUrl('yellow'));
     choose('totman');
     expect(primary().textContent).toBe('Use Face');
     expect(tabIcon()).toBe(core.faviconDataUrl('totman'));
-    choose('classic');
-    expect(primary().textContent).toBe('Use P');
-    expect(tabIcon()).toBe(core.faviconDataUrl('classic'));
     // Back to the one in use: the tab shows the icon it loaded with.
     choose('glass');
     expect(primary().textContent).toBe('Keep Glass');
@@ -251,8 +253,8 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
   ] as const) {
     test(`${way}: the loaded icon back on the tab, nothing saved, no Not now, and final on this load`, async () => {
       const set = await opened();
-      choose('classic');
-      expect(tabIcon()).toBe(core.faviconDataUrl('classic'));
+      choose('yellow');
+      expect(tabIcon()).toBe(core.faviconDataUrl('yellow'));
       act(() => void close(dialog()!));
       expect(dialog()).toBeNull();
       expect(tabIcon()).toBe(LOADED);

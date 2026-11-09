@@ -25,9 +25,9 @@ export interface TabIconChoiceProps {
 /**
  * "Which favicon do you prefer?" (the owner approved the mock, 2026-11-09: "Ship it as shown"): Code
  * review's `.ib-cro` shell, its picture the browser's own tab strip at real size (this tab, a plan review tab and a code
- * review tab), then the three choices in Settings' order (Glass, Face, P), each large and at tab size. A choice shows on
+ * review tab), then the three choices in Settings' order (Glass, Yellow, Face), each large and at tab size. A choice shows on
  * this tab at once and saves nothing (`previewFavicon`); the one primary button follows the pick ("Keep Glass", "Use
- * Face", "Use P") and saves it. Escape and a click outside put back the icon the tab loaded with. Every way out is final.
+ * Yellow", "Use Face") and saves it. Escape and a click outside put back the icon the tab loaded with. Every way out is final.
  * Focus starts on the question; Tab reaches the choices (native radios: arrows move between them), then the button. No
  * keyboard shortcut.
  */

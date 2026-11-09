@@ -573,7 +573,7 @@ export interface SettingsModel {
   text_size?: InboxTextSize;
   /**
    * The favicon (config.json `favicon`), shared with plan review, code review and annotate: 'glass' unless chosen,
-   * 'totman' (shown as Face) or 'classic' (shown as P). Absent from an older Inbox.
+   * 'yellow' or 'totman' (shown as Face). Absent from an older Inbox.
    */
   favicon?: FaviconStyle;
   /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved. Absent from an older Inbox. */

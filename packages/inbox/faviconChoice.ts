@@ -1,6 +1,6 @@
 /**
  * The Inbox's favicon: Settings → General → Appearance → Favicon, the same
- * three choices as plan review's Theme tab (Glass, Face, P;
+ * three choices as plan review's Theme tab (Glass, Yellow, Face;
  * FAVICON_STYLE_CHOICES in @plannotator/core/favicon).
  *
  * One shared choice: config.json `favicon`, which plan review, code review
