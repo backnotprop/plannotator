@@ -1,8 +1,8 @@
 /**
  * A question's prototypes on the card and in the window (approval
  * "inbox-question-tradeoffs"):
- * - the card: "Try prototype" hangs from the options' tray; picture tiles
- *   keep only their zoom (no ▷ on a tile: the tab is the one way in); the
+ * - the card: "Try prototypes" ("Try prototype" for one page) hangs from the
+ *   options' tray; picture tiles keep only their zoom (no ▷ on a tile: the tab is the one way in); the
  *   option lines leave the meaning line, and Pros and Cons sit in a closed
  *   "Trade-offs" table with no Recommended tag;
  * - the window: it opens on the recommended option's page, ‹ › skip options
@@ -10,8 +10,8 @@
  *   a beat.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * App pages are drawn as "runs on your computer" (`remote`), so nothing is
- * fetched.
+ * The window's app pages ask the API, answered here as a stopped app (the
+ * plain line); the bar is what is checked.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -122,7 +122,8 @@ test.skipIf(!hasDom)("the card: the tab under the tray, no ▷ on a picture tile
     expect(tile.textContent).not.toMatch(/prototype|Prototype:|Pros:|Cons:/);
   }
   const tab = host!.querySelector<HTMLButtonElement>('[data-question-tray-host] > .ib-qtab-row > button[data-try-prototype]')!;
-  expect(tab.textContent).toBe('Try prototype');
+  // Two options' pages: plural.
+  expect(tab.textContent).toBe('Try prototypes');
   expect(tab.closest('[data-question-tile]')).toBeNull();
   await act(async () => tab.click());
   expect(tried).toHaveLength(1);
@@ -149,42 +150,48 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
   ];
   const picks: string[] = [];
   let closed = 0;
-  await mount(
-    <PrototypeWindow
-      threadId={ID}
-      options={options}
-      start={openingOption(options)}
-      shared={false}
-      picked={[]}
-      readOnly={false}
-      records={[]}
-      attachments={[]}
-      remote
-      onSaved={() => {}}
-      onPick={(label) => picks.push(label)}
-      onClose={() => (closed += 1)}
-    />,
-  );
-  const caption = () => host!.querySelector('[data-prototype-caption]')!.getAttribute('data-prototype-caption');
-  const step = (dir: 'prev' | 'next') => host!.querySelector<HTMLButtonElement>(`[data-prototype-step="${dir}"]`)!;
-  expect(caption()).toBe('C');
-  expect(step('next').getAttribute('aria-disabled')).toBe('true');
-  await act(async () => step('prev').click());
-  // B has no page: one step back is A.
-  expect(caption()).toBe('A');
-  expect(step('prev').getAttribute('aria-disabled')).toBe('true');
-  await act(async () => step('prev').click());
-  expect(caption()).toBe('A');
-  await act(async () => step('next').click());
-  expect(caption()).toBe('C');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: 'Nothing answers.', code: 'live_not_answering' }), { status: 422, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+  try {
+    await mount(
+      <PrototypeWindow
+        threadId={ID}
+        options={options}
+        start={openingOption(options)}
+        shared={false}
+        picked={[]}
+        readOnly={false}
+        records={[]}
+        attachments={[]}
+        onSaved={() => {}}
+        onPick={(label) => picks.push(label)}
+        onClose={() => (closed += 1)}
+      />,
+    );
+    const caption = () => host!.querySelector('[data-prototype-caption]')!.getAttribute('data-prototype-caption');
+    const step = (dir: 'prev' | 'next') => host!.querySelector<HTMLButtonElement>(`[data-prototype-step="${dir}"]`)!;
+    expect(caption()).toBe('C');
+    expect(step('next').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => step('prev').click());
+    // B has no page: one step back is A.
+    expect(caption()).toBe('A');
+    expect(step('prev').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => step('prev').click());
+    expect(caption()).toBe('A');
+    await act(async () => step('next').click());
+    expect(caption()).toBe('C');
 
-  const pick = host!.querySelector<HTMLButtonElement>('[data-prototype-pick]')!;
-  await act(async () => pick.click());
-  await act(async () => pick.click());
-  expect(picks).toEqual(['C · Statement']);
-  expect(pick.textContent).toContain('Picked');
-  await act(async () => Bun.sleep(PICK_CLOSE_MS / 3));
-  expect(closed).toBe(0);
-  await act(async () => Bun.sleep(PICK_CLOSE_MS));
-  expect(closed).toBe(1);
+    const pick = host!.querySelector<HTMLButtonElement>('[data-prototype-pick]')!;
+    await act(async () => pick.click());
+    await act(async () => pick.click());
+    expect(picks).toEqual(['C · Statement']);
+    expect(pick.textContent).toContain('Picked');
+    await act(async () => Bun.sleep(PICK_CLOSE_MS / 3));
+    expect(closed).toBe(0);
+    await act(async () => Bun.sleep(PICK_CLOSE_MS));
+    expect(closed).toBe(1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

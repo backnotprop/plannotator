@@ -6,8 +6,8 @@
  *
  * Proved through the real doors: a running Inbox on loopback in a temp data
  * dir, the MCP SDK client for the agent, real `fetch` for the window, and a
- * scratch dev app (Bun.serve on a free loopback port). The tailnet's refusal
- * is in inbox-tailscale.test.ts.
+ * scratch dev app (Bun.serve on a free loopback port). The owner's phone over
+ * the tailnet (the prototype relay) is in inbox-tailscale.test.ts.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";

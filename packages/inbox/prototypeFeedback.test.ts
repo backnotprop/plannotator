@@ -9,7 +9,7 @@
 import { expect, test } from 'bun:test';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback } from './attachments';
-import { prototypeNames, questionPrototypePages } from './prototypes';
+import { prototypeNames, prototypePageCount, questionPrototypePages } from './prototypes';
 
 const ROOT = '/work/shop';
 const APP_B = { id: 'liv_0123456789abcdef', url: 'http://localhost:4000/checkout?v=b' };
@@ -92,4 +92,14 @@ test("a question's shared page is named for the question", () => {
   const shared = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which invoice?', prototype: { target: 'a.html' }, choices: [{ label: 'Lean' }, { label: 'Full' }] }] };
   expect(questionPrototypePages(shared.questions[0]!, shared, ROOT)).toEqual({ pages: [{ kind: 'file', attachmentId: FILE_A.id, name: 'a.html' }, { kind: 'file', attachmentId: FILE_A.id, name: 'a.html' }], shared: true });
   expect(prototypeNames([shared], ROOT).attachments.get(FILE_A.id)).toBe('Prototype for "Which invoice?"');
+});
+
+test('the tab counts pages: several options\' pages are plural, one shared page or one option\'s page is one, none is none', () => {
+  expect(prototypePageCount(MESSAGE.questions[0]!, MESSAGE, ROOT)).toBe(2);
+  const shared = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which invoice?', prototype: { target: 'a.html' }, choices: [{ label: 'Lean' }, { label: 'Full' }] }] };
+  expect(prototypePageCount(shared.questions[0]!, shared, ROOT)).toBe(1);
+  const one = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which?', choices: [{ label: 'A', prototype: { target: 'proto/a.html' } }, { label: 'B' }] }] };
+  expect(prototypePageCount(one.questions[0]!, one, ROOT)).toBe(1);
+  const none = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which?', choices: [{ label: 'A' }, { label: 'B' }] }] };
+  expect(prototypePageCount(none.questions[0]!, none, ROOT)).toBe(0);
 });

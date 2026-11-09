@@ -27,10 +27,12 @@
  *   refuses a response carrying the Plannotator server header, and the
  *   proxy refuses one on every response (#2190). A proxied Plannotator page
  *   would otherwise get same-origin writes on that server.
- * - Every route here is a window route on the loopback port: through the
- *   tailnet it answers `403 local_only`, and the device door does not list
- *   it. The proxy binds 127.0.0.1 and relays the person's signed-in dev
- *   app, so it is this computer's own window's business only.
+ * - Every route here is a window route. Through the tailnet it answers the
+ *   machine's owner only (`403 owner_only` to a login the allowlist adds;
+ *   the owner, 2026-11-09: "Should serve the prototype so it's viewable on
+ *   the phone"), and the window frames the prototype relay
+ *   (inbox-live-relay.ts) instead of the loopback proxy; the device door does
+ *   not list them. The proxy itself binds 127.0.0.1.
  * - Reads and writes alike refuse another site's page
  *   (`isSameOriginOrNoOrigin`: `Sec-Fetch-Site: same-site` too, since the
  *   proxied app is same-site with the window on another localhost port).
@@ -47,6 +49,8 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
+import { createLiveRelay, liveRelayEnterUrl } from "./inbox-live-relay";
+import type { InboxTailnetRelayHandlers } from "./inbox-tailscale";
 import {
   buildLiveAppUrl,
   buildLiveEditorOrigins,
@@ -183,6 +187,8 @@ interface ProxyEntry {
   origin: string;
   proxy: LiveAppProxy;
   token: string;
+  /** The key the tailnet relay's entry URL carries for this proxy (inbox-live-relay.ts); never the bridge token. */
+  relayKey: string;
   lastUsed: number;
 }
 
@@ -210,6 +216,15 @@ export interface InboxLiveSitesOptions {
   fetchImpl?: typeof fetch;
   /** The clock (tests). */
   now?: () => number;
+  /**
+   * Over your tailnet (inbox-tailscale.ts): who is the owner, the relay's origin (mapped on first use) and the window's
+   * tailnet origin. Absent: every live route answers the tailnet `403 local_only`.
+   */
+  tailnet?: {
+    isOwner: (req: Request) => boolean;
+    openRelay: (handlers: InboxTailnetRelayHandlers) => Promise<string>;
+    windowOrigin: () => string | null;
+  };
 }
 
 export interface InboxLiveSites {
@@ -280,12 +295,13 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       // assertLiveTargetNotEditor: the Inbox's own address.
       throw new InboxError("validation_error", `url: ${error instanceof Error ? error.message : String(error)}`, { field: "url" });
     }
-    const entry: ProxyEntry = { origin: url.origin, proxy, token, lastUsed: now() };
+    const entry: ProxyEntry = { origin: url.origin, proxy, token, relayKey: randomBytes(16).toString("hex"), lastUsed: now() };
     proxies.set(url.origin, entry);
     return entry;
   };
 
-  const wire = (threadId: string, site: InboxLiveSiteRef): InboxLiveSiteWire => {
+  /** `relayOrigin`: through the tailnet, the window frames the relay's entry for this proxy instead of the loopback proxy. */
+  const wire = (threadId: string, site: InboxLiveSiteRef, relayOrigin: string | null = null): InboxLiveSiteWire => {
     // Checked again at every open: a port may have become Plannotator's since the site was recorded.
     const url = checkInboxLiveUrl(site.url, reservedPorts().filter((port) => port !== proxies.get(new URL(site.url).origin)?.proxy.port));
     const entry = proxyFor(url);
@@ -293,12 +309,36 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       id: site.id,
       url: site.url,
       origin: url.origin,
-      app_url: buildLiveAppUrl(entry.proxy.port, url.href),
+      app_url: relayOrigin ? liveRelayEnterUrl(relayOrigin, entry.relayKey, url.href) : buildLiveAppUrl(entry.proxy.port, url.href),
       frame_url: `/api/inbox/threads/${encodeURIComponent(threadId)}/live/${site.id}/frame`,
-      proxy_origin: `http://localhost:${entry.proxy.port}`,
+      proxy_origin: relayOrigin ?? `http://localhost:${entry.proxy.port}`,
       token: entry.token,
       opened_by: site.opened_by,
     };
+  };
+
+  /** The tailnet relay's handlers: only a running proxy's key is relayed (the origins the questions' Prototype lines named). */
+  const relay = options.bridge && options.tailnet
+    ? createLiveRelay({
+        siteByKey: (key) => {
+          if (!key) return null;
+          for (const entry of proxies.values()) {
+            if (entry.relayKey === key) {
+              entry.lastUsed = now();
+              return { port: entry.proxy.port, token: entry.token };
+            }
+          }
+          return null;
+        },
+        windowOrigin: () => options.tailnet!.windowOrigin(),
+        bridge: options.bridge,
+      })
+    : null;
+  /** Through the tailnet: the relay's origin, mapped on the owner's first open. */
+  const relayOrigin = async (via: "local" | "tailnet"): Promise<string | null> => {
+    if (via !== "tailnet") return null;
+    if (!relay || !options.tailnet) throw new InboxError("live_unavailable", "This Inbox was started without the live bridge; start it with `plannotator inbox`.");
+    return options.tailnet.openRelay({ fetch: relay.fetch, websocket: relay.websocket });
   };
 
   /**
@@ -350,8 +390,11 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
 
   const route = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
     if (!isInboxLivePath(path)) return null;
-    // The proxy relays the person's signed-in app on this computer: never through the tailnet.
-    if (via === "tailnet") return options.localOnly();
+    // Through the tailnet: the machine's owner only (their phone), never a login the allowlist adds.
+    if (via === "tailnet") {
+      if (!options.tailnet) return options.localOnly();
+      if (!options.tailnet.isOwner(req)) return json({ error: "A prototype opens only for this computer's owner.", code: "owner_only" }, 403);
+    }
     // Another site's page (the proxied app is same-site with this window) never reads or writes here.
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -370,12 +413,12 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         // `?probe=1` (the prototype window): the app is asked first, so a stopped one answers
         // `422 live_not_answering` and the window says so in one line, instead of framing the proxy's error.
         if (new URL(req.url).searchParams.get("probe") === "1") await probe(checkInboxLiveUrl(site.url, []));
-        return json({ site: wire(threadId, site) });
+        return json({ site: wire(threadId, site, await relayOrigin(via)) });
       }
       if (action === "frame") {
         // The window's frame for the site: same origin only (the checks above), opening its proxy as GET .../live/:site does.
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        return liveFramePage(wire(threadId, siteOf(threadId, siteId)));
+        return liveFramePage(wire(threadId, siteOf(threadId, siteId), await relayOrigin(via)));
       }
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       if (action === "ping") {
@@ -397,6 +440,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
     clearInterval(timer);
     for (const entry of proxies.values()) entry.proxy.stop();
     proxies.clear();
+    relay?.stop();
   };
 
   return {

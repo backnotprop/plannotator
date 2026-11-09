@@ -18,6 +18,7 @@ import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { inboxLiveSiteId } from "./inbox-live";
 
 type Json = Record<string, any>;
 
@@ -738,42 +739,136 @@ describe("Inbox over your tailnet", () => {
   });
 });
 
-describe("running-app prototypes never answer through the tailnet", () => {
-  test("the live routes are local only, even for a site the thread shows; nothing opens or is written; the tailnet page frames no local proxy", async () => {
+describe("running-app prototypes on the owner's phone, through the prototype relay", () => {
+  test("the owner opens a question's running app through the tailnet: one more mapping, the app at its own root, framed only by the window; a guest, an unnamed site, another site and a stale key are refused", async () => {
+    const GUEST = "guest@example.com";
+    const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+    const ts = fakeTailscale();
+    // The agent's running app: a page that loads an absolute-path asset, and a redirect to a loopback address.
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/assets/app.js") return new Response("window.appLoaded = true;", { headers: { "Content-Type": "text/javascript" } });
+        if (path === "/old") return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${app.port}/checkout?v=b` } });
+        return new Response('<!doctype html><html><head><title>Checkout</title><script src="/assets/app.js"></script></head><body><button id="pay">Pay now</button></body></html>', {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "frame-ancestors 'none'" },
+        });
+      },
+    });
+    try {
+      const inbox = await start(dataDir, ts.run, {
+        htmlContent: "<!doctype html><title>Inbox</title>",
+        liveBridge: { bridgeScript: "/* bridge */", bridgeBootstrap: "", annotationCss: "" },
+      });
+      const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
+      const author = { kind: "agent" as const, host: "claude-code", session: "ses_shop", name: "Claude Code" };
+      const url = `http://127.0.0.1:${app.port}/checkout?v=b`;
+      const site = { id: inboxLiveSiteId(url), url, opened_by: "agent" as const };
+      const sent = inbox.store.sendMessage({ project_id: project.id, author, body: `:::question\nWhich checkout?\n- [ ] A\n- [ ] B\n    Prototype: ${url}\n:::`, live_sites: [site] }).message;
+      const live = `/api/inbox/threads/${sent.thread_id}/live`;
+      const windowOrigin = `https://${MAGIC}:${inbox.port}`;
+      const own = { Origin: windowOrigin };
+
+      // A guest the allowlist lets in, and a site no Prototype line named: refused, and no relay is made.
+      expect(await codeOf(await throughServe(inbox, `${live}/${site.id}`, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      expect(await codeOf(await throughServe(inbox, `${live}/liv_0123456789abcdef`, { headers: own }))).toEqual([404, "live_site_not_found"]);
+      expect(inbox.tailscale.relayPort()).toBeNull();
+      expect(ts.serve.size).toBe(1);
+      // #2258's list and open stay closed.
+      expect((await throughServe(inbox, live, { headers: own })).status).toBe(404);
+
+      // The owner: the relay is mapped (port R to the listener on R, recorded first), and the window frames its entry.
+      const opened = await throughServe(inbox, `${live}/${site.id}`, { headers: own });
+      expect(opened.status).toBe(200);
+      const wire = ((await opened.json()) as { site: { app_url: string; proxy_origin: string; token: string } }).site;
+      const relayPort = inbox.tailscale.relayPort()!;
+      const relayOrigin = `https://${MAGIC}:${relayPort}`;
+      expect(ts.serve.get(relayPort)).toBe(`http://127.0.0.1:${relayPort}`);
+      expect(registryOf(dataDir).tailscale.relay_port).toBe(relayPort);
+      expect(wire.proxy_origin).toBe(relayOrigin);
+      expect(wire.app_url.startsWith(`${relayOrigin}/__plannotator__/relay?k=`)).toBe(true);
+      const frame = await throughServe(inbox, `${live}/${site.id}/frame`, { headers: own });
+      expect(frame.headers.get("content-security-policy")).toContain(`frame-src ${relayOrigin}`);
+      expect(await frame.text()).toContain("/__plannotator__/relay?k=");
+
+      // Through the relay, as serve hands it over: Host is the relay's name and port, the login the owner's.
+      const relay = (path: string, init: { login?: string | null; host?: string; headers?: Record<string, string> } = {}) => {
+        const headers: Record<string, string> = { Host: init.host ?? `${MAGIC}:${relayPort}`, ...(init.headers ?? {}) };
+        const login = init.login === undefined ? OWNER : init.login;
+        if (login !== null) headers["Tailscale-User-Login"] = login;
+        return fetch(`http://127.0.0.1:${relayPort}${path}`, { headers, redirect: "manual" });
+      };
+      const entry = new URL(wire.app_url);
+      const frameLoad = { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" };
+      const entered = await relay(entry.pathname + entry.search, { headers: frameLoad });
+      expect(entered.status).toBe(302);
+      expect(entered.headers.get("location")).toBe("/checkout?v=b");
+      const cookie = entered.headers.get("set-cookie")!.split(";")[0]!;
+      expect(entered.headers.get("set-cookie")).toContain("Secure; HttpOnly; SameSite=Strict");
+      const signedIn = { ...frameLoad, Cookie: cookie };
+
+      // The app's page, at its own root: the bridge in it, framed only by the window's tailnet origin.
+      const page = await relay("/checkout?v=b", { headers: signedIn });
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-security-policy")).toBe(`frame-ancestors ${windowOrigin}`);
+      const html = await page.text();
+      expect(html).toContain('<button id="pay">Pay now</button>');
+      expect(html).toContain('<script src="/__plannotator__/bridge.js"></script>');
+      const asset = await relay("/assets/app.js", { headers: { "Sec-Fetch-Site": "same-origin", Cookie: cookie } });
+      expect(await asset.text()).toBe("window.appLoaded = true;");
+      const bridge = await (await relay("/__plannotator__/bridge.js", { headers: { "Sec-Fetch-Site": "same-origin", Cookie: cookie } })).text();
+      expect(bridge).toContain(JSON.stringify([windowOrigin]));
+      expect(bridge).toContain(wire.token);
+      // A loopback redirect stays on the relay.
+      expect((await relay("/old", { headers: signedIn })).headers.get("location")).toBe("/checkout?v=b");
+
+      // Refused: a guest, a wrong Host, no login, another site, a key no running proxy has, no cookie.
+      expect((await relay("/checkout?v=b", { login: GUEST, headers: signedIn })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { host: `127.0.0.1:${relayPort}`, headers: signedIn })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { login: null, headers: signedIn })).status).not.toBe(200);
+      expect((await relay("/checkout?v=b", { headers: { ...signedIn, "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+      expect((await relay("/assets/app.js", { headers: { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "no-cors", Cookie: cookie } })).status).toBe(403);
+      expect((await relay(`/__plannotator__/relay?k=${"0".repeat(32)}&to=%2F`, { headers: frameLoad })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { headers: { ...frameLoad, Cookie: "__Host-plannotator-relay=nope" } })).status).toBe(403);
+      expect((await relay("/checkout?v=b", { headers: frameLoad })).status).toBe(403);
+
+      // A clean stop takes both mappings down.
+      servers.splice(servers.indexOf(inbox), 1);
+      inbox.stop();
+      expect(ts.serve.size).toBe(0);
+    } finally {
+      app.stop(true);
+    }
+  });
+
+  test("a relay mapping a run before left is taken down at the next start, and by uninstall --purge", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
-    const inbox = await start(dataDir, ts.run, {
-      htmlContent: "<!doctype html><title>Inbox</title>",
-      liveBridge: { bridgeScript: "", bridgeBootstrap: "", annotationCss: "" },
-    });
-    const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
-    const author = { kind: "agent" as const, host: "claude-code", session: "ses_shop", name: "Claude Code" };
-    const site = { id: "liv_0123456789abcdef", url: "http://localhost:5173/", opened_by: "agent" as const };
-    const sent = inbox.store.sendMessage({ project_id: project.id, author, body: ":::question\nWhich checkout?\n- [ ] A\n    Prototype: http://localhost:5173/\n- [ ] B\n:::", live_sites: [site] }).message;
-    const live = `/api/inbox/threads/${sent.thread_id}/live`;
-    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
-    const calls: [string, string, Json | undefined][] = [
-      ["GET", live, undefined],
-      ["POST", live, { serverSession: inbox.serverSession, url: "http://localhost:5174/" }],
-      ["GET", `${live}/${site.id}`, undefined],
-      ["GET", `${live}/${site.id}/frame`, undefined],
-      ["POST", `${live}/${site.id}/ping`, {}],
-      ["POST", `${live}/${site.id}/annotations`, { serverSession: inbox.serverSession, annotation: { id: "ann-1", type: "COMMENT", text: "x", pageUrl: "/" } }],
-    ];
-    for (const [method, path, body] of calls) {
-      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
-      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
-    }
-    expect(inbox.liveSites.running()).toEqual([]);
-    expect(inbox.store.liveSites(sent.thread_id).map((s) => s.id)).toEqual([site.id]);
-    expect(inbox.store.pendingAnnotations(sent.thread_id)).toEqual([]);
+    const crashed = await start(dataDir, ts.run);
+    const port = crashed.port;
+    const deadTarget = ts.serve.get(port)!;
+    const deadRegistry = registryOf(dataDir);
+    crashed.stop();
+    servers.splice(0);
+    // kill -9 while a phone had a prototype open: the window's mapping, the relay's and the record stay.
+    const relayPort = 61234;
+    deadRegistry.tailscale.relay_port = relayPort;
+    ts.serve.set(port, deadTarget);
+    ts.serve.set(relayPort, `http://127.0.0.1:${relayPort}`);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    const next = await start(dataDir, ts.run);
+    expect(ts.serve.has(relayPort)).toBe(false);
+    expect(registryOf(dataDir).tailscale.relay_port).toBeUndefined();
+    expect(ts.serve.get(port)).toBe(`http://127.0.0.1:${next.tailscale.listenerPort()}`);
+    next.stop();
+    servers.splice(0);
 
-    // Neither page's policy names a local port (the prototype window frames its proxy through the wrapper page).
-    const tailnetPage = await throughServe(inbox, "/");
-    expect(tailnetPage.status).toBe(200);
-    expect(tailnetPage.headers.get("content-security-policy")).not.toContain("localhost");
-    const localPage = await fetch(`http://127.0.0.1:${inbox.port}/`);
-    expect(localPage.headers.get("content-security-policy")).not.toContain("localhost");
+    ts.serve.set(relayPort, `http://127.0.0.1:${relayPort}`);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify(deadRegistry));
+    expect(takeDownInboxTailscale(dataDir, ts.run)).toBe("removed");
+    expect(ts.serve.has(relayPort)).toBe(false);
   });
 });
 

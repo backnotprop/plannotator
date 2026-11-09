@@ -3967,7 +3967,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
-  /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer only. */
+  /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer, and its owner over the tailnet. */
   const liveSites = createInboxLiveSites({
     store,
     serverSession,
@@ -3980,6 +3980,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bridge: options.liveBridge ?? null,
     idleMs: options.liveIdleMs,
     fetchImpl: options.liveProbeFetch,
+    // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
+    tailnet: {
+      isOwner: (req) => tailscale.isOwnerRequest(req.headers),
+      openRelay: (handlers) => tailscale.openRelay(handlers),
+      windowOrigin: () => tailscale.windowOrigin(),
+    },
   });
 
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */

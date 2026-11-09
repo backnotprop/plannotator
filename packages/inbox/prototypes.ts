@@ -77,7 +77,14 @@ export function questionPrototypePages(question: PrototypeQuestion, message: Pro
 
 /** Whether a question has a page to try (its "Try prototype" tab is drawn). */
 export function hasPrototype(question: PrototypeQuestion, message: PrototypeMessage, root: string): boolean {
-  return questionPrototypePages(question, message, root).pages.some(Boolean);
+  return prototypePageCount(question, message, root) > 0;
+}
+
+/** How many pages the card's tab opens: a shared page is one; otherwise each option's own page (0 for none). */
+export function prototypePageCount(question: PrototypeQuestion, message: PrototypeMessage, root: string): number {
+  const { pages, shared } = questionPrototypePages(question, message, root);
+  if (!pages.some(Boolean)) return 0;
+  return shared ? 1 : pages.filter(Boolean).length;
 }
 
 /** What names a prototype's comments in the export, by site id and by attachment id. */

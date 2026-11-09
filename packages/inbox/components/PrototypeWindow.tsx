@@ -7,8 +7,11 @@
  *   file viewer's own HTML frame (its served document, under its own
  *   policy); comments are the file's, as in the file viewer;
  * - an app running on this computer, through the Inbox's live proxy and its
- *   same-origin wrapper page (`LiveSiteViewer`, the engine of #2258); comments
- *   are `live` records, grouped by page in the export.
+ *   same-origin wrapper page (`LiveSiteViewer`, the engine of #2258); on the
+ *   owner's phone over the tailnet the wrapper frames the prototype relay
+ *   instead (server side; nothing differs here); comments are `live`
+ *   records, grouped by page in the export. A page that does not open (a
+ *   guest login over the tailnet, say) is the server's words in one line.
  *
  * The window opens on Interact, with Annotate one click away. Its bottom row
  * (‹ option › Pick) is the window's own, under the page: never drawn over it
@@ -79,8 +82,6 @@ export function PrototypeWindow(props: {
   records: readonly InboxAnnotationRecord[];
   /** The thread's files (an HTML prototype is one of them). */
   attachments: readonly InboxAttachmentState[];
-  /** Through the tailnet: an app is not shown, only where to open it. */
-  remote: boolean;
   onSaved: (record: InboxAnnotationRecord) => void;
   onPick: (label: string) => void;
   onClose: () => void;
@@ -142,7 +143,6 @@ export function PrototypeWindow(props: {
     </button>
   );
 
-  const away = page?.kind === 'app' && props.remote;
   return (
     <div className="ib-pw" role="dialog" aria-modal="true" aria-label={`Prototype: ${option.label}`} data-prototype-window="" data-prototype-kind={page?.kind}>
       <header className="ib-pw-bar">
@@ -151,7 +151,7 @@ export function PrototypeWindow(props: {
         </span>
         {!props.shared && pages.length > 1 && <span className="ib-pw-pill">{`Page ${place + 1} of ${pages.length}`}</span>}
         <span className="ib-pw-sp" />
-        {page && !away && (
+        {page && (
           <div className="ib-seg" role="radiogroup" aria-label="Clicks on the page">
             <button type="button" role="radio" aria-checked={!armed} className="ib-seg-o" data-on={!armed ? '' : undefined} onClick={() => setArmed(false)} aria-label="Interact" data-prototype-interact="">
               <Icon name="frame" size={13} /> <span className="ib-pw-segt">Interact</span>
@@ -168,10 +168,6 @@ export function PrototypeWindow(props: {
       <div className="ib-pw-stage">
         {!page ? (
           <p className="ib-pw-line">This option has no prototype.</p>
-        ) : away ? (
-          <p className="ib-pw-line" data-prototype-away="">
-            This prototype runs on your computer. Open it there.
-          </p>
         ) : page.kind === 'app' ? (
           <AppPage
             key={pageKey(page)}
@@ -405,7 +401,8 @@ function FilePage(props: PageProps & { attachment: InboxAttachmentState }) {
 }
 
 /** "Try prototype": the tab that hangs from the right end of a question's options, opening the window. */
-export function TryPrototypeTab({ onOpen }: { onOpen: () => void }) {
+/** "Try prototypes" when the window steps between several options' pages; "Try prototype" for one page (shared or one option's). */
+export function TryPrototypeTab({ onOpen, pages = 1 }: { onOpen: () => void; pages?: number }) {
   const foot = 'M11 0V10H0V9.5A10.5 9.5 0 0 0 10.5 0Z';
   return (
     <div className="ib-qtab-row">
@@ -414,7 +411,7 @@ export function TryPrototypeTab({ onOpen }: { onOpen: () => void }) {
           <path d={foot} />
         </svg>
         <Icon name="play" size={13} />
-        <span>Try prototype</span>
+        <span>{pages > 1 ? 'Try prototypes' : 'Try prototype'}</span>
         <svg className="ib-qtab-foot r" viewBox="0 0 11 10" aria-hidden="true">
           <path d={foot} />
         </svg>

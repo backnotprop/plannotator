@@ -40,7 +40,7 @@ import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
-import { hasPrototype, prototypeNames, questionPrototypePages } from '../prototypes';
+import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
@@ -966,8 +966,11 @@ export function MessageBody({
   const tryRef = useRef(onTryPrototype);
   tryRef.current = onTryPrototype;
   const afterChoices = useCallback(
-    (indexed: IndexedQuestion) =>
-      hasPrototype(indexed.question, message, projectRoot) ? <TryPrototypeTab onOpen={() => tryRef.current?.(indexed.question.key)} /> : null,
+    (indexed: IndexedQuestion) => {
+      // "Try prototypes" when the window steps between several options' pages.
+      const pages = prototypePageCount(indexed.question, message, projectRoot);
+      return pages > 0 ? <TryPrototypeTab pages={pages} onOpen={() => tryRef.current?.(indexed.question.key)} /> : null;
+    },
     [message, projectRoot],
   );
 
@@ -3894,7 +3897,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         readOnly={locked}
         records={records}
         attachments={allFiles}
-        remote={remote === true}
         onSaved={saveRecord}
         onPick={(label) => {
           const base = answer ?? emptyAnswerFor(message, { key: q.key, prompt: q.prompt, question: q });
