@@ -15,7 +15,7 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
@@ -589,6 +589,12 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /**
+   * On an agent's message: the running apps its question choices name as
+   * prototypes (`Prototype: http://localhost:…`), each checked and probed when
+   * it was sent (packages/server/inbox-live.ts). Absent otherwise.
+   */
+  live_sites?: InboxLiveSiteRef[];
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -1235,6 +1241,17 @@ export interface InboxQuestionChoice {
    * absent from records written before picture choices.
    */
   image?: { alt: string; src: string };
+  /**
+   * Option lines (approval "inbox-question-tradeoffs"), each indented under a
+   * `- [ ]` choice and read at send: `Pros:` and `Cons:` items (split on
+   * `;`), and `Prototype:`, the page that shows this option as written (an
+   * attached HTML file's path, or an `http://` address of an app running on
+   * this computer, checked at send and kept in the message's `live_sites`).
+   * Each is absent when the choice names none, and on older records.
+   */
+  pros?: string[];
+  cons?: string[];
+  prototype?: { target: string; label?: string };
 }
 
 /**
@@ -1252,6 +1269,8 @@ export interface InboxQuestionContract {
   why?: string;
   /** `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible. */
   reversible?: { value: false; why: string | null };
+  /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
+  prototype?: { target: string; label?: string };
 }
 
 /** The parsed facts of a question block, kept on its record. */
@@ -2859,9 +2878,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * tokens, estimated, not measured on Pi; 2.6%, inside the 5%, so the
  * constants stay.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
+/*
+ * Option lines (INBOX_OPTION_LINES_RULE on send_message's `body`, approval
+ * "inbox-question-tradeoffs"; draft words): +452 bytes on the agent tool's
+ * entry, measured with the default tool list (about +120 tokens, estimated);
+ * added here.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 10700, tokens: 2910 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12675, tokens: 3486 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

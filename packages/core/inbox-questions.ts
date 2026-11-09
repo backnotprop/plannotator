@@ -119,6 +119,38 @@ export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] 
   );
 }
 
+/**
+ * A prototype a body's questions name (approval "inbox-question-tradeoffs"):
+ * where it was written (the question's prompt, and the option's label, or
+ * null for the question's shared `Prototype:` line) and the target as
+ * written. `app` is an address with a scheme (`http://localhost:3000/…`, an
+ * app running on this computer, checked and probed at send); `file` is a
+ * path (an HTML file the message attaches).
+ */
+export interface PrototypeAppTarget {
+  target: string;
+  prompt: string;
+  label: string | null;
+}
+export interface PrototypeTarget extends PrototypeAppTarget {
+  kind: "app" | "file";
+}
+
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+
+/** Every prototype a body's questions name, in block and choice order (the shared line first). Pure; never throws. */
+export function prototypeTargets(markdown: string): PrototypeTarget[] {
+  const out: PrototypeTarget[] = [];
+  for (const { parsed } of questionBlocksOf(markdown)) {
+    const named = [
+      ...(parsed.prototype ? [{ target: parsed.prototype.target, label: null }] : []),
+      ...parsed.choices.flatMap((choice) => (choice.prototype ? [{ target: choice.prototype.target, label: choice.label }] : [])),
+    ];
+    for (const { target, label } of named) out.push({ target, prompt: parsed.prompt, label, kind: SCHEME_RE.test(target) ? "app" : "file" });
+  }
+  return out;
+}
+
 /** Each question block of a body, parsed as the Inbox reads it. */
 function questionBlocksOf(markdown: string): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];
@@ -134,8 +166,9 @@ function questionBlocksOf(markdown: string): { key: string; startLine: number; p
       .replace(/\r\n?/g, "\n")
       .split("\n");
     const inner = lines.slice(1, CLOSE_RE.test(lines.at(-1) ?? "") && lines.length > 1 ? -1 : undefined);
-    // The Inbox records no decisions: a `Decision:` line is context.
-    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false });
+    // The Inbox records no decisions: a `Decision:` line is context. It reads the option lines
+    // (`Pros:`, `Cons:`, `Prototype:`; approval "inbox-question-tradeoffs").
+    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true });
     if (parsed !== null) out.push({ key: location.key, startLine: location.startLine, parsed });
   }
   return out;
@@ -164,6 +197,9 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
           recommended: choice.recommended,
           settled: choice.settled,
           ...(choice.image ? { image: { alt: choice.image.alt, src: choice.image.src } } : {}),
+          ...(choice.pros ? { pros: [...choice.pros] } : {}),
+          ...(choice.cons ? { cons: [...choice.cons] } : {}),
+          ...(choice.prototype ? { prototype: prototypeFact(choice.prototype) } : {}),
         })),
         aliases: parsed.choices.map((choice) => (choice.aliases?.length ? [...choice.aliases] : null)),
         recommendation: parsed.recommendation ?? null,
@@ -179,8 +215,14 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
 }
 
 /** The block's contract lines as the record keeps them (each only when present). */
-function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible">): InboxQuestionContract {
+/** A prototype as stored: the target as written, and the link's name when it has one. */
+function prototypeFact(prototype: { target: string; label?: string }): { target: string; label?: string } {
+  return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
+}
+
+function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype">): InboxQuestionContract {
   return {
+    ...(parsed.prototype ? { prototype: prototypeFact(parsed.prototype) } : {}),
     ...(parsed.stakes ? { stakes: parsed.stakes } : {}),
     ...(parsed.shows ? { shows: { kind: parsed.shows.kind, label: parsed.shows.label, src: parsed.shows.src } } : {}),
     ...(parsed.why ? { why: parsed.why } : {}),
@@ -195,6 +237,7 @@ function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
     ...(facts.shows ? { shows: { ...facts.shows } } : {}),
     ...(typeof facts.why === "string" && facts.why ? { why: facts.why } : {}),
     ...(facts.reversible ? { reversible: { value: false as const, why: facts.reversible.why ?? null } } : {}),
+    ...(facts.prototype && typeof facts.prototype.target === "string" ? { prototype: prototypeFact(facts.prototype) } : {}),
   };
 }
 
@@ -364,7 +407,13 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
     kind: record.kind,
     prompt: record.prompt,
     context: record.parsed.context,
-    choices: record.parsed.choices.map((c) => ({ ...c, ...(c.image ? { image: { ...c.image } } : {}) })),
+    choices: record.parsed.choices.map((c) => ({
+      ...c,
+      ...(c.image ? { image: { ...c.image } } : {}),
+      ...(c.pros ? { pros: [...c.pros] } : {}),
+      ...(c.cons ? { cons: [...c.cons] } : {}),
+      ...(c.prototype ? { prototype: { ...c.prototype } } : {}),
+    })),
     recommendation: record.parsed.recommendation,
     suggested_text: record.parsed.suggested_text,
     stopped: record.stopped,

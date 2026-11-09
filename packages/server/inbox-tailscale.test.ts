@@ -738,6 +738,45 @@ describe("Inbox over your tailnet", () => {
   });
 });
 
+describe("running-app prototypes never answer through the tailnet", () => {
+  test("the live routes are local only, even for a site the thread shows; nothing opens or is written; the tailnet page frames no local proxy", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run, {
+      htmlContent: "<!doctype html><title>Inbox</title>",
+      liveBridge: { bridgeScript: "", bridgeBootstrap: "", annotationCss: "" },
+    });
+    const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
+    const author = { kind: "agent" as const, host: "claude-code", session: "ses_shop", name: "Claude Code" };
+    const site = { id: "liv_0123456789abcdef", url: "http://localhost:5173/", opened_by: "agent" as const };
+    const sent = inbox.store.sendMessage({ project_id: project.id, author, body: ":::question\nWhich checkout?\n- [ ] A\n    Prototype: http://localhost:5173/\n- [ ] B\n:::", live_sites: [site] }).message;
+    const live = `/api/inbox/threads/${sent.thread_id}/live`;
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const calls: [string, string, Json | undefined][] = [
+      ["GET", live, undefined],
+      ["POST", live, { serverSession: inbox.serverSession, url: "http://localhost:5174/" }],
+      ["GET", `${live}/${site.id}`, undefined],
+      ["GET", `${live}/${site.id}/frame`, undefined],
+      ["POST", `${live}/${site.id}/ping`, {}],
+      ["POST", `${live}/${site.id}/annotations`, { serverSession: inbox.serverSession, annotation: { id: "ann-1", type: "COMMENT", text: "x", pageUrl: "/" } }],
+    ];
+    for (const [method, path, body] of calls) {
+      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
+      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
+    }
+    expect(inbox.liveSites.running()).toEqual([]);
+    expect(inbox.store.liveSites(sent.thread_id).map((s) => s.id)).toEqual([site.id]);
+    expect(inbox.store.pendingAnnotations(sent.thread_id)).toEqual([]);
+
+    // Neither page's policy names a local port (the prototype window frames its proxy through the wrapper page).
+    const tailnetPage = await throughServe(inbox, "/");
+    expect(tailnetPage.status).toBe(200);
+    expect(tailnetPage.headers.get("content-security-policy")).not.toContain("localhost");
+    const localPage = await fetch(`http://127.0.0.1:${inbox.port}/`);
+    expect(localPage.headers.get("content-security-policy")).not.toContain("localhost");
+  });
+});
+
 // Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
 describe("what the owner reads through the tailnet, and what a page there never claims", () => {
   test("What's new and its images answer the owner over the tailnet, read only; another allowed login is refused, there and at the update control", async () => {
