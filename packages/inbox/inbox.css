@@ -943,15 +943,15 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    or keyboard focus, one turn on a click (App.tsx refreshInbox). The h1 lets the focus ring show; the
    name inside cuts with "…". */
 .ib-lhead h1.ib-lhead-h { display: flex; overflow: visible; }
-.ib-lhead-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; border-radius: 6px; }
+.ib-lhead-title { display: inline-flex; align-items: center; gap: 0; min-width: 0; max-width: 100%; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; border-radius: 6px; }
 .ib-lhead-tt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pn-inbox .ib-lhead-title svg.ib-ic-refresh { flex: none; color: var(--muted-foreground); opacity: 0; transition: opacity 120ms ease-out; }
 @media (hover: hover) {
   .pn-inbox .ib-lhead-title:hover svg.ib-ic-refresh { opacity: 1; }
 }
 .pn-inbox .ib-lhead-title:focus-visible svg.ib-ic-refresh, .pn-inbox .ib-lhead-title[data-refreshing] svg.ib-ic-refresh { opacity: 1; }
-/* The ↻'s tooltip trigger (its own, apart from the name's): the icon's box, nothing more. */
-.ib-lhead-ic { display: inline-flex; flex: none; }
+/* The ↻'s tooltip trigger (its own, apart from the name's): the icon's box and the gap before it, so the gap opens it too. */
+.ib-lhead-ic { display: inline-flex; flex: none; padding-left: 8px; }
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
 /* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
    out under the rows sliding past it (they are opaque and sit above it while they move). */
