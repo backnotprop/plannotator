@@ -43,6 +43,15 @@ export function ListColumnEdge({ controls, onCollapse }: { controls?: string; on
 				onCollapse();
 			}
 		: undefined;
+	// A press focuses what it presses; the hook's pointerdown cancels that, so a click focuses the edge itself (with no
+	// ring), and focus then follows to the thread's ‹ Inbox as it does from Enter on the edge.
+	const clickHide = hide
+		? () => {
+				const separator = edge.current?.querySelector<HTMLElement>('[role="separator"]');
+				if (separator && document.activeElement !== separator) separator.focus({ preventScroll: true, focusVisible: false });
+				hide();
+			}
+		: undefined;
 	// The column shares `.ib-main` with the thread pane: that is the room.
 	const container = useCallback(() => edge.current?.parentElement?.parentElement, []);
 	const resize = useResizablePanel({
@@ -60,7 +69,7 @@ export function ListColumnEdge({ controls, onCollapse }: { controls?: string; on
 			if (column) column.style.width = `${w}px`;
 		},
 		// Threshold-gated (4px), as the sidebar's: a click hides the list, a drag resizes it.
-		onClick: hide,
+		onClick: clickHide,
 	});
 
 	useLayoutEffect(() => {

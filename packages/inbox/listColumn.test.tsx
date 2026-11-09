@@ -286,9 +286,11 @@ describe.if(hasDom)('the list column beside an open thread', () => {
   test('beside a thread a click on the edge hides the list; a drag resizes and never hides', async () => {
     let hides = 0;
     const el = render(true, () => hides++);
-    // A click, and a wiggle within the 4px threshold: each hides, and the width is left as it was.
+    // A click, and a wiggle within the 4px threshold: each hides, and the width is left as it was. The click focuses
+    // the edge, as a press would (the thread then moves focus off the hidden list).
     await gesture(el, 0);
     expect(hides).toBe(1);
+    expect(document.activeElement === separator(el)).toBe(true);
     await gesture(el, 3);
     expect(hides).toBe(2);
     expect(column(el).style.width).toBe(`${LIST_COLUMN_MIN}px`);
