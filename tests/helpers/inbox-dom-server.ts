@@ -290,6 +290,8 @@ if (broOfferMode) {
       inboxSound: { dialogShownFor: "0.30.0" },
       inboxListIntro: { shownAt: settled, version: 2 },
       inboxVoiceIntro: { shownAt: settled },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: "glass",
     }),
   );
   let clock = new Date();

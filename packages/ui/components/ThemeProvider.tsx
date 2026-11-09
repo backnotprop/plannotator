@@ -215,7 +215,8 @@ export function ThemeProvider({
     if (typeof document === 'undefined') return;
     // Loaded only where the app owns the favicon: the icons' bytes stay out of a
     // host's bundle (the guides.show viewer has a size budget). The page's first
-    // frame already shows the chosen icon from the server's /favicon.png.
+    // frame already shows the chosen icon from the server's /favicon.ico. Glass
+    // is a data URL of its .ico with its sizes, so the tab keeps the 16 or 32 frame.
     let cancelled = false;
     void import('@plannotator/core/favicon').then(({ faviconDataUrl, faviconLinkType }) => {
       if (cancelled) return;

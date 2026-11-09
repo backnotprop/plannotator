@@ -1403,3 +1403,12 @@ The app saves comments with the existing `POST annotations` (7.17): `{ idempoten
 - `images` is optional. The Mac attaches the paused frame there (a JPEG kept through its markups route). The phone sends no `images` in v1, because the door has no upload route. When it shows a comment with an image, the phone loads it with `GET markups/<name>` (already on the allowlist).
 - An older Inbox refuses a comment on a video (`422 annotation_not_allowed`), because there the kind reads `file`.
 - Send: the surface's `export_feedback` builds the feedback text with Plannotator's exporter, as for every other kind; the app passes the video records as usual, and `texts` carries no entry for a video. The text lists a film's comments by time, each with a line `At 1:42 (102.4 s of 7:41)` under its heading and the frame's path. The surface needs no new message type, but the app must bundle a `surface.html` built after this shipped: an older surface reads `video` as `file` and leaves these comments out of the text.
+
+## 12. Audio (2026-11-09)
+
+The owner's ask (approval `inbox-audio-attachments`, not in this repo): an agent attaches a recording; the person plays it in the Inbox and comments at moments. Everything here is additive, and it reuses section 11.
+
+- `InboxAttachmentState.kind` gets the value `"audio"`, decided from the bytes: MP3, AAC (ADTS), M4A (an audio major brand, or an MP4/MOV whose tracks hold no video), WAV, Ogg (Opus, Vorbis, FLAC, Speex), FLAC, and a WebM whose tracks hold audio and no video. `media_type` is one of `audio/mpeg`, `audio/aac`, `audio/mp4`, `audio/wav`, `audio/ogg`, `audio/flac`, `audio/webm`; `duration_ms` is set when the header gives it (M4A, WAV, FLAC, MP3, Ogg). There is no `width` / `height`.
+- `GET attachments/:id/audio[?version=sent]` through the door: the `video` route's contract (11.2) for kind `audio` (`415 attachment_not_audio` otherwise), `Content-Type` the sniffed `audio/*` type. `download` is unchanged.
+- Comments are section 11's: `blockId: "video"`, `inboxVideo: { time }`, and no `images` (a recording has no frame). The feedback text is the same, `At 0:12 (12.5 s of 1:23)` under each comment.
+- An app that does not know `audio` reads it as `file` (`readInboxAttachmentKind`) and shows Download, as today. To play it, the app can stream the `audio` route with the same player plumbing as a video (AVPlayer / ExoPlayer take audio by Range the same way).

@@ -42,6 +42,7 @@ import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_HELD_POLL_FIE
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -61,6 +62,21 @@ export interface InboxLiveSession {
   send_now: boolean;
   /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
   label?: string;
+}
+
+/** A session the Agents section may list (`agentSessions`): live, or ended and heard from today. Times in ms. */
+export interface InboxAgentSession {
+  session: string;
+  host: string;
+  /** The project root its `project_path` resolved to; null when it sent none. */
+  root: string | null;
+  startedAt: number;
+  /** The last poll, state change or Inbox tool call. */
+  lastSeen: number;
+  live: boolean;
+  /** A turn runs now (live only); null when the connection does not say, or it is not live. */
+  busy: boolean | null;
+  label: string | null;
 }
 
 /**
@@ -752,6 +768,41 @@ export function createInboxLiveSessions(options: {
   };
 
   /**
+   * The sessions the Agents section can list (packages/server/inbox-agents-list.ts): every live one, and every one
+   * last heard at or after `since` (the start of today) that has ended. In memory, so a restart forgets the ended.
+   * A launch's permission prompt (`perm:…`) is no session of its own.
+   */
+  const agentSessions = (since: number): InboxAgentSession[] => {
+    const out: InboxAgentSession[] = [];
+    for (const [session, entry] of sessions) {
+      const live = isLive(entry);
+      const heard = Math.max(entry.lastSeen, mcpSeen.get(session)?.lastSeen ?? 0);
+      if ((!live && heard < since) || isInboxPermissionSession(session)) continue;
+      out.push({
+        session,
+        host: entry.host,
+        root: entry.root,
+        startedAt: entry.startedAt,
+        lastSeen: heard,
+        live,
+        busy: live ? entry.busy : null,
+        label: entry.label ?? null,
+      });
+    }
+    return out;
+  };
+
+  /**
+   * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
+   * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
+   * a label's change says `labels` to the owner's windows (which read the list for it), and nothing to a guest's.
+   */
+  const agentsSignature = (since: number): string =>
+    agentSessions(since)
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}`)
+      .join("|");
+
+  /**
    * The agents that read the Inbox through MCP only, newest first: every
    * session whose latest message did not come through a waking connection,
    * and every session an MCP tool call named with its host or name, within
@@ -1231,6 +1282,10 @@ export function createInboxLiveSessions(options: {
     seenOverMcp,
     route,
     allLive,
+    agentSessions,
+    agentsSignature,
+    /** The sessions' clock (ms): "today" for the Agents section is by it. */
+    clock: now,
     isSessionLive,
     runStateOf,
     pollsNow,

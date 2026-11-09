@@ -232,6 +232,9 @@ test.skipIf(!hasDom)('a trusted folder: plain Send, no circle, and the Send carr
   type('Tidy the readme.');
   expect(label()).toStartWith('Send');
   expect(inDialog(CIRCLE)).toBeNull();
+  // No ⌘↵ keycap on Send (approval "inbox-send-no-shortcut-hint"); the key is still named for a screen reader.
+  expect(!!inDialog(SEND)!.querySelector('kbd, [data-shortcut-hint]')).toBe(false);
+  expect(inDialog(SEND)!.getAttribute('aria-keyshortcuts') ?? '').toMatch(/^(Meta|Control)\+Enter$/);
   await press(SEND);
   expect(sends[0]!.launch).toEqual({ agent: AGENT, project_id: 'p1' });
 });

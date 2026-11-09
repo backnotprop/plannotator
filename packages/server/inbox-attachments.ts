@@ -49,6 +49,7 @@ import { contentDisposition, inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
+import { inboxAudioServedType } from "@plannotator/shared/inbox/audio";
 import { byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -447,23 +448,28 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // A film for `<video src>` and a native player: Range from the descriptor
-    // the one check opened (inbox-byte-range.ts), never the whole file at once.
-    const videoRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/video$/.exec(path);
+    // A film for `<video src>` and a native player, a recording for `<audio src>`: Range from the descriptor
+    // the one check opened (inbox-byte-range.ts), never the whole file at once. One handler, two kinds.
+    const videoRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/(video|audio)$/.exec(path);
     if (videoRoute) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment } = attachmentOf(videoRoute[1]!);
-      if (readInboxAttachmentKind(attachment.kind) !== "video") {
-        throw new InboxError("attachment_not_video", `${attachment.name} is not a video; download it instead.`);
+      const audio = videoRoute[2] === "audio";
+      if (readInboxAttachmentKind(attachment.kind) !== (audio ? "audio" : "video")) {
+        throw audio
+          ? new InboxError("attachment_not_audio", `${attachment.name} is not a recording; download it instead.`)
+          : new InboxError("attachment_not_video", `${attachment.name} is not a video; download it instead.`);
       }
       const opened = await openInboxAttachmentVersion(store.dir, attachment, versionOf(url), { hash: "none" });
       if (!opened.ok) throw new InboxError(opened.code, opened.message);
       // The type of the bytes served, sniffed now (the sent blob too): never the record's, never the name's.
-      const sniffed = sniffInboxVideo(opened.head);
+      const sniffed = audio ? inboxAudioServedType(opened.head) : sniffInboxVideo(opened.head);
       if (!sniffed) {
         await opened.handle.close().catch(() => {});
-        throw new InboxError("attachment_not_video", `${attachment.name} is no longer a video.`);
+        throw audio
+          ? new InboxError("attachment_not_audio", `${attachment.name} is no longer a recording.`)
+          : new InboxError("attachment_not_video", `${attachment.name} is no longer a video.`);
       }
       const decision = decideByteRange(req.headers.get("range"), opened.size, { ifRange: req.headers.get("if-range"), etag: opened.etag });
       return byteRangeResponse(opened.handle, opened.size, decision, {
