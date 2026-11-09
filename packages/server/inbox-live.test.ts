@@ -537,7 +537,7 @@ describe("the person comments on a running-app prototype", () => {
     expect(record.sent_reply_id).toBeNull();
   });
 
-  test("Send carries the comments by page with each element's context; the agent reads them in wait_for_reply", async () => {
+  test("Send carries the comments by page with each element's context; the agent reads them in read_thread", async () => {
     const { project, dataDir } = world();
     const server = await start(dataDir);
     const client = await agent(server);
@@ -564,7 +564,9 @@ describe("the person comments on a running-app prototype", () => {
     expect(reply.status).toBe(200);
     expect(await pending(server, threadId)).toEqual([]);
 
-    const answer = await tool(client, "wait_for_reply", { thread_id: threadId, agent_session: "ses_shop", timeout_seconds: 5 });
+    // What the agent reads: read_thread's transcript (wait_for_reply is gone from the Inbox).
+    const answer = await tool(client, "read_thread", { thread_id: threadId, agent_session: "ses_shop" });
+    expect(answer.isError).toBeFalsy();
     const body = answer.text;
     const at = (part: string) => body.indexOf(part);
     for (const part of [

@@ -3,7 +3,7 @@
  * sites; packages/server/inbox-live.ts): one section per site, the comments
  * grouped by the page the store kept, in the order they were made, each with
  * the element's context; never the client's own page or location claims.
- * The server round trip (Send, wait_for_reply) is in
+ * The server round trip (Send, read_thread) is in
  * packages/server/inbox-live.test.ts.
  */
 import { expect, test } from 'bun:test';
