@@ -134,6 +134,8 @@ export interface MachineUpdateView {
   can_update: boolean;
   /** Its copy was installed by the install script. */
   self_update: boolean;
+  /** The person asked an agent there to update it (an older door): the thread (null while held) and the agent. Absent otherwise. */
+  asked?: { thread: string | null; agent: string; at: string };
 }
 
 /** How long "Updated" stays on the row, how long a machine has to come back, how long Update waits for its first answer (it asks GitHub first). */
@@ -142,6 +144,8 @@ const RESTART_BACK_MS = 3 * 60_000;
 const UPDATE_START_MS = 45_000;
 /** A press whose first `updating` has not arrived yet still reads as updating, for this long. */
 const UPDATE_ASKED_GRACE_MS = 10_000;
+/** How long an ask to an agent there is said ("Asked Claude Code on Mini"): an agent that never acts on it lets the dialog offer it again. */
+export const AGENT_ASK_KEPT_MS = 30 * 60_000;
 
 /**
  * What the window draws about a linked machine's version. That machine's own state first; when it has no newer version
@@ -149,6 +153,23 @@ const UPDATE_ASKED_GRACE_MS = 10_000;
  * Inbox never offers an update to a machine that is ahead of it or level with the newest known.
  */
 export function machineUpdateView(
+  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate"> & Partial<Pick<PeerLink, "agentAsked">>,
+  own: { current: string; latest: string | null } | null,
+  now: number,
+  clocks: { updatedShownMs: number; restartBackMs: number },
+): MachineUpdateView | null {
+  const view = pressView(peer, own, now, clocks);
+  // An agent there was asked to update it (an older door): said beside whatever the machine shows, for a while.
+  const ask = peer.agentAsked && now - peer.agentAsked.at < AGENT_ASK_KEPT_MS ? peer.agentAsked : null;
+  if (!ask || !view || view.phase === "updated") return view;
+  const asked = { thread: ask.thread, agent: ask.agent, at: new Date(ask.at).toISOString() };
+  // Gone since the ask: that agent's restart, for as long as a restart takes. Never "not back": a machine that sleeps
+  // after an ask nobody acted on is only asleep.
+  if (peer.state !== "online" && peer.since >= ask.at && now - peer.since < clocks.restartBackMs && view.phase === "behind") return { ...view, phase: "restarting", asked };
+  return { ...view, asked };
+}
+
+function pressView(
   peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate">,
   own: { current: string; latest: string | null } | null,
   now: number,
@@ -462,6 +483,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const due = [...peers.values()].flatMap((peer) => [
       ...(peer.updated ? [peer.updated.at + updatedShownMs] : []),
       ...(peer.asked ? [peer.state === "online" ? peer.asked.at + UPDATE_ASKED_GRACE_MS : peer.since + restartBackMs] : []),
+      ...(peer.agentAsked ? [peer.agentAsked.at + AGENT_ASK_KEPT_MS, ...(peer.state === "online" ? [] : [peer.since + restartBackMs])] : []),
     ]).filter((at) => at > now);
     if (due.length === 0) return;
     updateClock = setTimeout(machinesChanged, Math.min(...due) - now + 20);
@@ -990,6 +1012,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
       if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
       return json({ entry: outboxView(entry) });
+    }
+    // The window asked an agent on an older machine to update it (its New message went through the forward, as any
+    // compose does): remembered here so that machine's row says so, then Restarting and Updated when it comes back newer.
+    const askedMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/update\/asked$/.exec(path);
+    if (askedMatch) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const peer = peers.get(askedMatch[1]!);
+      if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
+      const thread = typeof body.thread_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(body.thread_id) ? body.thread_id : null;
+      const agent = typeof body.agent === "string" ? body.agent.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+      peer.agentAsked = { from: peer.version, at: Date.now(), thread, agent: agent || "An agent" };
+      machinesChanged();
+      return json({ ok: true, update: updateView(peer) });
     }
     // Update on another machine. Its own route, like its accounts: never the forward and never the outbox
     // (an update that waits days and runs when a machine wakes is not what anyone pressed).

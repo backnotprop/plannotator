@@ -53,7 +53,7 @@ import {
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
-import { MachineUpdateDialog } from './components/MachineUpdate';
+import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
@@ -192,7 +192,7 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
@@ -1139,6 +1139,8 @@ function Inbox() {
    */
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   const composeOpener = useRef<HTMLElement | null>(null);
+  /** New message opened from an older machine's Update ("Start an agent on <machine>"): its Send tells that machine's row it was asked. */
+  const machineAskCompose = useRef<{ request: ComposeRequest; machine: string } | null>(null);
   /** Where focus goes once compose closes or a draft row goes: the opener, else `focusFallback(next)`. */
   const pendingFocus = useRef<{ opener: HTMLElement | null; next: string | null } | null>(null);
   const [drafts, setDrafts] = useState<DraftView[] | null>(null);
@@ -6884,7 +6886,24 @@ function Inbox() {
       )}
       {machineUpdateOpen && (() => {
         const target = machines.linked.find((m) => m.id === machineUpdateOpen.id);
-        return target ? <MachineUpdateDialog machine={target} snooze={machineUpdateOpen.snooze} onClose={() => setMachineUpdateOpen(null)} /> : null;
+        return target ? (
+          <MachineUpdateDialog
+            machine={target}
+            snooze={machineUpdateOpen.snooze}
+            onClose={() => setMachineUpdateOpen(null)}
+            onStartAgent={
+              plusOn
+                ? (machine) => {
+                    // A new agent there, in a scratch folder, with the ask as its first message: the person sends it.
+                    const request: ComposeRequest = { body: ASK_AGENT_TO_UPDATE, threadName: ASK_AGENT_TO_UPDATE_THREAD, start: { projectId: SCRATCH_PICK, machine, agent: composeLastAgent } };
+                    machineAskCompose.current = { request, machine };
+                    setMachineUpdateOpen(null);
+                    openCompose(request);
+                  }
+                : undefined
+            }
+          />
+        ) : null;
       })()}
       {updateDialog === 'update' && update && (
         <UpdateDialog
@@ -7210,6 +7229,12 @@ function Inbox() {
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
+            // Sent from an older machine's "Start an agent on <machine>": that machine's row says Asked, then Updated.
+            const asked = machineAskCompose.current;
+            if (asked && asked.request === compose && sent.machine === asked.machine) {
+              machineAskCompose.current = null;
+              void inboxApi.machineUpdateAsked(asked.machine, sent.threadId, hostLabel(sent.host)).catch(() => {});
+            }
             // A New review opens beside the list, where it shows as Curating.
             if (compose.review) {
               writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: sent.threadId });

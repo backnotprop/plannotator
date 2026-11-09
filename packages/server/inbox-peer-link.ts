@@ -152,6 +152,11 @@ export class PeerLink {
   /** That machine asked GitHub on a press and answered up to date: the newest version this Inbox knew of then. In memory, like `asked`. */
   saidUpToDate: string | null = null;
   updated: { from: string; to: string; at: number } | null = null;
+  /**
+   * The person asked an agent on that machine to update it (an older door takes no `update`): the thread it went to
+   * (null while the outbox holds it) and the agent's name. In memory, like `asked`; a new version clears it into `updated`.
+   */
+  agentAsked: { from: string | null; at: number; thread: string | null; agent: string } | null = null;
   private cursor: number | null = null;
   private running = false;
   private stream: AbortController | null = null;
@@ -275,6 +280,10 @@ export class PeerLink {
         // It came back on the same version with nothing running: this press is over, and its own state says the rest.
         this.asked = null;
       }
+    }
+    if (this.agentAsked && nextVersion && this.agentAsked.from && nextVersion !== this.agentAsked.from) {
+      this.updated = { from: this.agentAsked.from, to: nextVersion, at: Date.now() };
+      this.agentAsked = null;
     }
     this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";

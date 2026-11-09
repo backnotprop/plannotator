@@ -102,6 +102,7 @@ export function machineNotice(machine: Pick<MachineView, 'name' | 'self' | 'upda
   const name = machine.name;
   switch (u.phase) {
     case 'behind':
+      if (!u.can_update && u.asked) return { kind: 'too_old', word: 'Asked', line: `${to} is out`, tip: `You asked ${u.asked.agent} on ${name} to update it.`, busy: false };
       if (!u.can_update) return { kind: 'too_old', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). See how to update it.`, busy: false };
       if (!u.self_update) return { kind: 'by_hand', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). See how to update it.`, busy: false };
       return { kind: 'update', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). Update it to ${to}.`, busy: false };

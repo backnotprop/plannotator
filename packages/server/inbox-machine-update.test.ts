@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
 import { autoUpdatePaths, type InstallerLaunch } from "./auto-update";
-import { machineUpdateView, parseFarDetails } from "./inbox-machines";
+import { AGENT_ASK_KEPT_MS, machineUpdateView, parseFarDetails } from "./inbox-machines";
 import { parseFarUpdate } from "./inbox-peer-link";
 import { createInboxUpdates, machinePath } from "./inbox-updates";
 import { UPDATE_STAGING_PREFIX } from "./update-log";
@@ -419,6 +419,21 @@ describe("how this machine draws what it hears", () => {
     const updated = { from: "0.28.46", to: "0.28.49", at: NOW };
     expect(view({ version: "0.28.49", updated }, NOW + 1)).toMatchObject({ phase: "updated", from: "0.28.46", target: "0.28.49" });
     expect(view({ version: "0.28.49", updated }, NOW + clocks.updatedShownMs)).toBeNull();
+  });
+
+  test("an agent asked to update an older machine: said on its row, then restarting while it is gone, never not back", () => {
+    const old = { version: "0.28.44", canUpdate: false };
+    const agentAsked = { from: "0.28.44", at: NOW, thread: "thr_1", agent: "Claude Code" };
+    expect(view({ ...old, agentAsked }, NOW + 1)).toMatchObject({ phase: "behind", can_update: false, asked: { thread: "thr_1", agent: "Claude Code" } });
+    // Gone after the ask: its restart. Past a restart's time it is only asleep, with the ask still said.
+    expect(view({ ...old, agentAsked, state: "offline", since: NOW + 10 }, NOW + 20)).toMatchObject({ phase: "restarting", asked: { agent: "Claude Code" } });
+    expect(view({ ...old, agentAsked, state: "offline", since: NOW + 10 }, NOW + 10 + clocks.restartBackMs)).toMatchObject({ phase: "behind", asked: { agent: "Claude Code" } });
+    // Already asleep when it was asked: not a restart.
+    expect(view({ ...old, agentAsked, state: "offline", since: NOW - 10 }, NOW + 20)).toMatchObject({ phase: "behind" });
+    // An ask nobody acted on fades, so the dialog offers it again.
+    expect(view({ ...old, agentAsked }, NOW + AGENT_ASK_KEPT_MS)).not.toHaveProperty("asked");
+    // Back on the new version, Updated says nothing of the ask.
+    expect(view({ ...old, version: "0.28.49", agentAsked: null, updated: { from: "0.28.44", to: "0.28.49", at: NOW } }, NOW + 1)).toMatchObject({ phase: "updated" });
   });
 
   test("a machine that removed the link says nothing about versions", () => {
