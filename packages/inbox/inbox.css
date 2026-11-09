@@ -5915,9 +5915,6 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: none; }
 }
 
-/* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
-.ib-strow { flex: none; display: inline-flex; align-items: center; }
-
 /* a phone: the sheet, 44 px rows and targets, a grab handle */
 .ib-oq-pos[data-phone] .ib-stp { width: auto; max-height: 72vh; border-radius: 14px 14px 0 0; border-width: 1px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); animation: ib-oq-up 240ms var(--ib-st-calm); }
 @media (prefers-reduced-motion: reduce) { .ib-oq-pos[data-phone] .ib-stp { animation: none; } }
@@ -5937,22 +5934,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-m { line-height: 22px; }
 .ib-oq-pos[data-phone] .ib-st-jump { margin: -11px 0; }
 
-/* the Board (part 4): the lane card stays still, with only the amber pause while a list waits on the person; the
-   opened card lists the steps under a section head like Threads and Links; the panel's head has a Board icon that
-   opens the card */
-.ib-bc-plan { flex: none; display: inline-flex; align-items: center; color: var(--ib-st-mut); }
-.ib-crdp-steps .ib-st-head { height: auto; padding: 0; margin: 0 0 4px; }
-.ib-crdp-sec.ib-crdp-steps h3.ib-st-lbl { margin: 0; }
-.ib-crdp-steps .ib-sts { margin: 0 -10px; }
-.ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
-/* The opened card on a phone: two lines too, as the foot's sheet. */
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-gl { margin-top: 4px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-m { line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -9px 0; }
+/* The checklist lives only in its thread (owner, 2026-11-09): no mark on a list row or a Board card. The panel's head
+   keeps its Board icon, which opens the card that links the thread. */
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -7414,6 +7397,14 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
+/* A known answer (feedbackKnown.ts), the first line, and a fixed issue: "Fixed in 0.28.52:" with Fixed in the accent
+   color, then the words, then the action, an accent link that runs a setting (approval "inbox-feedback-faq", take B). */
+.ib-fbk-lead { color: var(--primary); font-weight: 600; }
+/* It wraps rather than cut its action off. */
+.ib-fbk-rel li.ib-fbk-known { white-space: normal; }
+.ib-fbk-known-a { color: var(--foreground); }
+.pn-inbox .ib-fbk-act { padding: 0; border: 0; background: none; font: inherit; line-height: inherit; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-fbk-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 3px; }
 .ib-fbk-tabs { margin-top: 16px; }
 .ib-fbk-form .ib-bfield { margin-top: 16px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
@@ -7470,6 +7461,9 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
+  /* A known answer wraps, so its action is never cut off; the action sits above the line's link target, a thumb high. */
+  .ib-fbk-rel li.ib-fbk-known { white-space: normal; line-height: 1.45; padding: 12px 0; }
+  .pn-inbox .ib-fbk-act { position: relative; z-index: 1; padding: 12px 4px; margin: -12px -4px; }
   /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
   :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head, :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-tabs { display: none; }
   :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-form .ib-bfield { margin-top: 0; }
@@ -7478,6 +7472,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
   :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
   :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
+  /* Over a keyboard a known answer is one line too, so Send does not move. */
+  :root[data-ib-keyboard] .ib-fbk-rel li.ib-fbk-known { white-space: nowrap; line-height: 44px; padding: 0; }
   /* Cancel beside Send, the prompt button under them. */
   :root[data-ib-keyboard] .ib-fbk-acts { flex-direction: row; }
   :root[data-ib-keyboard] .ib-fbk-acts .ib-btn { flex: 1; }

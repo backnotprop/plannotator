@@ -272,9 +272,23 @@ test('the thread shows the images inline and as tiles with thumbnails; the PDF a
   expect(await imagesLoaded(page, '[data-image-gallery] img')).toBe(4);
   // The same images as tiles, each with its thumbnail.
   expect(await imagesLoaded(page, '.ib-att-t .ib-thumb img')).toBe(4);
-  // Every image comes from the attachment's own route, by id.
-  const srcs = await page.locator('[data-image-gallery] img').evaluateAll((imgs) => imgs.map((img) => img.getAttribute('src')));
-  expect(srcs.every((src) => /^\/api\/inbox\/attachments\/att_[0-9A-Z]+\/image$/.test(src ?? ''))).toBe(true);
+  // Every image comes from the attachment's own route, by id. A frame is at most 800 px wide, so the two 1280-wide
+  // screenshots load the server's 800-wide copy (`?w=800`, #2948: a big screenshot decoded whole in every frame is
+  // what crashed a heavy thread's tab); the 390-wide phone shot and the SVG load as they are.
+  const frames = await page.locator('[data-image-gallery] [data-gallery-image]').evaluateAll((items) =>
+    items.map((item) => {
+      const img = item.querySelector('img')!;
+      return { id: item.getAttribute('data-gallery-image'), src: img.getAttribute('src'), naturalWidth: img.naturalWidth };
+    }),
+  );
+  const byName = (name: string) => frames.find((frame) => frame.id === world.ids[name])!;
+  for (const name of ['retry-policy-desktop.png', 'Screen Shot 2026-10-10 at 4.12.png']) {
+    expect(byName(name).src).toBe(`/api/inbox/attachments/${world.ids[name]}/image?w=800`);
+    expect(byName(name).naturalWidth).toBe(800);
+  }
+  expect(byName('retry-policy-phone.png').src).toBe(`/api/inbox/attachments/${world.ids['retry-policy-phone.png']}/image`);
+  expect(byName('retry-policy-phone.png').naturalWidth).toBe(390);
+  expect(byName('refund-states.svg').src).toBe(`/api/inbox/attachments/${world.ids['refund-states.svg']}/image`);
   // An SVG drawn by <img> runs no script.
   expect(await page.title()).not.toContain('svg script ran');
   // Downloads, never opened in the window.
