@@ -843,13 +843,17 @@ export function MessageBody({
   openReplyFileRef.current = replyFiles?.onOpen;
   // The person's own words keep their links as they are: only an agent's message opens what it names.
   const refsOn = !!onOpenFileRef && message.author.kind === 'agent';
+  // The host's callback, read through a ref (see the note above renderFooter): named here, every closure React keeps
+  // from this render would pin the thread view of its read.
+  const hostOpenFileRef = useRef(onOpenFileRef);
+  hostOpenFileRef.current = onOpenFileRef;
   const openFileRefRef = useRef<((ref: FileRef) => void) | undefined>(undefined);
   // A file the message carries opens as that attachment (comments and all); any other file read only.
   openFileRefRef.current = refsOn
     ? (ref) => {
         const attached = attachmentForLink(ref.path, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
         if (attached) openRef.current(attached);
-        else onOpenFileRef?.(ref);
+        else hostOpenFileRef.current?.(ref);
       }
     : undefined;
   const resolveLocalLink = useCallback<LocalLinkResolver>(
