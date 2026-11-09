@@ -7,6 +7,7 @@ import { onAskChange } from './askEvents';
 import { readAsk } from './askReads';
 import { askUnseen } from './askModel';
 import { sideQuote } from './askWords';
+import { sideButtonFor, type SideButton } from './sideButton';
 
 export interface InboxAskOptions {
   /** The settings are read, this is not a tailnet guest's page, and not the tour: while false nothing is read and nothing shows. */
@@ -27,6 +28,12 @@ export interface InboxAskParts {
    * and in the phone layout (`phone`, App's usePhone), where the owner keeps the selection bar without it.
    */
   side: ((selected: string, source?: string) => void) | undefined;
+  /**
+   * How the selection bar draws Side (approval "inbox-side-button", 2026-11-09): the mark of the agent that owns the
+   * thread and "Side chat with <agent>", or the two bubbles and "Side chat" (sideButton.tsx). App provides it to the
+   * thread's selection bars through `SideButtonContext`.
+   */
+  sideButton: SideButton;
   /** The window. Outside the thread's section: see AskChat. */
   layer: ReactNode;
   /**
@@ -186,12 +193,16 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const canAsk = model?.can_ask === true;
   const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
 
+  const sideHost = model?.agent?.host ?? null;
+  const sideButton = useMemo(() => sideButtonFor(sideHost), [sideHost]);
+
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
   return {
     askWith,
     corner,
     side: canAsk && !phone ? side : undefined,
+    sideButton,
     layer: askFor ? (
       // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
       <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>

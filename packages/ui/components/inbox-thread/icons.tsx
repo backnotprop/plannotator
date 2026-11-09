@@ -256,51 +256,52 @@ export function TabGlyph({ harness }: { harness: string }) {
   );
 }
 
-/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
-export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
-  let mark: React.ReactNode;
+/** A host's own mark (a brand mark ui carries, or the glyph drawn here for it), or null when it has none. */
+function ownMark(host: string | null | undefined): React.ReactNode | null {
   switch (host) {
     case 'claude-code':
     case 'claude':
     case 'claude-app':
-      mark = <ClaudeIcon />;
-      break;
+      return <ClaudeIcon />;
     case 'gemini':
     case 'qwen':
     case 'zed':
     case 'vscode':
     case 'dsh':
     case 'cline':
-      mark = (
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
         </svg>
       );
-      break;
     case 'pi':
-      mark = <PiIcon />;
-      break;
+      return <PiIcon />;
     case 'opencode':
-      mark = <OpenCodeIcon />;
-      break;
+      return <OpenCodeIcon />;
     case 'codex':
-      mark = <CodexIcon />;
-      break;
+      return <CodexIcon />;
     case 'cursor':
-      mark = <CursorIcon />;
-      break;
+      return <CursorIcon />;
     case 'grok':
       // Grok Build: a plain letter G, drawn here (no brand asset in the repo).
-      mark = (
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M17.6 8.4A6.6 6.6 0 1 0 18.6 12H12.6" />
         </svg>
       );
-      break;
     default:
-      mark = <Icon name="code" />;
+      return null;
   }
-  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{mark}</span>;
+}
+
+/** Whether `HostMark` draws this host's own mark, not the neutral glyph: for a place that would rather draw something else than the neutral glyph. */
+export function hostHasMark(host: string | null | undefined): boolean {
+  return ownMark(host) !== null;
+}
+
+/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
+export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
+  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{ownMark(host) ?? <Icon name="code" />}</span>;
 }
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
