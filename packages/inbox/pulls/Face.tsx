@@ -5,7 +5,7 @@
  * while it loads and stays when there is no picture; a deleted account is a grey person; an app or a team is a soft
  * square, as on the forge, and a team has no picture to ask for.
  */
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { InboxPullReviewState } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { Icon } from '../icons';
@@ -19,15 +19,15 @@ const failedPictures = new Set<string>();
  * drew nothing, or there is no address). `onLoad` and `onError` go on the `<img>`.
  */
 export function usePicture(src: string | null) {
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(() => (src ? failedPictures.has(src) : true));
-  useEffect(() => {
-    setShown(false);
-    setFailed(src ? failedPictures.has(src) : true);
-  }, [src]);
+  // Kept by the address they are for, never reset in an effect: a picture the browser already holds loads before an
+  // effect runs, and a reset then would leave the face on its initial for good.
+  const [shownSrc, setShownSrc] = useState<string | null>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const shown = src !== null && shownSrc === src;
+  const failed = src === null || failedSrc === src || failedPictures.has(src);
   const fail = () => {
     if (src) failedPictures.add(src);
-    setFailed(true);
+    setFailedSrc(src);
   };
   return {
     shown,
@@ -35,7 +35,7 @@ export function usePicture(src: string | null) {
     state: (failed ? 'none' : shown ? 'shown' : 'loading') as 'none' | 'shown' | 'loading',
     onLoad: (event: { currentTarget: HTMLImageElement }) => {
       const img = event.currentTarget;
-      if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
+      if (img.naturalWidth > 1 && img.naturalHeight > 1) setShownSrc(src);
       else fail();
     },
     onError: fail,
