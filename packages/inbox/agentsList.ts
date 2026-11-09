@@ -7,7 +7,7 @@
  * The list is read again on `event: deliveries` with `agents` only while something reads this store
  * (`inboxAgentsWatched`), so the frames cost nothing until the section draws.
  */
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 
 const STATES = new Set<InboxAgent['state']>(['waiting', 'working', 'idle', 'ended']);
@@ -52,9 +52,23 @@ export function subscribeInboxAgents(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/** Each machine's agents now (this Inbox's first), redrawn when a list read changes them; null when the Inbox names none. */
+/**
+ * Each machine's agents now (this Inbox's first), redrawn when a list read changes them; null when the Inbox names none.
+ *
+ * Plain state, never `useSyncExternalStore`: that draws at once, in the middle of the list read that set the agents,
+ * with the read's own rows already in and what the reader does next (a snoozed row moved to its band, App.tsx
+ * `moveSnoozedRow`) not yet. The row menu then saw its write landed with the row still on screen, and the row left a
+ * draw later with focus on the page (rowMenu.test.tsx). As state, the agents draw in the same pass as the read.
+ */
 export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
-  return useSyncExternalStore(subscribeInboxAgents, snapshot, snapshot);
+  const [groups, setGroups] = useState(snapshot);
+  useEffect(() => {
+    const read = () => setGroups(snapshot());
+    // A read that landed between the first draw and this subscription.
+    read();
+    return subscribeInboxAgents(read);
+  }, []);
+  return groups;
 }
 
 /** Something draws the agents: `event: deliveries` with `agents` reads the list again. */

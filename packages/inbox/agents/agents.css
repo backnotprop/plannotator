@@ -48,6 +48,8 @@
 /* Phone: 44 px rows and targets, the heading's buttons beside the chevron's box. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-sbagents { margin-top: 8px; }
+  /* First in the list (nothing starred above it): 2 px under the menu's last row, as the approved phone mock shows it. */
+  .pn-inbox .ib-sidescroll > .ib-sbagents:first-child { margin-top: 2px; }
   .pn-inbox .ib-sbagents .ib-side-sec { padding-right: 0; }
   .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk { width: 18px; height: 18px; }
   .pn-inbox .ib-sbagents .ib-agents-add[data-agents-add="agent"] { right: 88px; }

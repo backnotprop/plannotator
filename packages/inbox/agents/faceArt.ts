@@ -8,16 +8,15 @@
  * In its own script: the Inbox window splits at every dynamic import, so these bytes load on the first click.
  */
 import { TAB_ICON_ART } from '../tabIconArt';
-import transparentLight from '../assets/agent-marks/transparent-light.svg?raw';
-import transparentDark from '../assets/agent-marks/transparent-dark.svg?raw';
+import transparentLight from '../assets/agent-marks/transparent-light.svg';
+import transparentDark from '../assets/agent-marks/transparent-dark.svg';
 import type { AgentFace } from './motion';
 
-const svgUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
 const picture = (src: string, className = 'am-art') => `<img class="${className}" src="${src}" alt="" draggable="false">`;
 
 export const AGENT_FACE_ART: Readonly<Record<Exclude<AgentFace, 'agent'>, string>> = {
   glass: picture(TAB_ICON_ART.glass),
   yellow: picture(TAB_ICON_ART.yellow),
-  transparent: picture(svgUrl(transparentLight), 'am-art am-art-l') + picture(svgUrl(transparentDark), 'am-art am-art-d'),
+  transparent: picture(transparentLight, 'am-art am-art-l') + picture(transparentDark, 'am-art am-art-d'),
   totman: picture(TAB_ICON_ART.totman),
 };
