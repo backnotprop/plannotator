@@ -228,7 +228,7 @@ async function openMore() {
 
 test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before the subject; Artifacts, Expand, ⋯ and × stay at the right', async () => {
   await render(OPENED);
-  expect(bar()).toEqual(['Hide the sidebar and the list', '|', 'Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
+  expect(bar()).toEqual(['Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
   expect(head().querySelector('[data-header-subject]')!.textContent).toBe('customize row look');
   // The read button is an icon: its words are its name, never drawn text.
   for (const button of head().querySelectorAll('[data-mark-unread], [data-thread-snooze]')) expect(button.textContent).toBe('');
@@ -236,11 +236,11 @@ test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before
   act(() => root!.unmount());
   host!.remove();
   await render(WAITING);
-  expect(bar().slice(2, 5)).toEqual(['Mark read', 'Snooze', 'subject']);
+  expect(bar().slice(0, 3)).toEqual(['Mark read', 'Snooze', 'subject']);
   act(() => root!.unmount());
   host!.remove();
   await render(MARKED);
-  expect(bar().slice(2, 5)).toEqual(['Read', 'Snooze', 'subject']);
+  expect(bar().slice(0, 3)).toEqual(['Read', 'Snooze', 'subject']);
   expect(head().querySelector('[data-mark-read]')!.getAttribute('aria-pressed')).toBe('true');
 });
 
