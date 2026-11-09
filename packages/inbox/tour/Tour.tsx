@@ -42,6 +42,7 @@ import { tourFileSource } from './fileSource';
 import { TourSettings, type TourSettingsHandle } from './TourSettings';
 import { sentAnswersOf } from '../sentReply';
 import { threadChipName } from '../threadChip';
+import { markInboxPage } from '../pageMarks';
 import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
@@ -868,7 +869,7 @@ export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPi
     }
   };
   return createPortal(
-    <div className="pn-inbox ib-tour-layer">
+    <div ref={markInboxPage} className="pn-inbox ib-tour-layer">
       <div ref={ref} className="ib-tour-viewer ib-wlayer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
         <header>
           <b>{picture.name}</b>

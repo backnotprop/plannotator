@@ -43,6 +43,7 @@ packages/ui/components/chat/chatKeepBlankLines.dom.test.tsx
 packages/review-editor/hooks/useAIChat.newChat.test.tsx
 packages/ui/hooks/useAgentSettings.dom.test.tsx
 packages/ui/utils/codeHighlight.test.ts
+packages/ui/utils/codeHighlight.deferral.test.ts
 packages/ui/utils/htmlChrome.test.ts
 packages/ui/utils/inputMethod.test.ts
 packages/ui/utils/vimNavigation.test.ts
@@ -634,3 +635,5 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/ui/utils/pageMarks.test.tsx
+packages/inbox/pageMarks.test.tsx

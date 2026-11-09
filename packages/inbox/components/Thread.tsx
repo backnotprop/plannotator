@@ -1,7 +1,7 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -255,6 +255,48 @@ function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean): HTMLEl
   const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])');
   const atOpen = below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])');
   return arrivals.length > 0 ? arrivals : atOpen;
+}
+
+/** A number that changes often, read by one small component (useSyncExternalStore) so a change redraws only that component. */
+interface CountStore {
+  get: () => number;
+  set: (next: number) => void;
+  subscribe: (listener: () => void) => () => void;
+}
+
+function createCountStore(): CountStore {
+  let value = 0;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next) => {
+      if (next === value) return;
+      value = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+
+/**
+ * The "↓ N new" pill. Its count changes on most scroll steps past new messages; it reads it from `count` so that
+ * only this button redraws then, not the thread. `onDrawn` runs after each of its draws (the phone's foot row
+ * places the pill by its width, which its count changes).
+ */
+function NewPill({ count, onJump, onDrawn }: { count: CountStore; onJump: (below: boolean) => void; onDrawn?: () => void }) {
+  const n = useSyncExternalStore(count.subscribe, count.get, count.get);
+  useLayoutEffect(() => {
+    onDrawn?.();
+  });
+  return (
+    <button type="button" className="ib-npill" data-new-pill="" data-off={n > 0 ? undefined : ''} tabIndex={n > 0 ? 0 : -1} aria-hidden={n === 0} onClick={() => onJump(true)}>
+      <Icon name="arrowDown" size={15} />
+      {Math.max(1, n)} new
+    </button>
+  );
 }
 
 /** A folded line's snippet: the message's first words, or the person's answers. */
@@ -2950,7 +2992,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // The "↓ N new" pill while new messages the person has not seen are below
   // the view (its count: those messages, never everything new this visit).
   // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
-  const [chrome, setChrome] = useState({ subject: false, pill: 0 });
+  // `pill` here is only whether the pill shows; its count changes on most scroll steps past new messages, so it
+  // lives in `pillCount`, which only the pill reads: a scroll redraws the pill, never every message of the thread.
+  const [chrome, setChrome] = useState({ subject: false, pill: false });
+  const [pillCount] = useState(createCountStore);
   /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
   const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
   const passedIds = useCallback((): Set<string> => {
@@ -2965,12 +3010,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const box = body.getBoundingClientRect();
     const subject = body.querySelector<HTMLElement>('.ib-subject');
     const shown = showingRef.current && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
+    const count = newBelow(body, passedIds(), shown).length;
     const next = {
       subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
-      pill: newBelow(body, passedIds(), shown).length,
+      pill: count > 0,
     };
+    pillCount.set(count);
     setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
-  }, [passedIds]);
+  }, [passedIds, pillCount]);
 
   // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
   // An agent message that arrives while the thread is open counts as seen once
@@ -2994,7 +3041,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (sightedRef.current.has(id)) return;
       const ids = new Set(sightedRef.current).add(id);
       sightedRef.current = ids;
-      setSighted({ threadId: thread.thread_id, ids });
+      // A transition: on a long thread the redraw this costs runs in slices between frames, not as one long task
+      // while the person scrolls. `data-sighted` draws nothing; only newBelow and the dwell read it.
+      startTransition(() => setSighted({ threadId: thread.thread_id, ids }));
       // The look goes as far as every arrival up to it was seen, never past one that was not.
       const through = lookThrough(arrivalsRef.current, ids);
       if (through !== null) onSeen?.(through);
@@ -3002,7 +3051,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [onSeen, thread.thread_id],
   );
   // On a phone the pill sits in the foot and covers none of the thread.
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill > 0 && !phone, onSeen: sawOne });
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill && !phone, onSeen: sawOne });
   // The thread on screen, for notifications: a question in it raises nothing while it is visible.
   const screenRef = useRef(onScreenChange);
   screenRef.current = onScreenChange;
@@ -5556,18 +5605,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   }, [pillOnRow, placePill]);
   const newPill = (
     <div className="ib-npill-wrap" data-above={phone && pillAbove ? '' : undefined}>
-      <button
-        type="button"
-        className="ib-npill"
-        data-new-pill=""
-        data-off={chrome.pill > 0 ? undefined : ''}
-        tabIndex={chrome.pill > 0 ? 0 : -1}
-        aria-hidden={chrome.pill === 0}
-        onClick={() => jumpNew(true)}
-      >
-        <Icon name="arrowDown" size={15} />
-        {Math.max(1, chrome.pill)} new
-      </button>
+      <NewPill count={pillCount} onJump={jumpNew} onDrawn={pillOnRow ? placePill : undefined} />
     </div>
   );
 
