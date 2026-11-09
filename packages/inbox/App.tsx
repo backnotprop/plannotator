@@ -1459,6 +1459,8 @@ function Inbox() {
 
   /** The newest list cursor taken, by Inbox run: a list read that brings nothing new keeps the list held, with its older cursor. */
   const listCursor = useRef<{ session: string; cursor: number } | null>(null);
+  /** The list header's Tidy hears a list read that brought nothing new (useTidy's `listRead`). */
+  const listTidyRead = useRef<(() => void) | null>(null);
   /** The open thread was not here, and the list names the machine that holds it: open it there. */
   const retryMissingThread = () => {
     const open = routeRef.current.thread;
@@ -1485,6 +1487,7 @@ function Inbox() {
         setShown((current) => (current === null || !hasRows(current) ? current : refreshHeldRows(current, listGroups(held), heldOpen())));
         setLoadError(null);
         retryMissingThread();
+        listTidyRead.current?.();
         return held;
       }
       setPageSession(next.serverSession);
@@ -5105,7 +5108,11 @@ function Inbox() {
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
       : [];
   // Tidy (2026-10-28): the list header's and the Board's ⋮ menu, each reading who it would ask in its scope.
-  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', shown, route.page === 'inbox' && !firstRun);
+  // Its plan goes stale with every list read: one that moved the latest list but kept the list drawn (a row held
+  // behind "N new") counts, and one that brought nothing new says so itself (`listRead`, refreshList).
+  const listReadToken = useMemo(() => ({ shown, latest }), [shown, latest]);
+  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', listReadToken, route.page === 'inbox' && !firstRun);
+  listTidyRead.current = listTidy.listRead ?? null;
   const boardTidy = useTidy(boardFilter, 'board', cards, route.page === 'board');
   // The first-run screen shows who is running now ("Message Claude Code") and moves on by itself
   // once an agent is installed or turned on: it reads the agents again when the window comes back
