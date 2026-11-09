@@ -96,7 +96,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const ping = (tool: string) => `{"version":"0.28.46","age_week":4,"tool":"${tool}","first":1}`;
+const ping = (tool: string) => `{"version":"0.28.46","age_week":4,"tool":"${tool}","first":1,"favicon":"none"}`;
 
 describe("the daily ping in the OpenCode plugin", () => {
   test("annotate", async () => {
@@ -133,6 +133,13 @@ describe("the daily ping in the OpenCode plugin", () => {
     await until(() => sent().includes("plan"));
     expect(bodies).toEqual([ping("plan")]);
   }, 15_000);
+
+  test("OpenCode reads the same config.json favicon as the CLI: classic is p", async () => {
+    writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ favicon: "classic" }));
+    await handleAnnotateCommand({ properties: { arguments: "plan.md", sessionID: "s" } }, deps() as any);
+    await until(() => sent().includes("annotate"));
+    expect(bodies).toEqual(['{"version":"0.28.46","age_week":4,"tool":"annotate","first":1,"favicon":"p"}']);
+  });
 
   test("a local build is a dev build: no release CI mark in dist/, or one for another version", () => {
     const pkg = path.join(root, "pkg");

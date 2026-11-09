@@ -1,11 +1,16 @@
 /**
- * Plannotator's daily ping: a Worker in front of one D1 table of daily totals.
+ * Plannotator's daily ping: a Worker in front of three D1 tables of daily totals.
  *
- *  - POST /ping     `{"version":"X.Y.Z","age_week":1-4,"tool":"plan","first":0|1}`
+ *  - POST /ping     `{"version":"X.Y.Z","age_week":1-4,"tool":"plan","first":0|1,"favicon":"glass"}`
  *                   and nothing else: adds 1 to today's (UTC) total for that
  *                   version, age bucket and tool, and, when `first` is 1 (the
  *                   computer's first ping of the day), to the day's user
- *                   total. 204, no body. Anything else: 400 / 413 / 405.
+ *                   total and to the day's count for that `favicon` (glass,
+ *                   face, p or none), a table of its own, never stored next
+ *                   to the version, age bucket or tool. The four-key body
+ *                   without `favicon` (every release before it) is accepted
+ *                   for ever and counts no favicon. 204, no body. Anything
+ *                   else: 400 / 413 / 405.
  *                   A body over MAX_BODY_BYTES is refused before it is read
  *                   (its Content-Length) and never read past that size.
  *  - GET  /totals   read-only JSON of the last TOTALS_DAYS days' sums, for a
@@ -50,6 +55,8 @@ const TOTALS_CACHE_KEY = "https://ping.plannotator.ai/totals";
 export const MAX_BODY_BYTES = 160;
 export const AGE_WEEKS = [1, 2, 3, 4] as const;
 export const TOOLS = ["inbox", "plan", "review", "annotate", "last"] as const;
+/** The favicon set in Settings (packages/shared/daily-ping.ts), or none when never picked. */
+export const FAVICONS = ["glass", "face", "p", "none"] as const;
 /** How many days GET /totals answers, newest last. */
 export const TOTALS_DAYS = 90;
 
@@ -60,19 +67,25 @@ export const TOOL_UPSERT_SQL =
   "INSERT INTO daily (day, version, age_week, tool, n) VALUES (?1, ?2, ?3, ?4, 1) ON CONFLICT (day, version, age_week, tool) DO UPDATE SET n = n + 1";
 export const TOTAL_UPSERT_SQL =
   "INSERT INTO daily_total (day, version, age_week, n) VALUES (?1, ?2, ?3, 1) ON CONFLICT (day, version, age_week) DO UPDATE SET n = n + 1";
+export const FAVICON_UPSERT_SQL =
+  "INSERT INTO daily_favicon (day, favicon, n) VALUES (?1, ?2, 1) ON CONFLICT (day, favicon) DO UPDATE SET n = n + 1";
 export const TOOL_TOTALS_SQL = "SELECT day, version, age_week, tool, n FROM daily WHERE day >= ?1";
 export const USER_TOTALS_SQL = "SELECT day, version, age_week, n FROM daily_total WHERE day >= ?1";
+export const FAVICON_TOTALS_SQL = "SELECT day, favicon, n FROM daily_favicon WHERE day >= ?1";
 
 export interface Ping {
   version: string;
   age_week: (typeof AGE_WEEKS)[number];
   tool: (typeof TOOLS)[number];
   first: 0 | 1;
+  /** Absent in the four-key body older releases send. */
+  favicon?: (typeof FAVICONS)[number];
 }
 
 /**
  * The body, or null: exactly the keys `version` (X.Y.Z), `age_week` (1-4),
- * `tool` (one of TOOLS) and `first` (0 or 1).
+ * `tool` (one of TOOLS) and `first` (0 or 1), with or without `favicon` (one
+ * of FAVICONS).
  */
 export function parsePing(text: string): Ping | null {
   let value: unknown;
@@ -83,13 +96,16 @@ export function parsePing(text: string): Ping | null {
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const keys = Object.keys(value).sort().join(",");
-  if (keys !== "age_week,first,tool,version") return null;
-  const { version, age_week, tool, first } = value as Record<string, unknown>;
+  if (keys !== "age_week,first,tool,version" && keys !== "age_week,favicon,first,tool,version") return null;
+  const { version, age_week, tool, first, favicon } = value as Record<string, unknown>;
   if (typeof version !== "string" || !VERSION_RE.test(version)) return null;
   if (typeof age_week !== "number" || !(AGE_WEEKS as readonly number[]).includes(age_week)) return null;
   if (typeof tool !== "string" || !(TOOLS as readonly string[]).includes(tool)) return null;
   if (first !== 0 && first !== 1) return null;
-  return { version, age_week: age_week as Ping["age_week"], tool: tool as Ping["tool"], first };
+  const out: Ping = { version, age_week: age_week as Ping["age_week"], tool: tool as Ping["tool"], first };
+  if (favicon === undefined) return out;
+  if (typeof favicon !== "string" || !(FAVICONS as readonly string[]).includes(favicon)) return null;
+  return { ...out, favicon: favicon as Ping["favicon"] };
 }
 
 function utcDay(now: number): string {
@@ -110,17 +126,20 @@ export interface DayTotals {
   versions: Record<string, number>;
   /** Computers that used each tool that day. */
   tools: Record<string, number>;
+  /** Computers per favicon that day (from releases that send it; older ones count in `users` only). */
+  favicon: Record<string, number>;
 }
 
 type ToolRow = { day: string; version: string; age_week: number; tool: string; n: number };
 type UserRow = { day: string; version: string; age_week: number; n: number };
+type FaviconRow = { day: string; favicon: string; n: number };
 
 /** The rows, summed per day. */
-export function sumDays(users: UserRow[], tools: ToolRow[]): DayTotals[] {
+export function sumDays(users: UserRow[], tools: ToolRow[], favicons: FaviconRow[]): DayTotals[] {
   const days = new Map<string, DayTotals>();
   const day = (d: string) => {
     let t = days.get(d);
-    if (!t) days.set(d, (t = { day: d, users: 0, age_week: {}, versions: {}, tools: {} }));
+    if (!t) days.set(d, (t = { day: d, users: 0, age_week: {}, versions: {}, tools: {}, favicon: {} }));
     return t;
   };
   for (const row of users) {
@@ -132,6 +151,10 @@ export function sumDays(users: UserRow[], tools: ToolRow[]): DayTotals[] {
   for (const row of tools) {
     const t = day(row.day);
     t.tools[row.tool] = (t.tools[row.tool] ?? 0) + row.n;
+  }
+  for (const row of favicons) {
+    const t = day(row.day);
+    t.favicon[row.favicon] = (t.favicon[row.favicon] ?? 0) + row.n;
   }
   return [...days.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 }
@@ -173,7 +196,10 @@ export async function handleRequest(req: Request, env: Env, now: number = Date.n
     if (!ping) return empty(400);
     const day = utcDay(now);
     await env.DB.prepare(TOOL_UPSERT_SQL).bind(day, ping.version, ping.age_week, ping.tool).run();
-    if (ping.first === 1) await env.DB.prepare(TOTAL_UPSERT_SQL).bind(day, ping.version, ping.age_week).run();
+    if (ping.first === 1) {
+      await env.DB.prepare(TOTAL_UPSERT_SQL).bind(day, ping.version, ping.age_week).run();
+      if (ping.favicon) await env.DB.prepare(FAVICON_UPSERT_SQL).bind(day, ping.favicon).run();
+    }
     return empty(204);
   }
   if (path === "/totals") {
@@ -184,7 +210,8 @@ export async function handleRequest(req: Request, env: Env, now: number = Date.n
     const from = utcDay(now - (TOTALS_DAYS - 1) * DAY_MS);
     const users = await env.DB.prepare(USER_TOTALS_SQL).bind(from).all<UserRow>();
     const tools = await env.DB.prepare(TOOL_TOTALS_SQL).bind(from).all<ToolRow>();
-    const res = new Response(JSON.stringify({ days: sumDays(users.results, tools.results) }), {
+    const favicons = await env.DB.prepare(FAVICON_TOTALS_SQL).bind(from).all<FaviconRow>();
+    const res = new Response(JSON.stringify({ days: sumDays(users.results, tools.results, favicons.results) }), {
       status: 200,
       headers: {
         "content-type": "application/json",

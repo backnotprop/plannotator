@@ -8,7 +8,7 @@
  *   content-type: application/json
  *   user-agent: plannotator
  *
- *   {"version":"0.28.46","age_week":2,"tool":"plan","first":1}
+ *   {"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":"glass"}
  *
  *  - `version`: this release (X.Y.Z only).
  *  - `age_week`: how long ago this computer first used Plannotator, in Fedora
@@ -16,8 +16,14 @@
  *  - `tool`: inbox, plan, review, annotate or last.
  *  - `first`: 1 on this computer's first ping of the UTC day (any tool), else 0,
  *    so the server counts daily users without an ID.
+ *  - `favicon`: the favicon set in Settings, read from config.json `favicon`
+ *    in the data dir when the ping is sent: glass, face (the `totman` setting),
+ *    p (the `classic` setting), or none when it was never picked (or holds
+ *    anything else). Every tool's ping carries it; the server counts it only
+ *    on the `first: 1` ping, on its own, never next to version, age or tool.
  * At most five pings a computer a day. No ID, no OS, nothing else. The server
- * adds 1 to that day's totals and keeps nothing else (apps/telemetry).
+ * adds 1 to that day's totals and keeps nothing else (apps/telemetry). It
+ * still accepts the four-key body older releases send.
  *
  * When a check sends (every gate, in order):
  *  - a release build: `version` is X.Y.Z, and the build says it is a release.
@@ -69,6 +75,10 @@ export const DAILY_PING_LOCK_WAIT_MS = 5_000;
 
 export const DAILY_PING_TOOLS = ["inbox", "plan", "review", "annotate", "last"] as const;
 export type DailyPingTool = (typeof DAILY_PING_TOOLS)[number];
+
+/** The `favicon` values a ping carries: config.json's setting, or none when it was never picked. */
+export const DAILY_PING_FAVICONS = ["glass", "face", "p", "none"] as const;
+export type DailyPingFavicon = (typeof DAILY_PING_FAVICONS)[number];
 
 const DAY_MS = 86_400_000;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -135,8 +145,26 @@ export function isReleaseVersion(version: string | undefined): version is string
 }
 
 /** The exact body: the only bytes the ping carries. */
-export function dailyPingBody(version: string, ageWeek: 1 | 2 | 3 | 4, tool: DailyPingTool, first: boolean): string {
-  return JSON.stringify({ version, age_week: ageWeek, tool, first: first ? 1 : 0 });
+export function dailyPingBody(version: string, ageWeek: 1 | 2 | 3 | 4, tool: DailyPingTool, first: boolean, favicon: DailyPingFavicon): string {
+  return JSON.stringify({ version, age_week: ageWeek, tool, first: first ? 1 : 0, favicon });
+}
+
+/** config.json's `favicon` as the ping names it: glass, totman is face, classic is p, anything else none. */
+export function dailyPingFavicon(setting: unknown): DailyPingFavicon {
+  if (setting === "glass") return "glass";
+  if (setting === "totman") return "face";
+  if (setting === "classic") return "p";
+  return "none";
+}
+
+/** The favicon config.json in `dataDir` sets, read now (none when the file is missing or does not parse). */
+export function readDailyPingFavicon(dataDir: string): DailyPingFavicon {
+  try {
+    const config = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf-8")) as { favicon?: unknown } | null;
+    return dailyPingFavicon(config?.favicon);
+  } catch {
+    return "none";
+  }
 }
 
 /** The CLI commands that annotate the last message (apps/hook/server/index.ts). */
@@ -342,7 +370,7 @@ export async function checkDailyPing(deps: DailyPingDeps): Promise<DailyPingResu
       }
       const sent = sentToday(state, today);
       if (sent.includes(deps.tool)) return "sent-today";
-      const body = dailyPingBody(deps.version!, dailyPingAge(state.firstWeek, today), deps.tool, sent.length === 0);
+      const body = dailyPingBody(deps.version!, dailyPingAge(state.firstWeek, today), deps.tool, sent.length === 0, readDailyPingFavicon(dataDir));
       const response = await (deps.fetch ?? fetch)(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json", "user-agent": "plannotator" },
