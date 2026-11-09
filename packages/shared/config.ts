@@ -809,7 +809,9 @@ export interface PlannotatorConfig {
   todoProvider?: "auto" | "off";
   /**
    * Selected favicon style for Plannotator application surfaces:
-   * 'totman' (production brand mascot) or 'classic' (historical dark-navy P tile).
+   * 'glass' (the goggles in glass, the default), 'totman' (the Face icon, the
+   * goggles face that was the default before PR 2975) or 'classic' (the P
+   * icon: dark tile, cream P, yellow stripe; it replaced the old navy P).
    */
   favicon?: FaviconStyle;
 }

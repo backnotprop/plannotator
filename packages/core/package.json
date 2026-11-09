@@ -35,6 +35,7 @@
     "./external-annotation": "./external-annotation.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",
+    "./favicon-style": "./favicon-style.ts",
     "./forge-refs": "./forge-refs.ts",
     "./forge-ref-card": "./forge-ref-card.ts",
     "./feedback-templates": "./feedback-templates.ts",

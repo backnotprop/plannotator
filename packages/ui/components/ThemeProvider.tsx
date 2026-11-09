@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { configStore } from '../config/configStore';
 import { readThemePairCookies, writeThemePairCookies } from '../config/settings';
 import { useConfigValue } from '../config/useConfig';
-import { faviconDataUrl } from '@plannotator/core/favicon';
 import { storage } from '../utils/storage';
 import {
   BUILT_IN_THEMES,
@@ -214,20 +213,26 @@ export function ThemeProvider({
   useEffect(() => {
     if (!manageFavicon) return;
     if (typeof document === 'undefined') return;
-    let link = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'icon';
-      document.head.appendChild(link);
-    }
-    if (faviconStyle === 'classic') {
-      link.type = 'image/svg+xml';
-      link.removeAttribute('sizes');
-    } else {
-      link.type = 'image/png';
-      link.setAttribute('sizes', '192x192');
-    }
-    link.href = faviconDataUrl(faviconStyle);
+    // Loaded only where the app owns the favicon: the icons' bytes stay out of a
+    // host's bundle (the guides.show viewer has a size budget). The page's first
+    // frame already shows the chosen icon from the server's /favicon.png.
+    let cancelled = false;
+    void import('@plannotator/core/favicon').then(({ faviconDataUrl, faviconLinkType }) => {
+      if (cancelled) return;
+      let link = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      const { type, sizes } = faviconLinkType(faviconStyle);
+      link.type = type;
+      link.setAttribute('sizes', sizes);
+      link.href = faviconDataUrl(faviconStyle);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [faviconStyle, manageFavicon]);
 
   // Hand the resolved pair to the store as a SEED, not a user choice: seeding

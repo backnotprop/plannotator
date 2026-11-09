@@ -716,6 +716,8 @@ button.ib-mut { border-radius: 6px; }
 .ib-seg-o { --ib-seg-fg-s: var(--ib-soft-segmented) color-mix(in oklch, var(--ib-raise-mfg) 70%, var(--foreground)); position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13, 13px); color: var(--ib-seg-fg-s, var(--muted-foreground)); cursor: pointer; white-space: nowrap; }
 .ib-seg-o:hover { color: var(--foreground); }
 .ib-seg-o[data-on] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+/* Settings → General → Favicon: each choice shows its icon. */
+.ib-seg-o .ib-favicon-o { width: 16px; height: 16px; border-radius: 3px; flex: none; }
 .ib-seg-o input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 .ib-seg-o:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .pn-inbox .ib-seg-o input:focus-visible { outline: none; }

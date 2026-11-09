@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../packages/core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../packages/core/favicon";
 
 // The two server-served entry points declare no type/sizes: their /favicon.png
 // is answered by handleFavicon(), which picks PNG or the classic SVG from the
@@ -167,13 +167,18 @@ describe("favicon surfaces", () => {
     expect(stats.opaquePixels).toBeGreaterThan((192 * 192) / 2);
   });
 
-  test("the optional classic style is the archival pre-Totman asset", () => {
-    // The second thing /favicon.png can now answer with, so it belongs in this
-    // enumeration alongside the production PNG. Pinned to the exact bytes that
-    // shipped at 5b91c543^.
-    expect(createHash("sha256").update(CLASSIC_FAVICON_SVG).digest("hex")).toBe(
-      "27d33cff3d4515801f48e1cbaceec777ba802a7d341b22b2c0444d82b303cb49",
+  test("the Face and P styles are their pinned PNGs", () => {
+    // The other two things /favicon.png can answer with, so they belong in this
+    // enumeration alongside the default. Face is the icon PR 2975 replaced
+    // (eede4aecf^1); P is the studio's P icon-192.png.
+    expect(createHash("sha256").update(FACE_FAVICON_PNG_BYTES).digest("hex")).toBe(
+      "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
     );
+    expect(inspectPng(FACE_FAVICON_PNG_BYTES)).toMatchObject({ width: 64, height: 64 });
+    expect(createHash("sha256").update(P_FAVICON_PNG_BYTES).digest("hex")).toBe(
+      "f6bed7f06a78ae9d4de3d2019e7704ca447f9629c85d868ca77f5a25af82b4f8",
+    );
+    expect(inspectPng(P_FAVICON_PNG_BYTES)).toMatchObject({ width: 192, height: 192 });
   });
 
   test("the marketing site ships the studio's web icon set unchanged", async () => {

@@ -260,6 +260,7 @@ import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
+import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
@@ -2107,6 +2108,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saved;
   };
 
+  /**
+   * The favicon (config.json `favicon`, the value plan review, code review and
+   * annotate write through POST /api/config, and the one `/favicon.png`
+   * answers with): 'glass' (the default, also when nothing is stored),
+   * 'totman' (the Face icon) or 'classic'.
+   */
+  const faviconState = (): FaviconStyle => {
+    const value = loadConfig().favicon;
+    return isFaviconStyle(value) ? value : DEFAULT_FAVICON_STYLE;
+  };
+
+  const saveFavicon = (input: unknown, validateOnly = false): FaviconStyle => {
+    if (!isFaviconStyle(input)) throw new InboxError("validation_error", "favicon: glass, totman (Face) or classic.", { field: "favicon" });
+    if (validateOnly) return faviconState();
+    saveConfig({ favicon: input });
+    if (loadConfig().favicon !== input) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    return input;
+  };
+
   /** The name on the person's comments (config.json `displayName`); null when never set. */
   const displayNameState = (): string | null => {
     const name = loadConfig().displayName;
@@ -3003,6 +3023,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { display_name: displayNameState() }),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** The favicon (config.json `favicon`), shared with plan review, code review and annotate: glass unless chosen. */
+    favicon: faviconState(),
     /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. `reactions_rev` counts the saves. */
     ...reactionsWire(reactionsState()),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
@@ -4946,6 +4968,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.favicon === undefined &&
           body.reactions === undefined &&
           body.reaction_change === undefined &&
           body.rows === undefined &&
@@ -4965,7 +4988,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, reaction_change, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -5016,6 +5039,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        if (body.favicon !== undefined) saveFavicon(body.favicon, true);
         const reactionsChange = body.reactions !== undefined || body.reaction_change !== undefined;
         if (reactionsChange) saveReactions(body, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
@@ -5042,6 +5066,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const favicon = body.favicon === undefined ? faviconState() : saveFavicon(body.favicon);
         const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
@@ -5056,7 +5081,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const systemAnswer = system.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
