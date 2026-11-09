@@ -11,6 +11,10 @@ import { homeFoldersSource } from "./inbox-home-folders-source.ts" with { type: 
 import type { FolderPlaces, HomeFolder, HomeFolderListing, HomeFolderRefusal } from "./inbox-home-folders";
 import { folderPlacesFor } from "./inbox-home-folders";
 import { realpathSync } from "node:fs";
+import { envPathOf } from "./env-path";
+
+/** The env a Windows child needs for Windows' folder rules (`refusedOutside`): where Windows and programs live. */
+const WINDOWS_PLACES_ENV = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"] as const;
 
 /** The rules' own source, carried in the build (a Bun macro). */
 const RULES_SOURCE: string = homeFoldersSource();
@@ -91,8 +95,13 @@ export function createFolderReader(options: {
     const args = JSON.stringify({ call, home: options.home, typed, places, hang });
     const code = `${RULES_SOURCE}\n;{const a=${args};if(a.hang)Bun.sleepSync(a.hang);const r=a.call==="list"?listHomeFolders(a.home,a.typed,a.places):resolveHomeFolder(a.home,a.typed,a.places);process.stdout.write(JSON.stringify(r));}`;
     // The compiled binary acts as Bun with BUN_BE_BUN; nothing of the Inbox's env goes to the child, and it runs at `/`
-    // so no config file of the folder it was started in is read.
-    const child = Bun.spawn([execPath, "-e", code], { cwd: "/", env: { BUN_BE_BUN: "1", PATH: env.PATH ?? "/usr/bin:/bin" }, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    // so no config file of the folder it was started in is read. On Windows it gets the system folders' places too
+    // (Windows' folder rules refuse them) and its PATH by any spelling (`Path`).
+    const childEnv: Record<string, string> = { BUN_BE_BUN: "1", PATH: envPathOf(env, options.platform as NodeJS.Platform) ?? "/usr/bin:/bin" };
+    if (options.platform === "win32") {
+      for (const name of WINDOWS_PLACES_ENV) if (env[name]) childEnv[name] = env[name]!;
+    }
+    const child = Bun.spawn([execPath, "-e", code], { cwd: "/", env: childEnv, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

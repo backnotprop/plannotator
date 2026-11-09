@@ -237,6 +237,7 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
 import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
@@ -7090,6 +7091,7 @@ function Inbox() {
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>
+    <SideButtonContext.Provider value={ask.sideButton}>
     <div
       ref={rootRef}
       className="pn-inbox"
@@ -7780,6 +7782,7 @@ function Inbox() {
         />
       )}
     </div>
+    </SideButtonContext.Provider>
     </InitiativeTagsContext.Provider>
   );
 }

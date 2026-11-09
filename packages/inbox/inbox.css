@@ -432,6 +432,11 @@ button.ib-mut { border-radius: 6px; }
 .ib-mk > svg, .ib-mk > img { width: var(--ib-mark-16); height: var(--ib-mark-16); display: block; }
 .ib-mk.ib-big { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); background: var(--muted); }
 .ib-mk.ib-big > svg, .ib-mk.ib-big > img { width: var(--ib-mark-30-g); height: var(--ib-mark-30-g); }
+/* Side in the selection bar (ask/sideButton.tsx): the thread agent's mark is the button's glyph. A block, as the
+   other buttons' glyphs are: an inline box would sit on a text line and make the button taller than its neighbours.
+   On a touch bar ui's theme.css draws every glyph at 20 px and sizes the mark's box; the last rule sizes the mark in it. */
+.annotation-toolbar [data-annotation-side] > .ib-mk { display: flex; }
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-annotation-side] > .ib-mk > :is(svg, img) { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 
 /* shell */
 .ib-shell { display: flex; height: 100%; width: 100%; overflow: hidden; }
@@ -4612,6 +4617,17 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-kd-w { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .ib-kd-n { flex: none; white-space: pre; }
 .ib-kd-c { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+/* A video's or a recording's line never cuts a word or a number ("WAV … · 2.0 MB · 3 comme…" in a narrow tile): a part
+   that does not fit goes whole. Both halves are one line high and wrap, so what wraps is out of sight. The size and the
+   frame go first (.ib-kd-drop, from its end; the empty first item, a line high, lets its only part wrap too), then the kind and the
+   length (.ib-kd-keep, from its start: laid out from the right in reverse order, packed to the left). The count stays. */
+.ib-kd-timed :is(.ib-kd-keep, .ib-kd-drop) { display: flex; flex-wrap: wrap; min-width: 0; height: 1lh; overflow: hidden; }
+.ib-kd-timed :is(.ib-kd-keep, .ib-kd-drop) > span { flex: none; white-space: pre; }
+.ib-kd-keep { flex: 0 1 auto; flex-direction: row-reverse; justify-content: flex-end; }
+.ib-kd-keep > :nth-child(1) { order: 3; }
+.ib-kd-keep > :nth-child(2) { order: 2; }
+.ib-kd-drop { flex: 0 100000 auto; }
+.ib-kd-drop::before { content: ''; flex: none; width: 0; height: 1lh; }
 .ib-cp-file.ib-refused { border-color: color-mix(in oklch, var(--destructive) 55%, var(--border)); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
 .ib-cp-ferr { font-size: var(--ib-fs-12, 12px); color: var(--destructive); line-height: 1.4; }
 .ib-cp-prog { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); overflow: hidden; }

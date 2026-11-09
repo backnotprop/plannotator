@@ -1223,8 +1223,11 @@ ${result.text}`);
         const raw = body.scratch_dir;
         if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "scratch_dir: a folder path, or null.", { field: "scratch_dir" });
         const typed = (raw ?? "").trim();
-        const path = typed === "~" ? options.homeDir : typed.startsWith("~/") ? join(options.homeDir, typed.slice(2)) : typed;
-        if (path && (!isAbsolute(path) || resolve(path) === resolve("/"))) throw new InboxError("validation_error", "Give a full path, such as ~/scratch.", { field: "scratch_dir" });
+        // Windows also takes `~\scratch`, and refuses any drive's root, not only the current one.
+        const homeRelative = typed.startsWith("~/") || (options.platform === "win32" && typed.startsWith("~\\"));
+        const path = typed === "~" ? options.homeDir : homeRelative ? join(options.homeDir, typed.slice(2)) : typed;
+        const root = path && (resolve(path) === resolve("/") || (options.platform === "win32" && /^[A-Za-z]:[\\/]*$/.test(path)));
+        if (path && (!isAbsolute(path) || root)) throw new InboxError("validation_error", "Give a full path, such as ~/scratch.", { field: "scratch_dir" });
         const repository = path ? repositoryHolding(path) : null;
         if (repository) {
           throw new InboxError("validation_error", `That folder is inside the git repository ${options.displayFolder(repository)}. Pick one outside any repository.`, { field: "scratch_dir" });

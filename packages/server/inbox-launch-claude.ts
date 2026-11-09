@@ -28,7 +28,7 @@
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -48,6 +48,7 @@ import {
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
+import { claudeRulePathOf, claudeWindowsTrustKeys, powerShellInFolder, powerShellQuote } from "./inbox-launch-windows";
 import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget } from "./inbox-launch-host";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
@@ -174,8 +175,9 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The command that opens the session in a terminal (the ⋯ menu's Copy attach command). */
-export function claudeAttachCommand(folder: string, short: string): string {
+/** The command that opens the session in a terminal (the ⋯ menu's Copy attach command): PowerShell's on Windows. */
+export function claudeAttachCommand(folder: string, short: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return powerShellInFolder(folder, `claude attach ${powerShellQuote(short)}`);
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
 }
 
@@ -221,13 +223,19 @@ function trustTableOf(path: string): TrustTable | null {
 export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
   const table = trustTableOf(claudeGlobalConfigPath(e));
   if (!table) return false;
-  if (table[claudeTrustKey(folder)]?.hasTrustDialogAccepted === true) return true;
+  if (trustedIn(table, claudeTrustKey(folder))) return true;
   for (let dir = placeKey(folder); ; dir = dirname(dir)) {
-    if (table[dir.normalize("NFC")]?.hasTrustDialogAccepted === true) return true;
+    if (trustedIn(table, dir.normalize("NFC"))) return true;
     // A repository's root: only its own entry counts.
     if (existsSync(join(dir, ".git"))) return false;
     if (dirname(dir) === dir) return false;
   }
+}
+
+/** Whether `key` is trusted in Claude's table: on Windows under any form Claude has written it (`claudeWindowsTrustKeys`). */
+function trustedIn(table: TrustTable, key: string, platform: NodeJS.Platform = process.platform): boolean {
+  const keys = platform === "win32" ? claudeWindowsTrustKeys(key) : [key];
+  return keys.some((each) => table[each]?.hasTrustDialogAccepted === true);
 }
 
 /**
@@ -294,7 +302,8 @@ export function claudePurgeRefusal(folder: string, plan: string | null): string 
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
-export function claudeTrustCommand(folder: string): string {
+export function claudeTrustCommand(folder: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return powerShellInFolder(folder, "claude");
   return `cd ${shellQuote(folder)} && claude`;
 }
 
@@ -344,7 +353,9 @@ export function createClaudeHost(options: {
       environment: AgentEnvironment;
     }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
       // A name that starts with "-" would read as a flag.
-      const name = input.name.replace(/^-+/, "").trim() || "Inbox";
+      // Windows: a `claude.cmd` starts through cmd.exe, which can't carry `"`, `%`, `!`, `^` or a line break.
+      const plain = process.platform === "win32" ? input.name.replace(/["%!^\u0000-\u001f\u007f]/g, "") : input.name;
+      const name = plain.replace(/^-+/, "").trim() || "Inbox";
       const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
       let { result, missing } = await run([...base, ...(input.mode ? ["--permission-mode", input.mode] : [])], input.folder, START_TIMEOUT_MS, input.environment);
       let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
@@ -407,8 +418,12 @@ export type ClaudeHost = ReturnType<typeof createClaudeHost>;
 const CLAUDE = "claude-code" as const;
 /** The agent's own Inbox call never prompts, whatever the person's permission mode. */
 const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
-/** Read of everything under a folder, whatever folder the session runs in: `//` makes a rule's path absolute (a single `/` means the project's root). */
-export const claudeReadRule = (folder: string) => `Read(/${folder}/**)`;
+/**
+ * Read of everything under a folder, whatever folder the session runs in: `//` makes a rule's path absolute (a single
+ * `/` means the project's root). Windows: Claude matches rules in POSIX form, the drive first (`//c/Users/me/**`).
+ */
+export const claudeReadRule = (folder: string, platform: NodeJS.Platform = process.platform) =>
+  `Read(/${platform === "win32" ? claudeRulePathOf(folder) : folder}/**)`;
 
 const resultOf = (result: AgentRunResult): LaunchHostResult => ({ exitCode: result.exitCode, text: `${result.stdout}${result.stderr}` });
 
@@ -545,7 +560,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const folder = trustFolderOf(target);
       const key = claudeTrustKey(folder);
       const home = placeKey(ctx.homeDir).normalize("NFC");
-      if (key === home || home.startsWith(`${key}/`) || dirname(key) === key) return null;
+      if (key === home || home.startsWith(`${key}${sep}`) || dirname(key) === key) return null;
       return {
         folder: key,
         // Where Claude starts, its repository's root, the folder trusted and the key: Claude reads a worktree's local
