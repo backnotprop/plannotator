@@ -1183,10 +1183,11 @@ test('a Change it while the session answers another thread: no storm of requests
     // Refused while the other turn holds the session: seven seconds, and at most a try a pause (the loop was 1,600 a second).
     const readsBefore = reads.length;
     await second.waitForTimeout(7_000);
-    // MEASURE (temporary, removed before review): the reads and posts in the window.
-    console.log(`[ask-reads] reads=${reads.length - readsBefore} posts=${posts.length} before=${readsBefore}`);
     expect(posts.length).toBeLessThanOrEqual(3);
-    expect(reads.length - readsBefore).toBeLessThanOrEqual(6);
+    // The window's readers share one read of the thread's Ask (ask/askReads.ts): each try is one read (its look,
+    // whose answer the wake reuses), and the three posts allow two tries here; two more for news that comes while
+    // a read is on its way (one more read after it). CI measures 2.
+    expect(reads.length - readsBefore).toBeLessThanOrEqual(4);
     expect(wakes()).toBe(0);
 
     // That turn ends: the person's Change it goes through, once.
