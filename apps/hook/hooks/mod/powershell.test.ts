@@ -116,9 +116,9 @@ describe.skipIf(!POWERSHELL || !existsSync(POWERSHELL))('the PowerShell twins of
   }
   // windowsHide: no console, as under Claude Code. With one, stdin and stdout
   // decode in the console's code page, which can hide an encoding bug.
-  const run = (argv: string[], stdin?: string) => {
+  const run = (argv: string[], stdin?: string, options: { cwd?: string; env?: Record<string, string> } = {}) => {
     useShell(powerShellShell(POWERSHELL))
-    const result = Bun.spawnSync(argv, { stdin: stdin === undefined ? 'ignore' : new TextEncoder().encode(stdin), stdout: 'pipe', stderr: 'pipe', windowsHide: true })
+    const result = Bun.spawnSync(argv, { stdin: stdin === undefined ? 'ignore' : new TextEncoder().encode(stdin), stdout: 'pipe', stderr: 'pipe', windowsHide: true, ...options })
     return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() }
   }
   const ps = () => {
@@ -199,6 +199,35 @@ describe.skipIf(!POWERSHELL || !existsSync(POWERSHELL))('the PowerShell twins of
     for (let i = 0; i < 100 && !existsSync(join(dir, 'exit')); i++) Bun.sleepSync(100)
     expect(existsSync(join(dir, 'exit'))).toBe(true)
     expect(run(aliveArgv(pid)).code).not.toBe(0)
+  })
+
+  test('a bare CLI name runs the plannotator.exe on PATH, never one in the session folder', () => {
+    ps()
+    // The environment with PATH set to `path`, whatever case the variable's name has here (Windows: Path).
+    const withPath = (path: string) => {
+      const env: Record<string, string> = {}
+      for (const [key, value] of Object.entries(process.env)) if (key.toUpperCase() !== 'PATH' && value !== undefined) env[key] = value
+      env.PATH = path
+      return env
+    }
+    const systemPath = [join(WINDOWS, 'System32'), WINDOWS].join(';')
+    // A repository folder holding its own plannotator.exe, with none on PATH: nothing runs.
+    const repo = scratch()
+    copyFileSync(join(WINDOWS, 'System32', 'PING.EXE'), join(repo, 'plannotator.exe'))
+    const planted = scratch()
+    writeFileSync(join(planted, 'stdin'), '')
+    expect(run(launchArgv(planted, ['plannotator', '-n', '1', '127.0.0.1']), undefined, { cwd: repo, env: withPath(systemPath) }).code).toBe(0)
+    for (let i = 0; i < 100 && !existsSync(join(planted, 'exit')); i++) Bun.sleepSync(100)
+    expect(readFileSync(join(planted, 'exit'), 'utf8').trim()).toBe('127')
+    expect(existsSync(join(planted, 'pid'))).toBe(false)
+    // The same name with a plannotator.exe on PATH: that one runs.
+    const bin = scratch()
+    copyFileSync(join(WINDOWS, 'System32', 'PING.EXE'), join(bin, 'plannotator.exe'))
+    const found = scratch()
+    writeFileSync(join(found, 'stdin'), '')
+    expect(run(launchArgv(found, ['plannotator', '-n', '1', '127.0.0.1']), undefined, { cwd: repo, env: withPath(`${bin};${systemPath}`) }).code).toBe(0)
+    for (let i = 0; i < 100 && !existsSync(join(found, 'exit')); i++) Bun.sleepSync(100)
+    expect(readFileSync(join(found, 'exit'), 'utf8').trim()).toBe('0')
   })
 
   test("stop refuses a pid that is not plannotator, and a decided review's", () => {

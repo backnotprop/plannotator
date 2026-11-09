@@ -52,7 +52,10 @@ exit 1`,
    * watcher process (`Start-Process`), which puts its streams on the launch
    * directory's files, writes its pid, waits for it, and writes its exit code
    * (127 when it never started) through `exit.tmp` so the `exit` file appears
-   * whole. `Quote-Argument` quotes each CLI argument the way the Windows
+   * whole. A bare CLI name is looked up as an .exe on `PATH` only: given a
+   * bare name, `Process.Start` would also search the session's folder first,
+   * so a `plannotator.exe` in a cloned repository would run.
+   * `Quote-Argument` quotes each CLI argument the way the Windows
    * command-line parser reads it back; `Write-Value` writes each of the
    * watcher's inputs into its script as base64, decoded where it is read.
    */
@@ -84,6 +87,7 @@ $ErrorActionPreference = 'Stop'
 $out = [IO.File]::Open([IO.Path]::Combine($dir, 'stdout'), 'Create', 'Write', 'Read')
 $err = [IO.File]::Open([IO.Path]::Combine($dir, 'stderr'), 'Create', 'Write', 'Read')
 try {
+  if (-not [IO.Path]::IsPathRooted($exe)) { $exe = (Get-Command -CommandType Application -Name ([IO.Path]::ChangeExtension($exe, 'exe')) -TotalCount 1).Path }
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $exe
   $start.Arguments = $line
