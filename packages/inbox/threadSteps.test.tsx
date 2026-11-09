@@ -680,7 +680,7 @@ test.skipIf(!hasDom)('the button\'s mark follows the list: the pie while fresh, 
   }
 });
 
-test.skipIf(!hasDom)('the stylesheet: the spinner turns while working, and rests while idle or ended', async () => {
+test.skipIf(!hasDom)('the stylesheet: the spinner turns while a step is in progress (busy or idle), and rests once the session ended', async () => {
   await withStylesheet(() => {
     const box = document.createElement('div');
     box.className = 'pn-inbox';
@@ -690,7 +690,7 @@ test.skipIf(!hasDom)('the stylesheet: the spinner turns while working, and rests
     try {
       const turn = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"] .ib-stg-spin`)!).animation;
       expect(turn('working')).toContain('ib-st-turn');
-      expect(['', 'none']).toContain(turn('idle'));
+      expect(turn('idle')).toContain('ib-st-turn');
       expect(['', 'none']).toContain(turn('ended'));
     } finally {
       box.remove();

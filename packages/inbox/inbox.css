@@ -5903,15 +5903,16 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-stg-spin { transform-origin: 50% 50%; }
 .ib-stg-spin .tr { stroke: var(--ib-st-track); }
 .ib-stg-spin .arc { stroke: var(--primary); }
-.ib-st-working .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
+/* In progress means turning, whether or not the session is busy this moment (owner, 2026-11-09); only an ended
+   session's list rests, grey. */
+.ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
 @keyframes ib-st-turn { to { transform: rotate(360deg); } }
-.ib-st-idle .ib-stg-spin .arc { stroke: color-mix(in oklab, var(--primary) 70%, var(--card)); }
 .ib-st-ended .ib-stg-spin .arc { stroke: var(--ib-st-ring); }
 .ib-st-ended .ib-stg-spin .tr { stroke: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
 /* Reduced motion: the arc rests from 12 o'clock to about 4, a partial ring (never the todo ring's full one). */
 @media (prefers-reduced-motion: reduce) {
   .ib-stp { animation: none; }
-  .ib-st-working .ib-stg-spin { animation: none; }
+  .ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: none; }
 }
 
 /* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
