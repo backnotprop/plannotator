@@ -849,6 +849,10 @@ export const WINDOW_CSP = [
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
   "img-src 'self' data: blob:",
+  // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
+  // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
+  // Never from the web, for the same reason.
+  "media-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
