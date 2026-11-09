@@ -19,6 +19,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
+import { shareUnchanged } from './shareUnchanged';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
@@ -171,6 +172,7 @@ import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { DraftsPage } from './compose/DraftsPage';
@@ -1590,11 +1592,18 @@ function Inbox() {
       if (unlistedSince.current?.threadId === threadId) unlistedSince.current = null;
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
-        threadLoaded.current = next.thread;
+        // A re-read of the thread on screen keeps what did not change as the same objects (shareUnchanged.ts):
+        // a window left open on a busy thread no longer holds a full copy of it per message that came in.
+        const reread = threadLoaded.current?.thread_id === threadId;
+        const read = reread ? shareUnchanged(threadLoaded.current, next.thread) : next.thread;
+        // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
+        // objects being new): a read that brought nothing new keeps the thread object, so it says so here.
+        if (reread) setFilesChanged((n) => n + 1);
+        threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
-        setThread(next.thread);
+        setThread(read);
         setThreadRow(next.row ?? null);
         setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
         setThreadLoad(null);
@@ -7118,11 +7127,16 @@ function Inbox() {
             void copied.then((ok) => showToast(feedbackCopiedToast(ok), ok ? 6000 : 4200));
           }}
           simpleListOn={listView === 'list'}
+          hiddenAnswers={hiddenKnownAnswers(settings)}
           onAction={(kind) => {
-            // Common questions (feedbackFaq.ts): the real setting, with the dialog closed so its result is in view.
+            // A known answer or a Common question (feedbackKnown.ts): the real setting, with the dialog closed so its result is in view.
             setFeedbackOpen(false);
             if (kind === 'simple-list') setListView('list');
-            else go({ page: 'settings', project: null, thread: null, section: kind === 'settings-rows' ? 'rows' : 'devices' });
+            else if (kind === 'settings-experimental') {
+              go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
+              // Lands on the Experimental group, as `#settings/experimental` does (the address never carries it).
+              setRoute((current) => (current.page === 'settings' ? { ...current, experimental: true } : current));
+            } else go({ page: 'settings', project: null, thread: null, section: kind.slice('settings-'.length) as SettingsSection });
           }}
           onClose={() => setFeedbackOpen(false)}
         />

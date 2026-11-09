@@ -10,6 +10,8 @@ const data: SearchData = {
     { title: 'Harbor charts', path: 'releases/tag/v1.2.3' },
     { title: 'Lighthouse lamp', path: 'pull/56' },
     { title: 'Beacon beacons glow', path: 'pull/78' },
+    { title: 'Pin threads', path: 'releases/tag/v1.2.4' },
+    { title: 'Anchor chain rusts in salt water', path: 'issues/90', fixed: '1.2.4' },
   ],
 };
 const titles = (text: string) => searchFeedback(data, text).map((hit) => hit.title);
@@ -37,6 +39,35 @@ describe('searchFeedback', () => {
     for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden', 'beacon zebras', 'light']) expect(titles(text)).toEqual([]);
   });
 
+  test('one word in common is not enough, and filler words never count: "Pin threads" does not answer "threads reorder"', () => {
+    expect(titles('threads reorder')).toEqual([]);
+    expect(titles('lamp')).toEqual([]);
+    // "really", "please", "would", "with" and "inbox" are filler: each of these still shares one meaningful word.
+    for (const text of ['please really, the lamp would be nice', 'inbox lamp', 'with the lamp please']) expect(titles(text)).toEqual([]);
+    expect(titles('the lighthouse lamp please')).toEqual(['Lighthouse lamp', 'Lighthouse lamp flickers at dusk']);
+  });
+
+  test('words in many titles do not make two titles alike on their own', () => {
+    const common = { features: [], links: [...Array.from({ length: 30 }, (_, at) => ({ title: `Thread list number${at}`, path: `pull/${at}` })), { title: 'Thread list flickers', path: 'pull/99' }] };
+    expect(searchFeedback(common, 'the thread list').map((hit) => hit.title)).toEqual([]);
+    expect(searchFeedback(common, 'thread list flickers').map((hit) => hit.title)).toEqual(['Thread list flickers']);
+  });
+
+  test('a fixed issue says which release fixed it', () => {
+    expect(searchFeedback(data, 'the anchor chain rusts')).toEqual([{ title: 'Anchor chain rusts in salt water', href: 'https://github.com/backnotprop/plannotator/issues/90', fixed: '1.2.4' }]);
+  });
+
+  test('the shipped list: "Pin threads" is not offered for "threads reorder", and fixed issues name their release', () => {
+    expect(searchFeedback(shipped, 'threads reorder').map((hit) => hit.title)).not.toContain('Pin threads');
+    expect(searchFeedback(shipped, 'the agent moves files around in my repo')).toEqual([]);
+    const fixed = shipped.links.filter((link) => 'fixed' in link);
+    expect(fixed.length).toBeGreaterThan(0);
+    for (const link of fixed) {
+      expect(link.path).toMatch(/^issues\/\d+$/);
+      expect((link as { fixed: string }).fixed).toMatch(/^\d+\.\d+\.\d+$/);
+    }
+  });
+
   test('only the first 4,000 characters are searched', () => {
     expect(titles(`${'x '.repeat(1990)}harbor charts`)).toEqual(['Harbor charts']);
     expect(titles(`${'x '.repeat(2000)}harbor charts`)).toEqual([]);
@@ -44,8 +75,8 @@ describe('searchFeedback', () => {
 
   test('the closest comes first, and only a handful show', () => {
     expect(titles('lighthouse lamp')).toEqual(['Lighthouse lamp', 'Lighthouse lamp flickers at dusk']);
-    const many = { features: [], links: Array.from({ length: 40 }, (_, at) => ({ title: `Lighthouse ${at}`, path: `pull/${at}` })) };
-    expect(searchFeedback(many, 'lighthouse').length).toBeLessThanOrEqual(5);
+    const many = { features: [], links: Array.from({ length: 15 }, (_, at) => ({ title: `Lighthouse lamp ${at}`, path: `pull/${at}` })) };
+    expect(searchFeedback(many, 'lighthouse lamp')).toHaveLength(5);
   });
 
   test('the shipped file links only to the public docs and repo', () => {

@@ -157,6 +157,18 @@ export function highlightToHtml(code: string, lang: string, theme: string): stri
   return plain === code ? html : null;
 }
 
+/**
+ * Shiki's time budget for one line (its default). A line that runs over it is
+ * cut short: the rest of the line is one token in the plain colour, and the
+ * lines after it start from the wrong state. A grammar compiles its regexes as
+ * its first fence is tokenized; in JavaScriptCore (Safari) that takes most of a
+ * second for TypeScript, which used to cut the first line of a page's first
+ * TypeScript fence short, so it coloured differently from every later fence.
+ */
+const TOKENIZE_TIME_LIMIT_MS = 500;
+/** Passes over a fence at most, while each one takes the budget. */
+const TOKENIZE_PASSES = 3;
+
 /** Shiki's tokens for `code`, or null when the pair is not attached (or the tokenizer threw). */
 function themedLines(code: string, lang: string, theme: string): ThemedTokenish[][] | null {
   const mod = pierre;
@@ -169,7 +181,15 @@ function themedLines(code: string, lang: string, theme: string): ThemedTokenish[
     return null;
   }
   try {
-    return highlighter.codeToTokens(code, { lang, theme }).tokens as ThemedTokenish[][];
+    // A pass that took the budget may have had a line cut short. Each pass compiles what it reached, so the
+    // next one gets further; a line that is slow for its own sake stays cut short, as before, after the last.
+    let tokens: ThemedTokenish[][] = [];
+    for (let pass = 0; pass < TOKENIZE_PASSES; pass++) {
+      const started = performance.now();
+      tokens = highlighter.codeToTokens(code, { lang, theme, tokenizeTimeLimit: TOKENIZE_TIME_LIMIT_MS }).tokens as ThemedTokenish[][];
+      if (performance.now() - started < TOKENIZE_TIME_LIMIT_MS - 10) break;
+    }
+    return tokens;
   } catch {
     ready.delete(pairKey(lang, theme));
     return null;

@@ -3,11 +3,14 @@ import { FEEDBACK_CONTACT_MAX, FEEDBACK_MESSAGE_MAX, FEEDBACK_UNAVAILABLE, feedb
 import { Icon } from '../icons';
 import { searchShipped, type SearchHit } from '../feedbackSearch';
 import { FEEDBACK_FAQ, type FeedbackFaqAction } from '../feedbackFaq';
+import { knownAnswerFor, type KnownAnswer } from '../feedbackKnown';
 import { Modal } from './Updates';
 
 /** Shown under the box once the message is this close to the cap. */
 const COUNT_FROM = FEEDBACK_MESSAGE_MAX - 400;
 const SEARCH_PAUSE_MS = 250;
+/** "These might help" shows this many lines at most, a known answer included (three on a phone, by the CSS). */
+const LINES_SHOWN = 5;
 
 const NOTHING_TYPED = { message: '', category: null as FeedbackCategory | null, contact: '' };
 /** What was typed and not sent, for the window's life: any close, even a stray press on the backdrop, loses nothing. */
@@ -36,10 +39,12 @@ export interface FeedbackDialogProps {
   onSend: (input: { message: string; category: FeedbackCategory | null; contact: string | null }) => Promise<void>;
   /** "Prompt your agent to send feedback": copies the prompt (with what is typed so far) and closes; the window's toast says how it went. */
   onCopyPrompt: (draft: string) => void;
-  /** A Common questions action (feedbackFaq.ts): the window closes the dialog and runs the setting it names. */
+  /** A known answer's or a Common question's action (feedbackKnown.ts): the window closes the dialog and runs the setting it names. */
   onAction: (kind: FeedbackFaqAction) => void;
   /** Simple list is already on: its action says so instead of offering it. */
   simpleListOn?: boolean;
+  /** Known answers this Inbox can't follow (no such switch here, as starting agents on Windows): never shown. */
+  hiddenAnswers?: readonly string[];
   onClose: () => void;
 }
 
@@ -52,9 +57,9 @@ function lengthOf(value: string): number {
 /**
  * Sidebar → Feedback: a "Feedback" title, then the Inbox's segmented switch
  * (approval "inbox-feedback-faq"): Message, the default, and Common questions,
- * the answers in feedbackFaq.ts with "Not here? Tell us about it" back to
+ * the known answers with a question (feedbackKnown.ts) with "Not here? Tell us about it" back to
  * Message. Message is a short form that sends the person's words about
- * Plannotator to its maintainers. A message; "These might help" links when a
+ * Plannotator to its maintainers. A message; "These might help": a known answer (feedbackKnown.ts) first, then links when a
  * search finds something similar; an optional category and an optional email;
  * a line saying what is sent; Send and Cancel; a
  * short "Sent" state. "Prompt your agent to send feedback" copies a prompt that has
@@ -63,7 +68,7 @@ function lengthOf(value: string): number {
  * Send. No shortcut (owner rule); Escape and the backdrop close it, as every
  * Inbox dialog. On a phone it is a bottom sheet.
  */
-export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction, simpleListOn = false, onClose }: FeedbackDialogProps) {
+export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction, simpleListOn = false, hiddenAnswers, onClose }: FeedbackDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const [message, setMessage] = useState(unsent.message);
   const [category, setCategory] = useState(unsent.category);
@@ -71,6 +76,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   const [phase, setPhase] = useState<'edit' | 'sending' | 'sent'>('edit');
   const [error, setError] = useState<string | null>(null);
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [known, setKnown] = useState<KnownAnswer | null>(null);
   const [tab, setTab] = useState<FeedbackTab>('message');
   const [openItem, setOpenItem] = useState<string | null>(null);
   const boxRef = useRef<HTMLTextAreaElement>(null);
@@ -78,7 +84,15 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   const closed = useRef(false);
   useEffect(() => {
     let latest = true;
-    const pause = setTimeout(() => void searchShipped(message).then((found) => latest && setHits(found)), SEARCH_PAUSE_MS);
+    // The known answers first (feedbackKnown.ts), then the search; both in the window, so what is typed goes nowhere.
+    const pause = setTimeout(() => {
+      const answer = knownAnswerFor(message, hiddenAnswers);
+      void searchShipped(message).then((found) => {
+        if (!latest) return;
+        setKnown(answer);
+        setHits(found.filter((hit) => !(answer?.feature && hit.definition !== undefined && hit.title === answer.feature)).slice(0, answer ? LINES_SHOWN - 1 : LINES_SHOWN));
+      });
+    }, SEARCH_PAUSE_MS);
     return () => {
       latest = false;
       clearTimeout(pause);
@@ -247,11 +261,13 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
               </p>
             )}
             <div className="ib-fbk-rel" role="status" data-feedback-related="">
-              {hits.length > 0 && <p className="ib-fbk-rel-h">These might help</p>}
-              {hits.length > 0 && (
+              {(known || hits.length > 0) && <p className="ib-fbk-rel-h">These might help</p>}
+              {(known || hits.length > 0) && (
                 <ul>
+                  {known && <KnownLine answer={known} simpleListOn={simpleListOn} onAction={onAction} />}
                   {hits.map((hit) => (
                     <li key={hit.href + hit.title}>
+                      {hit.fixed && <FixedLead release={hit.fixed} />}
                       <a href={hit.href} target="_blank" rel="noopener noreferrer">
                         {hit.title}
                       </a>
@@ -387,6 +403,53 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
         </>
       )}
     </Modal>
+  );
+}
+
+/** "Fixed in 0.28.52: ", with Fixed in the accent color (approval "inbox-feedback-faq", take B). */
+function FixedLead({ release }: { release: string }) {
+  return (
+    <>
+      <span className="ib-fbk-lead">Fixed</span> in {release}:{' '}
+    </>
+  );
+}
+
+/**
+ * A known answer, first of "These might help": its lead ("Fixed in 0.28.52:", "Experimental:"), its words (a link
+ * when it has one) and its action, which the window runs after closing the dialog.
+ */
+function KnownLine({ answer, simpleListOn, onAction }: { answer: KnownAnswer; simpleListOn: boolean; onAction: (kind: FeedbackFaqAction) => void }) {
+  const { action, link } = answer;
+  return (
+    <li className="ib-fbk-known" data-feedback-known={answer.id}>
+      {answer.fixedIn ? (
+        <FixedLead release={answer.fixedIn} />
+      ) : answer.experimental ? (
+        <>
+          <span className="ib-fbk-lead">Experimental</span>:{' '}
+        </>
+      ) : null}
+      {link ? (
+        <a href={link.href} target="_blank" rel="noopener noreferrer">
+          {answer.answer}
+        </a>
+      ) : (
+        <span className="ib-fbk-known-a">{answer.answer}</span>
+      )}
+      {action && (
+        <>
+          {' · '}
+          {action.kind === 'simple-list' && simpleListOn ? (
+            <span data-feedback-known-done="">Simple list is on</span>
+          ) : (
+            <button type="button" className="ib-fbk-act" data-feedback-known-action={action.kind} onClick={() => onAction(action.kind)}>
+              {action.label}
+            </button>
+          )}
+        </>
+      )}
+    </li>
   );
 }
 

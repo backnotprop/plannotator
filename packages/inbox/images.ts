@@ -111,6 +111,36 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   return url;
 };
 
+/**
+ * The widths the window asks the Inbox's image routes for (`?w=`, packages/server/inbox-image-scale.ts) where it
+ * draws a picture smaller than it is: a message body's pictures, the gallery's frames, a tile's icon. A wider
+ * picture comes back that wide, so the browser decodes a copy of a few MB instead of the 34 MB of a 3840 by 2242
+ * screenshot; the viewer that opens a picture whole asks for no width. An Inbox that does not know `w` sends the
+ * original, as before.
+ */
+export const MESSAGE_IMAGE_WIDTH = 1600;
+export const GALLERY_IMAGE_WIDTH = 800;
+export const TILE_IMAGE_WIDTH = 128;
+
+/**
+ * An Inbox image route's URL asking for the picture at most `width` wide. Any other URL (a tour's asset, a
+ * `blob:`, a remote picture) comes back as it is.
+ */
+export function scaledImageUrl(url: string, width: number): string {
+  if (!/\/(?:messages|attachments)\/[A-Za-z0-9_%]+\/image$/.test(url.split('?', 1)[0]!)) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
+}
+
+/** The URL a picture of `width` pixels is drawn from where it shows at most `drawn` wide: a smaller copy when it is wider. */
+export function drawnImageUrl(url: string, width: number | undefined, drawn: number): string {
+  return typeof width === 'number' && width > drawn ? scaledImageUrl(url, drawn) : url;
+}
+
+/** Whether a URL asks for a smaller copy (`scaledImageUrl`). */
+export function isScaledImageUrl(url: string): boolean {
+  return /[?&]w=\d+(?:&|$)/.test(url);
+}
+
 /** Taller than this (in CSS pixels), an image in a message is cropped to its top (inbox.css `[data-ib-tall]`). */
 export const TALL_MESSAGE_IMAGE_PX = 480;
 
@@ -121,8 +151,12 @@ export const TALL_MESSAGE_IMAGE_PX = 480;
  * still opens it whole. An image that fits is never marked.
  */
 export function markTallImage(img: HTMLImageElement): void {
-  const { naturalWidth: width, naturalHeight: height } = img;
-  if (width <= 0 || height <= 0) return;
+  const { naturalWidth, naturalHeight } = img;
+  if (naturalWidth <= 0 || naturalHeight <= 0) return;
+  // A smaller copy (`scaledImageUrl`) carries the original's width: the picture is measured as the original.
+  const declared = isScaledImageUrl(img.getAttribute('src') ?? '') ? Number(img.getAttribute('width')) : 0;
+  const width = declared > 0 ? declared : naturalWidth;
+  const height = declared > 0 ? Math.round((naturalHeight * declared) / naturalWidth) : naturalHeight;
   if (height <= TALL_MESSAGE_IMAGE_PX || height <= width * 1.5) {
     img.removeAttribute('data-ib-tall');
     return;
