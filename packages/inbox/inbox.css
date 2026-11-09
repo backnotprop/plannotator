@@ -4660,7 +4660,6 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-status { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); text-align: right; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-foot { flex-wrap: nowrap; }
 .ib-cp-foot .ib-btn { flex: none; }
-.pn-inbox .ib-cp-foot .ib-btn.ib-pri .ib-kbd { color: inherit; border: 0; padding: 0; font-family: inherit; font-size: var(--ib-fs-12-5, 12.5px); opacity: 0.8; letter-spacing: 0.04em; }
 .ib-cp-drop { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 2px dashed color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--popover) 88%, var(--primary)); color: var(--primary); font-weight: 600; pointer-events: none; }
 
 /* "Send to another session", under a message no session took. */

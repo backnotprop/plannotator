@@ -699,7 +699,7 @@ for (const engine of ENGINES) {
 }
 
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
-  test('none of it applies: the foot keeps Send with its keycap, Save draft and the status line; a draft keeps Delete draft', async ({ page }) => {
+  test('none of it applies: the foot keeps Send (no ⌘↵ keycap, the key named for a screen reader), Save draft and the status line; a draft keeps Delete draft', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
     await page.goto(world.url);
@@ -716,7 +716,9 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await sheet.locator(`[data-compose-session="${SESSION}"]`).click();
     const send = sheet.locator('.ib-cp-foot [data-compose-send]');
     await expect(send).toHaveClass('ib-btn ib-pri');
-    await expect(send.locator('[data-shortcut-hint]')).toBeVisible();
+    // No ⌘↵ on Send (approval "inbox-send-no-shortcut-hint"); the key is named in aria-keyshortcuts.
+    await expect(send.locator('kbd, [data-shortcut-hint]')).toHaveCount(0);
+    await expect(send).toHaveAttribute('aria-keyshortcuts', /^(Meta|Control)\+Enter$/);
     await expect(sheet.locator('.ib-cp-sendl')).toHaveCount(0);
 
     // What reads as a keyboard on a phone is nothing here: To and Thread stay put.

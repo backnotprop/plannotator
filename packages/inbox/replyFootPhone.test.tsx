@@ -273,6 +273,17 @@ test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic,
   }
 });
 
+test.skipIf(!hasDom)('a computer: Send says Send and no more: no tooltip on hover and no keycap, the key named for a screen reader', async () => {
+  const { tooltipOf, unhover } = await import('./testing/tooltip');
+  const el = await open({ questions: false, phone: false });
+  const send = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')!;
+  // The owner: "Nobody needs to see command enter for send" (approval "inbox-send-no-shortcut-hint").
+  expect(await tooltipOf(send.closest('[data-tip-wrap]') ?? send)).toBeNull();
+  unhover(send.closest('[data-tip-wrap]') ?? send);
+  expect(!!send.querySelector('kbd, [data-shortcut-hint]')).toBe(false);
+  expect(send.getAttribute('aria-keyshortcuts') ?? '').toMatch(/^(Meta|Control)\+Enter$/);
+});
+
 /** Words typed into the box, as a person types them. */
 function typeInBox(el: HTMLElement, words: string) {
   const text = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
