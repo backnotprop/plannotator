@@ -495,8 +495,8 @@ export interface InboxMessage {
   /**
    * The `thread` name the agent sent this message with (send_message's
    * `thread`), else absent or null. On a root it is the thread's name: a
-   * named thread is joined by name across sessions; an unnamed root is its
-   * session's default thread. Added after step 1: older records lack it.
+   * named thread is joined by name across sessions; an unnamed root only by
+   * reply_to. Added after step 1: older records lack it.
    */
   thread_name?: string | null;
   /**
@@ -718,7 +718,7 @@ export interface InboxMessage {
   /**
    * On a thread's root the person wrote (compose: "send a new message to a
    * connected agent"): the thread was started by the person, addressed to
-   * one live agent session (`to`), and is no session's default thread. The
+   * one live agent session (`to`). The
    * agent's answer lands in it by `reply_to`. Absent on every other message.
    */
   started_by_person?: true;
@@ -1620,7 +1620,7 @@ export interface InboxListRow extends InboxThreadSummary {
    * machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
    */
   machine?: string;
-  /** The thread's name (send_message's `thread`), or null for a session's default thread. */
+  /** The thread's name (send_message's `thread`), or null for an unnamed thread. */
   thread_name: string | null;
   section: InboxSectionId;
   /**
@@ -1855,7 +1855,7 @@ export interface InboxThread {
    */
   project: InboxProject & { repo?: InboxProjectRepo | null };
   subject: string | null;
-  /** The thread's name, or null for a session's default thread. */
+  /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;
   resolved_at: string | null;
   /**

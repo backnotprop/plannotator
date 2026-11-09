@@ -116,7 +116,7 @@ test.beforeAll(async () => {
     ...Array.from({ length: 6 }, (_, i) => `${i + 7}. ${PARAGRAPH}`),
     [':::question', 'Keep the footer sticky on phones?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   ].join('\n\n');
-  // Named threads: without one, both go to the session's default thread, and the question folds behind the newer message.
+  // Named threads, each its own: the question never folds behind a newer message.
   const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', thread: 'checkout-footer', body }, { wakes: true });
   const actionBody = [
     'The publish failed with E401.',
