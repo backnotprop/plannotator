@@ -16,11 +16,13 @@
  * hidden ones too. A drive's own root (`/Volumes/Studio SSD`) can be started in. A path that isn't there (or is a file)
  * is `{ exists: false }`, with the nearest folder above it that is (`nearest`), so the window can offer what is there.
  *
- * This file imports only `node:fs` and `node:path`: its own source runs in a child process for a folder outside home
- * (`inbox-folder-reader.ts`), so a drive that doesn't answer never stops the Inbox.
+ * This file imports only `node:fs`, `node:path` and Windows' own folder rules (`inbox-launch-windows.ts`, which imports
+ * nothing): its source, bundled with them, runs in a child process for a folder outside home (`inbox-folder-reader.ts`),
+ * so a drive that doesn't answer never stops the Inbox.
  */
 import { accessSync, constants, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { windowsAttributesOf, windowsFolderHidden, windowsFolderRefusal, windowsTypedUnderHome } from "./inbox-launch-windows";
 
 /** At most this many names come back for one folder (alphabetical): the window filters as the person types. */
 export const HOME_FOLDERS_MAX = 500;
@@ -84,8 +86,15 @@ const under = (path: string, root: string) => path === root || path.startsWith(r
 
 const inside = (real: string, realHome: string) => under(real, realHome);
 
-/** A real path under the real home that passes through a hidden folder (by where it really is, not how it was typed). */
-const hiddenUnder = (real: string, realHome: string) => relative(realHome, real).split(sep).some((segment) => segment.startsWith("."));
+/**
+ * A real path under the real home that passes through a hidden folder (by where it really is, not how it was typed).
+ * On Windows a folder with the Hidden or System attribute is hidden too (AppData, the `Application Data` junctions).
+ */
+const hiddenUnder = (real: string, realHome: string) => {
+  const segments = relative(realHome, real).split(sep).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return true;
+  return process.platform === "win32" && segments.some((_, n) => windowsFolderHidden(join(realHome, ...segments.slice(0, n + 1))));
+};
 
 /**
  * Why a real folder is never offered (null: it may be), and whether it can be started in. In home: hidden folders are
@@ -94,14 +103,23 @@ const hiddenUnder = (real: string, realHome: string) => relative(realHome, real)
  */
 function judge(real: string, realHome: string, places: FolderPlaces): { refused: HomeFolderRefusal | null; start: boolean } {
   if (inside(real, realHome)) return hiddenUnder(real, realHome) ? { refused: "hidden", start: false } : { refused: null, start: real !== realHome };
-  const refused = refusedOutside(real, places);
+  const refused = refusedOutside(real, realHome, places);
   if (refused) return { refused, start: false };
   const above = realHome === real || under(realHome, real);
   return { refused: null, start: !above && !places.containers.includes(real) };
 }
 
-/** Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. */
-function refusedOutside(real: string, places: FolderPlaces): HomeFolderRefusal | null {
+/**
+ * Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. On
+ * Windows, by Windows' own rules (`windowsFolderRefusal`: the Windows and Program Files folders, other profiles, a
+ * folder with the Hidden or System attribute).
+ */
+function refusedOutside(real: string, realHome: string, places: FolderPlaces): HomeFolderRefusal | null {
+  if (process.platform === "win32") {
+    const env = process.env;
+    const programFiles = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432].filter((path): path is string => Boolean(path));
+    return windowsFolderRefusal(real, { systemRoot: env.SystemRoot ?? env.windir, programFiles, programData: env.ProgramData, home: realHome }, windowsAttributesOf);
+  }
   if (real.split(sep).some((segment) => segment.startsWith("."))) return "hidden";
   if (places.system.some((root) => under(real, root)) && !places.open.some((root) => under(real, root))) return "system";
   return null;
@@ -171,7 +189,13 @@ export function isHomeItself(home: string, real: string): boolean {
 
 /** A typed path read into its base and segments, or why it can't be one (before anything is read). */
 function parseTyped(home: string, realHome: string, typed: string): { base: Base; segments: string[] } | { refused: HomeFolderRefusal } {
-  const text = typed.trim();
+  let text = typed.trim();
+  if (process.platform === "win32") {
+    // `C:\Users\me\code`, `c:/users/me/code` or `~\code`: read as `~/code`. Another drive is outside home here.
+    const underHome = windowsTypedUnderHome(text, home);
+    if (underHome === null) return { refused: "outside" };
+    text = underHome;
+  }
   let base: Base;
   let rest: string;
   if (text === "~" || text === "") (base = { dir: home, tilde: true }), (rest = "");
@@ -233,6 +257,7 @@ function foldersIn(real: string, realHome: string, places: FolderPlaces): { fold
   const nostart: string[] = [];
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name.includes("\\")) continue;
+    if (process.platform === "win32" && windowsFolderHidden(join(real, entry.name))) continue;
     if (entry.isDirectory()) {
       const judged = judge(join(real, entry.name), realHome, places);
       if (judged.refused) continue;

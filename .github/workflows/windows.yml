@@ -266,6 +266,11 @@ jobs:
       - name: Run agent job .cmd shim tests (Pi server)
         run: bun test apps/pi-extension/server/agent-jobs-windows-cmd-shim.test.ts
 
+      # Inbox launch's Windows paths and env: PATH by any spelling, PowerShell commands run for real, Hidden and
+      # System folders, and a .cmd CLI through cmd.exe with a tree kill (stub scripts and node only).
+      - name: Run Inbox launch Windows tests
+        run: bun test packages/server/inbox-launch-windows.test.ts
+
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
 

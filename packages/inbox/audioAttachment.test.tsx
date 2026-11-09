@@ -163,7 +163,7 @@ test.skipIf(!hasDom)('the tile reads "MP3 audio · 1:23 · size" and offers Play
   await render(<AttachmentTiles attachments={[take]} annotationCounts={new Map([[take.path, 2]])} onOpen={() => {}} />);
   const tile = host!.querySelector<HTMLButtonElement>(`button[data-attachment-id="${take.id}"]`)!;
   expect(tile.getAttribute('data-attachment-kind')).toBe('audio');
-  expect(tile.querySelector('.ib-kd')!.textContent).toBe('MP3 audio · 1:23 · 1.3 MB · 2 comments');
+  expect(tile.querySelector('.ib-kd')!.textContent).toBe('MP3 audio · 1:23 · 2 comments · 1.3 MB');
   expect(tile.querySelector('.ib-open')!.textContent).toBe('Play');
   expect(tile.getAttribute('aria-label')).toBe(`Play ${take.name}`);
   expect(tile.querySelector('[data-icon="music"]')).not.toBeNull();
