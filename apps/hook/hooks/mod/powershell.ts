@@ -362,7 +362,7 @@ foreach ($path in $paths) {
     elseif ($line.Contains('"type":"user"') -or $line.Contains('"type":"assistant"')) { $found = '' }
   }
   if ($found -ne '') {
-    Write-Line $found.Substring(0, [Math]::Min($found.Length, 1024))
+    Write-Line ($found.Substring(0, [Math]::Min($found.Length, 1024)))
     $shown += 1
   }
 }
