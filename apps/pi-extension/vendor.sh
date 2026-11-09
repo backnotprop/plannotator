@@ -68,8 +68,9 @@ printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/project-key
 # its own relative import. tailnet (the serve header names, for
 # tailnet-audience and so this-machine-reader) imports ../tailscale.
 # pi-session-claim (which process runs a Pi session) imports node: only.
+# grill-me (the note a grill-me skill gets, grill-me.ts here) imports nothing.
 mkdir -p generated/inbox
-for f in connection agent-link tailnet pi-session-claim; do
+for f in connection agent-link tailnet pi-session-claim grill-me; do
   src="../../packages/shared/inbox/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done

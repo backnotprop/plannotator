@@ -52,6 +52,7 @@ import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
 import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
+import { createOpenCode1GrillMe } from "./grill-me";
 import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
@@ -766,6 +767,7 @@ Do NOT proceed with implementation until your plan is approved.`;
       // no line), so the system prompt cannot flip between requests.
       const inboxConfig = loadConfig();
       if (resolveInboxReminder(inboxConfig, process.env, "opencode")) {
+        addGrillMeOpenCode1(spec.name);
         // The person's own line (config.json prompts.inbox) or the no-wake default, decided once here.
         const reminderText = resolveInboxReminderText(inboxConfig, "opencode", { wakes: false });
         const planTransform = plugin["experimental.chat.system.transform"];
@@ -798,6 +800,44 @@ Do NOT proceed with implementation until your plan is approved.`;
   }
 
   return plugin;
+
+  /**
+   * The grill-me note (grill-me.ts), under the reminder's switch: a typed
+   * grill-me slash command and the `skill` tool loading a grill-me skill.
+   * Wrapped around the hooks above, which run unchanged after it.
+   */
+  function addGrillMeOpenCode1(toolName: string): void {
+    const grillMe = createOpenCode1GrillMe({
+      toolName,
+      isSubagentSession: async (sessionID) => {
+        try {
+          const session = await ctx.client.session.get({ path: { id: sessionID } });
+          return typeof (session?.data as { parentID?: unknown } | undefined)?.parentID === "string";
+        } catch {
+          return false;
+        }
+      },
+    });
+    const commandBefore = plugin["command.execute.before"];
+    plugin["command.execute.before"] = async (input: any, output: any) => {
+      grillMe.command(input, output);
+      await commandBefore?.(input, output);
+    };
+    const chatMessage = plugin["chat.message"];
+    plugin["chat.message"] = async (input: any, output: any) => {
+      grillMe.userMessage(input);
+      await chatMessage?.(input, output);
+    };
+    const toolAfter = plugin["tool.execute.after"];
+    plugin["tool.execute.after"] = async (input: any, output: any) => {
+      await toolAfter?.(input, output);
+      try {
+        await grillMe.toolAfter(input, output);
+      } catch {
+        // The skill's output stays as it was.
+      }
+    };
+  }
 };
 
 export default PlannotatorPlugin;

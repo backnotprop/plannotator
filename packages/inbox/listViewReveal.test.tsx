@@ -354,7 +354,7 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
 
   test("App's clock runs only while a reveal that takes idle is armed (next, List view ahead, or the list options due)", () => {
     expect(reveal.idleClockArmed(null, true)).toBe(false);
-    for (const next of ['list_view', 'board', 'steps', 'bro'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
+    for (const next of ['list_view', 'board', 'steps', 'bro', 'grill_me_tip'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
     expect(reveal.idleClockArmed({ next: 'snooze', ahead: ['list_view'] }, false)).toBe(true);
     expect(reveal.idleClockArmed({ next: null, ahead: [] }, true)).toBe(true);
     for (const next of ['snooze', 'code_review', 'voice', 'sound', null] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(false);

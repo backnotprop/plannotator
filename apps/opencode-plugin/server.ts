@@ -47,6 +47,7 @@ import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-s
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
 import { dropInboxDuplicates, findInboxConnection, inboxReminderAlreadyAdded, registerInboxOpenCode2, type InboxToolDomainLike } from "./inbox";
+import { registerGrillMeOpenCode2, type GrillMeSessionDomainLike, type GrillMeToolDomainLike } from "./grill-me";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -249,6 +250,20 @@ const serverPlugin = {
           });
         } catch (error) {
           console.error(`[Plannotator] Could not register the Inbox reminder: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        // The grill-me note (grill-me.ts), under the reminder's switch: the
+        // `skill` tool's result when it loads a grill-me skill, never a subagent's.
+        try {
+          await registerGrillMeOpenCode2(ctx.tool as unknown as GrillMeToolDomainLike, ctx.session as unknown as GrillMeSessionDomainLike, {
+            wakes: typeof v2.session?.prompt === "function",
+            isSubagent: async ({ sessionID, agent }) => {
+              const known = (await getAgents()).find((candidate) => candidate.name === agent);
+              if (known?.mode === "subagent") return true;
+              return (await resolveRootSession(v2, sessionID)).subagent;
+            },
+          });
+        } catch (error) {
+          console.error(`[Plannotator] Could not register the grill-me note: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }

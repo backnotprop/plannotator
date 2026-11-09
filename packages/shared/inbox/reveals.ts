@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "bro" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -111,6 +111,13 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
+  // The grill-me tip (DRAFT, waiting on the owner's OK; the owner, 2026-11-08: "if we have any gap in like consistent
+  // use, we should say, hey, have you tried /grill-me yet?"): a tip never costs an offer its showing, so it comes after
+  // them, after the Checklist, from day 10 (a shorter tenure let it take a light user's Snooze, whose 3 days' patience
+  // had run out: reveals-schedule.test.ts). Its need is its own (`open`): the person answers question cards but never
+  // ran grill-me (grill-me-tip.ts `revealGrillMeGap`). Nothing to turn on: the claim stamps it, `GrillMeTip` says it
+  // once, and "Got it" closes it.
+  { id: "grill_me_tip", kind: "offer", tenureMs: 10 * DAY_MS, minThreads: 0, enabled: true },
   // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
   // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
   // minimum), once across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the

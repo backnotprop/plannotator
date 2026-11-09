@@ -51,6 +51,7 @@ const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0
 
 const BRO: RevealId = "bro";
 const LIST_VIEW: RevealId = "list_view";
+const GRILL_ME: RevealId = "grill_me_tip";
 const TABLE: readonly RevealEntry[] = INBOX_REVEALS;
 
 test("Bro mode is registered in the real queue as the approval places it: right after Snooze, an offer for heavy use, never on day 0 or 1", () => {
@@ -60,6 +61,11 @@ test("Bro mode is registered in the real queue as the approval places it: right 
 
 test("List view is registered in the real queue as the approval places it: last, an offer, ahead at its moment", () => {
   expect(INBOX_REVEALS.at(-1)).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true });
+});
+
+test("the grill-me tip is registered after the offers it must never cost a showing: right after the Checklist, from day 10", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "steps") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: GRILL_ME, kind: "offer", tenureMs: 10 * DAY, minThreads: 0, enabled: true });
 });
 
 type Dialog = RevealId | "agent_note";
@@ -83,6 +89,8 @@ interface User {
   notNow?: readonly RevealId[];
   /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
   codeReviewOff?: boolean;
+  /** The grill-me tip's gap holds (grill-me-tip.ts `revealGrillMeGap`): its offer is open. Absent: it never is. */
+  grillMeGap?: boolean;
 }
 
 interface Shown {
@@ -117,7 +125,10 @@ function simulate(user: User, days = 30): Shown[] {
         heavy: revealHeavyUse(reads, now),
         threads: user.threads(day),
         open: Object.fromEntries(
-          TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.kind === "offer" || user.update)]),
+          TABLE.map((entry) => [
+            entry.id,
+            !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap === true : entry.kind === "offer" || user.update),
+          ]),
         ),
         waitingSince: saved.waitingSince,
       });
@@ -237,6 +248,60 @@ describe("30 days of a heavy user", () => {
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
     expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 1 });
+  });
+});
+
+describe("the grill-me tip (its gap: question cards answered, grill-me never run)", () => {
+  // Every dialog keeps the day it has without the tip; the tip comes after them. The star ask apart (aside, it takes a
+  // day the line leaves free): on an update day the tip takes day 6, so the star goes on 7.
+  for (const [name, user, tip, starShift] of [
+    ["a heavy user", HEAVY, 10, 0],
+    ["a heavy user who said Not now to Bro mode", { ...HEAVY, notNow: [BRO] }, 10, 0],
+    ["a heavy user whose list is taller than the screen from the start", { ...HEAVY, moment: (id: RevealId, day: number) => id !== "snooze" || day >= 1 }, 10, 0],
+    ["a new user with Code review off", { ...HEAVY, codeReviewOff: true }, 10, 0],
+    ["a light user (Snooze on 7, the Checklist on 25)", LIGHT, 18, 0],
+    ["someone updating on day 0", UPGRADER, 6, 1],
+  ] as const) {
+    test(`${name}: every dialog on its own day, the tip on day ${tip}`, () => {
+      const without = days(simulate(user));
+      const shown = simulate({ ...user, grillMeGap: true });
+      const got = days(shown);
+      expect(got[GRILL_ME]).toBe(tip);
+      const { [GRILL_ME]: _tip, ...rest } = got;
+      expect(rest).toEqual({ ...without, ...(starShift ? { star: without.star! + starShift } : {}) });
+      expectOnePerDay(shown);
+    });
+  }
+
+  test("the heavy and light timelines with the tip", () => {
+    expect(simulate({ ...HEAVY, grillMeGap: true }).map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      ["star", 1],
+      ["snooze", 2],
+      [BRO, 3],
+      ["board", 4],
+      [LIST_VIEW, 5],
+      ["steps", 6],
+      [GRILL_ME, 10],
+    ]);
+    expect(simulate({ ...LIGHT, grillMeGap: true }).map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      ["star", 4],
+      ["snooze", 7],
+      [GRILL_ME, 18],
+      ["steps", 25],
+    ]);
+  });
+
+  test("its moment never comes: it retires after 14 days without a word, and every other dialog keeps its day", () => {
+    const user: User = { ...HEAVY, grillMeGap: true, moment: (id, day) => id !== GRILL_ME && HEAVY.moment(id, day) };
+    const shown = simulate(user, 40);
+    expect(shown.some((s) => s.id === GRILL_ME)).toBe(false);
+    expect(days(shown)).toEqual(days(simulate(HEAVY, 40)));
+  });
+
+  test("shown once: never again, whatever its moment", () => {
+    expect(simulate({ ...HEAVY, grillMeGap: true }, 40).filter((s) => s.id === GRILL_ME)).toHaveLength(1);
   });
 });
 

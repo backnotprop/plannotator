@@ -260,6 +260,7 @@
   --ib-fs-20: max(11px, calc(20px * var(--ib-type) / 14));
   --ib-fs-22: max(11px, calc(22px * var(--ib-type) / 14));
   --ib-fs-24: max(11px, calc(24px * var(--ib-type) / 14));
+  --ib-fs-29: max(11px, calc(29px * var(--ib-type) / 14));
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
@@ -7042,6 +7043,28 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
+/* GRILL-ME-TIP-START The grill-me tip (DRAFT; packages/inbox/components/GrillMeTip.tsx): Bro mode's card as it is (navy,
+   dot grid, Experimental chip, orange button), with a title line in place of the poster name and a small picture of
+   one question card. Only the `ib-gm` rules are its own. */
+dialog.ib-dlg.ib-bro.ib-gm h2 { position: relative; margin: 0; padding: 24px 132px 0 26px; font-size: var(--ib-fs-34, 34px); font-weight: 800; line-height: 1.04; letter-spacing: -0.035em; color: #fbfaf5; text-wrap: balance; }
+dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0.86em; font-weight: 600; letter-spacing: -0.04em; color: #f69d25; }
+/* The picture: one question card as the Inbox draws it, small, on the navy. */
+.ib-gm .ib-gm-art { position: relative; margin: 20px 26px 0; padding: 14px 16px 12px; border-radius: 12px; background: #fbfaf5; color: #1d2433; box-shadow: 0 10px 26px -12px #0009; transform: rotate(-1.2deg); }
+.ib-gm .ib-gm-art .q { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 650; margin: 0 0 8px; letter-spacing: -0.01em; }
+.ib-gm .ib-gm-art ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.ib-gm .ib-gm-art li { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); padding: 6px 8px; border-radius: 7px; border: 1px solid #1d243317; }
+.ib-gm .ib-gm-art li::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid #1d243366; flex: none; }
+.ib-gm .ib-gm-art li.rec { border-color: #f69d2588; background: #f69d2514; }
+.ib-gm .ib-gm-art li.rec::before { border-color: #c96f00; background: radial-gradient(circle, #c96f00 0 3px, transparent 3.5px); }
+.ib-gm .ib-gm-art li .tag { margin-left: auto; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; color: #9a5600; }
+.ib-gm .ib-gm-art .meta { margin-top: 8px; font-size: var(--ib-fs-11, 11px); color: #1d243399; }
+.ib-gm .ib-bi-text p + p { margin-top: 8px; }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-bro.ib-gm h2 { font-size: var(--ib-fs-29, 29px); padding-right: 26px; padding-top: 52px; }
+  .ib-gm .ib-gm-art { margin: 16px 20px 0; }
+  .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
+}
+/* GRILL-ME-TIP-END */
 /* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
    small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
    name and tags, one line, and its button (Smart groups' the primary one). */

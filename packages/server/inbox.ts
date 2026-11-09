@@ -249,6 +249,8 @@ import {
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
+import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
+import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -2621,6 +2623,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     steps: stepsUndecided,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
+    // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
+    // read in `revealState`, only while it is unshown and could go today.
+    grill_me_tip: () => true,
     star: starUndecided,
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
@@ -2640,6 +2645,40 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
     }
   };
+  /**
+   * What the grill-me tip's gap reads (shared/inbox/grill-me-tip.ts `revealGrillMeGap`), lazily, in its order: every
+   * question block with its thread, then the skills the person's own messages named, then thread subjects and names
+   * and agent messages. The rule stops reading as soon as it knows (fewer than three answers: no message is read).
+   */
+  const grillMeUse = () => ({
+    questions: (function* (): Generator<GrillMeTipQuestion> {
+      for (const question of store.allQuestionRecords()) {
+        const message = store.message(question.message_id);
+        if (!message) continue;
+        const sent = question.sent_reply_id ? (store.message(question.sent_reply_id)?.created_at ?? null) : null;
+        yield { ...question, threadId: message.thread_id, at: question.picked_at ?? sent };
+      }
+    })(),
+    skills: (function* (): Generator<string> {
+      for (const threadId of store.threadIds())
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message?.author.kind !== "person" || !message.body.includes("**Skills referenced**")) continue;
+          for (const skill of splitInboxSkillsBlock(message.body)?.skills ?? []) yield skill.name;
+        }
+    })(),
+    texts: (function* (): Generator<string | null | undefined> {
+      for (const threadId of store.threadIds()) {
+        const root = store.message(threadId);
+        yield root?.subject;
+        yield root?.thread_name;
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message?.author.kind === "agent") yield message.body;
+        }
+      }
+    })(),
+  });
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
   /** The page loads seen, each with the one first seen before it (never a dialog on the load right after one). */
@@ -2663,7 +2702,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board need not be on.
       ...offers,
     };
-    return {
+    const state: RevealState = {
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
@@ -2678,6 +2717,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       open,
       waitingSince: reveals?.waitingSince,
     };
+    // The grill-me tip's gap (a walk of the store): read only while the tip is unshown, in a release build, past its
+    // tenure and with the line free today; otherwise it could not be next or claimed anyway.
+    const grillMe = INBOX_REVEALS.find((entry) => entry.id === "grill_me_tip");
+    if (open.grill_me_tip) {
+      const first = snooze?.firstUseAt ? Date.parse(snooze.firstUseAt) : Number.NaN;
+      open.grill_me_tip =
+        !!grillMe?.enabled &&
+        snoozeIntroRelease &&
+        !Number.isNaN(first) &&
+        now.getTime() - first >= grillMe.tenureMs &&
+        revealLineFree("spaced", state, now) &&
+        revealGrillMeGap(grillMeUse());
+    }
+    return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
   const lineStamp = (at: string, spaced: boolean, load: string | null): Partial<PlannotatorConfig> =>
