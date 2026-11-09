@@ -132,6 +132,7 @@ packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
+packages/inbox/sharedPictureChoice.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
@@ -315,6 +316,7 @@ packages/review-editor/edit/discardRestoreRender.test.tsx
 packages/review-editor/edit/selectionActionPopover.test.ts
 packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
 packages/review-editor/components/AllFilesCodeView.flushTrailing.test.tsx
+packages/review-editor/components/AllFilesCodeView.hostLineNotes.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
@@ -573,6 +575,7 @@ packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
 packages/inbox/pulls/railTree.test.tsx
+packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
@@ -613,6 +616,7 @@ packages/ui/components/shape/ShapeSurface.stack.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
+packages/inbox/reviewShapeOff.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/inbox/system/systemInReviews.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx

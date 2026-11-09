@@ -1353,6 +1353,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
+        walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
+        // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
+        shapeOn: () => shapeOn(),
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
         snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
         snoozeMade: () => markSnoozeUsed(),
@@ -2595,8 +2598,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * group, and no agent text names it. Read on every request.
    */
   const shapeOn = () => options.shape ?? shapeSwitchOn();
-  /** The boards themselves: Shape on, or Code review on, whose Show me makes a board (approval "code-review-launch-build", item 1). */
-  const boardsOn = () => shapeOn() || codeReviewOn();
+  /**
+   * The boards themselves (the routes, the event feed, a Show me): Shape's own switch only. Code review on brings none
+   * of them (approval "code-review-029-shape-off"); with both on, Show me makes a board as before.
+   */
+  const boardsOn = () => shapeOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });

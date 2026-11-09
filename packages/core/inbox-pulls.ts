@@ -188,6 +188,28 @@ export interface InboxPullDetailComment {
   /** A comment on a line of a file. */
   file?: string;
   line?: number;
+  /** The forge hides this comment (GitHub's "minimized"): its reason in lower case ("off-topic", "outdated"), or "" when it gave none. */
+  hidden?: string;
+}
+
+/**
+ * A discussion on the PR's code, as the forge keeps it: where it is and its comments in order. Drawn on the line it is
+ * about in the PR page (`line` on `side`, `start_line` first when it spans lines); one with no line there sits at the
+ * top of its file.
+ */
+export interface InboxPullThread {
+  id: string;
+  file: string;
+  /** Its last line on the PR's current code; null when a push moved past it (`outdated`) or it is on the whole file. */
+  line: number | null;
+  start_line: number | null;
+  /** `old`: a removed line (the PR's base); `new`: an added or unchanged line (its head). */
+  side: 'old' | 'new';
+  resolved: boolean;
+  /** A push changed its lines since it was written (GitHub only; GitLab does not say). */
+  outdated: boolean;
+  /** In order, never empty. `file` and `line` are the thread's. */
+  comments: InboxPullDetailComment[];
 }
 
 /** `GET /api/inbox/pulls/details`: what the forge has about a PR beside its diff. */
@@ -198,6 +220,8 @@ export interface InboxPullDetailsAnswer {
   reviewers: InboxPullReviewer[];
   checks: InboxPullCheck[];
   comments: InboxPullDetailComment[];
+  /** The discussions on the code, each with its comments (also in `comments`, in time order). Absent on an older Inbox. */
+  threads?: InboxPullThread[];
   /** The comments on lines could not all be read: the forge failed partway. Not kept; the next opening asks again. */
   threads_incomplete?: boolean;
 }

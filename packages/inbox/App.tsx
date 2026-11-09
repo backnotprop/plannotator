@@ -222,6 +222,7 @@ import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
+import { setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
@@ -1833,10 +1834,12 @@ function Inbox() {
   // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
   // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
   const shapeOn = settings?.shape?.on === true && settings.guest !== true;
-  // The boards work with Code review on too: its Show me makes one (approval "code-review-launch-build", item 1). Shape's
-  // own places (the row, the grid, ⌘K's group, `/shape`) stay on Shape's switch.
   const codeReviewOn = settings?.code_review?.on === true;
-  const boardsOn = (shapeOn || codeReviewOn) && settings?.guest !== true;
+  // The boards, and every Shape piece in a review (Show me, the Overview's picture, boards over it), ride Shape's own
+  // switch: Code review on brings none of them (approval "code-review-029-shape-off"). With both on, as before.
+  const boardsOn = shapeOn;
+  // The review skills a Send pastes carry their drawing lines only while Shape is on.
+  setReviewSkillsShape(shapeOn);
   const shapes = useInboxShapes(boardsOn, subscribeShapeFrames);
   const wakeOnChange = useRef(codeReviewOn);
   wakeOnChange.current = codeReviewOn;
@@ -7420,6 +7423,7 @@ function Inbox() {
           message={guideMessage}
           guest={tailnetGuest(settings)}
           codeReview={codeReviewOn}
+          shape={shapeOn}
           // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
           onBack={() => {
             const now = routeRef.current;

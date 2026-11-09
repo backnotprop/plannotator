@@ -5,7 +5,8 @@
  * Show me (code review in the Inbox, approval "shape-in-code-review"): a POST
  * with `kind: "show_me"` and `show_me: { review, file, lines, round, words? }`
  * is a question that asks the agent for a Shape. Only while Code review is on
- * (`409 code_review_off`), about a review of this thread, and its `question`
+ * (`409 code_review_off`) and Shape is on (`409 shape_off`, approval
+ * "code-review-029-shape-off"), about a review of this thread, and its `question`
  * is exactly `inboxShowMeRequest`'s words. The board comes back the way any
  * board does (`plannotator shape update --thread`); a read names it on the turn
  * (`showMeShapes`), so nothing is kept twice. A dragged box's Show me sends its
@@ -81,10 +82,10 @@ export interface InboxAskReview {
 }
 
 export function createInboxAsk(options: {
-  /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
+  /** Code review (Settings → Capabilities): a review's Show me needs it, and the boards too. Absent: off. */
   codeReviewOn?: () => boolean;
   /**
-   * The boards are on (Shape's switch or Code review): a Show me from a board is taken only then. Absent: off.
+   * The boards are on (Shape's own switch, approval "code-review-029-shape-off"): every Show me needs them. Absent: off.
    */
   boardsOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
@@ -222,15 +223,19 @@ export function createInboxAsk(options: {
     }
 
     const input = checkInboxAskInput(body);
-    // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
+    // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review and Shape are on.
     const showMe = checkInboxShowMeInput(body);
     let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
     let boxPicture: string | null = null;
     let requestOf: ((target: InboxShowMeTarget) => string) | null = null;
     if (showMe) {
       const asked = showMe.target;
-      // A review's Show me needs Code review; a board's, the boards (Shape or Code review).
-      if (!(asked.part ? (options.boardsOn?.() ?? false) : (options.codeReviewOn?.() ?? false))) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      // A review's Show me needs Code review; every Show me needs the boards (Shape's own switch). Both off: the
+      // refusal it always had. Code review on and Shape off (approval "code-review-029-shape-off"): Shape's.
+      const codeReview = options.codeReviewOn?.() ?? false;
+      const boards = options.boardsOn?.() ?? false;
+      if (asked.part ? !boards && !codeReview : !codeReview) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      if (!boards) return json({ error: "Shape is off in this Inbox (Settings → Capabilities).", code: "shape_off" }, 409);
       if (asked.part && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === asked.part!.board)) {
         throw new InboxError("validation_error", `show_me.part: ${asked.part.board} is not a board of this thread.`, { field: "show_me" });
       }

@@ -1092,3 +1092,105 @@ test.skipIf(!hasDom)('a jump into a hidden message opens the run from its newest
   expect(shown(el)).toEqual([`${ROOT}:line`, 'fold', 'msg_L10:open', ...range(11, 48).map((i) => `${L(i)}:line`), 'msg_L49:open']);
   expect(el.querySelector('[data-middle-fold]')!.textContent).toBe('Show 9 earlier');
 });
+
+/**
+ * `read` agent messages the person has looked at, then `fresh` new ones (approval "inbox-thread-fold-unread": past
+ * 20 new, the thread opens on its newest 20 and the older new ones wait behind the fold).
+ */
+function manyNew(read: number, fresh: number): InboxThread {
+  const id = (i: number) => (i === 0 ? ROOT : `msg_N${i}`);
+  const messages = Array.from({ length: read + fresh }, (_, i) =>
+    message(id(i), AGENT, 2 * i + 2, `Step ${i} of the rollout is done.`, {
+      created_at: new Date(Date.UTC(2026, 9, 10, 9) + i * 60_000).toISOString(),
+      ...(i === 0 ? { person_seen_seq: read === 0 ? 0 : 2 * read, agent_checked_seq: 0 } : {}),
+    }),
+  );
+  return { thread_id: ROOT, project: PROJECT, subject: 'Search for the docs site', thread_name: null, resolved_at: null, messages };
+}
+const N = (i: number) => (i === 0 ? ROOT : `msg_N${i}`);
+
+/** Every top-level element of the thread is 50px under the one before it (happy-dom has no layout). */
+function rowsOf50() {
+  stub(HTMLElement.prototype, 'offsetTop', {
+    get(this: HTMLElement) {
+      const parent = this.parentElement;
+      return parent?.classList.contains('ib-pbody') ? [...parent.children].indexOf(this) * 50 : 0;
+    },
+  });
+}
+
+test.skipIf(!hasDom)('past 20 new, the thread opens on its newest 20; the older new ones wait behind the fold, under the divider, and it opens where it did', async () => {
+  rowsOf50();
+  // Three read, thirty new: N3..N12 hide, N13..N32 (the newest 20) open.
+  const el = await render(manyNew(3, 30));
+  expect(shown(el)).toEqual([`${ROOT}:line`, 'msg_N1:line', 'msg_N2:line', 'divider', 'fold', ...range(13, 32).map((i) => `${N(i)}:open`)]);
+  expect(el.querySelector('[data-middle-fold]')!.textContent).toBe('Show 10 earlier');
+  // Where it opened before: the divider, with the last read line just above it.
+  const body = el.querySelector<HTMLElement>('.ib-pbody')!;
+  const divider = el.querySelector<HTMLElement>('[data-new-divider]')!;
+  const above = divider.previousElementSibling as HTMLElement;
+  expect(above.getAttribute('data-message-article')).toBe('msg_N2');
+  expect(body.scrollTop).toBe(above.offsetTop - 6);
+  expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('30 new since you looked');
+
+  // Folding marks nothing read: the older new ones come in still New, and the count holds.
+  act(() => el.querySelector<HTMLButtonElement>('[data-fold-step]')!.click());
+  expect(shown(el)).toEqual([`${ROOT}:line`, 'msg_N1:line', 'msg_N2:line', 'divider', ...range(3, 12).map((i) => `${N(i)}:line`), ...range(13, 32).map((i) => `${N(i)}:open`)]);
+  for (const i of range(3, 12)) {
+    expect(article(el, N(i))!.hasAttribute('data-new')).toBe(true);
+    expect(article(el, N(i))!.querySelector('.ib-newtag')?.textContent).toBe('New');
+  }
+  expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('30 new since you looked');
+
+  // Never looked at (every message new): it opens at the top, as before, its first message a line above the fold.
+  act(() => root!.unmount());
+  host!.remove();
+  const unread = await render(manyNew(0, 30));
+  expect(shown(unread)).toEqual([`${ROOT}:line`, 'fold', ...range(10, 29).map((i) => `${N(i)}:open`)]);
+  expect(unread.querySelector('[data-middle-fold]')!.textContent).toBe('Show 9 earlier');
+  expect(unread.querySelector<HTMLElement>('.ib-pbody')!.scrollTop).toBe(0);
+});
+
+test.skipIf(!hasDom)('20 new or fewer: every new message opens, as before', async () => {
+  const el = await render(manyNew(3, 20));
+  expect(shown(el)).toEqual([`${ROOT}:line`, 'msg_N1:line', 'msg_N2:line', 'divider', ...range(3, 22).map((i) => `${N(i)}:open`)]);
+  expect(el.querySelector('[data-middle-fold]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a link to a new message behind the fold opens the fold down to it and lands on it', async () => {
+  const centred: string[] = [];
+  stub(HTMLElement.prototype, 'scrollIntoView', {
+    writable: true,
+    value(this: HTMLElement, options?: ScrollIntoViewOptions) {
+      if (options?.block === 'center') centred.push(this.getAttribute('data-message-article') ?? '');
+    },
+  });
+  const thread = manyNew(3, 30);
+  let landed = 0;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div className="pn-inbox">
+        <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} landing={{ messageId: 'msg_N6', terms: [], questionKey: null }} onLanded={() => void (landed += 1)} />
+      </div>,
+    );
+  });
+  for (let i = 0; i < 60 && landed === 0; i += 1) await waitInAct(16);
+  expect(landed).toBe(1);
+  // N6 is open and landed on; the new ones under it came in as lines; N3..N5 stay behind the fold.
+  expect(shown(host)).toEqual([`${ROOT}:line`, 'msg_N1:line', 'msg_N2:line', 'divider', 'fold', 'msg_N6:open', ...range(7, 12).map((i) => `${N(i)}:line`), ...range(13, 32).map((i) => `${N(i)}:open`)]);
+  expect(centred).toContain('msg_N6');
+  expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_N6');
+});
+
+test.skipIf(!hasDom)('past 20 new, a message that arrives while the thread is open shows open at the bottom', async () => {
+  const thread = manyNew(0, 30);
+  const el = await render(thread);
+  const arrival = message('msg_N30', AGENT, 62, 'Step 30 of the rollout is done.', { created_at: new Date(Date.UTC(2026, 9, 10, 9) + 30 * 60_000).toISOString() });
+  act(() => root!.render(pane({ ...thread, messages: [...thread.messages, arrival] })));
+  await settle();
+  expect(shown(el).slice(-2)).toEqual(['msg_N29:open', 'msg_N30:open']);
+  expect(el.querySelector('[data-middle-fold]')!.textContent).toBe('Show 9 earlier');
+});
