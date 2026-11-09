@@ -499,6 +499,13 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * was). Fixed text: the agent tool's `body` field, the MCP server's `body`
  * field and `plannotator inbox --help` carry it whole.
  */
+/**
+ * Option lines (approval "inbox-question-tradeoffs"; DRAFT words, awaiting the owner's OK): `Pros:`, `Cons:` and
+ * `Prototype:` under a `- [ ]` choice, and a question's own `Prototype:` line. On every copy of send_message's body.
+ */
+export const INBOX_OPTION_LINES_RULE =
+  'Indented under a `- [ ]` choice (not a plain bullet), only when it helps the person pick: `Pros: <item>; <item>` and `Cons: <item>; <item>` (the card lines them up across options), and `Prototype: <page>`, a page they try before picking: an HTML file you also attach, or the http://localhost address of an app you are running (the send is refused if it does not answer). One `Prototype:` line at the block\'s own indent is one page for all the options.'
+
 export const INBOX_PICTURES_RULE =
   'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each, inside the choice (not in the text above the question): `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
@@ -565,6 +572,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       INBOX_PICTURES_RULE,
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
+      INBOX_OPTION_LINES_RULE,
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
       '',

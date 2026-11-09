@@ -234,9 +234,11 @@ export interface AttachmentPaneProps {
   /**
    * Open another file of the thread in this pane, in the frame it is in now
    * (full screen stays full screen). The route is replaced, not pushed, so
-   * Back returns to the thread in one press.
+   * Back returns to the thread in one press. `at`: the step's place in
+   * `steps` (null for a step from the sheet's `allSteps`), so a host can tell
+   * apart two steps that show the same file (a picture two choices share).
    */
-  onStep?: (attachmentId: string, version: 'current' | 'sent') => void;
+  onStep?: (attachmentId: string, version: 'current' | 'sent', at?: number | null) => void;
   /**
    * Every file of the thread, when `steps` is fewer (a question's picture
    * choices, `optionSet`): the pill's sheet and the stepper's peek list these,
@@ -249,6 +251,13 @@ export interface AttachmentPaneProps {
    * ends say "Last option" / "First option". Absent: the thread's files.
    */
   optionSet?: OptionSet | null;
+  /**
+   * The file's place in `steps` when the host knows it: a picture two choices
+   * share is in an option set twice, and only the host knows which choice was
+   * opened. Ignored unless that step shows this file. Absent: the first step
+   * that shows it.
+   */
+  stepAt?: number | null;
   /**
    * A phone (phone.ts): always full screen; the toolbar sits bottom right
    * with 44 px targets and leads with Back to the thread, its `4/9 ⌄` pill
@@ -505,7 +514,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // ── Stepping (design record "inbox-attachment-stepping", v2) ──────────────
   const steps = props.steps ?? [];
-  const index = stepIndexOf(steps, attachment.id);
+  const named = props.stepAt ?? null;
+  const index = named !== null && steps[named] && stepIndexOf([steps[named]!], attachment.id) === 0 ? named : stepIndexOf(steps, attachment.id);
   const multi = steps.length > 1 && index >= 0;
   /** A question's picture choices (optionSets.ts): what the pane steps through; the sheet still lists `allSteps`. */
   const optionSet = multi && props.optionSet ? props.optionSet : null;
@@ -869,15 +879,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** Open the file at `target` in `list` (the files stepped through; the sheet's `allSteps`). */
   const goTo = (target: number, source: StepSource, list: readonly AttachmentStep[] = steps) => {
     const next = list[target];
-    if (!next || next.attachment.id === attachment.id) {
+    const inSteps = list === steps;
+    // The same file at another place in `steps` is another step (a picture two choices share); in the sheet's list it is this one.
+    const sameFile = next !== undefined && next.attachment.id === attachment.id;
+    if (!next || (inSteps ? target === index : sameFile)) {
       setMenuOpen(false);
       return;
     }
-    leave(next.attachment.name, () => {
+    const go = () => {
       pendingStep.current = source;
       setMenuOpen(false);
-      props.onStep?.(next.attachment.id, memory.current.get(next.attachment.id)?.version ?? 'current');
-    });
+      props.onStep?.(next.attachment.id, memory.current.get(next.attachment.id)?.version ?? 'current', inSteps ? target : null);
+    };
+    if (!sameFile) return leave(next.attachment.name, go);
+    // Nothing is left behind on the same file (no draft to keep), and no new picture loads to end a swipe's handoff.
+    go();
+    requestAnimationFrame(() => swipe.settle());
   };
   const step = (dir: 1 | -1, source: StepSource) => {
     if (!multi) return;
@@ -894,6 +911,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // Each file opens armed (Annotate; on a phone, in Interact) and without the last file's note; a step is announced once.
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
+  const indexRef = useRef(index);
+  indexRef.current = index;
   useEffect(() => {
     setArmed(!phone);
     setEndNote(null);
@@ -910,7 +929,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
-    const at = stepIndexOf(stepsRef.current, attachment.id);
+    const at = indexRef.current;
     const set = optionSetRef.current;
     if (at >= 0) announce(set ? optionAnnouncement(set, at, outsideSet) : stepAnnouncement(stepsRef.current, at));
     // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment (a set's caption names the choice).
@@ -931,7 +950,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       steppedFromSheet.current = false;
       requestAnimationFrame(focusPeekOpener);
     }
-  }, [attachment.id, announce]);
+    // A step between two choices that share a picture keeps the file: their place in the set is what changed.
+  }, [attachment.id, named, announce]);
 
   // `]` `[` `→` `←` (stepping.ts has the rules for when they stand down).
   const blocked = menuOpen || moreOpen;

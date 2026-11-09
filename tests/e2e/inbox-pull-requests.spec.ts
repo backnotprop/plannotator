@@ -529,7 +529,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
         },
         merged: { nodes: [ghPull(billingRepo, 411, { title: 'Idempotency keys on the charge client', state: 'MERGED', headRefName: 'retry/charge-client', mergedAt: ago(26 * 60), updatedAt: ago(26 * 60) })] },
       },
-    }),
+    }, (key, value) =>
+      // The same call answers the Pull requests board (the searches everywhere, `every…`): here, the same PRs.
+      key === 'data' ? { ...value, everyRequested: value.requested, everyAuthored: value.authored, everyAssigned: value.assigned, everyMerged: value.merged } : value,
+    ),
   );
   const mr = (iid: number, fields: Record<string, unknown>) => ({
     iid: String(iid),
@@ -786,12 +789,17 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
+  // One read per host: never more.
+  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
+  // The Pull requests board in the right pane (the person's own PRs everywhere) is answered by that same read.
+  await expect(page.locator('[data-prs-page] [data-pr-tile]').first()).toBeVisible();
+  await page.waitForTimeout(400);
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
 
   // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
-  await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText('tomas asked for your review');
+  await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
   const fold = list.locator('[data-reviews-fold="not_reviewed"]');
   await expect(fold).toHaveAttribute('aria-expanded', 'false');
   await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);
@@ -1076,10 +1084,15 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
   // Global comment is a quiet mark in the bar; the diff controls (one Split / Unified button, Collapse all, the gear) sit
-  // in the review app's muted tab row over the code.
+  // in the bar too, before it, as in a thread's review (the owner: in the Inbox they are always in the header).
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-pull-tabs] [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+  await expect(review.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+  await expect(review.locator('[data-diff-controls]')).toHaveCount(1);
+  const barOrder = await review.locator('.ib-vhead').evaluate((bar) => {
+    const left = (selector: string) => Math.round(bar.querySelector(selector)!.getBoundingClientRect().left);
+    return [left('[data-diff-controls]') < left('[data-guide-global-comment-add]'), left('[data-guide-global-comment-add]') < left('[data-review-decision]')];
+  });
+  expect(barOrder).toEqual([true, true]);
   await expect(review.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
@@ -1105,22 +1118,21 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
   expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', cornerRight: '0px', barApart: true });
-  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it, the 33 px tab row over the
-  // code alone, in a fill of its own, the first file right under it.
+  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it and right under the bar:
+  // no row over the code (no empty band; the diff controls are in the bar).
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
-    const [bar, rail, body, tabs] = ['.ib-vhead', '.ib-rrail', '.ib-gbody', '[data-pull-tabs]'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
-    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
+    const [bar, rail, body] = ['.ib-vhead', '.ib-rrail', '.ib-gbody'].map(box) as [DOMRect, DOMRect, DOMRect];
     return {
       barHeight: bar.height,
       railTop: rail.top - bar.bottom,
       railFoot: root.getBoundingClientRect().bottom - rail.bottom,
       beside: body.left - rail.right,
-      tabs: { height: tabs.height, top: tabs.top - bar.bottom, overCode: [tabs.left, tabs.right, body.top - tabs.bottom].map(Math.round), apart: fill('[data-pull-tabs]') !== fill('.ib-gbody') && fill('[data-pull-tabs]') !== fill('.ib-vhead') },
+      codeTop: Math.round(body.top - bar.bottom),
+      row: root.querySelectorAll('[data-pull-tabs], .ib-prp-tabs').length,
     };
   });
-  const codeBox = (await review.locator('.ib-gbody').boundingBox())!;
-  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, tabs: { height: 33, top: 0, overCode: [Math.round(codeBox.x), Math.round(codeBox.x + codeBox.width), 0], apart: true } });
+  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, codeTop: 0, row: 0 });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1479,6 +1491,22 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await other.context.close();
     rmSync(join(dir, 'details-fail'), { force: true });
     for (const name of [`ctx-${number}.json`, `ctxg-${number}.json`, `req-${number}.json`]) rmSync(join(dir, name), { force: true });
+    // The server keeps a details read a minute, keyed by the PR's last update: this read's thread on src/app.ts would
+    // show on the rail of the next tests that open #880 within it. The PR updated a second later and the list read
+    // again (at most every 20 s), that read is never reached, however soon the next test opens #880.
+    const pulls = join(dir, 'gh-pulls.json');
+    const listed = readFileSync(pulls, 'utf8');
+    const updated = listed.replace(new RegExp(`("number":${number},[^}]*?"updatedAt":")([^"]+)`), (_, head: string, at: string) => `${head}${new Date(Date.parse(at) + 1_000).toISOString()}`);
+    expect(updated).not.toBe(listed);
+    writeFileSync(pulls, updated);
+    const listReads = () => forgeCalls().filter((call) => call === 'gh pulls').length;
+    const before = listReads();
+    await expect
+      .poll(async () => {
+        await fetch(`${world.url}api/inbox/pulls?refresh=1`);
+        return listReads();
+      }, { timeout: 60_000, intervals: [2_000] })
+      .toBeGreaterThan(before);
   }
 });
 
@@ -1997,7 +2025,7 @@ test('the next file\'s header right under the last code row, whatever separators
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
-    await review.locator('[data-pull-tabs] [data-diff-layout-toggle="split"]').click();
+    await review.locator('.ib-vhead [data-diff-layout-toggle="split"]').click();
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
   } finally {
     await context.close();
@@ -2508,11 +2536,18 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
-    // The bar has it at every width but a phone's, beside the title.
-    for (const width of [800, 1040, 1280, 1440]) {
+    // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
+    // gives way before the title does: the title's tip names the author as well.
+    for (const width of [1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     }
+    await page.setViewportSize({ width: 800, height: 900 });
+    const narrow = await review.evaluate((root) => {
+      const width = (selector: string) => root.querySelector(selector)!.getBoundingClientRect().width;
+      return { title: width('[data-pull-review-title]') > width('[data-pull-review-readonly]') + 24, overflow: root.querySelector('.ib-vhead')!.scrollWidth - root.querySelector('.ib-vhead')!.clientWidth };
+    });
+    expect(narrow).toEqual({ title: true, overflow: 0 });
     await page.setViewportSize({ width: 1440, height: 900 });
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
@@ -2896,7 +2931,7 @@ test('a saved line comment over a push: labelled, posted at the commit read, the
     writeFileSync(named(endpoint), patch.replace(/ms-6/g, 'ms-8'));
     writeFileSync(join(world.forge, 'gh-head-880'), `${pushed}\n`);
     writeFileSync(named(`${endpoint}/commits?per_page=100`), `${read}\n${pushed}\n`);
-    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/, `$1${new Date().toISOString()}`));
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/g, `$1${new Date().toISOString()}`));
     // The list reads again on focus, at most every 20 s.
     await expect(async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -3584,6 +3619,141 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await expect(read).toHaveCount(0);
   await box.locator('[data-compose-text] textarea').fill('');
   await box.locator('[data-compose-cancel]').click();
+});
+
+test('New review, a walkthrough: the words are the ask, its thread is named from them, and the code comes with no verdict', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="walkthrough"]').check({ force: true });
+  // Nothing but the words: no changes to choose, no picker, and Start waits for them.
+  await expect(box.locator('[data-review-choices="changes"]')).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toHaveCount(0);
+  const words = box.locator('[data-compose-text] textarea');
+  await expect(words).toBeFocused();
+  await expect(words).toHaveAttribute('placeholder', 'What should it walk you through?');
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await words.fill('How does a failed charge get retried? Start from the webhook.');
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Failed charge');
+  await expect(box.locator('[data-compose-send]')).toContainText('Start walkthrough');
+  await shot(page, 'w-box');
+  for (const [width, height] of [[390, 844], [320, 700]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `w-box-${width}`, ['light']);
+    const row = box.locator('[data-review-choices="kind"]');
+    expect(await row.evaluate((group) => group.getBoundingClientRect().right <= group.parentElement!.getBoundingClientRect().right)).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+
+  // Its row from the start, by the word, under a name that came from what was typed.
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveCount(0);
+  const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Failed charge' });
+  await expect(row).toContainText('Walkthrough');
+  // Being written, not curated: the row and the thread say so.
+  await expect(row).toContainText('Writing…');
+  await expect(row).not.toContainText('Curating');
+  await expect(page.locator('[data-review-curating]')).toHaveText('Writing the walkthrough…');
+  await expect(page.getByText('/review-walkthrough').first()).toBeVisible();
+  const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  await shot(page, 'w-curating');
+
+  // The agent names files and lines, and sends its own patch too: it isn't looked at.
+  const longFile = join(world.projects.web, 'src/walk-long.ts');
+  writeFileSync(longFile, Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
+  const sent = await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'A failed charge starts at the webhook.',
+    guide: {
+      title: 'How a failed charge gets retried',
+      intent: 'Follow one failed charge.',
+      sections: [
+        { title: 'Where it starts', overview: 'The webhook takes the event.', diffs: [{ file: 'src/i18n/fallback.ts', lines: '1-2', summary: 'The first lines.' }] },
+        { title: 'Between', overview: 'Words with no code beside them.', diffs: [] },
+        { title: 'Further down', overview: 'Two places in a long file.', diffs: [{ file: 'src/walk-long.ts', lines: '30-32, 50-51', summary: 'Those lines.' }] },
+      ],
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+  } as never);
+  const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
+  await expect(reviewed).toContainText('Ready', { timeout: 15_000 });
+  await expect(reviewed).toContainText('Walkthrough');
+  await expect(reviewed).toHaveAttribute('data-pulls-move', 'on_you');
+
+  // The card asks nothing and counts nothing.
+  const card = page.locator('[data-review-card]').last();
+  await expect(card).toContainText('Walkthrough');
+  await expect(card).not.toContainText('Waiting on you');
+  await expect(card).not.toContainText('+0');
+  await expect(card).toContainText('2 files');
+  await shot(page, 'w-card');
+
+  // Open: the code once, not side by side, and no verdict to give.
+  await card.locator('[data-review-start]').click();
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
+  // The top bar keeps its diff controls but no Split / Unified button: nothing is marked as changed.
+  await expect(page.locator('[data-review-message] [data-diff-controls]')).toBeVisible();
+  await expect(page.locator('[data-review-message] [data-diff-layout-toggle]')).toHaveCount(0);
+  await expect(page.locator('[data-diff-style-switch]')).toHaveCount(0);
+  await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
+  await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');
+  await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
+  await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
+  await expect(page.getByText('unmodified line')).toHaveCount(0);
+  // No ticks: no chapter Reviewed, no file Viewed, and no "N of M" line in the chapter menu.
+  await expect(page.locator('[data-review-message]').getByRole('button', { name: /viewed/i })).toHaveCount(0);
+  await page.locator('[data-review-jump]').first().click();
+  await expect(page.locator('[data-review-jump-menu] [data-review-jump-row]').first()).toBeVisible();
+  await expect(page.locator('[data-review-progress]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+  // Two ranges in a file leave no room over its header for a separator that isn't there: it sits as a one-range file's does.
+  const gapOver = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().evaluate((shell) => {
+    const body = [shell, ...shell.querySelectorAll('*')].flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];
+    return body ? body.getBoundingClientRect().top - shell.getBoundingClientRect().top : Number.NaN;
+  });
+  expect(Math.abs((await gapOver('src/walk-long.ts')) - (await gapOver('src/i18n/fallback.ts')))).toBeLessThan(4);
+  await page.waitForTimeout(1200);
+  await shot(page, 'w-pane');
+  // All files: the same code, nothing counted, and no words about changes.
+  await page.getByRole('radio', { name: 'All files' }).first().check({ force: true });
+  await expect(page.locator('[data-guide-file-shell="src/i18n/fallback.ts"]').first()).toBeVisible();
+  await expect(page.getByText('Every changed file')).toHaveCount(0);
+  await expect(page.getByText(/^\+0/)).toHaveCount(0);
+  await shot(page, 'w-pane-files');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'w-pane-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#thread=${encodeURIComponent(threadId!)}`);
+  await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
+  await shot(page, 'w-thread');
+  rmSync(longFile);
+  // The list's mark says the word; a plain guided review's mark keeps its own.
+  await expect(page.locator(`[data-row="${threadId}"] [data-guide-mark]`).first()).toHaveAttribute('aria-label', 'Walkthrough');
+  await expect(page.locator('[data-guide-mark][aria-label="Guided review"]').first()).toBeAttached();
+
+  // More asked: the row is with the agent, and its plain answer, no second walkthrough, brings it back.
+  const moveOf = () => page.evaluate(async (id) => ((await (await fetch('/api/inbox/reviews')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.find((row) => row.thread_id === id)?.move, threadId);
+  await page.evaluate(async (id) => {
+    await fetch(`/api/inbox/messages/${id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotency_key: '00000000-0000-4000-8000-00000000a001', words: 'Where does the 200 come from?' }) });
+  }, sent.message_id);
+  await expect.poll(moveOf).toBe('agents');
+  await claude.send({ project_path: world.projects.web, reply_to: sent.message_id as string, body: 'From charge.ts, line 4.' });
+  await expect.poll(moveOf).toBe('on_you');
+
+  // Code review off: the field isn't there, and nothing is sent.
+  await setCodeReview(false);
+  await expect(claude.submitGuide({ project_path: world.projects.web, thread: 'walk-off', walkthrough: true, guide: { title: 'Off', intent: 'Off.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/i18n/fallback.ts' }] }] } } as never)).rejects.toThrow('walkthrough');
+  await setCodeReview(true);
 });
 
 test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {

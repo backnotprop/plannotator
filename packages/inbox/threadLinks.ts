@@ -4,8 +4,8 @@
  * Links side of the Artifacts view (components/ThreadLinksView.tsx).
  *
  * What counts is what the message text draws as a link (`ui` InlineMarkdown):
- * `[text](url)`, `<url>`, a bare url, `owner/repo#12` and `#12` when the
- * project names its repo, and `<a href>` in a raw HTML block. Not: anything in
+ * `[text](url)`, `<url>`, a bare url, `owner/repo#12` (with no repo, on the host
+ * most projects use: defaultRefHost.ts) and `#12` when the project names its repo, and `<a href>` in a raw HTML block. Not: anything in
  * a code block or a code span, images, `@mentions`, local file links (they
  * have their own hover), links inside attachments. Nothing is fetched here: a
  * title is the words the message wrote for the link, when it wrote any.
@@ -115,7 +115,7 @@ function readLink(text: string, start: number): { words: string; url: string; en
 
 type RefRepo = { display: string; host?: string } | null;
 
-function readInline(text: string, repo: RefRepo, out: WrittenLink[]): void {
+function readInline(text: string, repo: RefRepo, out: WrittenLink[], fallbackHost?: string): void {
   const refs = repo ? forgeRefLinks(repo) : null;
   let i = 0;
   while (i < text.length) {
@@ -168,16 +168,18 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[]): void {
         }
       }
     }
-    if (refs && !/[\w./@-]/.test(prev)) {
+    // A bare `#12` needs the project's repo; an `owner/repo#12` names its own, so with no repo it is on the host
+    // most projects use (`fallbackHost`, defaultRefHost.ts; github.com when absent), as the message draws it.
+    if ((refs || !repo) && !/[\w./@-]/.test(prev)) {
       if (ch === '#') {
-        const num = /^#([1-9]\d*)(?!\w)/.exec(text.slice(i));
-        if (num) {
+        const num = refs ? /^#([1-9]\d*)(?!\w)/.exec(text.slice(i)) : null;
+        if (refs && num) {
           out.push({ href: refs.issue(num[1]!), words: null, fromRef: true });
           i += num[0].length;
           continue;
         }
       } else if (/[A-Za-z0-9]/.test(ch)) {
-        const cross = matchCrossRepoRef(text.slice(i), prev, { host: repo?.host });
+        const cross = matchCrossRepoRef(text.slice(i), prev, { host: repo ? repo.host : fallbackHost });
         if (cross?.href) {
           out.push({ href: cross.href, words: null, fromRef: true });
           i += cross.label.length;
@@ -212,23 +214,24 @@ function readHtml(html: string, out: WrittenLink[]): void {
   }
 }
 
-function readBlocks(markdown: string, repo: RefRepo, out: WrittenLink[]): void {
+function readBlocks(markdown: string, repo: RefRepo, out: WrittenLink[], fallbackHost?: string): void {
   for (const block of parseMarkdownToBlocks(markdown, { frontmatter: false })) {
     if (block.type === 'code' || block.type === 'math' || block.type === 'hr') continue;
     if (block.type === 'html') readHtml(block.content, out);
-    else if (block.type === 'directive') readBlocks(block.content, repo, out);
+    else if (block.type === 'directive') readBlocks(block.content, repo, out, fallbackHost);
     else if (block.type === 'table') {
       const { headers, rows } = parseTableContent(block.content);
-      for (const cell of [...headers, ...rows.flat()]) readInline(cell, repo, out);
-    } else readInline(block.content, repo, out);
+      for (const cell of [...headers, ...rows.flat()]) readInline(cell, repo, out, fallbackHost);
+    } else readInline(block.content, repo, out, fallbackHost);
   }
 }
 
 /** Every web link a message's text draws, in reading order, repeats included. */
-export function linksOfBody(body: string, repo: RefRepo): WrittenLink[] {
+/** `fallbackHost`: where an `owner/repo#12` links when there is no repo (defaultRefHost.ts); absent, github.com. */
+export function linksOfBody(body: string, repo: RefRepo, fallbackHost?: string): WrittenLink[] {
   if (!MAY_HAVE_LINK.test(body)) return [];
   const out: WrittenLink[] = [];
-  readBlocks(body, repo, out);
+  readBlocks(body, repo, out, fallbackHost);
   return out;
 }
 
@@ -236,11 +239,11 @@ export function linksOfBody(body: string, repo: RefRepo): WrittenLink[] {
 const bodyLinks = new Map<string, { body: string; links: WrittenLink[] }>();
 const BODY_LINKS_MAX = 5000;
 
-function linksOfMessage(id: string, body: string, repo: RefRepo): WrittenLink[] {
-  const key = `${repo ? `${repo.host ?? ''}/${repo.display}` : ''}\u0000${id}`;
+function linksOfMessage(id: string, body: string, repo: RefRepo, fallbackHost?: string): WrittenLink[] {
+  const key = `${repo ? `${repo.host ?? ''}/${repo.display}` : `\u0001${fallbackHost ?? ''}`}\u0000${id}`;
   const hit = bodyLinks.get(key);
   if (hit && hit.body === body) return hit.links;
-  const links = linksOfBody(body, repo);
+  const links = linksOfBody(body, repo, fallbackHost);
   bodyLinks.delete(key);
   bodyLinks.set(key, { body, links });
   if (bodyLinks.size > BODY_LINKS_MAX) bodyLinks.delete(bodyLinks.keys().next().value!);
@@ -419,12 +422,12 @@ function linkOf(entry: Entry): ThreadLink {
  * from a `#12`. A repository keeps its kinds together: pull requests, issues,
  * files, commits, the rest. Repositories and sites by their newest link.
  */
-export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'body'>[], repo: InboxProjectRepo | null | undefined): ThreadLinks {
+export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'body'>[], repo: InboxProjectRepo | null | undefined, fallbackHost?: string): ThreadLinks {
   const refRepo: RefRepo = repo?.display ? { display: repo.display, ...(repo.host ? { host: repo.host } : {}) } : null;
   const seen = new Map<string, Entry>();
   for (let m = messages.length - 1; m >= 0; m--) {
     const message = messages[m]!;
-    for (const written of linksOfMessage(message.id, message.body, refRepo)) {
+    for (const written of linksOfMessage(message.id, message.body, refRepo, fallbackHost)) {
       const entry = entryOfCached(written);
       if (!entry) continue;
       const had = seen.get(entry.key);

@@ -40,6 +40,11 @@ export interface TidyController {
   warm?: () => void;
   /** That read (`warm`) is still out: the plan may be stale, so the menu shows Tidy as while it is first read. */
   pending?: boolean;
+  /**
+   * A list read that brought nothing new (so `version` did not move, App's listSame.ts): it still counts as a list
+   * read, as when every read drew the list again. Read now while shown, else the plan is stale.
+   */
+  listRead?: () => void;
 }
 
 /** How long the window polls a run's progress. */
@@ -105,6 +110,12 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [warm],
   );
+  const listRead = useCallback(() => {
+    // Not read for this scope yet: its first read is on its way anyway.
+    if (!enabled || readFor.current !== refresh) return;
+    if (open.current) refresh();
+    else stale.current = true;
+  }, [enabled, refresh]);
   const run = plan?.run ?? null;
   // Poll while a run goes, for 10 minutes at most: an agent that cannot say it
   // is done (Codex, MCP only) would otherwise keep it going all day. List and
@@ -135,7 +146,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [scope, surface, refresh],
   );
-  return { surface, scope, plan, run, start, refresh, shown, warm, pending };
+  return { surface, scope, plan, run, start, refresh, shown, warm, pending, listRead };
 }
 
 

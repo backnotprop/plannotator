@@ -208,14 +208,14 @@ export function ReviewRows(props: {
   return (
     <>
       <Row>
-        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local'], ['pr', 'Pull request']]} />
+        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local'], ['pr', 'Pull request'], ['walkthrough', 'Walkthrough']]} />
       </Row>
       {kind === 'local' ? (
         <Row>
           <Choices label="Changes" name="changes" value={props.changes} onChange={props.onChanges} options={[['uncommitted', 'Uncommitted'], ['last', 'Last commit'], ['branch', 'Whole branch']]} />
           <SummaryLine summary={props.summary} />
         </Row>
-      ) : (
+      ) : kind === 'walkthrough' ? null : (
         <>
           <Row>
             <button ref={button} type="button" className="ib-cp-tobtn ib-cp-rvpick" aria-haspopup="listbox" aria-expanded={menu} aria-label={`Pull request: ${linkPull ? `${linkPull.pull.repo} ${inboxPullLabel(linkPull.pull)} ${linkPull.pull.title}` : linkChosen ? props.link : pick ? `${pick.label} ${pick.title}` : 'none chosen'}`} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>

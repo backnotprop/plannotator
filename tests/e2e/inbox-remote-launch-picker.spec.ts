@@ -234,6 +234,16 @@ async function window(browser: Browser, phone: boolean): Promise<Page> {
 const dialog = (page: Page) => page.locator('dialog[data-compose]');
 
 /** New message → To → New Claude Code session → words → the folder menu, open once Mac mini's group is in. */
+/** Close compose keeping nothing: closing with words keeps a draft (approval "inbox-compose-escape-keeps"), so empty it first. */
+async function closeEmpty(page: Page, how: 'cancel' | 'escape'): Promise<void> {
+  const d = dialog(page);
+  await d.getByRole('textbox', { name: 'Message' }).fill('');
+  await d.getByRole('textbox', { name: 'Thread name' }).fill('');
+  if (how === 'cancel') await d.locator('[data-compose-cancel]').click();
+  else await d.getByRole('textbox', { name: 'Message' }).press('Escape');
+  await expect(d).toHaveCount(0);
+}
+
 async function openFolderMenu(page: Page, words: string, wantGroup: string): Promise<void> {
   await page.locator('[data-open-compose]:visible').first().click();
   const d = dialog(page);
@@ -266,8 +276,7 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   await folderShot(phone, 'row');
   await phone.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await shot(phone, 'to-line-390');
-  await phone.locator('[data-compose-cancel]').click();
-  await dialog(phone).locator('[data-compose-discard]').click();
+  await closeEmpty(phone, 'cancel');
 
   await openFolderMenu(page, 'The staging certs expire in a week. Rotate them and update the three cron jobs that read them.', 'Mac mini');
   const groups = page.locator('[data-compose-folder-group]');
@@ -367,8 +376,7 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await folderShot(phone, 'missing');
   await phone.locator('[data-home-folders-back]').click();
   await phone.locator('[data-compose-folders] .ib-cp-back').first().click();
-  await phone.locator('[data-compose-cancel]').click();
-  await dialog(phone).locator('[data-compose-discard]').click();
+  await closeEmpty(phone, 'cancel');
   expect(phoneReads.length).toBeGreaterThan(0);
   expect(phoneReads.every((r) => r.machine === mini.id)).toBe(true);
 
@@ -442,10 +450,8 @@ test('4. an untrusted folder picked there: the start stops on trust, and the run
     await openFolderMenu(window, 'Nothing to send.', 'Mac mini');
     await expect(window.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'billing-reports' })).toHaveCount(1, { timeout: 20_000 });
     await window.keyboard.press('Escape');
-    await window.keyboard.press('Escape');
-    const discard = dialog(window).locator('[data-compose-discard]');
-    if (await discard.isVisible().catch(() => false)) await discard.click();
-    await expect(dialog(window)).toHaveCount(0);
+    await expect(window.locator('[data-compose-folders]')).toHaveCount(0);
+    await closeEmpty(window, 'escape');
   }
 });
 

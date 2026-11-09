@@ -23,6 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
@@ -49,9 +50,11 @@ import {
   INBOX_REVIEW_FIELD_DESCRIPTION,
   INBOX_REVIEW_NOTES_RULE,
   INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC,
+  INBOX_WALKTHROUGH_FIELD_DESCRIPTION,
   inboxReviewTitleLine,
 } from "@plannotator/core/inbox-review";
 import { checkGuideNotes, readGuideDiffNotes, type GuideDiffNote } from "@plannotator/core/inbox-context-notes";
+import { readInboxWalkthrough } from "./inbox-walkthrough";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
@@ -300,7 +303,7 @@ export function inboxGuideInputHash(input: { snapshot?: unknown; guide?: unknown
  * asked for a verdict (submit_guide `review: true` while Code review is on); the record then carries `review` and the
  * chapter titles the review card lists.
  */
-export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false): { text: string; ref: InboxGuideRef } {
+export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false, walkthrough = false): { text: string; ref: InboxGuideRef } {
   const text = JSON.stringify(snapshot);
   const files = parseDiffToFiles(snapshot.review.rawPatch);
   const ref: InboxGuideRef = {
@@ -313,6 +316,7 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string,
     additions: files.reduce((n, f) => n + f.additions, 0),
     deletions: files.reduce((n, f) => n + f.deletions, 0),
     ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => inboxReviewTitleLine(section.title)) } : {}),
+    ...(walkthrough ? { walkthrough: true as const } : {}),
   };
   // Reviews (approval "inbox-reviews-page") lists a review by where its changes came from.
   const source = review ? inboxReviewSourceOf(snapshot) : null;
@@ -506,8 +510,9 @@ export async function inboxGuideRoute(
  * get_guide_brief's output_schema while Code review is on: the guide's, plus
  * an optional `overview: { text, diagram? }` (a drawing: `kind: "html"` with
  * source, css, width and height, tall; or `kind: "mermaid"` with source).
+ * `diagram`: only while Shape is on too; off, the overview is `{ text }`.
  */
-function guideSchemaWithOverview(): Record<string, unknown> {
+function guideSchemaWithOverview({ diagram }: { diagram: boolean }): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -525,7 +530,7 @@ function guideSchemaWithOverview(): Record<string, unknown> {
     type: "object",
     properties: {
       text: { type: "string" },
-      diagram: {
+      ...(diagram && { diagram: {
         type: "object",
         properties: {
           kind: { enum: ["html", "mermaid"] },
@@ -537,7 +542,7 @@ function guideSchemaWithOverview(): Record<string, unknown> {
         },
         required: ["kind", "source"],
         additionalProperties: false,
-      },
+      } }),
     },
     required: ["text"],
     additionalProperties: false,
@@ -558,11 +563,14 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview({ diagram: context.shapeOn?.() ?? false }) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
-        // Context notes ride the same switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview, and its one drawing
+        // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
+        // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
+        rules: context.codeReviewOn?.()
+          ? [...GUIDE_RULES, ...(context.shapeOn?.() ? [INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : []), INBOX_REVIEW_NOTES_RULE]
+          : GUIDE_RULES,
         example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
       }),
   );
@@ -585,7 +593,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
             .describe("Instead of guide and patch: a complete Plannotator guide snapshot, as an object or its JSON."),
           body: z.string().optional().describe("Your note above the card, markdown. Default: the guide's intent."),
           // Code review (approval "inbox-code-review-direction"): listed only while the person has it on.
-          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION) } : {}),
+          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION), walkthrough: z.boolean().optional().describe(INBOX_WALKTHROUGH_FIELD_DESCRIPTION) } : {}),
           ...SEND_ROUTING_FIELDS,
         })
         .strict(),
@@ -594,14 +602,26 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const review = (input as { review?: boolean }).review === true;
+        // A walkthrough: asked for here, or any guide in a thread the New review box started as one, so a real agent's
+        // own patch (or an empty one) can't turn it back into a diff, and the verdict stays away. Only while Code review
+        // is on (the owner: a walkthrough is part of code review): off, the field means nothing and no text names it.
+        const codeReviewOn = !!context.codeReviewOn?.();
+        const replyThread = input.reply_to ? context.store.message(input.reply_to)?.thread_id : null;
+        const walkthrough = codeReviewOn && ((input as { walkthrough?: boolean }).walkthrough === true || (!!replyThread && !!context.walkthroughThread?.(replyThread)));
+        let submitted: { snapshot?: unknown; guide?: unknown; patch?: string } = input;
+        if (walkthrough && input.snapshot === undefined && input.guide !== undefined) {
+          const read = readInboxWalkthrough(input.guide, [callerWorkingFolder(ctx), input.project_path, project.root].filter((folder): folder is string => !!folder && isAbsolute(folder)));
+          if (!read.ok) throw new InboxError("invalid_guide", read.error);
+          submitted = { guide: read.guide, patch: read.patch };
+        }
+        const review = (input as { review?: boolean }).review === true || walkthrough;
         // Notes ride only a review: a plain guided review's are left out (only the review draws them).
-        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false, review });
+        const checked = checkInboxGuide(submitted, project.root, { codeReview: context.codeReviewOn?.() ?? false, review });
         if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
         if (review && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `review`.");
-        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review);
+        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review, walkthrough);
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         // A reply never gets the default: its only subject is one the agent gives (it may name a thread the person started).
         // The default is made one line here (displayInboxSubject), so the guide's own title can never fail the subject check.

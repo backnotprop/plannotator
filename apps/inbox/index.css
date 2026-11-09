@@ -22,6 +22,8 @@
 @source "../../packages/inbox/floaters/**/*.tsx";
 /* A thread's PRs: the mark, the button and its card (packages/inbox/threadPulls/). */
 @source "../../packages/inbox/threadPulls/**/*.tsx";
+/* The Pull requests page (packages/inbox/prs/). */
+@source "../../packages/inbox/prs/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -33,10 +35,14 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
+@import "../../packages/inbox/prototype-window.css";
 /* System: the drawing's own sheet (sys- classes, packages/system), drawn in Reviews' System pane. */
 @import "../../packages/system/src/system.css";
 /* Floating reply drafts and Ask AI in the corner. */
 @import "../../packages/inbox/floaters/floaters.css";
+/* The Pull requests page and a stack's page (packages/inbox/prs/). */
+@import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 

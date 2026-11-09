@@ -39,7 +39,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'artifacts';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
   /**
    * Artifacts (approval "inbox-artifact-stars"): the row in the top group, always shown with `onArtifacts`, that opens
    * the Artifacts wall on All. No count.
@@ -479,12 +479,12 @@ export function Sidebar(props: SidebarProps) {
         return (
         <button
           type="button"
-          className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
+          className={`ib-nav${props.page === 'reviews' || props.page === 'prs' ? ' ib-on' : ''}`}
           onClick={pick(() => props.onPulls?.())}
-          aria-current={props.page === 'reviews' ? 'page' : undefined}
+          aria-current={props.page === 'reviews' || props.page === 'prs' ? 'page' : undefined}
           data-pulls-nav=""
         >
-          <Icon name="reviews" />
+          <Icon name="pullRequest" />
           Reviews
           {(props.pullsCount ?? 0) > 0 && (
             <span className="ib-n" aria-label={`${props.pullsCount} on you`}>

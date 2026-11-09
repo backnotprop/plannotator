@@ -28,12 +28,12 @@ import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
-import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, inboxServedTools } from "@plannotator/server/inbox-mcp";
+import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inboxServedTools } from "@plannotator/server/inbox-mcp";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
-import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
@@ -284,14 +284,14 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): s
   const guide = TOOL_GUIDE[name];
   // send_message's `steps` field exists only while steps are on.
   const withSteps = steps && name === "send_message";
-  // submit_guide's `review` field exists only while code review is on.
+  // submit_guide's `review` and `walkthrough` fields exist only while code review is on (the tool's own words, as served).
   const withReview = codeReview && name === "submit_guide";
-  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review"] : [])];
+  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
   const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
   const lines = [
     ...guide.lines,
     ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
-    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`] : []),
+    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`, `- \`walkthrough\`: ${INBOX_WALKTHROUGH_FIELD_DESCRIPTION}`] : []),
   ];
   return [`### ${name}`, "", ...args, ...lines, ""];
 }
@@ -407,7 +407,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## Where replies go",
     "",
-    `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi, OpenCode 2, DeepSeek Harness or Cline, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <title> (<reply id>)\`. The title is the thread's short name, or \`a reply\` when it has none; what is not a plain reply in a thread you already have (a new thread, a tag, a hand-off, a 👍, a Re-ask) shows the thread's subject. End your turn instead of waiting. When the person presses Send now while you work (not in Cline, where it waits for idle), it arrives in the turn you are in, at your next step: answer it before you go on. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way. Its \`[Thread <thread id>…]\` line names the thread. Every such message ends with one closing line, \`[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]\` (a 👍 Looks good ends with \`[thread <thread id>]\` alone): read_thread with that \`thread_id\` shows the whole thread.`,
+    `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi, OpenCode 2, DeepSeek Harness or Cline, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <title> (<reply id>)\`. The title is the thread's short name, or \`a reply\` when it has none; what is not a plain reply in a thread you already have (a new thread, a tag, a hand-off, a reaction, a Re-ask) shows the thread's subject. End your turn instead of waiting. When the person presses Send now while you work (not in Cline, where it waits for idle), it arrives in the turn you are in, at your next step: answer it before you go on. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way. Its \`[Thread <thread id>…]\` line names the thread. Every such message ends with one closing line, \`[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]\` (a reaction ends with \`[thread <thread id>]\` alone): read_thread with that \`thread_id\` shows the whole thread.`,
     "- The person can start a new thread with your session from the Inbox: an idea or a request of their own, not an answer to anything you asked, and it may have nothing to do with your current work. It arrives the same way, and its second line says so. Say how you will handle it before you start, and answer with `reply_to` set to the id on its first line, so your answer lands in that thread; name this thread on that reply with `thread` (a few words). Files they attached are listed under their words as `Attached: <name> (<path>)`; open them by path.",
     `- Replies come back to the session that sent the message: send with your \`${INBOX_TOOL_NAME}\` tool; inside Claude Code or Pi, a command your session runs also carries the session's identity.`,
     `- In Codex ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, "")} or later (the TUI, the Codex app, the IDE extension), through the stdio server, the person's reply arrives in your thread by itself too: the Inbox puts it into your thread with \`codex queue\`, and it starts a new turn once the turn you are in ends (at once when the thread is idle; a closed thread gets it when it is resumed). It starts with the same \`Plannotator Inbox: <title> (<reply id>)\` line and names your tools as you see them (send_message, read_thread). When send_message says the reply arrives by itself, end your turn instead of waiting. It never arrives in the middle of a turn (no Send now). A \`codex exec\` run is not woken (it ends after its turn): there, read the thread later with read_thread.`,
@@ -464,6 +464,20 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "```markdown",
     INBOX_CONTRACT_EXAMPLE,
     "```",
+    "",
+    "### Trade-offs and prototypes",
+    "",
+    "Lines indented under a `- [ ]` choice (a plain `- Label` bullet would take them into its label), each optional, each read once. Write them only when they help the person pick:",
+    "",
+    "- `Pros: <item>; <item>` and `Cons: <item>; <item>`: what the option gives and what it costs, items split on `;`. The card keeps them in a Trade-offs line under Why that opens into a table, one row per option, Pros and Cons side by side. Give them for every option or for none.",
+    "- `Prototype: <page>`: a page the person tries before picking that option; leave it off an option with nothing to show. \"Try prototype\" on the card opens it full window; they step between the options' pages and press Pick. The page is either an HTML file you attach in the same send (send_message's `attachments`, its path written as there; it shows as sent), or the address of an app running on this computer (`http://localhost:5173/checkout?v=b`): the send is refused, naming the question and option, when nothing answers there, so start it first and keep it running until they answer. Their comments on a page come back in the reply under that option's name.",
+    "- One `Prototype: <page>` line at the block's own indent instead: one page that shows every option.",
+    "",
+    "```markdown",
+    INBOX_TRADEOFFS_EXAMPLE,
+    "```",
+    "",
+    "Here `proto/checkout-b.html` is in `attachments`, and the app runs on port 5173.",
     "",
     "### Action items only the person can do",
     "",

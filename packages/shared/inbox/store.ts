@@ -131,6 +131,10 @@ import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
+  INBOX_LIVE_ANNOTATION_MAX,
+  INBOX_LIVE_ELEMENT_MAX,
+  INBOX_LIVE_QUOTE_MAX,
+  INBOX_LIVE_URL_MAX,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
   INBOX_MESSAGE_COMMENT_TEXT_MAX,
   isInboxAnnotationId,
@@ -143,6 +147,7 @@ import {
   type InboxAttachment,
   type InboxDraftFile,
   type InboxInlineImage,
+  type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
 import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
@@ -265,6 +270,8 @@ export interface InboxSendInput {
    * written); an empty list: it shows some but none could be read.
    */
   inline_images?: InboxInlineImage[];
+  /** Running apps the body's question choices name as prototypes, already checked and probed by the server (`packages/server/inbox-live.ts`). */
+  live_sites?: Omit<InboxLiveSiteRef, "opened_at">[];
   /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
@@ -478,6 +485,22 @@ function withoutExportLocation(annotation: Record<string, unknown>): Record<stri
   if (!("exportLocation" in annotation)) return annotation;
   const { exportLocation: _dropped, ...rest } = annotation;
   return rest;
+}
+
+/**
+ * A live comment's page as the bridge reports it: a path with its query
+ * (`/settings?tab=billing`), never a scheme-relative `//host` address, no
+ * control characters, at most INBOX_LIVE_URL_MAX characters.
+ */
+function isLivePagePath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= INBOX_LIVE_URL_MAX &&
+    value.startsWith("/") &&
+    !value.startsWith("//") &&
+    !value.startsWith("/\\") &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
 }
 
 /** An action item named where a question's answer or skip goes: it is marked on its card (Done, Can't do it). */
@@ -2296,6 +2319,7 @@ export class InboxStore {
       unseen,
       sent,
       guide: messages.some((m) => m.guide != null),
+      ...(messages.filter((m) => m.guide != null).at(-1)?.guide?.walkthrough ? { guide_walkthrough: true } : {}),
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
@@ -2627,9 +2651,20 @@ export class InboxStore {
       if (!row) continue;
       for (const { message, question } of waiting) {
         const author = message.author as Extract<InboxAuthor, { kind: "agent" }>;
+        const ownChoices = new Set(question.choices.flatMap((c) => (c.image ? [c.image.src] : [])));
         const inBlock = (ref: string) =>
+          ownChoices.has(ref) ||
           [question.context ?? "", ...question.choices.flatMap((c) => [c.label, c.description ?? ""])].some((text) => text.includes(ref));
-        const images = [...(message.inline_images ?? [])].sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
+        // Another question's picture choices are that question's options, not this one's context: left out, unless
+        // this question shows the same picture too.
+        const otherChoices = new Set(
+          this.questionsOf(message.id)
+            .filter((other) => other.key !== question.key)
+            .flatMap((other) => other.choices.flatMap((c) => (c.image ? [c.image.src] : []))),
+        );
+        const images = (message.inline_images ?? [])
+          .filter((image) => !otherChoices.has(image.ref) || inBlock(image.ref))
+          .sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
         candidates.push({
           seq: this.messageSeq.get(message.id) ?? 0,
           decision: {
@@ -3983,7 +4018,9 @@ export class InboxStore {
         const sameGuide = (message.guide?.input_sha256 ?? null) === (input.guide?.input_sha256 ?? null);
         const sameSupersedes = [...(message.supersedes ?? [])].sort().join("\n") === [...supersedes].sort().join("\n");
         const sameDone = [...(message.done ?? [])].sort().join("\n") === [...done].sort().join("\n");
-        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes || !sameDone) {
+        const liveIds = (sites: readonly { id: string }[] | undefined) => [...new Set((sites ?? []).map((site) => site.id))].sort().join("\n");
+        const sameLive = liveIds(message.live_sites) === liveIds(input.live_sites);
+        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes || !sameDone || !sameLive) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",
@@ -4064,6 +4101,7 @@ export class InboxStore {
         ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) }
         : {}),
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
+      ...(input.live_sites && input.live_sites.length > 0 ? { live_sites: input.live_sites.map((site) => ({ ...site, opened_at: at })) } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
       // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.
@@ -4654,6 +4692,21 @@ export class InboxStore {
    * written as ONE reply in the thread. Replaying the same idempotency key on
    * the same message answers the reply it wrote, and writes nothing.
    */
+  /**
+   * The agent message a project already has under this idempotency key (what
+   * `sendMessage` would replay), so a caller can skip work a replay never
+   * uses: probing its live sites again, for one, which could refuse a retry
+   * after the first send landed.
+   */
+  agentMessageByKey(projectId: string, key: string): InboxMessage | null {
+    const trimmed = key.trim();
+    if (!trimmed) return null;
+    for (const message of this.messages.values()) {
+      if (message.project_id === projectId && message.idempotency_key === trimmed && message.author.kind === "agent") return message;
+    }
+    return null;
+  }
+
   /** The person's reply to this message written under this idempotency key, for a replayed Send. */
   replyByKey(messageId: string, key: string): InboxMessage | null {
     if (!this.messages.has(messageId) || !key) return null;
@@ -5360,7 +5413,7 @@ export class InboxStore {
     const existing = this.annotations.get(id);
     // A draft's key is the file's path and the version, so an annotation
     // made through one attachment of a file edits from another of the same file.
-    if (existing && (existing.guide || existing.message || existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
+    if (existing && (existing.guide || existing.message || existing.live || existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
       throw new InboxError("validation_error", "annotation.id: already used on another file or version.", { field: "annotation.id" });
     }
     if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
@@ -5571,6 +5624,100 @@ export class InboxStore {
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
       annotation: { ...withoutExportLocation(fields), ...(diagramAnchor ? { diagramAnchor } : {}) },
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /**
+   * The running local apps a thread shows: the ones its agents' question
+   * choices name as prototypes (each message's `live_sites`, in thread
+   * order). One entry per site id.
+   */
+  liveSites(threadId: string): InboxLiveSiteRef[] {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== root.id) return [];
+    const out: InboxLiveSiteRef[] = [];
+    const add = (site: InboxLiveSiteRef) => {
+      if (!out.some((known) => known.id === site.id)) out.push(site);
+    };
+    for (const message of this.threadMessages(threadId)) for (const site of message.live_sites ?? []) add(site);
+    return out;
+  }
+
+  /**
+   * Save a comment the person made on a running local site the thread shows
+   * (a new one, or an edit of one still waiting): Plannotator's annotation
+   * as the live bridge made it, comment-only (an element pin, selected words,
+   * or a comment on the whole site), with `elementContext` and the page it
+   * was made on (`pageUrl`: a path, kept on the record as `live.page_url`).
+   * It rides the next Send like a file's annotation; `message_id` is the
+   * thread's latest agent message (the root when no agent wrote yet).
+   */
+  saveLiveAnnotation(threadId: string, siteId: string, annotation: unknown): InboxAnnotationRecord {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== root.id) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const site = this.liveSites(threadId).find((candidate) => candidate.id === siteId);
+    if (!site) throw new InboxError("live_site_not_found", "This thread shows no such site.");
+    if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
+      throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
+    }
+    const fields = annotation as Record<string, unknown>;
+    const id = fields.id;
+    if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    // Comment-only, as on every HTML surface: never a deletion or a replacement.
+    if (fields.type !== "COMMENT" && fields.type !== "GLOBAL_COMMENT") {
+      throw new InboxError("validation_error", 'annotation.type: "COMMENT" or "GLOBAL_COMMENT".', { field: "annotation.type" });
+    }
+    const text = fields.text;
+    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+      throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
+    }
+    // What the page itself supplies (the words or element text, the element's context and anchor) is
+    // capped, since it rides into the agent's feedback: a page cannot fill a reply or the store.
+    const quoted = fields.originalText;
+    if (quoted !== undefined && (typeof quoted !== "string" || quoted.length > INBOX_LIVE_QUOTE_MAX)) {
+      throw new InboxError("validation_error", `annotation.originalText: at most ${INBOX_LIVE_QUOTE_MAX} characters.`, { field: "annotation.originalText" });
+    }
+    for (const key of ["elementContext", "htmlAnchor"] as const) {
+      if (fields[key] !== undefined && JSON.stringify(fields[key]).length > INBOX_LIVE_ELEMENT_MAX) {
+        throw new InboxError("validation_error", `annotation.${key}: at most ${INBOX_LIVE_ELEMENT_MAX} characters as JSON.`, { field: `annotation.${key}` });
+      }
+    }
+    if (JSON.stringify(fields).length > INBOX_LIVE_ANNOTATION_MAX) {
+      throw new InboxError("validation_error", `annotation: at most ${INBOX_LIVE_ANNOTATION_MAX} characters as JSON.`, { field: "annotation" });
+    }
+    // The page: a path the site serves (`/settings?tab=billing`), never another origin's address.
+    const page = fields.pageUrl;
+    if (page !== undefined && page !== null && !isLivePagePath(page)) {
+      throw new InboxError("validation_error", `annotation.pageUrl: a path on the site, starting with one "/" (at most ${INBOX_LIVE_URL_MAX} characters).`, { field: "annotation.pageUrl" });
+    }
+    const existing = this.annotations.get(id);
+    if (existing && (!existing.live || existing.live.site_id !== site.id || existing.thread_id !== threadId)) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file, message or site.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const lastAgent = [...this.threadMessages(threadId)].reverse().find((m) => m.author.kind === "agent") ?? root;
+    const target = (existing && this.messages.get(existing.message_id)) || lastAgent;
+    if (this.closedByArchive(target)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const pageUrl = typeof page === "string" ? page : null;
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: root.project_id,
+      thread_id: threadId,
+      message_id: target.id,
+      attachment_id: "",
+      path: site.url,
+      version: INBOX_ANNOTATION_CURRENT,
+      live: { site_id: site.id, url: site.url, page_url: pageUrl },
+      annotation: withoutExportLocation(fields),
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,

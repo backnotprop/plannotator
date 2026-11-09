@@ -64,7 +64,11 @@ export interface InboxRegistryEntry {
    * its tailnet-only loopback listener), kept after a stop whose take-down
    * failed so the next start or `uninstall --purge` can take it down.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number };
+  /**
+   * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
+   * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
 }
 
 export function inboxRegistryPath(dataDir: string): string {

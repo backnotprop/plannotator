@@ -109,11 +109,20 @@ jobs:
           # or this one was rerun): deploy that newer tree instead of this
           # older one, which would overwrite it. It contains this commit, and
           # the diff from this run's base covers this commit's changes too.
+          # "Newer" means the commit contains this one (GitHub's compare says
+          # "ahead"), not only a later Test run: a run id is no proof of order
+          # on main, and deploying an older tree would put old pages live.
           NEWEST_ID="$(jq -r '.workflow_runs[0].id // 0' <<< "$RUNS")"
-          if (( NEWEST_ID > TEST_RUN_ID )); then
-            CURRENT_SHA="$(jq -r '.workflow_runs[0].head_sha' <<< "$RUNS")"
-            echo "Test run ${NEWEST_ID} passed on a newer main commit; deploying its tree ${CURRENT_SHA}."
-            git fetch --no-tags --depth=1 origin "$CURRENT_SHA"
+          NEWEST_SHA="$(jq -r '.workflow_runs[0].head_sha // empty' <<< "$RUNS")"
+          if (( NEWEST_ID > TEST_RUN_ID )) && [[ -n "$NEWEST_SHA" && "$NEWEST_SHA" != "$CURRENT_SHA" ]]; then
+            ORDER="$(gh api "repos/${REPOSITORY}/compare/${CURRENT_SHA}...${NEWEST_SHA}" --jq '.status' || echo unknown)"
+            if [[ "$ORDER" == "ahead" ]]; then
+              CURRENT_SHA="$NEWEST_SHA"
+              echo "Test run ${NEWEST_ID} passed on a newer main commit; deploying its tree ${CURRENT_SHA}."
+              git fetch --no-tags --depth=1 origin "$CURRENT_SHA"
+            else
+              echo "Test run ${NEWEST_ID} is on ${NEWEST_SHA}, which is ${ORDER} of this commit, not ahead; deploying this commit."
+            fi
           fi
           echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
           echo "Changes ${BEFORE_SHA}..${CURRENT_SHA}"

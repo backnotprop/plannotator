@@ -177,15 +177,23 @@ export function showLandsIn(shown: readonly InboxListSection[], latest: readonly
  */
 export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
   const fresh = rowsById(latest);
-  return shown.map((section) => ({
-    ...section,
-    threads: section.threads.map((row) => {
+  // What did not change stays the same objects: a read that changed no row on screen keeps the list drawn as it is.
+  let changed = false;
+  const sections = shown.map((section) => {
+    let moved = false;
+    const threads = section.threads.map((row) => {
       const next = fresh.get(row.thread_id);
       // The open thread's row always tells its state, in place: bold when an
       // agent message arrives, not bold once it is seen (it never moves).
-      return next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
-    }),
-  }));
+      const take = next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
+      if (take !== row) moved = true;
+      return take;
+    });
+    if (!moved) return section;
+    changed = true;
+    return { ...section, threads };
+  });
+  return changed ? sections : (shown as InboxListSection[]);
 }
 
 /** The list's own order within a section (packages/shared/inbox/list.ts): newest first, ties on the thread id. */

@@ -15,7 +15,7 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
@@ -592,6 +592,12 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /**
+   * On an agent's message: the running apps its question choices name as
+   * prototypes (`Prototype: http://localhost:…`), each checked and probed when
+   * it was sent (packages/server/inbox-live.ts). Absent otherwise.
+   */
+  live_sites?: InboxLiveSiteRef[];
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -1217,6 +1223,11 @@ export interface InboxGuideRef {
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
   /**
+   * A walkthrough: the code as it is, with nothing changed (submit_guide `walkthrough`, or any guide in a thread the
+   * New review box started as one). Always with `review`; it takes no verdict, and its patch is context lines only.
+   */
+  walkthrough?: true;
+  /**
    * A review's source (Reviews, approval "inbox-reviews-page"): the
    * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
    * git ref), each one line. Only with `review`; absent on reviews sent
@@ -1238,6 +1249,17 @@ export interface InboxQuestionChoice {
    * absent from records written before picture choices.
    */
   image?: { alt: string; src: string };
+  /**
+   * Option lines (approval "inbox-question-tradeoffs"), each indented under a
+   * `- [ ]` choice and read at send: `Pros:` and `Cons:` items (split on
+   * `;`), and `Prototype:`, the page that shows this option as written (an
+   * attached HTML file's path, or an `http://` address of an app running on
+   * this computer, checked at send and kept in the message's `live_sites`).
+   * Each is absent when the choice names none, and on older records.
+   */
+  pros?: string[];
+  cons?: string[];
+  prototype?: { target: string; label?: string };
 }
 
 /**
@@ -1255,6 +1277,8 @@ export interface InboxQuestionContract {
   why?: string;
   /** `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible. */
   reversible?: { value: false; why: string | null };
+  /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
+  prototype?: { target: string; label?: string };
 }
 
 /** The parsed facts of a question block, kept on its record. */
@@ -1730,6 +1754,8 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
+  guide_walkthrough?: boolean;
   /**
    * On a thread the person started (`started_by_person`): the agent session
    * it is addressed to now (the root's `to`, which "Send to another session"
@@ -2885,9 +2911,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * tokens the same way. Measured before the ref rule above landed with it (about
  * +270 bytes more, 2.4%), inside the 5%, so the constants stay.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 11293, tokens: 3058 };
+/*
+ * Option lines (INBOX_OPTION_LINES_RULE on send_message's `body`, approval
+ * "inbox-question-tradeoffs"; draft words): +452 bytes on the agent tool's
+ * entry, measured with the default tool list (about +120 tokens, estimated);
+ * added here, on top of the PRs' numbers (merge of both).
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 11745, tokens: 3178 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13268, tokens: 3634 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13720, tokens: 3754 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

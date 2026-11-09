@@ -188,10 +188,12 @@ import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewS
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createRefCards, type RefRunner } from "./ref-cards";
+import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
@@ -450,6 +452,12 @@ export interface InboxServerOptions {
    * saying so.
    */
   htmlContent?: string;
+  /** The live bridge's sources for live sites (`inbox-live.ts`), passed by the CLI as annotate's are, so the server never imports ui. Absent: sites are listed but do not open. */
+  liveBridge?: InboxLiveBridgeSources;
+  /** Tests: how long a live site's proxy lives with no open or ping (default `INBOX_LIVE_IDLE_MS`, 10 minutes). */
+  liveIdleMs?: number;
+  /** Tests: the live probe's fetch. */
+  liveProbeFetch?: typeof fetch;
   /**
    * Tests: where the Feedback dialog's send goes (inbox-feedback.ts). Default:
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
@@ -643,6 +651,8 @@ export interface InboxServer {
   imageCapture: InboxImageCapture;
   /** The Codex wake (inbox-codex-wake.ts): tests run its sweep. */
   codexWake: InboxCodexWake;
+  /** The live sites' proxies (inbox-live.ts): tests read which run and run the idle sweep. */
+  liveSites: Pick<InboxLiveSites, "running" | "sweep">;
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
@@ -814,6 +824,9 @@ const ERROR_STATUS: Record<string, number> = {
   cookie_host_url_host_in_use: 409,
   tailscale_unavailable: 409,
   local_only: 403,
+  live_unavailable: 503,
+  live_not_answering: 422,
+  live_site_not_found: 404,
 };
 
 /**
@@ -844,6 +857,18 @@ export const WINDOW_CSP = [
   "base-uri 'self'",
   "form-action 'none'",
 ].join("; ");
+
+/**
+ * The window's policy, on this computer's port and through the tailnet alike
+ * (exported for the tests that pin it). `frame-src` stays at `default-src
+ * 'self'`, never a localhost port: a live site's proxy is framed through a
+ * same-origin wrapper page whose own policy names that one port
+ * (`liveFrameCsp` in inbox-live.ts). A srcdoc frame (an HTML attachment) is
+ * checked against THIS policy when it navigates itself, so naming
+ * `http://localhost:*` here would let any attachment send its frame to any
+ * local port (proved by tests/e2e/inbox-live-sites.spec.ts).
+ */
+export { WINDOW_CSP as INBOX_WINDOW_CSP };
 
 /** `/` before the window is built (a source run, the server tests). */
 const NOT_BUILT_PAGE =
@@ -1349,6 +1374,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+        // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
+        checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
         // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
         searchIndex: search.index,
         findProjects,
@@ -1372,6 +1399,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
+        walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
+        // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
+        shapeOn: () => shapeOn(),
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
         snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
         snoozeMade: () => markSnoozeUsed(),
@@ -1443,7 +1473,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
       // When its letter mark's picture was set (Set picture…), additive: the window's key for the picture.
       const picture = projectPictures.uploadedAt(project.id);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
+      // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
+      const repo = repos.peek(project.root);
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -2657,8 +2690,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * group, and no agent text names it. Read on every request.
    */
   const shapeOn = () => options.shape ?? shapeSwitchOn();
-  /** The boards themselves: Shape on, or Code review on, whose Show me makes a board (approval "code-review-launch-build", item 1). */
-  const boardsOn = () => shapeOn() || codeReviewOn();
+  /**
+   * The boards themselves (the routes, the event feed, a Show me): Shape's own switch only. Code review on brings none
+   * of them (approval "code-review-029-shape-off"); with both on, Show me makes a board as before.
+   */
+  const boardsOn = () => shapeOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
@@ -4096,6 +4132,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     localOnly,
   });
 
+  /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer, and its owner over the tailnet. */
+  const liveSites = createInboxLiveSites({
+    store,
+    serverSession,
+    dataDir,
+    readBody,
+    json,
+    errorResponse,
+    localOnly,
+    port: () => port,
+    bridge: options.liveBridge ?? null,
+    idleMs: options.liveIdleMs,
+    fetchImpl: options.liveProbeFetch,
+    // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
+    tailnet: {
+      isOwner: (req) => tailscale.isOwnerRequest(req.headers),
+      openRelay: (handlers) => tailscale.openRelay(handlers),
+      windowOrigin: () => tailscale.windowOrigin(),
+    },
+  });
+
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
   const voice = createInboxVoice({
     dataDir,
@@ -4599,9 +4656,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         }
         const { projectsByRepo, wanted } = await pullProjects();
-        // `others=1`: the person has the Others view open, so Others is read as often as the list.
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
-        pullRisk.assess(listed.pulls);
+        // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
+        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard").
+        const everywhere = url.searchParams.get("everywhere") === "1";
+        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1", everywhere });
+        // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
+        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
@@ -4840,6 +4900,36 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           return json({ error: message, code: "pull_review_failed" }, 502);
         }
+      }
+      // Merge from the Pull requests page (approval "inbox-pr-dashboard", q-f71fc8d1): the tile popover's Merge, sent after
+      // the person's second click (`confirmed`). The forge is asked again now and must say it can merge at the head the
+      // person saw (`mergePull`'s guard); the merge pins that head and uses the repository's own method. A write to the
+      // forge as the person's own gh / glab, so the same guards as Post: the owner only, same origin, Code review on.
+      if (path === "/api/inbox/pulls/merge") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const seen = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
+        if (!seen) throw new InboxError("validation_error", "head_sha: the head commit the person saw.", { field: "head_sha" });
+        // The second click: a request that does not say so never merges.
+        if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
+        // After a restart the list may not have been read yet: read it once, as the review route does.
+        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
+        const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
+        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
+        // The next list shows it merged at once, even from the read cache or a forge search that still says open.
+        pulls.markMerged(key);
+        return json({ serverSession, ok: true, key, method: result.method, url: pull.url });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
@@ -6044,6 +6134,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
+      // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
+      // person's signed-in dev app; another site's page is refused, reads included.
+      const liveAnswer = await liveSites.route(req, path, via);
+      if (liveAnswer) return liveAnswer;
+
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two for this computer's owner only: a tailnet guest reads them as before.
       const newMessage = await live.route(req, path, ownerOrLocal(req, via), isGuest(req, via));
@@ -6315,6 +6410,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     debugLog?.close();
     clearInterval(dataCheck);
     windows.stop();
+    liveSites.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);
     setAsideTimers.clear();
     connectStop.abort();
@@ -6354,7 +6450,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

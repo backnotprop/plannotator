@@ -18,7 +18,7 @@
  *    through a real MediaStream stands in for the microphone), at 320 to 430 px, the keyboard a stand-in: the mic at the
  *    row's right end and still when it starts, the level drawn and moving, nothing over the clock, "Listening" whole or
  *    not there. Words land where they
- *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
+ *    did; compose's Cancel mid-take leaves no microphone open; To ends a take and keeps its words; a save waits for
  *    a take on its way. On a desktop Save draft stays put when listening starts.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
  *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
@@ -419,7 +419,7 @@ test('Esc: cancels only what runs, in the reply box and in compose; at rest it i
   await expect(box).toHaveValue('Kept words');
   await expect(box).toBeVisible();
 
-  // Compose: the dialog stays, and it does not ask about a draft.
+  // Compose: the press only cancels the take; the dialog stays.
   await page.locator('.ib-side [data-open-compose]').click();
   const dialog = page.locator('dialog[data-compose]');
   await expect(mic(dialog)).toBeVisible();
@@ -428,7 +428,6 @@ test('Esc: cancels only what runs, in the reply box and in compose; at rest it i
   await page.keyboard.press('Escape');
   await expect(line(dialog, 'tap')).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-compose-keep]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await context.close();
@@ -1731,7 +1730,7 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
-  test('a phone: Cancel keeps the words, and the draft question leaves no microphone open', async () => {
+  test('a phone: the take\'s Cancel keeps the words; compose\'s Cancel mid-take lets the microphone go and keeps them as a draft', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     const mics = await watchMic(page);
@@ -1747,17 +1746,15 @@ test.describe('New message dictates as the reply box does', () => {
     await expect(line(sheet(page), 'tap')).toHaveCount(0);
     await expect.poll(mics).toBe(0);
     await expect(sheet(page)).toBeVisible();
-    await expect(sheet(page).locator('[data-compose-question]')).toHaveCount(0);
     await expect(text).toHaveValue('Kept words');
 
+    // Compose's Cancel while the mic listens: the take is let go (nothing sent), and the words are kept as a draft.
     await mic(sheet(page)).tap();
     await expect(line(sheet(page), 'tap')).toBeVisible();
     await sheet(page).locator('[data-compose-cancel]').tap();
-    await expect(sheet(page).locator('[data-compose-question]')).toBeVisible();
-    await expect.poll(mics, { message: 'the question took the status and Cancel: no microphone stays open behind it' }).toBe(0);
-    await sheet(page).getByRole('button', { name: 'Keep writing' }).tap();
-    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
-    await expect(text).toHaveValue('Kept words');
+    await expect(sheet(page)).toHaveCount(0);
+    await expect.poll(mics, { message: 'closing compose leaves no microphone open' }).toBe(0);
+    await expect.poll(() => savedDrafts(w)).toContain('Kept words');
     expect(w.upstreamCalls()).toHaveLength(posts);
     await context.close();
   });
@@ -1798,20 +1795,14 @@ test.describe('New message dictates as the reply box does', () => {
     await expect(line(sheet(page), 'sending')).toBeVisible();
   }
 
-  test('a phone: Keep draft pressed before the answer waits for the words, and keeps them', async () => {
+  test('a phone: Cancel pressed before the answer waits for the words, then closes keeping them', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     await takeOnItsWay(page, w);
     await sheet(page).locator('[data-compose-cancel]').tap();
-    const keep = sheet(page).locator('[data-compose-keep]');
-    await expect(keep).toBeVisible();
-    await expect(keep, 'Keep draft waits, as Send does').toBeDisabled();
-    await keep.evaluate((button: HTMLButtonElement) => button.click());
     await page.waitForTimeout(300);
-    await expect(sheet(page), 'the press before the answer did not leave').toBeVisible();
+    await expect(sheet(page), 'the press before the answer did not leave yet').toBeVisible();
     w.send({ release: true });
-    await expect(field(page)).toHaveValue('Before. After.');
-    await keep.tap();
     await expect(sheet(page)).toHaveCount(0);
     await expect.poll(() => savedDrafts(w)).toContain('Before. After.');
     await context.close();

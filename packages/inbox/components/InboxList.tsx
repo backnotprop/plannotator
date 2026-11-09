@@ -630,14 +630,17 @@ function Preview({ row }: { row: InboxListRow }) {
   return preview ? <ClipText className="ib-pv" text={preview} /> : null;
 }
 
+const guideWord = (row: InboxListRow) => (row.guide_walkthrough ? 'Walkthrough' : 'Guided review');
+
 /** The record's 1.1: a thread that carries a guided review says so after its subject. */
 function GuideMark({ row }: { row: InboxListRow }) {
   if (!row.guide || row.section === 'sent') return null;
+  const word = guideWord(row);
   return (
-    <RowTip content="Guided review" when={guideLabelHidden}>
-      <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+    <RowTip content={word} when={guideLabelHidden}>
+      <span className="ib-att" data-guide-mark="" role="img" aria-label={word}>
         <Icon name="book" size={13} />
-        <span className="ib-att-l">Guided review</span>
+        <span className="ib-att-l">{word}</span>
       </span>
     </RowTip>
   );
@@ -1156,7 +1159,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
               {twoLines && (
                 <span className="ib-lend">
                   {guide && (
-                    <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+                    <span className="ib-att" data-guide-mark="" role="img" aria-label={guideWord(row)}>
                       <Icon name="book" size={13} />
                     </span>
                   )}
@@ -1187,7 +1190,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             </span>
           )}
           {guide && (
-            <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+            <span className="ib-att" data-guide-mark="" role="img" aria-label={guideWord(row)}>
               <Icon name="book" size={13} />
             </span>
           )}

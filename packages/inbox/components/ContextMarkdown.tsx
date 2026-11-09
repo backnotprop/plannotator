@@ -26,7 +26,7 @@ export function ContextMarkdown({
   /** The message whose images the markdown may show. None: the host's `ImageResolverContext` decides. */
   messageId?: string;
   onImage?: (src: string, alt: string) => void;
-  /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: they stay plain). */
+  /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: `#123` stays plain, `owner/repo#123` links on github.com). */
   refRepo?: { display: string; host?: string } | null;
   /** What a path in the markdown is. None: the renderer's default, which is an address of this window. */
   resolveLocalLink?: LocalLinkResolver;

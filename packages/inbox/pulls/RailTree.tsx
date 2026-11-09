@@ -11,6 +11,7 @@ import { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
 import { CountColumns, ViewedControl } from '@plannotator/ui/components/FileRowAtoms';
 import { splitFileName } from '../components/FileName';
 import { Tip } from '../components/Tip';
+import { Icon } from '../icons';
 
 type Row =
   | { kind: 'file'; file: DiffFile; dir: string; name: string; depth: number }
@@ -75,12 +76,14 @@ function Cut({ text, className }: { text: string; className: string }) {
   );
 }
 
-export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, onToggleViewed, head }: {
+export function RailTree({ tree, loose, files, viewed, commentCount, threadCount, onSelect, onToggleViewed, head }: {
   tree: DiffFileTreeNode<DiffFile>[];
   loose: readonly DiffFile[];
   files: readonly DiffFile[];
   viewed: ReadonlySet<string>;
   commentCount: (path: string) => number;
+  /** Other people's open threads on the file (the forge's). Absent: none shown, as before. */
+  threadCount?: (path: string) => number;
   onSelect: (path: string) => void;
   /** Without it the rows have no Viewed circle (a review where nothing takes the ticks). */
   onToggleViewed?: (path: string) => void;
@@ -100,10 +103,11 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
   const fileRow = ({ file, dir, name, depth }: { file: DiffFile; dir: string; name: string; depth: number }, key: string) => {
     const seen = viewed.has(file.path);
     const n = commentCount(file.path);
+    const t = threadCount?.(file.path) ?? 0;
     return (
       <li key={key}>
         <Tip content={file.path}>
-          <button type="button" className="ib-prp-file" data-seen={seen ? '' : undefined} style={{ paddingLeft: pad(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}`} onClick={() => onSelect(file.path)} data-review-file={file.path}>
+          <button type="button" className="ib-prp-file" data-seen={seen ? '' : undefined} style={{ paddingLeft: pad(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}${t ? `, ${t} open ${t === 1 ? 'thread' : 'threads'}` : ''}`} onClick={() => onSelect(file.path)} data-review-file={file.path}>
             {/* The review app's row: [viewed][letter] name [comments], its numbers at the row's end. */}
             {onToggleViewed && <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />}
             <span className="review-change-letter"><ChangeTypeLetter status={file.status} oldPath={file.oldPath} /></span>
@@ -112,6 +116,12 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
               <Cut text={name} className="ib-prp-base" />
             </span>
             {n > 0 && <span className="ib-prp-c">{n}</span>}
+            {t > 0 && (
+              <span className="ib-prp-t" data-pull-file-threads={t} aria-hidden="true">
+                <Icon name="comment" size={12} />
+                {t}
+              </span>
+            )}
             <CountColumns additions={file.additions} deletions={file.deletions} />
           </button>
         </Tip>

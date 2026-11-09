@@ -8,7 +8,9 @@
  * The world (tests/e2e/heavy-thread-world.ts): one agent sends 120 messages in
  * one thread, every fourth with a 2880 × 1800 screenshot inline, the last
  * one with six of them attached (the gallery and the tiles). The thread is
- * unread, so every message is open. The window opens it, scrolls through it
+ * unread; it opens on its newest 20 (approval "inbox-thread-fold-unread":
+ * its first message a line, the rest behind the fold), and then Expand all
+ * opens every message. The window scrolls through it
  * and back (every picture loads), and is measured over raw CDP (raw-cdp.ts:
  * no Network domain, the heap after two forced collections). Then 30 more
  * messages come in while it stays open (a window left open for days on a
@@ -129,7 +131,10 @@ test('a thread of 120 open messages and 30 full-size screenshots stays within it
     writeFileSync(join(proofDir, 'measure.json'), `${JSON.stringify(m, null, 2)}\n`);
     console.log(`heavy thread ${JSON.stringify(m)}`);
 
-    // The world is what it says: every message open, every picture loaded.
+    // Opened unread, it drew its first message's line and its newest 20 open, not all 120.
+    expect(m.openedDrawn, 'the unread thread opened on more than its newest 20').toBe(21);
+    expect(m.openedOpen, 'the unread thread opened more than its newest 20').toBe(20);
+    // The world is what it says: every message open (Expand all), every picture loaded.
     expect(m.messages).toBe(MESSAGES);
     expect(m.open).toBe(MESSAGES);
     expect(m.loaded, 'a picture in the thread did not load').toBe(m.images);

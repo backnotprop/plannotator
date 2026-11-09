@@ -51,6 +51,7 @@ import {
   MAX_PAGE_URL_LENGTH,
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
+  bridgeWindowOf,
   rejectsLiveMessage,
   resolveFrameScale,
   useHtmlAnnotation,
@@ -220,6 +221,14 @@ const REOPEN_ANSWER_MS = 3000;
 
 export interface HtmlViewerProps {
   rawHtml: string;
+  /**
+   * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
+   * annotate's live mode has always run. A host that passes one keeps the
+   * app working with `allow-scripts allow-same-origin allow-forms` and takes
+   * away what it leaves out (`allow-top-navigation`: the app cannot navigate
+   * the host's window).
+   */
+  liveSandbox?: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
    *  rawHtml. The caller must also set `fullViewport` and `liveSession`. */
   src?: string;
@@ -500,6 +509,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      liveSandbox,
       src,
       liveSession,
       currentPageUrl,
@@ -605,7 +615,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
     const postToBridge = useCallback((msg: Record<string, unknown>) => {
-      const win = iframeRef.current?.contentWindow;
+      const win = bridgeWindowOf(iframeRef.current, liveSessionRef.current);
       if (!win) return;
       const live = liveSessionRef.current;
       if (live) {
@@ -931,7 +941,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // WebKit runner, the Inbox surface's proof).
     useLayoutEffect(() => {
       function handler(e: MessageEvent<unknown>) {
-        if (e.source !== iframeRef.current?.contentWindow) return;
+        if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveSessionRef.current)) return;
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
@@ -1575,13 +1585,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. A host-served frame
+                same-origin XHR) and no srcdoc, unless a host passes `liveSandbox`. A host-served frame
                 (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
                 unchanged. */}
             <iframe
               ref={iframeRef}
               {...(src
-                ? { src }
+                ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
                   ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}

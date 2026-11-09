@@ -17,12 +17,13 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { findQuestionBlocks, QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
-import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
+import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck, type PrototypeAppTarget } from "@plannotator/core/inbox-questions";
+import { checkSendPrototypes } from "./inbox-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -32,7 +33,7 @@ import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpener
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
@@ -160,6 +161,29 @@ export const INBOX_CONTRACT_EXAMPLE = [
 ].join("\n");
 
 /**
+ * Option lines (approval "inbox-question-tradeoffs"): Pros, Cons and a
+ * prototype per option, one a running app and one an attached file. The help
+ * carries it (`plannotator inbox --help`, "Trade-offs and prototypes").
+ */
+export const INBOX_TRADEOFFS_EXAMPLE = [
+  ":::question",
+  "Which checkout should ship?",
+  "",
+  "- [ ] A · Classic — today's layout",
+  "    Pros: no retraining",
+  "    Cons: Pay sits below the fold on a phone",
+  "    Prototype: http://localhost:5173/checkout?v=a",
+  "- [ ] B · Total first — the amount and Pay at the top",
+  "    Pros: the amount due and Pay are seen first",
+  "    Cons: accounting checks a new layout; a long invoice runs to two pages",
+  "    Prototype: proto/checkout-b.html",
+  "",
+  "Recommended: B · Total first",
+  "Why: in the pilot, people paid faster with B.",
+  ":::",
+].join("\n");
+
+/**
  * send_message's `body`, as an agent reads it. The `Stopped:` and `Holds up:`
  * lines live here, not in QUESTION_AUTHORING_GUIDE (shared with plan review,
  * where they mean nothing) and not in send_message's own description (cut at
@@ -185,6 +209,7 @@ export const SEND_BODY_DESCRIPTION = [
   "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
+  INBOX_OPTION_LINES_RULE,
   "",
   INBOX_CONTRACT_EXAMPLE,
   "",
@@ -241,6 +266,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /**
+   * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
+   * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
+   * names one is refused.
+   */
+  checkPrototypeApps?: (apps: readonly PrototypeAppTarget[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** The clock (epoch ms) send_message's "not read since" line compares with (inbox-session-reads.ts). Default: Date.now. Tests inject. */
   now?: () => number;
   /** The ⌘K search index (packages/server/inbox-search.ts), for the agents' read-only search tool. */
@@ -301,6 +332,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
+  walkthroughThread?: (threadId: string) => boolean;
+  /**
+   * Whether Shape is on (config.json `inboxShape`, read on every request). With Code review on, get_guide_brief names
+   * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
+   */
+  shapeOn?: () => boolean;
 }
 
 
@@ -775,6 +813,15 @@ export async function sendAgentMessage(
   }
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
+  // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
+  // probed, before anything is written. A replay of a message already sent probes nothing: an app stopped since the
+  // first send must not make a retry read as "not sent".
+  const prototypes = await checkSendPrototypes(input.body, {
+    attachments: attachments ?? [],
+    bases: [here && isAbsolute(here) ? here : project.root, basePath ?? "", project.root],
+    checkApps: context.checkPrototypeApps,
+    probing: !(input.idempotency_key && store.agentMessageByKey(project.id, input.idempotency_key)),
+  });
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -805,6 +852,7 @@ export async function sendAgentMessage(
       thread: input.thread ?? null,
       attachments,
       inline_images: captured?.images,
+      ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
       guide: guide ?? null,
       base_path: basePath,
       from_project: fromProject,
