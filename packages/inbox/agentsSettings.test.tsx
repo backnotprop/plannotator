@@ -383,6 +383,44 @@ test.skipIf(!hasDom)('each switch left off says what that means for the agent, o
   expect(offLines(group(el, 'codex'))).toEqual({ 'Reaches the Inbox': null, 'Your replies': null, 'Note in its instructions': null });
 });
 
+test.skipIf(!hasDom)('an off line shows only under an agent found on this computer: none under one not found, none while a run is still connecting', () => {
+  const toolOff = { tool: { on: false, locked: false }, reminder: { on: false, locked: false, needs_tool: false } };
+  const manual = { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: null } as const;
+  const agents: InboxAgentRow[] = [
+    // Found, every switch off: each says so.
+    { ...tool('pi', 'Pi', { reach: manual, note: note('pi', { path: '~/.pi/agent/AGENTS.md' }) }), ...toolOff },
+    // The same switches off under agents this computer does not have: nothing.
+    { ...tool('opencode', 'OpenCode', { reach: manual, note: note('opencode', { path: '~/.config/opencode/AGENTS.md' }) }), ...toolOff, detected: false },
+    { ...tool('cline', 'Cline', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null }, reminder: null }), tool: { on: false, locked: false }, detected: false },
+    // Found with its switches on: nothing.
+    tool('claude-code', 'Claude Code'),
+  ];
+  let el = mount(model({ agents }));
+  expect(offLines(group(el, 'pi'))).toEqual({
+    'Reaches the Inbox': null,
+    'The Inbox tool': offWords.reach('Pi'),
+    'Reminder at session start': offWords.reminder('Pi'),
+    'Note in its instructions': offWords.note('Pi'),
+  });
+  for (const id of ['opencode', 'cline']) {
+    expect(group(el, id).querySelector('.ib-agstate')?.textContent).toBe('Not found on this computer');
+    expect(group(el, id).querySelector('[role="switch"][aria-checked="false"]')).not.toBeNull();
+    expect(group(el, id).querySelector('[data-agent-off]')).toBeNull();
+  }
+  expect(group(el, 'claude-code').querySelector('[data-agent-off]')).toBeNull();
+  // The folded "Not found on this computer" group, opened, has none either.
+  act(() => (el.querySelector('.ib-amore') as HTMLButtonElement).click());
+  expect(el.querySelector('#ib-aundet')).not.toBeNull();
+  expect(el.querySelectorAll('[data-agent-off]').length).toBe(3);
+  expect(el.querySelector('#ib-aundet [data-agent-off]')).toBeNull();
+
+  // While a run is still connecting the agents the switches may still turn on: no line yet, so none comes and goes.
+  act(() => root?.unmount());
+  host?.remove();
+  el = mount(model({ agents, connecting: true }));
+  expect(el.querySelector('[data-agent-off]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('no off line where there is no switch to turn on: a reminder that needs the tool, a note to copy or with no file, Claude Code\'s mod off, another QWEN_HOME', () => {
   const reason = "Plannotator's Claude Code mod is off (PLANNOTATOR_CLAUDE_MOD or claudeCodeMod), so Claude Code has no Inbox tool";
   const base = model();

@@ -295,6 +295,8 @@ const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
  * What a switch left off means for that agent, one quiet line under its row
  * while it is off (owner, 2026-11-07: "If they turn off the Inbox tool, then
  * it's game over. … Let 'em know. Even reminders."). No dialog, no confirm.
+ * Only under an agent found on this computer (owner, 2026-11-09): an agent the
+ * page marks "Not found on this computer" gets none.
  */
 export const offWords = {
   reach: (label: string) => `Off: ${label} can't send you messages or read your replies here.`,
@@ -355,8 +357,11 @@ function AgentGroup({
   busy,
   sessions,
   extra,
+  settling,
 }: {
   row: InboxAgentRow;
+  /** A run is still connecting the agents (`model.connecting`): the switches may still turn on, so no off line yet. */
+  settling?: boolean;
   /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
   extra?: ReactNode;
   noteText: string;
@@ -371,6 +376,9 @@ function AgentGroup({
   const base = row.detected ? stateOf(row) : { text: 'Not found on this computer', tone: 'off' as const };
   const needs = row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode' ? sessionsState(row.id, sessions) : null;
   const state = needs ? { text: `${base.text} · ${needs}`, tone: 'bad' as const } : base;
+  // An off line shows only under an agent found on this computer (the header's status is not "Not found on this
+  // computer"), and only once that is known and settled: never in, then out.
+  const offLine = (kind: OffKind, text: string) => (row.detected === true && !settling ? { kind, text } : null);
   // DeepSeek Harness decides once, when it starts (its plugin), never per session.
   const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
   const reach = row.reach;
@@ -463,7 +471,7 @@ function AgentGroup({
         k="Reaches the Inbox"
         v={reachValue}
         // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
-        off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? { kind: 'reach', text: offWords.reach(row.label) } : null}
+        off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? offLine('reach', offWords.reach(row.label)) : null}
         sub={modOff && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
         warn={modOff && reach.kind === 'tool'}
         r={
@@ -480,7 +488,7 @@ function AgentGroup({
         <Row
           k="The Inbox tool"
           sub={cost}
-          off={row.tool.on ? null : { kind: 'tool', text: reach.on ? offWords.toolBesideMcp(row.label) : offWords.reach(row.label) }}
+          off={row.tool.on ? null : offLine('tool', reach.on ? offWords.toolBesideMcp(row.label) : offWords.reach(row.label))}
           v={
             <>
               the <code>plannotator_inbox</code> tool, with Plannotator&apos;s {row.id === 'pi' ? 'extension' : 'plugin'}
@@ -499,7 +507,7 @@ function AgentGroup({
           k="Reminder at session start"
           v={row.reminder.needs_tool ? 'Needs the tool' : 'one line when a session starts'}
           // "Needs the tool" already says why; the tool's own off line says what that means.
-          off={!row.reminder.on && !row.reminder.needs_tool ? { kind: 'reminder', text: offWords.reminder(row.label) } : null}
+          off={!row.reminder.on && !row.reminder.needs_tool ? offLine('reminder', offWords.reminder(row.label)) : null}
           r={
             <>
               {pending.has(`${row.id}:reminder`) && <span className="ib-agpending">{next}</span>}
@@ -535,7 +543,7 @@ function AgentGroup({
                 </>
               ) : null
             }
-            off={note.state === 'absent' ? { kind: 'note', text: offWords.note(row.label) } : null}
+            off={note.state === 'absent' ? offLine('note', offWords.note(row.label)) : null}
             sub={noteSub}
             warn={(note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
           />
@@ -808,6 +816,7 @@ export function AgentsSettings({
             noteText={model.note_text}
             pending={pending}
             busy={busy.has(row.id)}
+            settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
             {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
