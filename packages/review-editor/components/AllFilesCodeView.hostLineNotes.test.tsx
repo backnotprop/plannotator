@@ -37,7 +37,8 @@ type Item = { id: string; type: 'diff'; version?: number; annotations: Ann[]; fi
 let items = new Map<string, Item>();
 /** The ids of each `updateItem`, in order. */
 let updates: string[] = [];
-let renderAnnotation: (annotation: Ann, item: Item) => React.ReactNode = () => null;
+// Called as CodeView does since @pierre/diffs 1.6: (annotation, fileDiff, item).
+let renderAnnotation: (annotation: Ann, fileDiff: unknown, item: Item) => React.ReactNode = () => null;
 let renderCustomHeader: (item: Item) => React.ReactNode = () => null;
 /** The options CodeView was last given. */
 let viewOptions: { itemMetrics?: { diffHeaderHeight?: number } } = {};
@@ -143,7 +144,7 @@ async function mount(hostLineNotes?: readonly HostLineNote[]) {
 }
 
 const kinds = (id: string) => items.get(id)!.annotations.map((a) => `${a.metadata.kind ?? 'annotation'}:${a.metadata.annotationId}`);
-const drawn = (id: string, index: number) => renderToStaticMarkup(<>{renderAnnotation(items.get(id)!.annotations[index]!, items.get(id)!)}</>);
+const drawn = (id: string, index: number) => renderToStaticMarkup(<>{renderAnnotation(items.get(id)!.annotations[index]!, items.get(id)!.fileDiff, items.get(id)!)}</>);
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
