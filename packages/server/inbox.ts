@@ -217,8 +217,9 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
-import { isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
@@ -3825,10 +3826,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
   // once each (inbox-codex-wake.ts). Worded like any bridge command.
+  /** The launch engine exists (the Codex wake is made before it). */
+  let launchReady = false;
+  /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
+  const launchedCodex = (session: string) =>
+    store.launchedRoots().some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
+    // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
+    // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
+    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
+    launched: (session) => launchedCodex(session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
@@ -3945,7 +3956,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
-  // Launch: compose starts Claude Code or Pi in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
+  // Launch: compose starts Claude Code, Pi or Codex in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
     store,
@@ -3982,6 +3993,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
     isGuest,
   });
+  launchReady = true;
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4176,6 +4188,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
+  // Settings → Agents' Codex account line: read from Codex when the page asks, never polled (inbox-codex-account.ts).
+  const codexAccount = createInboxCodexAccount({ environment: agentEnvironment, dataDir, ...(options.voice?.extraClis ? { extraClis: options.voice.extraClis } : {}) });
   const voice = createInboxVoice({
     dataDir,
     environment: agentEnvironment,
@@ -5064,6 +5078,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ ...updates.details(), checked });
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // Codex's account (Settings → Agents): the person's own login, never a tailnet guest's to read.
+      if (path === "/api/inbox/codex/account") {
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+        return json({ account: await codexAccount.read() });
       }
       // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
@@ -6458,6 +6479,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     qwenWake.stop();
     t3Wake.stop();
     voice.stop();
+    codexAccount.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
     ask.stop();

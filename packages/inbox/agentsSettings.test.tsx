@@ -349,3 +349,27 @@ test.skipIf(!hasDom)('Your replies on Windows: Claude Code\'s mod stands down th
   expect(repliesOf(tool('pi', 'Pi'), 'windows')?.wakes).toBe(true);
   expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'), 'windows')?.wakes).toBe(false);
 });
+
+test.skipIf(!hasDom)("Codex's group reads its account once: the plan and the limits used, or the command that signs in", async () => {
+  const answer = (account: unknown) =>
+    (async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      return new Response(JSON.stringify({ account }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+  const asked: string[] = [];
+  globalThis.fetch = answer({ state: 'signed_in', kind: 'chatgpt', plan: 'ChatGPT Plus', limits: [{ used_percent: 21, window_mins: 300, resets_at: null }, { used_percent: 40, window_mins: 10080, resets_at: null }] });
+  const el = mount(model());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(asked.filter((url) => url.endsWith('/codex/account'))).toHaveLength(1);
+  expect(rows(group(el, 'codex')).at(-1)).toEqual({ k: 'Account', v: 'ChatGPT Plus', sw: null, sub: '5h 21% · week 40%' });
+  // Only Codex's group has it.
+  expect(el.querySelectorAll('[data-codex-account]')).toHaveLength(1);
+  act(() => root!.unmount());
+  host!.remove();
+
+  globalThis.fetch = answer({ state: 'signed_out' });
+  const out = mount(model());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(rows(group(out, 'codex')).at(-1)).toEqual({ k: 'Account', v: 'Not signed in', sw: null, sub: 'Run codex login in Terminal to sign in.' });
+  expect(group(out, 'codex').querySelector('[data-codex-account] code')?.textContent).toBe('codex login');
+});

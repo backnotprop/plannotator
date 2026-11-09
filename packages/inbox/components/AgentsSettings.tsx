@@ -5,6 +5,7 @@ import {
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
+  type InboxCodexAccount,
   type InboxHostSessions,
   type InboxOpenSession,
   type InboxToolHostId,
@@ -17,6 +18,7 @@ import { ConnectPicker } from './ConnectPicker';
 import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeCommand, ReloadCopy, ReloadLead, type ReloadSpec } from './RestartNote';
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
+import { codexAccountLine } from '../codexAccount';
 
 /** Whether any host has an open session that needs a restart or an update: Settings' Agents dot. */
 export function agentsNeedRestart(model: InboxAgentsModel | null | undefined): boolean {
@@ -309,6 +311,43 @@ function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: Re
   );
 }
 
+/**
+ * Codex's account, read-only (`GET /api/inbox/codex/account`, asked once when the row shows): the plan or API key and
+ * how much of its limits is used, or that Codex is not signed in and the command that signs in. Plannotator never
+ * signs in for the person. No row until the read answers, nor when it could not be read.
+ */
+function CodexAccountRow() {
+  const [account, setAccount] = useState<InboxCodexAccount | null>(null);
+  useEffect(() => {
+    let live = true;
+    inboxApi
+      .codexAccount()
+      .then((read) => live && setAccount(read.account))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const line = codexAccountLine(account);
+  if (!line) return null;
+  return (
+    <Row
+      k="Account"
+      v={line.value}
+      sub={
+        line.signIn ? (
+          <>
+            Run <code>codex login</code> in Terminal to sign in.
+          </>
+        ) : (
+          line.limits
+        )
+      }
+      data={{ 'data-codex-account': account?.state === 'signed_in' ? account.kind : 'signed_out' }}
+    />
+  );
+}
+
 function AgentGroup({
   row,
   noteText,
@@ -583,8 +622,8 @@ export function AgentsSettings({
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
       <Row
         k="Start agents from New message"
-        v="Claude Code and Pi"
-        sub="New message can start Claude Code or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        v="Claude Code, Codex and Pi"
+        sub="New message can start Claude Code, Codex or Pi in a folder you pick. Turn off to only message sessions that are already running."
         data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
@@ -770,6 +809,7 @@ export function AgentsSettings({
             onChange={(input) => void change(row.id, input)}
             {...(context ? { platform: context.platform } : {})}
             {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
+            {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

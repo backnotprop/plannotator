@@ -79,8 +79,9 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
+import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
@@ -411,6 +412,7 @@ export function createInboxLaunch(options: {
   const ownHosts: LaunchHost[] = [
     claude,
     createPiLaunchHost(context),
+    createCodexLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -647,6 +649,14 @@ export function createInboxLaunch(options: {
   const trusting = new Map<string, Promise<Record<string, unknown>>>();
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
+  /** A reply's `deliver` under way, by launch id: a Stop or Delete stops it at its next step and waits for it. */
+  const delivering = new Map<string, Set<{ controller: AbortController; done: Promise<unknown> }>>();
+  /** Before a Stop or Delete stops the session: no delivery under way starts a turn after it. */
+  const settleDeliveries = async (launchId: string) => {
+    const under = [...(delivering.get(launchId) ?? [])];
+    for (const one of under) one.controller.abort();
+    await Promise.all(under.map((one) => one.done.catch(() => undefined)));
+  };
 
   /**
    * Create a folder (q-d2512542): a folder the Send just made, still empty, is trusted as one the person trusted by
@@ -1187,6 +1197,7 @@ ${result.text}`);
         stopping.add(launch.id);
         let result: LaunchHostResult;
         try {
+          await settleDeliveries(launch.id);
           result = await host.stop(launch.session_ref);
         } finally {
           stopping.delete(launch.id);
@@ -1238,6 +1249,7 @@ ${result.text}`);
           } else if (launch.clone?.state === "cloning") removeClonedFolder(launch);
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
+            await settleDeliveries(launch.id);
             const stop = await host.stop(launch.session_ref);
             const rm = await host.remove(launch.session_ref);
             log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
@@ -1694,6 +1706,45 @@ ${result.text}`);
           };
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
+    },
+
+    /**
+     * The Codex wake's text for a person's item to `session` of `agent` (asked before `codex queue`): a launched
+     * session's host takes it as a turn (`deliver`). A session no launch here owns goes the wake's own way (`queue`).
+     * A session that is not running and is not being started again for a reply holds it: only the owner's new
+     * reply starts it again (`maybeRespawn`, so a Stop holds across an Inbox restart too), and a deleted launch's
+     * session never gets it.
+     */
+    async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
+      if (!Object.hasOwn(hosts, agent)) return "queue";
+      const host = hosts[agent]!;
+      if (!host.deliver) return "queue";
+      const ofSession = roots().filter((m) => m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      const root = ofSession.find((m) => !m.launch!.deleted_at) ?? ofSession[0];
+      if (!root) return "queue";
+      const launch = root.launch!;
+      if (launch.deleted_at || stopping.has(launch.id) || deleting.has(launch.id)) return "hold";
+      if (!liveOf(host, root, memoOf(launch)) && !respawning.has(launch.id)) return "hold";
+      const controller = new AbortController();
+      const call = host.deliver(launch, text, controller.signal).catch((error: unknown): LaunchDelivery => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const one = { controller, done: call };
+      const under = delivering.get(launch.id) ?? delivering.set(launch.id, new Set()).get(launch.id)!;
+      under.add(one);
+      let result: LaunchDelivery;
+      try {
+        result = await call;
+      } finally {
+        under.delete(one);
+        if (under.size === 0) delivering.delete(launch.id);
+      }
+      if (typeof result === "object") startLog(launch.id, "failed" in result ? `deliver: ${result.failed}` : `deliver: may have gone, not sent again: ${result.uncertain}`);
+      options.onChange();
+      return result;
+    },
+
+    /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
+    launched(agent: string, session: string): boolean {
+      return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
     },
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */

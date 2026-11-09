@@ -76,6 +76,7 @@ import type {
   InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
+  InboxCodexAccount,
   InboxAnnotationRecord,
   InboxCardColumn,
   InboxCardHistoryEntry,
@@ -1821,6 +1822,8 @@ export const inboxApi = {
   launchTrust: (launchId: string, warning: string | null, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`, undefined, machine), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  /** Settings → Agents' Codex account line: read from Codex on this computer (the plan and its limits), never polled. */
+  codexAccount: () => get<{ account: InboxCodexAccount }>(inboxUrl('/codex/account')),
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
