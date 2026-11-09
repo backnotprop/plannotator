@@ -215,6 +215,42 @@ test('the dot on the bar and the panel time pill seek back to the comment; a pre
   await expect.poll(() => currentTime(page)).toBeLessThan(1.3);
 });
 
+test("a narrow tile's line drops whole parts and never cuts one: the length and the comment count stay", async () => {
+  const page = world.page;
+  const tiles = page.locator('section.ib-pane .ib-attachments:not(.ib-hatts-tiles) .ib-tiles');
+  const line = tiles.locator(`button[data-attachment-id="${world.noteId}"] .ib-kd`);
+  await expect(line).toHaveText(/^WAV audio · 0:02 · 1 comment · [\d.]+ KB$/);
+  // Each part of the line at this width: drawn whole ('whole'), out of sight ('gone'), or cut ('cut').
+  const partsAt = (width: number) =>
+    tiles.evaluate((grid, width) => {
+      (grid.firstElementChild as HTMLElement).style.width = `${width}px`;
+      const line = grid.querySelector('.ib-kd')!;
+      const box = line.getBoundingClientRect();
+      const parts = Array.from(line.querySelectorAll('span')).filter((part) => part.children.length === 0);
+      return parts.map((part) => {
+        const half = part.parentElement!.getBoundingClientRect();
+        const r = part.getBoundingClientRect();
+        const [left, right, bottom] = [Math.max(box.left, half.left), Math.min(box.right, half.right), Math.min(box.bottom, half.bottom)];
+        if (r.top >= bottom - 1 || r.left >= right - 0.5) return 'gone';
+        return r.left >= left - 0.5 && r.right <= right + 0.5 && r.bottom <= bottom + 0.5 && part.scrollWidth <= Math.ceil(r.width) ? 'whole' : 'cut';
+      });
+    }, width);
+  try {
+    const seen = new Set<string>();
+    // From a tile wide enough for the whole line down to one that holds only the length and the count.
+    for (let width = 560; width >= 300 && !seen.has('gone gone'); width -= 4) {
+      const [kind, length, count, size] = await partsAt(width);
+      expect([kind, size], `at ${width}px`).not.toContain('cut');
+      expect([length, count], `at ${width}px`).toEqual(['whole', 'whole']);
+      seen.add(`${kind} ${size}`);
+    }
+    // The size goes first, then the kind: never the kind while the size still shows.
+    expect([...seen].sort()).toEqual(['gone gone', 'whole gone', 'whole whole']);
+  } finally {
+    await tiles.evaluate((grid) => (grid.firstElementChild as HTMLElement).style.removeProperty('width'));
+  }
+});
+
 test('Send carries the moment; the agent reads it, with no frame', async () => {
   const page = world.page;
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
