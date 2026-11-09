@@ -47,7 +47,7 @@ export const REVEAL_TIMES = {
  * person who keeps a thread open beside the list never makes: App counts idle only while one of them is armed (and
  * the list options' update-day dialog, which waits for the list the same way).
  */
-export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip']);
+export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip', 'tab_icon']);
 
 /**
  * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
@@ -129,6 +129,10 @@ export function noteOneTimeDialogShown(): void {
 }
 export function oneTimeDialogShownThisLoad(): boolean {
   return otherOneTimeDialog;
+}
+/** A test starts each case as a fresh load. */
+export function resetOneTimeDialogShownForTests(): void {
+  otherOneTimeDialog = false;
 }
 
 export function useRevealMoment(input: RevealMomentInput) {
@@ -512,7 +516,7 @@ export function useStepsReveal(input: StepsRevealInput) {
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
-  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip'>;
+  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip'>;
   /**
    * The Inbox has it for this page, read once per load: `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.

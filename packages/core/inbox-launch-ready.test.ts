@@ -31,6 +31,13 @@ describe("why an agent can't start on a machine, in that machine's name", () => 
     for (const line of INBOX_CLAUDE_PLUGIN_INSTALL.split("\n")) expect(fix).toContain(line);
   });
 
+  test("a signed-out Codex is told to run codex login, never claude, over SSH too", () => {
+    for (const overSsh of [false, true]) {
+      const words = inboxLaunchNotReadyWords({ agent: "Codex", code: "signed_out", machine: null, overSsh });
+      expect(words.fix).toBe("Run `codex login` on this computer, then try again.");
+    }
+  });
+
   test("launch off and a too-old Plannotator read differently: one is fixed by updating, the other is not", () => {
     expect(inboxMachineLaunchWords("Mac mini", "update")).toContain("Update Plannotator on Mac mini");
     expect(inboxMachineLaunchWords("Mac mini", "off")).not.toContain("Update");

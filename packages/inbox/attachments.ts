@@ -27,7 +27,7 @@ import type { PrototypeNames } from './prototypes';
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
 export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: string, name: string): Block[] {
   const kind = readInboxAttachmentKind(kindValue);
-  if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'pdf' || kind === 'file') return [];
+  if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf' || kind === 'file') return [];
   if (kind === 'mermaid' || kind === 'graphviz') return diagramDocumentBlocks(text, kind);
   if (kind === 'code') return codeDocumentBlocks(text, name);
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
@@ -151,9 +151,10 @@ export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>,
   return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
-/** A video's bytes for `<video src>` (HTTP Range, by id only). */
-export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
+/** A video's bytes for `<video src>`, a recording's for `<audio src>` (its `audio` route, by its kind): HTTP Range, by id only. */
+export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'> & { kind?: unknown }, version: 'current' | 'sent' = 'current'): string {
+  const route = readInboxAttachmentKind(attachment.kind) === 'audio' ? 'audio' : 'video';
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/${route}${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
@@ -776,7 +777,8 @@ export function attachmentFeedback(
       group = {
         annotations: [],
         blocks: kind === 'code' ? [] : attachmentBlocks(kind, text, attachment.name),
-        ...(kind === 'video' ? { video: { durationMs: attachment.duration_ms } } : {}),
+        // A video's or a recording's comments are at moments.
+        ...(kind === 'video' || kind === 'audio' ? { video: { durationMs: attachment.duration_ms } } : {}),
       };
       groups.set(label, group);
     }
@@ -787,7 +789,7 @@ export function attachmentFeedback(
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);
     if (code.length > 0) group.blocks = [...group.blocks, ...code];
-    // A video's comments go by the moment they are at, each with its "At 1:42 (102.4 s of 7:41)" line.
+    // A video's (and a recording's) comments go by the moment they are at, each with its "At 1:42 (102.4 s of 7:41)" line.
     // Export copies only: the exporter orders same-block entries by offset, and prints `exportLocation`.
     if (group.video) {
       const durationMs = group.video.durationMs;

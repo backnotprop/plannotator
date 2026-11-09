@@ -10,8 +10,8 @@
  * Loaded from `hooks/hooks.json` ("modules") only where Claude Code runs
  * hooks modules (function hooks, 2.1.287+, CLI). Elsewhere the same plugin's
  * classic command hooks and the `/plannotator-*` skills behave exactly as
- * before; the mod also stands down in `-p`/SDK sessions and where there is no
- * `/bin/sh` (Windows), leaving those classic paths in place.
+ * before; the mod also stands down in `-p`/SDK sessions and where it finds no
+ * shell for its scripts (shell.ts), leaving those classic paths in place.
  *
  * What it does:
  * - ExitPlanMode (`tool.call`): answers `deny` with "waiting for review" text
@@ -110,8 +110,10 @@ import {
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
-import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
+import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
+import { isAbsolutePath } from './paths'
 import { PLAN_TOOL } from './plan'
+import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
@@ -476,7 +478,7 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
   const folder = link ? await link.projectFolder().catch(() => null) : null
   if (folder) return folder
   const root = await Promise.resolve($.session.root()).then(String, () => '')
-  if (root.startsWith('/')) return root
+  if (isAbsolutePath(root)) return root
   return fallback ?? String(await $.session.cwd())
 }
 
@@ -517,11 +519,11 @@ function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTit
   let firstRoot: string | null = null
   const folder = (read: () => unknown) => Promise.resolve().then(read).then(String, () => '')
   return new TranscriptTitle(host, sessionId, async () => {
-    const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+    const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeOf($)) ?? ''}/.claude`
     const root = await folder(() => $.session.root())
-    if (firstRoot === null && root.startsWith('/')) firstRoot = root
+    if (firstRoot === null && isAbsolutePath(root)) firstRoot = root
     const cwd = await folder(() => $.session.cwd())
-    return configDir.startsWith('/') ? claudeTranscriptPaths(configDir, [firstRoot ?? '', root, cwd], sessionId) : []
+    return isAbsolutePath(configDir) ? claudeTranscriptPaths(configDir, [firstRoot ?? '', root, cwd], sessionId) : []
   })
 }
 
@@ -619,6 +621,62 @@ async function startSelfHeal($: Engine): Promise<void> {
   })
 }
 
+/**
+ * The user's home folder, as the CLI's `homedir()` finds it: `USERPROFILE` on
+ * Windows (where `HOME`, when set at all, may name another folder), else `HOME`.
+ */
+async function homeOf($: Engine): Promise<string | undefined> {
+  const profile = await $.env.get('USERPROFILE')
+  const windows = (await $.env.get('OS')) === 'Windows_NT'
+  const home = (windows && profile) || (await $.env.get('HOME')) || profile
+  return typeof home === 'string' && home ? home : undefined
+}
+
+/**
+ * The variables `resolveShell` reads. Each is named as a literal: Claude Code
+ * refuses to load a hooks module whose `$.env.get` takes anything else
+ * (env-get-literal.test.ts).
+ */
+async function shellEnvOf($: Engine): Promise<Record<string, string | undefined>> {
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
+  return {
+    OS: text(await $.env.get('OS')),
+    // Which Windows shell: PLANNOTATOR_MOD_SHELL, then where findGitBash looks, then where powershell.exe is.
+    // Windows matches variable names in any case, so PROGRAMFILES reads ProgramFiles.
+    PLANNOTATOR_MOD_SHELL: text(await $.env.get('PLANNOTATOR_MOD_SHELL')),
+    CLAUDE_CODE_GIT_BASH_PATH: text(await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')),
+    PATH: text(await $.env.get('PATH')),
+    PROGRAMFILES: text(await $.env.get('PROGRAMFILES')),
+    LOCALAPPDATA: text(await $.env.get('LOCALAPPDATA')),
+    SYSTEMROOT: text(await $.env.get('SYSTEMROOT')),
+    WINDIR: text(await $.env.get('WINDIR')),
+  }
+}
+
+/** The session's shell (shell.ts `pickShell`), with its pin in the session's folder. */
+async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null> {
+  const env = await shellEnvOf($)
+  const sessionDir = `${dataDir}/claude-code-mod/${String(await $.session.id()).replace(/[^A-Za-z0-9._-]/g, '_')}`
+  const pinPath = `${sessionDir}/shell`
+  return pickShell(
+    { exists: async (path) => Boolean(await $.fs.exists(path)), env: async (name) => env[name] },
+    {
+      readPin: async () => {
+        const text = await $.fs.read(pinPath).catch(() => null)
+        return typeof text === 'string' ? text : null
+      },
+      writePin: async (shell) => {
+        if (!(await $.fs.exists(sessionDir))) {
+          useShell(shell)
+          await $.process.run(privateDirArgv(sessionDir), { timeoutMs: 5_000 })
+        }
+        await $.fs.write(pinPath, `${shell.name}\n`)
+      },
+      run: (argv) => $.process.run(argv, { timeoutMs: 5_000 }),
+    },
+  )
+}
+
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
 async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promise<Allowed | null> {
   // A person at the prompt is what makes a later plugin turn mean anything;
@@ -626,11 +684,9 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!e.isInteractive) return null
   // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts).
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
-  if (!(await $.fs.exists('/bin/sh'))) return null
-  const home = await $.env.get('HOME')
   const dataDir = await resolveDataDir(
     {
-      home: home ? String(home) : undefined,
+      home: await homeOf($),
       dataDir: await $.env.get('PLANNOTATOR_DATA_DIR'),
       xdgDataHome: await $.env.get('XDG_DATA_HOME'),
     },
@@ -643,6 +699,9 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!resolveClaudeModEnabled(await $.env.get('PLANNOTATOR_CLAUDE_MOD'), configText)) {
     return null
   }
+  const shell = await pickShellOf($, dataDir)
+  if (!shell) return null
+  useShell(shell)
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
   return {
     dataDir,
@@ -951,8 +1010,9 @@ export function register(on: On) {
   // Plannotator's plan hook turns the variable off, so where it would have
   // waived a removal prompt in bypass mode, the mod answers that prompt with
   // allow. The `tool.check` hook only watches the call's own verdict (which
-  // rule, hook or plugin asked); the person's own rules and hooks, and every
-  // enabled plugin's PreToolUse and PermissionRequest hooks, win.
+  // rule, hook or plugin asked); the person's own rules, a hook that asked on
+  // the call, and every PermissionRequest hook that could run for Bash (the
+  // person's or an enabled plugin's) win.
   on('tool.check', { tool: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     const verdict = await next(e)
     if (!allowed || typeof e.tool_use_id !== 'string') return verdict
@@ -966,13 +1026,14 @@ export function register(on: On) {
 
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
+    let why = ''
     const decision = await answerRemovalPrompt(e, removalAsks, {
       variable: () => $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'),
       childSession: () => $.env.get('CLAUDE_CODE_CHILD_SESSION'),
       settings: () => $.settings.read(),
       configDir: async () => {
-        const home = await $.env.get('HOME')
-        return (await $.env.get('CLAUDE_CONFIG_DIR')) || (typeof home === 'string' && home ? `${home.replace(/\/+$/, '')}/.claude` : null)
+        const home = await homeOf($)
+        return (await $.env.get('CLAUDE_CONFIG_DIR')) || (home ? `${home.replace(/[\\/]+$/, '')}/.claude` : null)
       },
       readText: async (path) => {
         if (!(await $.fs.exists(path))) return null
@@ -980,9 +1041,13 @@ export function register(on: On) {
         if (typeof text !== 'string') throw new Error(`unreadable: ${path}`)
         return text
       },
+      // Claude Code's own verdict for one part of a several-parts command; nothing runs.
+      check: (command) => $.tool.check({ tool: SHELL_TOOL, input: { command } }),
+    }, (reason) => {
+      why = reason
     })
     if (allowed.debugPath && (decision || isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS')))) {
-      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : 'left to the dialog'}`)
+      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : `left to the dialog${why ? `: ${why}` : ''}`}`)
     }
     return decision ? { decision } : next(e)
   })

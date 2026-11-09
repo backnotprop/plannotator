@@ -265,6 +265,7 @@ packages/inbox/openInFile.test.tsx
 packages/inbox/htmlLinks.test.tsx
 packages/inbox/markdownLinks.test.tsx
 packages/inbox/videoAttachment.test.tsx
+packages/inbox/audioAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
 packages/inbox/skillReferences.test.tsx
@@ -569,6 +570,7 @@ packages/inbox/broReveal.test.tsx
 packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
+packages/inbox/tabIconChoice.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
@@ -651,6 +653,7 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
 packages/inbox/listFilterButton.test.tsx
 packages/inbox/prototypeWindow.test.tsx
@@ -659,3 +662,5 @@ packages/inbox/pageMarks.test.tsx
 packages/review-editor/components/guide/GuideDiffControls.test.tsx
 packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
+packages/inbox/fileQuestionCards.test.tsx
+packages/inbox/agents/agentsSection.test.tsx

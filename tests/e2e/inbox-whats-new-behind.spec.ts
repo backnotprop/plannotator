@@ -72,6 +72,8 @@ test.beforeAll(async () => {
       inboxAgentNotes: { offered: true },
       inboxSound: { dialogShownFor: RUNNING },
       inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
     }),
   );
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());

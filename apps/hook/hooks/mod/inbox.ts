@@ -57,6 +57,8 @@
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
+import { isAbsolutePath } from './paths'
+import { shellArgv } from './shell'
 import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
@@ -252,10 +254,10 @@ export function inboxSessionProjectEnvValue(sessionId: string, folder: string): 
  * nothing answers with an absolute path.
  */
 export async function sessionProjectFolder(host: Host, live: string | null, first: string | null, cwd: string | null): Promise<string | null> {
-  const usable = async (folder: string | null): Promise<boolean> => !!folder && folder.startsWith('/') && (await host.exists(folder).catch(() => false))
+  const usable = async (folder: string | null): Promise<boolean> => !!folder && isAbsolutePath(folder) && (await host.exists(folder).catch(() => false))
   if (live && (await usable(live))) return live
   if (first && (await usable(first))) return first
-  return cwd && cwd.startsWith('/') ? cwd : null
+  return cwd && isAbsolutePath(cwd) ? cwd : null
 }
 
 /** The Inbox tools whose relative paths resolve against the folder the agent works in (INBOX_WORKING_FOLDER_META_KEY). */
@@ -272,7 +274,7 @@ const INBOX_WORKING_FOLDER_ACTIONS: ReadonlySet<string> = new Set(['send_message
  * threads. Never throws.
  */
 export async function readSessionThreads(host: Host, dataDir: string, sessionId: string, cwd: string, toolName: string): Promise<string | null> {
-  if (!sessionId || !cwd.startsWith('/')) return null
+  if (!sessionId || !isAbsolutePath(cwd)) return null
   const work = (async () => {
     const path = inboxRegistryPathOf(dataDir)
     if (!(await host.exists(path))) return null
@@ -425,8 +427,8 @@ export function sessionNamesAfterCommand(
  * newline yet is read again once the file grows, never on every poll. Another
  * inode under the path is a rewrite: its end is read as new. A read that fails
  * or times out waits longer each time, and a region that fails
- * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No `/bin/sh` (Windows), no
- * file found, or a read that fails: the last title, else null, and the
+ * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No file found, or a read
+ * that fails: the last title, else null, and the
  * `/rename` store answers.
  */
 export const TRANSCRIPT_TITLE_FIRST_READ_BYTES = 4 * 1024 * 1024
@@ -463,7 +465,7 @@ export function claudeProjectSlug(folder: string): string | null {
 /** Where Claude Code keeps `sessionId`'s transcript for each folder it may have started in, first first. */
 export function claudeTranscriptPaths(configDir: string, folders: readonly string[], sessionId: string): string[] {
   if (!configDir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sessionId)) return []
-  const base = configDir.replace(/\/+$/, '')
+  const base = configDir.replace(/[\\/]+$/, '')
   const out: string[] = []
   for (const folder of folders) {
     const slug = folder ? claudeProjectSlug(folder) : null
@@ -553,7 +555,7 @@ export class TranscriptTitle {
     if (size < this.offset || size - this.offset > TRANSCRIPT_TITLE_FIRST_READ_BYTES) this.fresh = true
     const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
     const length = size - start
-    const result = await this.host.run(['/bin/sh', '-c', TRANSCRIPT_TITLE_SCRIPT, 'sh', String(start + 1), path, String(length)], { timeoutMs: 5_000 }).catch(() => null)
+    const result = await this.host.run(shellArgv('transcript-title', TRANSCRIPT_TITLE_SCRIPT, 'sh', [String(start + 1), path, String(length)]), { timeoutMs: 5_000 }).catch(() => null)
     const found = result && result.exitCode === 0 ? transcriptTitleOf(result.stdout, this.sessionId, start, length) : null
     if (!found) return this.failed(size)
     const id = transcriptFileIdOf(result!.stdout)
@@ -636,7 +638,7 @@ export const INBOX_CLAIM_SCRIPT = [
 ].join('\n')
 
 export function inboxClaimArgv(dir: string, claimant: string): string[] {
-  return ['/bin/sh', '-c', INBOX_CLAIM_SCRIPT, 'plannotator-inbox-claim', dir, claimant]
+  return shellArgv('inbox-claim', INBOX_CLAIM_SCRIPT, 'plannotator-inbox-claim', [dir, claimant])
 }
 
 /**
@@ -654,7 +656,7 @@ export const INBOX_RELEASE_SCRIPT = [
 ].join('\n')
 
 export function inboxReleaseArgv(dir: string, claimant: string): string[] {
-  return ['/bin/sh', '-c', INBOX_RELEASE_SCRIPT, 'plannotator-inbox-release', dir, claimant]
+  return shellArgv('inbox-release', INBOX_RELEASE_SCRIPT, 'plannotator-inbox-release', [dir, claimant])
 }
 
 /**
@@ -670,7 +672,7 @@ export const INBOX_PROJECT_DIR_SCRIPT = [
 ].join('\n')
 
 export function inboxProjectDirArgv(cwd: string, given: string): string[] {
-  return ['/bin/sh', '-c', INBOX_PROJECT_DIR_SCRIPT, 'plannotator-inbox-project', cwd, given]
+  return shellArgv('inbox-project', INBOX_PROJECT_DIR_SCRIPT, 'plannotator-inbox-project', [cwd, given])
 }
 
 async function mcpCall(host: Host, port: number, method: string, params: Record<string, unknown>): Promise<{ result?: unknown; error?: { message?: string } } | null> {
@@ -1004,17 +1006,17 @@ export class InboxLink {
       // The agent named the project: an existing folder, relative to the working folder, or nothing reaches the Inbox.
       // Its relative paths stay relative to that folder, as before.
       const dir = await this.host.run(inboxProjectDirArgv(cwd, call.projectPath), { timeoutMs: 5_000 }).catch(() => null)
-      const resolved = dir?.exitCode === 0 ? dir.stdout.replace(/\n$/, '') : ''
-      if (!resolved.startsWith('/')) return { deny: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.` }
+      const resolved = dir?.exitCode === 0 ? dir.stdout.replace(/\r?\n$/, '') : ''
+      if (!isAbsolutePath(resolved)) return { deny: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.` }
       call.arguments.project_path = resolved
-    } else if (cwd.startsWith('/') && cwd !== project && INBOX_WORKING_FOLDER_ACTIONS.has(call.name)) {
+    } else if (isAbsolutePath(cwd) && cwd !== project && INBOX_WORKING_FOLDER_ACTIONS.has(call.name)) {
       // The project stays where the session started, the agent works here: its relative paths resolve here, as they did
       // when the project followed the cd. Attachments are made absolute here too, so an older Inbox that ignores the
       // working folder never resolves them against the project folder (a missing file, or another one of that name).
       workingFolder = cwd
       const attachments = call.arguments.attachments
       if (Array.isArray(attachments)) {
-        call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
+        call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !isAbsolutePath(path) ? `${cwd}/${path}` : path))
       }
     }
     const running = await this.ensureRunning()

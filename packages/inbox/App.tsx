@@ -70,6 +70,7 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
+import { inboxAgentsWatched, setInboxAgents } from './agentsList';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -150,7 +151,9 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
-import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark } from './sidebarLayout';
+import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
+import { sidebarTipDue, useSidebarTip } from './sidebarTip';
+import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
 import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
@@ -183,7 +186,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
-import { adoptSavedFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
+import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
@@ -214,6 +217,8 @@ import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
+import { TabIconChoice } from './components/TabIconChoice';
+import { useTabIconChoice } from './tabIconChoice';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -232,13 +237,14 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
 import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
-import { setReviewSkillsShape } from './skills';
+import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
@@ -968,6 +974,7 @@ function Inbox() {
   // latest read (not the held list on screen, and not the sidebar's project filter).
   const faviconHref = useInboxFaviconHref();
   const faviconBadgeHref = useInboxFaviconBadgeHref();
+  const faviconInUse = useInboxFavicon();
   useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref, faviconBadgeHref);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
@@ -1542,6 +1549,8 @@ function Inbox() {
       const newest = held && listCursor.current?.session === held.serverSession ? Math.max(listCursor.current.cursor, held.cursor) : held?.cursor;
       if (held && next.serverSession === held.serverSession && next.cursor < newest!) return held;
       listCursor.current = { session: next.serverSession, cursor: next.cursor };
+      // Each machine's agents (agentsList.ts): their own store, so a read that moved only them never draws the list.
+      setInboxAgents(next.agents);
       // Nothing new (listSame.ts): the list held stays, and nothing is drawn again. A row's own state shows in place
       // as before (an own write's row put back by the read, the open thread's row).
       if (!adopt && held && firstList.current!.done && sameListModel(held, next, { cursor: routeRef.current.page === 'settings' })) {
@@ -1903,6 +1912,10 @@ function Inbox() {
   const boardsOn = shapeOn;
   // The review skills a Send pastes carry their drawing lines only while Shape is on.
   setReviewSkillsShape(shapeOn);
+  // Chapter diagrams (Settings → Capabilities, under Code review; on unless turned off): off, the review skills a Send
+  // pastes carry no diagram line, and a guide that still has a chapter diagram draws it folded.
+  const chapterDiagramsOn = settings?.chapter_diagrams?.on !== false;
+  setReviewSkillsDiagrams(chapterDiagramsOn);
   const shapes = useInboxShapes(boardsOn, subscribeShapeFrames);
   const wakeOnChange = useRef(codeReviewOn);
   wakeOnChange.current = codeReviewOn;
@@ -2319,7 +2332,7 @@ function Inbox() {
           // again only where a list shows.
           stepsBus.emit('presence');
           // A session's label changed (issue #2450), or one ended or came back: the list carries both, so it is read again.
-          if (!deliveriesReadList(change, latestSectionsRef.current)) return;
+          if (!deliveriesReadList(change, latestSectionsRef.current, inboxAgentsWatched())) return;
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
@@ -3075,7 +3088,7 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
-  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide, without
+  // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
   // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
   // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
   // as full screen (`full` below), so widening it again returns to full screen.
@@ -4649,6 +4662,19 @@ function Inbox() {
     }
   };
 
+  // Chapter diagrams, under Code review: every other window hears `event: capabilities`.
+  const toggleChapterDiagrams = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, chapter_diagrams: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveChapterDiagrams(next);
+      setSettings((current) => (current ? { ...current, chapter_diagrams: saved.chapter_diagrams ?? { on: next } } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleShape = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
@@ -4915,9 +4941,11 @@ function Inbox() {
   // The idle clock (idleClock.ts): a calm moment for the dialogs whose own moment is "back on the list", which a person
   // who keeps a thread open beside the list never reaches (the owner, 2026-11-08). Counts only while one of them is
   // armed, on the Inbox page, the tab in front and nothing typed or open.
+  const sidebarTipSpent = useRef(false);
   const idleArmedNow = settings && latest !== null && !firstRun && route.page === 'inbox' ? revealArmed(settings) : null;
   const pageIdle = useIdleClock({
-    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')),
+    // The Sidebar tip (sidebarTip.ts) takes the idle moment too.
+    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')) || (idleArmedNow !== null && !phone && !sidebarTipSpent.current && sidebarTipDue(settings)),
     busy: () => revealHeldBack() || !listIntroClear,
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
@@ -5150,10 +5178,26 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
+  // while it is `reveal.next`, at the line's calm moment (back on the list, or the page idle), 60 s into the page.
+  const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const tabIconChoice = useTabIconChoice({
+    due: snoozeIntroLatch.current?.next === 'tab_icon',
+    blocked: revealBlocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    thread: tabIconThread,
+    rows: snoozeIntroRows,
+    clear: listViewRevealClear(listIntroClear, tabIconThread, pageIdle),
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+  });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -5240,7 +5284,9 @@ function Inbox() {
     starReveal.stage !== 'open' &&
     starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
-    listViewReveal.stage !== 'claimed';
+    listViewReveal.stage !== 'claimed' &&
+    tabIconChoice.stage !== 'open' &&
+    tabIconChoice.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5891,6 +5937,26 @@ function Inbox() {
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
   const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
+  // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
+  // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
+  const sidebarDocked = !phone && route.page === 'inbox' && sidebarOpen && !fileOpen && !sidebarHeld && !full;
+  const sidebarCustomizing = useSidebarCustomizerOpen();
+  const sidebarTip = useSidebarTip({
+    due: !phone && !tourOn && sidebarTipDue(settings) && snoozeIntroLatch.current !== null && !snoozeIntroLatch.current.aside.includes('star'),
+    blocked: revealBlocked || otherRevealActive || starReveal.stage === 'open' || starReveal.stage === 'claimed' || sidebarCustomizing,
+    sidebar: sidebarDocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    rows: snoozeIntroRows,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+  });
+  if (sidebarTip.stage !== 'none') sidebarTipSpent.current = true;
   threadFullRef.current = full;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
@@ -6148,7 +6214,9 @@ function Inbox() {
   }, [stack.thread, view, route.thread, phone]);
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
-  const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
+  const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.
@@ -6263,6 +6331,7 @@ function Inbox() {
       state={pulls}
       stackId={route.stack ?? null}
       threadId={threadId}
+      onHide={threadId && !stack.thread ? () => setThreadFull(true) : undefined}
       project={project}
       filter={view}
       projects={projects}
@@ -6358,6 +6427,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
+        onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
@@ -6711,6 +6781,7 @@ function Inbox() {
           onHideAway={setHideAway}
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
           narrow={(route.thread !== null || panelView) && !stack.thread}
+          onHide={route.thread !== null && !stack.thread ? () => setThreadFull(true) : undefined}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
           selectedThreadId={route.thread}
@@ -7040,6 +7111,7 @@ function Inbox() {
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>
+    <SideButtonContext.Provider value={ask.sideButton}>
     <div
       ref={rootRef}
       className="pn-inbox"
@@ -7132,6 +7204,18 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
+            // The Agents section (approval "inbox-agents-section"): an agent opens its thread as a starred one does;
+            // Add agent is New message with a new session chosen (plain New message where nothing can be started
+            // from here), and Add machine is Settings → Machines, where a machine is linked.
+            agentRows={windowRows}
+            onOpenAgentThread={(threadId) => {
+              const now = routeRef.current;
+              if (now.page === 'inbox' && now.thread === threadId) return;
+              go({ page: 'inbox', project: now.page === 'inbox' ? now.project : null, thread: threadId });
+            }}
+            onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
+            onAddMachine={machines.self && !guestPage ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
             projectCounts={projectCounts}
             projectActivity={latestProjectActivity}
@@ -7369,6 +7453,7 @@ function Inbox() {
           onLeave={starReveal.close}
         />
       )}
+      {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
           groups={listViewChoiceGroups}
@@ -7388,6 +7473,20 @@ function Inbox() {
             setListView('list');
             listViewReveal.close();
           }}
+        />
+      )}
+      {tabIconChoice.stage === 'open' && (
+        <TabIconChoice
+          phone={phone}
+          current={faviconInUse ?? 'glass'}
+          title={document.title}
+          onUse={(style) => {
+            // Settings' own save (config.json `favicon`): plan review, code review and annotate show it at their next load.
+            void chooseFavicon(style);
+            tabIconChoice.close();
+          }}
+          // Escape or a click outside: the tab's own icon is back (the dialog put it back), nothing saved. Final.
+          onDismiss={tabIconChoice.close}
         />
       )}
       {voiceIntro.stage === 'open' && (
@@ -7591,6 +7690,7 @@ function Inbox() {
           lastSent={lastSent}
           home={settings?.home ?? null}
           board={boardEnabled === true}
+          localWindow={!!settings && (settings.via ?? 'local') === 'local'}
           launched={composeLaunched}
           onHeld={composeHeld}
           reviewPulls={compose.review ? reviewPulls : undefined}
@@ -7679,6 +7779,7 @@ function Inbox() {
           guest={tailnetGuest(settings)}
           codeReview={codeReviewOn}
           shape={shapeOn}
+          chapterDiagrams={chapterDiagramsOn}
           // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
           onBack={() => {
             const now = routeRef.current;
@@ -7714,6 +7815,7 @@ function Inbox() {
         />
       )}
     </div>
+    </SideButtonContext.Provider>
     </InitiativeTagsContext.Provider>
   );
 }

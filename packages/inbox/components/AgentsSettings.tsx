@@ -5,6 +5,7 @@ import {
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
+  type InboxCodexAccount,
   type InboxHostSessions,
   type InboxOpenSession,
   type InboxToolHostId,
@@ -17,6 +18,7 @@ import { ConnectPicker } from './ConnectPicker';
 import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeCommand, ReloadCopy, ReloadLead, type ReloadSpec } from './RestartNote';
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
+import { codexAccountLine } from '../codexAccount';
 
 /** Whether any host has an open session that needs a restart or an update: Settings' Agents dot. */
 export function agentsNeedRestart(model: InboxAgentsModel | null | undefined): boolean {
@@ -271,14 +273,12 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
  * Plannotator's own connection puts it into the session as a new turn; an
  * agent reached through MCP (or OpenCode 1, which has the tool but no wake)
  * reads it when it next checks. Null when the agent does not reach the Inbox,
- * or when it is not known (Claude Code on Windows).
+ * or when it is not known.
  */
-export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platform']): { text: string; wakes: boolean } | null {
+export function repliesOf(row: InboxAgentRow): { text: string; wakes: boolean } | null {
   if (!row.reach.on) return null;
   if (row.reach.kind === 'tool') {
     if (row.tool?.mod_off) return null;
-    // Claude Code's mod stands down on Windows (no /bin/sh), so nothing wakes it there: say no more than the Reaches row.
-    if (row.id === 'claude-code' && platform === 'windows') return null;
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
     return { text: 'arrive as a new turn', wakes: true };
   }
@@ -309,6 +309,43 @@ function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: Re
   );
 }
 
+/**
+ * Codex's account, read-only (`GET /api/inbox/codex/account`, asked once when the row shows): the plan or API key and
+ * how much of its limits is used, or that Codex is not signed in and the command that signs in. Plannotator never
+ * signs in for the person. No row until the read answers, nor when it could not be read.
+ */
+function CodexAccountRow() {
+  const [account, setAccount] = useState<InboxCodexAccount | null>(null);
+  useEffect(() => {
+    let live = true;
+    inboxApi
+      .codexAccount()
+      .then((read) => live && setAccount(read.account))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const line = codexAccountLine(account);
+  if (!line) return null;
+  return (
+    <Row
+      k="Account"
+      v={line.value}
+      sub={
+        line.signIn ? (
+          <>
+            Run <code>codex login</code> in Terminal to sign in.
+          </>
+        ) : (
+          line.limits
+        )
+      }
+      data={{ 'data-codex-account': account?.state === 'signed_in' ? account.kind : 'signed_out' }}
+    />
+  );
+}
+
 function AgentGroup({
   row,
   noteText,
@@ -316,14 +353,11 @@ function AgentGroup({
   pending,
   busy,
   sessions,
-  platform,
   extra,
 }: {
   row: InboxAgentRow;
   /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
   extra?: ReactNode;
-  /** This computer's platform (the window's), for what wakes a session. */
-  platform?: ConnectContext['platform'];
   noteText: string;
   onChange: (change: Change) => void;
   pending: Set<string>;
@@ -381,7 +415,7 @@ function AgentGroup({
   const modOff = row.tool?.mod_off === true;
   // Claude Code's MCP entry is one the person added by hand (`claude mcp add`): Plannotator never writes or removes it.
   const handMcp = row.id === 'claude-code' && reach.kind === 'mcp';
-  const replies = repliesOf(row, platform);
+  const replies = repliesOf(row);
   const reachSwitchable = (reach.kind === 'tool' || reach.kind === 'mcp') && reach.state !== 'foreign' && reach.state !== 'unreadable' && !modOff && !handMcp;
   const note = row.note;
   const noteOn = note?.state === 'added' || note?.state === 'edited';
@@ -583,8 +617,8 @@ export function AgentsSettings({
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
       <Row
         k="Start agents from New message"
-        v="Claude Code and Pi"
-        sub="New message can start Claude Code or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        v="Claude Code, Codex and Pi"
+        sub="New message can start Claude Code, Codex or Pi in a folder you pick. Turn off to only message sessions that are already running."
         data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
@@ -768,8 +802,8 @@ export function AgentsSettings({
             pending={pending}
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
-            {...(context ? { platform: context.platform } : {})}
             {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
+            {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

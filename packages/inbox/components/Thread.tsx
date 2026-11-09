@@ -10,6 +10,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { messageSideSource } from '../ask/sideSource';
+import { useSideButton } from '../ask/sideButton';
 import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -34,6 +35,7 @@ import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
 import { replyViewingOf } from '../replyViewing';
@@ -130,7 +132,7 @@ import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
 import { createPickQueue, keepSavedQuestions, onlyQuestionsChanged } from '../pickQueue';
-import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
+import { fileGroupName, sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../tagHighlight';
@@ -978,6 +980,7 @@ export function MessageBody({
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
   // Side (ask/useInboxAsk.tsx): read through refs, as every kept closure here (#2948): naming `comments`, the message
   // or its blocks in a closure would let this body's kept closures hold a render of the whole thread view per read.
+  const sideButton = useSideButton();
   const sideFrom = useRef({ message, blocks, annotations: commentList });
   sideFrom.current = { message, blocks, annotations: commentList };
   const side = useCallback((text: string, context: SelectionActionContext) => {
@@ -1116,6 +1119,7 @@ export function MessageBody({
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
+        sideButton={sideButton}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
@@ -2318,9 +2322,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // Replaced-question cards link `#123` refs into the project's repo, as message bodies do.
   const threadRefRepo = useRefRepo(thread.project.repo ?? null);
+  /** A jump to a question inside an attached file (issue #2828): opens the file on its card; false for any other question. Set below, once the file opener is. */
+  const fileJumpRef = useRef<(target: { messageId: string; key: string }) => boolean>(() => false);
+  /** The card the open file brings into view (its record key), once per ask. */
+  const [fileQuestionFocus, setFileQuestionFocus] = useState<{ key: string; seq: number } | null>(null);
 
   /** Scroll to a card or a message, focus it, and ring it briefly; a folded message opens first. */
   const jumpTo = useCallback((target: JumpTarget) => {
+    // A question inside an attached file (issue #2828): its card is in the file, which opens on it.
+    if (target.kind === 'question' && fileJumpRef.current(target)) return;
     // A place held after a file closed must not pull the thread back while the message unfolds.
     holdRef.current?.();
     holdRef.current = null;
@@ -4124,7 +4134,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const id = `${m.id}/${q.key}`;
           const answer = pending.has(id) ? pending.get(id)! : q.answer;
           if (!answer || isQuestionAnswerEmpty(answer)) return [];
-          return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: `${agentName(m.author)}'s message, ${whenTime(m.created_at)}` }];
+          const messageName = `${agentName(m.author)}'s message, ${whenTime(m.created_at)}`;
+          // A question inside an attached file (issue #2828): its own group, named by the file.
+          return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: q.attachment ? fileGroupName(q.attachment.name, messageName) : messageName, ...(q.attachment ? { fileId: q.attachment.id } : {}) }];
         }),
   );
 
@@ -5701,6 +5713,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const artifactsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'artifacts' });
+  const sendAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
   const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepsButtonSig(stepLists, stepsAnswered)].join('|');
   const rowFittedFor = useRef('');
@@ -5863,15 +5876,58 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null;
+  // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
+  // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
+  const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;
+  const fileQuestionRecordsShown = openAttachment ? fileQuestionRecords(fileOwner, openAttachment.id) : [];
+  const fileQuestions: FileQuestions | null =
+    fileOwner && openAttachment && fileQuestionRecordsShown.length > 0
+      ? {
+          records: fileQuestionRecordsShown,
+          answers: answersOf(fileOwner),
+          locked:
+            fileOwner.author.kind !== 'agent' ||
+            !liveMessage(fileOwner) ||
+            (file!.version === 'current' && openAttachment.changed_since_sent),
+          onPick: (key, answer) => pick(fileOwner.id, key, answer),
+          footerFor: footerFor(fileOwner),
+          focus: fileQuestionFocus,
+        }
+      : null;
+  fileJumpRef.current = (target) => {
+    const message = threadRef.current.messages.find((m) => m.id === target.messageId);
+    const asked = message?.questions?.find((q) => q.key === target.key)?.attachment;
+    const attachment = asked ? allFiles.find((a) => a.id === asked.id) : undefined;
+    if (!asked || !attachment) return false;
+    setFileQuestionFocus((current) => ({ key: target.key, seq: (current?.seq ?? 0) + 1 }));
+    // The sent text holds the card when the file changed since.
+    if (file?.id !== attachment.id) openFromMessage(attachment, null, undefined, null, attachment.changed_since_sent ? 'sent' : 'current');
+    return true;
+  };
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
   const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
-  // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
-  // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
+  // The thread's full screen: the control pressed goes away or hides (the list's edge, ‹ Inbox), so focus follows to
+  // ‹ Inbox, or back to the thread, when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
   // frame, so focus is checked again until the frame ends, and falls back to the stacked ‹ Inbox, then the subject.
   const aloneWas = useRef(threadAlone);
   const aloneFocus = useRef(false);
+  const lastKey = useRef(false);
+  useEffect(() => {
+    const key = () => {
+      lastKey.current = true;
+    };
+    const press = () => {
+      lastKey.current = false;
+    };
+    window.addEventListener('keydown', key, true);
+    window.addEventListener('pointerdown', press, true);
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      window.removeEventListener('pointerdown', press, true);
+    };
+  }, []);
   useLayoutEffect(() => {
     if (aloneWas.current !== threadAlone) {
       aloneWas.current = threadAlone;
@@ -5882,13 +5938,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     if (!aloneFocus.current) return;
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    // The list's edge hides the list (a click, Enter): the list stays drawn, hidden, so focus left on it is lost too.
+    const lost = !active || active === document.body || !active.isConnected || (threadAlone && active.closest('.ib-listcol') !== null);
+    if (!lost) return;
+    // After a pointer press (the list's edge, ‹ Inbox) the control focused draws no ring (nor its tooltip), the browser's
+    // own rule for a click; after a key it does.
+    const quiet = !lastKey.current;
     const section = sectionRef.current;
-    const order = threadAlone ? ['[data-full-back]'] : ['[data-full-in]', '[data-stack-back]', 'h2.ib-subject'];
+    const order = threadAlone ? ['[data-full-back]'] : ['[data-stack-back]', 'h2.ib-subject'];
     for (const selector of order) {
       const el = section?.querySelector<HTMLElement>(selector);
       if (el) {
-        el.focus({ preventScroll: true });
+        el.focus(quiet ? { preventScroll: true, focusVisible: false } : { preventScroll: true });
         return;
       }
     }
@@ -6140,16 +6201,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
-            {!threadAlone && !stacked && !backBesideFile && onFull && (
-              <>
-                <Tip content={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'}>
-                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'} data-full-in="">
-                    <Icon name="panelsHide" size={17} />
-                  </button>
-                </Tip>
-                <span className="ib-vsep" aria-hidden="true" />
-              </>
-            )}
+            {/* Hiding the list is the list column's edge (click it, drag to resize), not a button here. */}
             {/* A file beside the thread hides the list: the same way back leads; it closes the file. */}
             {backBesideFile && (
               <>
@@ -7186,13 +7238,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 fitKey={replyFitKey}
                 send={
                   routeChoiceOpen ? null : (
-                  <Tip content={withShortcut('Send', { scope: inboxThreadShortcuts, action: 'send' })}>
-                    <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy}>
-                      {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
-                      {sending && <span className="ib-spin" aria-hidden="true" />}
-                      <span className="ib-rsend-w">Send</span>
-                    </button>
-                  </Tip>
+                  // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
+                  // (approval "inbox-send-no-shortcut-hint").
+                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
+                    {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
+                    {sending && <span className="ib-spin" aria-hidden="true" />}
+                    <span className="ib-rsend-w">Send</span>
+                  </button>
                   )
                 }
                 clip={
@@ -7494,6 +7546,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         onSaved={saveRecord}
         onRemoved={dropRecord}
         onToast={onToast}
+        questions={fileQuestions}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus, view: currentView, set: setFor(attachmentId) }, { replace: true })}
         onClose={() => {
           onOpenFile(null);

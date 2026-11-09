@@ -38,6 +38,7 @@ import type { ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
+import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
@@ -48,7 +49,7 @@ import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
-import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { registerReloadFlush } from '../stalePage';
@@ -82,6 +83,7 @@ import {
   type ComposeClone,
   type ComposeCloneRequest,
   cloneOfUrl,
+  defaultStartProject,
   launchGroups,
   type LaunchHistory,
   type MachineLaunchProject,
@@ -131,6 +133,12 @@ export interface ComposeRequest {
    * agent the person started last when that machine has it (`agent`), else its first; the cursor is in the message.
    */
   start?: { projectId: string; machine: string | null; agent: string | null } | null;
+  /**
+   * The sidebar's Add agent (approval "inbox-agents-section"): To reads "New <agent> session" in the project the
+   * person is looking at, else the most recently active (`defaultStartProject`), once the launch block is read; the
+   * agent the person started last when it can start (`agent`), else the first. Nothing to start: To stays empty.
+   */
+  launch?: { agent: string | null } | null;
 }
 
 export interface ComposeSent {
@@ -224,6 +232,11 @@ export interface ComposeDialogProps {
    * this page shows it). Absent: never.
    */
   launchTip?: { claim: () => Promise<boolean> } | null;
+  /**
+   * This computer's own window (not over the tailnet): the folder browser may offer "Choose in Finder…" (macOS, approval
+   * "inbox-launch-any-folder"). Absent: no.
+   */
+  localWindow?: boolean;
 }
 
 /**
@@ -432,18 +445,32 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
-  // "+" on a project row: an agent that machine doesn't have (or none started yet) becomes its first, once its block is read.
+  // Add agent: the default start, once the launch block is read, unless the person chose To already.
+  const launchPicked = useRef(false);
   useEffect(() => {
-    if (!request.start || !startPick || startPick.folder) return;
+    if (!request.launch || launchPicked.current || startPick || chosen || !launch || !canStart) return;
+    const project = defaultStartProject(launch, current);
+    if (!project) return;
+    launchPicked.current = true;
+    const agent = launch.agents.find((a) => a.agent === request.launch!.agent) ?? launch.agents[0]!;
+    setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.launch, launch, canStart, startPick, chosen, current]);
+  // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
+  // once its block is read.
+  useEffect(() => {
+    if (!(request.start || request.launch) || !startPick || startPick.folder) return;
     const block = blockOf(startPick.machine);
     if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent)) return;
     setStartPick({ ...startPick, agent: block.agents[0]!.agent });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.start, startPick, model?.launch, there.reads]);
+  }, [request.start, request.launch, startPick, model?.launch, there.reads]);
   // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
   const startMachine = start?.machine ? (there.machines.find((m) => m.id === start.machine) ?? null) : null;
   const startMachineName = start?.machine ? (startMachine?.name ?? machineGroups.groups.find((g) => g.machine === start.machine)?.name ?? null) : null;
   const startHome = start?.machine ? (there.reads.get(start.machine)?.home ?? null) : home;
+  // A project on a drive that isn't mounted now: the drive's name, said as "isn't connected" rather than "moved or deleted".
+  const startUnplugged = start && !start.project.exists ? unpluggedDrive(start.project.root, blockOf(start.machine ?? null)?.drives) : null;
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
@@ -623,7 +650,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
   // Escape on the tip: it leaves, and focus on its Got it (which is going) moves to To, as Got it from the keyboard does.
   const escapeTip = () => {
-    const onTip = !!(document.activeElement as Element | null)?.closest?.('.ib-lt');
+    const onTip = !!(document.activeElement as Element | null)?.closest?.('.ib-ctip');
     if (!leaveTip()) return false;
     if (onTip) (toRef.current ?? textRef.current)?.focus();
     return true;
@@ -1079,6 +1106,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       notice: g.notice,
       asleep: g.asleep,
       cloneInto: blockOf(g.machine)?.clone?.into ? tildePath(blockOf(g.machine)!.clone!.into, g.home) : null,
+      drives: blockOf(g.machine)?.drives ?? null,
+      finder: g.machine === null && props.localWindow === true && !phone && model?.launch?.finder === true,
       scratch:
         g.scratch && folder && start
           ? { folder: tildePath(folder, g.home), root: tildePath(g.scratch.root, g.home), trusted: agentThere?.scratch_trusted !== false || !!agentThere.untrusted?.[SCRATCH_PICK], agentName: start.name }
@@ -1383,6 +1412,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           selected={start.project.id}
           selectedMachine={start.machine}
           groups={grouped ? folderGroups : null}
+          drives={model?.launch?.drives ?? null}
+          finder={props.localWindow === true && !phone && model?.launch?.finder === true}
           scratch={
             launch.scratch && scratchFolder
               ? {
@@ -1500,11 +1531,25 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <div className="ib-cp-note ib-warn" data-compose-note="folder-missing">
           <Icon name="warn" size={16} />
           <div>
-            <b>
-              <bdi>{tildePath(start.project.root, startHome)}</bdi> isn't there any more.
-            </b>
+            {startUnplugged ? (
+              <b>
+                <bdi>{startUnplugged}</bdi> isn't connected.
+              </b>
+            ) : (
+              <b>
+                <bdi>{tildePath(start.project.root, startHome)}</bdi> isn't there any more.
+              </b>
+            )}
             <p>
-              It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
+              {startUnplugged ? (
+                <>
+                  Connect it to start {start.name} in <bdi>{start.project.name}</bdi>, or pick another project. Nothing is sent until you do.
+                </>
+              ) : (
+                <>
+                  It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
+                </>
+              )}
             </p>
             <button type="button" className="ib-btn ib-sm" onClick={() => setFolderMenu(true)} data-compose-pick-folder="">
               Pick a project
@@ -1684,7 +1729,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
         >
           <Icon name="send" size={15} />
           {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
-          <ShortcutHint scope={inboxThreadShortcuts} action="send" />
         </button>
       </div>
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">

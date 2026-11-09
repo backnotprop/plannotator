@@ -566,6 +566,13 @@ export interface PlannotatorConfig {
    */
   inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
   /**
+   * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
+   * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
+   * text names one, and a guide that still has one draws it folded under its Diagram header. Written by
+   * `POST /api/inbox/settings` `{ chapter_diagrams: { on } }`, read on every request (`inboxChapterDiagramsOn`).
+   */
+  inboxChapterDiagrams?: boolean;
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
@@ -607,7 +614,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -619,8 +626,15 @@ export interface PlannotatorConfig {
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
+    /**
+     * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
+     * install (never due), both written at the first release start of the version that ships it; then claimed once.
+     */
+    tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
+    /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
+    sidebar_tip?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -876,6 +890,11 @@ function getConfigDir(): string {
 }
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
+}
+
+/** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
+export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
+  return config.inboxChapterDiagrams !== false;
 }
 
 /**

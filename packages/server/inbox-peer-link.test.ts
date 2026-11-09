@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxOutbox } from "./inbox-outbox";
+import { INBOX_AGENTS_LISTED_MAX } from "@plannotator/core/inbox-types";
 import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -331,6 +332,32 @@ describe("the list (rule 5)", () => {
     expect(told).toEqual([true]);
     // The first read of the list, then one for all six frames.
     expect(d.stats.threads).toBe(2);
+  });
+
+  test("that machine's Agents moved (no record, no cursor): its list is read again with the new agents, and the windows hear `agents`", async () => {
+    const told: { sessions: boolean; agents: boolean }[] = [];
+    const agentsAt = (state: string) => [{ agents: [{ id: "ses_1", session: "ses_1", host: "claude-code", project: null, state, waiting: 0, live: true, started_at: null, last_seen_at: null }], total: 1, ended_today: 0 }];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"agents":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [], agents: agentsAt(d.stats.threads > 1 ? "working" : "idle") }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(told).toEqual([{ sessions: false, agents: true }]);
+    expect(peer.list!.agents).toMatchObject({ machine: B, total: 1, agents: [{ id: "ses_1", state: "working" }] });
+  });
+
+  test("a machine's agents are kept capped and named by the machine; an older Inbox's list (no `agents`) names none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 1, sections: [] });
+    expect(peer.list!.agents).toBeNull();
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: `ses_${i}`, session: `ses_${i}`, host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null }));
+    peer.acceptList({ cursor: 1, sections: [], agents: [{ agents: [...many, { id: 1 }, { id: "x", session: "x", state: "asleep" }], total: 302, ended_today: 0 }] });
+    expect(peer.list!.agents!.machine).toBe(B);
+    expect(peer.list!.agents!.agents.length).toBe(INBOX_AGENTS_LISTED_MAX);
+    expect(peer.list!.agents!.total).toBe(302);
   });
 
   test("a list older than the one held is dropped", () => {

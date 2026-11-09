@@ -446,9 +446,9 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     expect((await row()).session_ended).toBeUndefined();
   });
 
-  test("the windows are told when a session ends or comes back (they then read the list, whatever else the rows say), and not for a turn starting", async () => {
+  test("the windows are told when a session ends or comes back (they then read the list, whatever else the rows say), and not for a turn starting (which moves only the Agents section)", async () => {
     const { server, project, pass } = await ended();
-    const frames: { sessions?: boolean }[] = [];
+    const frames: { sessions?: boolean; agents?: boolean }[] = [];
     const abort = new AbortController();
     const stream = await fetch(`${base(server)}/api/inbox/events?deliveries=1`, { signal: abort.signal });
     void (async () => {
@@ -466,18 +466,19 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
       return frames.at(-1);
     };
     try {
+      // `agents` (inbox-agents-list.ts): a session that starts, ends, comes back or starts a turn moves the Agents section.
       const first = next();
       await poll(server, "ses-asker", project);
-      expect(await first).toEqual({ sessions: true });
+      expect(await first).toEqual({ sessions: true, agents: true });
       const turn = next();
       await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-asker", host: "claude-code", type: "state", busy: true, idle_since: null });
-      expect(await turn).toEqual({});
+      expect(await turn).toEqual({ agents: true });
       const gone = next();
       pass();
-      expect(await gone).toEqual({ sessions: true });
+      expect(await gone).toEqual({ sessions: true, agents: true });
       const back = next();
       await poll(server, "ses-asker", project);
-      expect(await back).toEqual({ sessions: true });
+      expect(await back).toEqual({ sessions: true, agents: true });
     } finally {
       abort.abort();
     }
