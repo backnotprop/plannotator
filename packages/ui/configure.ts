@@ -21,6 +21,7 @@ import { setComponentTooltips } from './components/HostTitle';
 import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
+import { setPageMarks } from './utils/pageMarks';
 import { setDigitHexIssueRefs } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
@@ -179,6 +180,17 @@ export interface PlannotatorUIConfig {
    */
   touchSelectionToolbar?: boolean;
   /**
+   * Mark the page's root while a part a theme.css or comments.css `:has()` on
+   * `html` or `body` keys on is there: `<body data-pn-popout>` while a popout
+   * dialog is open, `<html data-pn-selection-chooser>` while the diff's
+   * selection chooser shows (`utils/pageMarks`). For a host that rewrites
+   * those `:has()` selectors to the marks in its build: on a long page each
+   * such `:has()` costs a style pass over the whole document on every DOM
+   * change. Default: false, nothing is marked. The Plannotator Inbox passes
+   * true (build/inbox-page-marks.ts).
+   */
+  pageMarks?: boolean;
+  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
@@ -214,6 +226,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
+  if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();

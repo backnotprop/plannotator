@@ -527,3 +527,18 @@ test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typ
   expect(tags.length).toBe(8);
   expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
 });
+
+// inbox.css's phone rule `.pn-inbox:has(.ib-rpick) .ib-rbox` (no ring around the box under the list) runs in the window
+// keyed on a page mark (pageMarks.ts, build/inbox-page-marks.ts): it must stand exactly while the list is open.
+test.skipIf(!hasDom)('the open list marks its .pn-inbox (data-ib-rpick), and the mark goes with the list', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)), true);
+  await write(el, 'Use the old totals.');
+  const inbox = el.querySelector('.pn-inbox')!;
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+  await openList(el);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(true);
+  await only(el, 'ses_claude');
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+});
