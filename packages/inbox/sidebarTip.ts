@@ -40,7 +40,7 @@ export const SIDEBAR_TIP_TIMES = {
   leaveMs: 130,
 };
 
-/** The card's width (inbox.css `.ib-lt`), its gap from the sidebar's edge (the arrow spans it) and from the window's. */
+/** The card's width (inbox.css `.ib-ctip`), its gap from the sidebar's edge (the arrow spans it) and from the window's. */
 export const SIDEBAR_TIP_WIDTH = 284;
 const GAP = 8;
 const EDGE = 8;

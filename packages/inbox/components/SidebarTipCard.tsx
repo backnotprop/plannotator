@@ -1,5 +1,5 @@
 /**
- * The Sidebar tip's card (rules in sidebarTip.ts): the Launch tip's card (`.ib-tour-coach.ib-lt`, LaunchTipCard.tsx)
+ * The Sidebar tip's card (rules in sidebarTip.ts): the Launch tip's card (`.ib-tour-coach.ib-ctip`, LaunchTipCard.tsx)
  * standing beside the sidebar, its arrow on the sidebar's edge, level with the Inbox row. It never takes focus: a
  * pointer press on Got it keeps focus where it was. It leaves by itself on Escape (only the tip closes), a right-click
  * on the sidebar (the menu the tip is about), and when `gone` turns true (the Customize panel, the sidebar going away).
@@ -87,7 +87,7 @@ export function SidebarTipCard(props: {
   return (
     <div
       ref={cardRef}
-      className="ib-tour-coach ib-lt ib-st"
+      className="ib-tour-coach ib-ctip ib-st"
       role="group"
       aria-labelledby={titleId}
       aria-hidden={leaving || undefined}
@@ -96,7 +96,7 @@ export function SidebarTipCard(props: {
       data-leaving={leaving ? '' : undefined}
       style={place ? { top: place.top, left: place.left } : { visibility: 'hidden' }}
     >
-      <span className="ib-lt-arrow" data-side="left" style={place ? { top: place.arrow - 5 } : undefined} aria-hidden="true" />
+      <span className="ib-ctip-arrow" data-side="left" style={place ? { top: place.arrow - 5 } : undefined} aria-hidden="true" />
       <div className="ib-tc-eb">{SIDEBAR_TIP_WORDS.eyebrow}</div>
       <h2 id={titleId}>{SIDEBAR_TIP_WORDS.title}</h2>
       <p>{SIDEBAR_TIP_WORDS.line}</p>

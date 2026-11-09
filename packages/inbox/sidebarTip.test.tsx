@@ -7,16 +7,20 @@
  * or was shown on this load (the tip must stand down unclaimed, so a later load still has it); the other reveals not
  * held back once it is up; the card shown after the Inbox refused the claim (another window showed it); focus moving
  * to the card; Got it, Escape, a right-click on the sidebar or the Customize panel not closing it; Escape taken from
- * a menu that is open over it; a second claim after it closed.
+ * a menu that is open over it; a second claim after it closed; the arrow a different colour from its card (this one
+ * and the Launch tip's), which happened when another component's rule for the same class name repainted the card.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
+const launchCard = (hasDom ? await import('./compose/LaunchTipCard') : {}) as typeof import('./compose/LaunchTipCard');
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const tip = (hasDom ? await import('./sidebarTip') : {}) as typeof import('./sidebarTip');
 const cardModule = (hasDom ? await import('./components/SidebarTipCard') : {}) as typeof import('./components/SidebarTipCard');
@@ -336,5 +340,64 @@ describe.skipIf(!hasDom)('sidebarTipDue and sidebarTipPlace', () => {
 
   test('no room beside the sidebar for the card: it does not show', () => {
     expect(tip.sidebarTipPlace({ viewportWidth: 520, viewportHeight: 900, sidebar, row, cardHeight: 130 })).toBeNull();
+  });
+});
+
+/**
+ * The `background` inbox.css gives an element, by its classes and attributes alone: among the rules whose selector is
+ * one compound of classes the element wears (with `.pn-inbox` before it or not), the most specific, then the last.
+ */
+function surfaceOf(css: string, el: Element): string | null {
+  let best: { weight: number; at: number; value: string } | null = null;
+  let at = 0;
+  for (const rule of css.matchAll(/(^|[}\n])\s*([^{}@\n]+)\{([^{}]*)\}/g)) {
+    const value = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/.exec(rule[3]!)?.[1]?.trim();
+    if (!value) continue;
+    for (const selector of rule[2]!.split(',').map((part) => part.trim())) {
+      at += 1;
+      const compound = /^(\.pn-inbox\s+)?((?:\.[\w-]+)+)((?:\[[^\]]+\])*)$/.exec(selector);
+      if (!compound) continue;
+      const classes = compound[2]!.slice(1).split('.');
+      if (!classes.every((name) => el.classList.contains(name))) continue;
+      try {
+        if (!el.matches(`${compound[2]}${compound[3]}`)) continue;
+      } catch {
+        continue;
+      }
+      const weight = classes.length + (compound[3]!.match(/\[/g)?.length ?? 0) + (compound[1] ? 1 : 0);
+      if (!best || weight > best.weight || (weight === best.weight && at > best.at)) best = { weight, at, value };
+    }
+  }
+  return best?.value ?? null;
+}
+
+describe.skipIf(!hasDom)('the tip cards and their arrows are one surface', () => {
+  const css = hasDom ? readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8') : '';
+
+  test('the Sidebar tip: the arrow is filled as its card is', async () => {
+    await shown();
+    const arrow = card()!.querySelector('span[aria-hidden="true"]')!;
+    expect(surfaceOf(css, card()!)).toBe('var(--popover)');
+    expect(surfaceOf(css, arrow)).toBe(surfaceOf(css, card()!));
+  });
+
+  test('the Launch tip, beside and under To: the arrow is filled as its card is', () => {
+    for (const side of ['right', 'below'] as const) {
+      host = document.createElement('div');
+      host.className = 'pn-inbox';
+      document.body.appendChild(host);
+      act(() => {
+        root = createRoot(host!);
+        root.render(<launchCard.LaunchTipCard place={{ side, top: 0, left: 0, arrow: 24 }} phone={false} leaving={false} titleId="lt-title" lineId="lt-line" onOk={() => {}} />);
+      });
+      const tipCard = host.querySelector('[data-launch-tip]')!;
+      const arrow = tipCard.querySelector('span[aria-hidden="true"]')!;
+      expect(surfaceOf(css, tipCard)).toBe('var(--popover)');
+      expect(surfaceOf(css, arrow)).toBe(surfaceOf(css, tipCard));
+      act(() => root!.unmount());
+      host.remove();
+      root = null;
+      host = null;
+    }
   });
 });
