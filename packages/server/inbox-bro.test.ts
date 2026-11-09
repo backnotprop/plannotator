@@ -72,6 +72,8 @@ async function world(options: WorldOptions = {}) {
       inboxSound: { dialogShownFor: options.version ?? "0.30.0" },
       inboxListIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString(), version: 2 },
       inboxVoiceIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: "glass",
       ...options.config,
     }),
   );

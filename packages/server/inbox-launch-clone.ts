@@ -15,7 +15,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, join, relative, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { prepareGitCommand } from "@plannotator/shared/review-core";
 
@@ -89,9 +89,11 @@ export function originKeyOf(folder: string): string | null {
   return null;
 }
 
-/** A folder under `home` as `~/…` (home as `~`). */
+/** A folder under `home` as `~/…` (home as `~`); one elsewhere as its full path. */
 export function tildeOf(home: string, path: string): string {
   const rel = relative(home, path);
+  // Outside home (a folder on another drive): its full path.
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return path;
   return rel === "" ? "~" : `~/${rel.split(sep).join("/")}`;
 }
 

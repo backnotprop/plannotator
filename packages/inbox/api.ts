@@ -99,8 +99,8 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
-/** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
+export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
+/** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
 export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
@@ -578,7 +578,7 @@ export interface SettingsModel {
   text_size?: InboxTextSize;
   /**
    * The favicon (config.json `favicon`), shared with plan review, code review and annotate: 'glass' unless chosen,
-   * 'totman' (shown as Face) or 'classic' (shown as P). Absent from an older Inbox.
+   * 'yellow' or 'totman' (shown as Face). Absent from an older Inbox.
    */
   favicon?: FaviconStyle;
   /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved. Absent from an older Inbox. */
@@ -1263,6 +1263,10 @@ export interface HomeFoldersAnswer {
   nearest?: { path: string; folders: string[] };
   /** A missing path under a file or a folder that can't be opened. */
   blocked?: { path: string; state: 'file' | 'locked' };
+  /** The folder itself is never started in (home, a folder above it, `/`, the folder drives are in). Absent: it can be. */
+  start?: false;
+  /** Of `folders`, the ones listed but never started in (absent from an older Inbox). */
+  nostart?: string[];
 }
 
 /** Clone from a git URL: where that machine would clone it (`GET /api/inbox/launch/clone`), each path as `~/…`. */
@@ -1801,13 +1805,20 @@ export const inboxApi = {
     return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined, machine));
   },
   /**
-   * "Another folder on <machine>…": the folder names in one folder under that machine's home (`GET
-   * /api/inbox/launch/folders?path=~/…`), one level, no hidden ones. `machine`: a linked machine's, through the
-   * forward; null: this computer's. A path that isn't there is `exists: false`; a hidden one or one outside home is a
-   * 422 (`folder_hidden`, `folder_outside_home`), a guest or a call from outside the window a 403.
+   * "Another folder on <machine>…": the folder names in one folder on that machine (`GET
+   * /api/inbox/launch/folders?path=~/…` or a full path), one level, no hidden or system ones. `machine`: a linked
+   * machine's, through the forward; null: this computer's. A path that isn't there is `exists: false`; a hidden or
+   * system one is a 422 (`folder_hidden`, `folder_system`; an older Inbox's `folder_outside_home`), a drive that
+   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a guest or a call from
+   * outside the window a 403.
    */
-  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal) =>
-    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path }).toString(), machine), signal),
+  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal, fresh = false) =>
+    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path, ...(fresh ? { fresh: '1' } : {}) }).toString(), machine), signal),
+  /**
+   * "Choose in Finder…": macOS's folder dialog on this computer (this computer's own window only). The folder picked
+   * as a full path, or `cancelled`.
+   */
+  chooseFolder: () => post<{ path?: string; cancelled?: true }>(inboxUrl('/launch/choose-folder'), {}),
   /** Clone from a git URL: where `url` would be cloned on that machine (`into` absent: its default clone folder, C1). */
   cloneTarget: (url: string, into: string | null, machine?: string | null, signal?: AbortSignal) =>
     get<CloneTargetAnswer>(inboxUrl('/launch/clone', new URLSearchParams({ url, ...(into ? { into } : {}) }).toString(), machine), signal),
