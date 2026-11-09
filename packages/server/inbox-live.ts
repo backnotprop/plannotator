@@ -332,7 +332,9 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       } catch (error) {
         // One refusal refuses the whole send, naming the question and the option, as an attachment's does.
         if (error instanceof InboxError) {
-          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: Prototype: ${app.target}: ${error.message.replace(/^url: /, "")}`, { field: "body" });
+          // The reason without the address again (the probe's own words start with it).
+          const reason = error.message.replace(/^url: /, "").replace(/^(\S+) (?=did not answer)/, "");
+          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: Prototype: ${app.target}: ${reason}`, { field: "body" });
         }
         throw error;
       }
