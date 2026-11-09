@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findGitBash, gitBashShell } from './git-bash'
@@ -113,7 +113,8 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     useShell(gitBashShell(GIT_BASH as string))
     const dir = scratch()
     mkdirSync(join(dir, 'sub'))
-    const want = dir.replaceAll('\\', '/')
+    // `cd -P` gives the long path: a temp folder under an 8.3 name (`RUNNER~1`, CI's) is compared as that.
+    const want = realpathSync.native(dir).replaceAll('\\', '/')
     expect(run(inboxProjectDirArgv(tmpdir(), dir))).toEqual({ code: 0, out: want })
     expect(run(inboxProjectDirArgv(dir, 'sub'))).toEqual({ code: 0, out: `${want}/sub` })
     expect(run(inboxProjectDirArgv(dir, 'missing')).code).toBe(3)
