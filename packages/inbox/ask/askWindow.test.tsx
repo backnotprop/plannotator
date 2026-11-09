@@ -219,6 +219,12 @@ const askCorner = () => document.querySelector<HTMLButtonElement>('[data-rf-card
 
 /** Selects the words of the thread's first message, as a drag does: the selection bar opens over them. */
 async function selectMessage() {
+  // A thread with a reply folds the agent's earlier message: open it, so its words can be selected.
+  const expand = document.querySelector<HTMLButtonElement>('section.ib-pane [data-expand-all][aria-label="Expand all messages"]');
+  if (expand) {
+    act(() => expand.click());
+    await wait(50);
+  }
   const block = document.querySelector<HTMLElement>('section.ib-pane [data-block-id]');
   const walker = block ? document.createTreeWalker(block, NodeFilter.SHOW_TEXT) : null;
   let node: Text | null = null;

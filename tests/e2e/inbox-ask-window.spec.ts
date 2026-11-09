@@ -99,7 +99,7 @@ const side = (page = world.page) => page.locator('.annotation-toolbar [data-anno
 /** Drag over `words` in the thread's messages with the real mouse: the selection bar opens over them. */
 async function selectInThread(page: Page, words: string): Promise<void> {
   const box = await page.evaluate((needle) => {
-    const root = document.querySelector('section.ib-pane');
+    const root = document.querySelector('section.ib-pane .ib-body');
     if (!root) return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
