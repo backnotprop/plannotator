@@ -786,7 +786,11 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
-  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
+  // One read per host for Reviews' list, and one for the Pull requests board in its right pane (the person's own PRs
+  // everywhere, cached apart): never more.
+  await expect.poll(() => forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'gh pulls', 'glab pulls', 'glab pulls']);
+  await page.waitForTimeout(400);
+  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'gh pulls', 'glab pulls', 'glab pulls']);
 
   // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
