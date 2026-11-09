@@ -4,7 +4,7 @@
  * `broReveal.test.tsx` drives the gate alone.
  *
  * What regresses: App not drawing the card, or not arming it when the line says `bro`, at its moment (back on the list
- * from a long agent message); a tab loaded while the line was held (the day after another dialog) never arming it
+ * from a long agent message); a tab loaded while the line was held (the gap after another dialog) never arming it
  * however long it stays loaded, so only a reload ever shows it; a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
  * tailnet guest changing what every agent here reads.
  *
@@ -182,7 +182,7 @@ test.skipIf(!hasDom)('the card opens in the window when the queue says bro, at t
   await until(() => card() === null, 'the card to close');
 }, 30_000);
 
-test.skipIf(!hasDom)('a tab loaded the day after another dialog and left loaded shows the card once the line is free, with no reload', async () => {
+test.skipIf(!hasDom)('a tab loaded inside the gap after another dialog and left loaded shows the card once the line is free, with no reload', async () => {
   // The line's last dialog, as config.json keeps it (the Inbox reads it live).
   const lastDialog = (at: number) => {
     const stamp = new Date(at).toISOString();
@@ -195,7 +195,7 @@ test.skipIf(!hasDom)('a tab loaded the day after another dialog and left loaded 
   await wait(TIMES.settledMs + 400);
   expect(openDialogs()).toEqual([]);
   expect(config().inboxReveals.bro).toBeUndefined();
-  // More than a day passes on the same tab: the Inbox has Bro mode next, and the tab asks it for the line again.
+  // The gap passes on the same tab: the Inbox has Bro mode next, and the tab asks it for the line again.
   lastDialog(Date.now() - 26 * 3_600_000);
   await wait(reveal.REVEAL_TIMES.lineReadMs + 300);
   act(() => {

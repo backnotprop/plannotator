@@ -331,15 +331,15 @@ export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ah
 /**
  * What a load arms of the line, kept as the newest settings read has it until the load is spent (App's latches).
  *
- * The line moves while a tab stays loaded: the spacing ends, the day turns, tenure passes, another dialog is shown
+ * The line moves while a tab stays loaded: the gap ends, tenure passes, another dialog is shown
  * elsewhere. A tab left loaded for hours or days used to keep what its first read said, so a load that began while the
- * line was held (the day after a dialog, say) armed nothing for the rest of its life, whatever the Inbox answered later.
+ * line was held (the gap after a dialog, say) armed nothing for the rest of its life, whatever the Inbox answered later.
  * So the latch follows each later read, and the load reads the line again every `REVEAL_TIMES.lineReadMs` while the tab
  * is in front (and when it comes back in front after that long), until it is spent.
  *
  * Spent: this load showed or claimed a one-time dialog, or had the tour or an update on screen. Then what it holds
- * stays and it reads no more: a load shows one dialog at most, as before. The Inbox still decides every claim (one a
- * day, the spacing, never the load right after one that showed a dialog).
+ * stays and it reads no more: a load shows one dialog at most, as before. The Inbox still decides every claim (the
+ * gap, never the load right after one that showed a dialog).
  *
  * `read`: what the newest settings arm, null until the first list and settings are in. `line`: the Inbox keeps a line
  * (settings `reveal.line`; without one nothing moves with time, so nothing is read again).

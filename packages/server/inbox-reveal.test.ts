@@ -349,8 +349,8 @@ describe("the Board reveal at day 4", () => {
     expect(await (await world({ threads: 5 })).next()).toBe("board");
   });
 
-  test("an upgrade: Snooze and voice shown an hour ago by an Inbox before the reveals (no inboxReveals key): nothing is due", async () => {
-    const hourAgo = new Date(Date.now() - HOUR).toISOString();
+  test("an upgrade: Snooze and voice shown ten minutes ago by an Inbox before the reveals (no inboxReveals key): nothing is due", async () => {
+    const hourAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     const w = await world({
       config: {
         inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString(), shownAt: hourAgo },
@@ -579,7 +579,7 @@ describe("over the tailnet", () => {
 });
 
 describe("the queue with Snooze", () => {
-  test("Snooze first at day 4 when it was never shown; its claim stamps the spacing clock, and the Board waits a day", async () => {
+  test("Snooze first at day 4 when it was never shown; its claim stamps the spacing clock, and the Board waits out the gap", async () => {
     const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() } } });
     expect(await w.next()).toBe("snooze");
     // A tab that armed the Board (loaded earlier) is refused while Snooze is next.
@@ -591,8 +591,8 @@ describe("the queue with Snooze", () => {
     expect((await w.claim("board")).show).toBe(false);
   });
 
-  test("Snooze gains the spacing: another announcement under a day ago holds it back", async () => {
-    const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() }, inboxReveals: { lastShownAt: new Date(Date.now() - 23 * HOUR).toISOString() } } });
+  test("Snooze gains the spacing: another announcement under 40 minutes ago holds it back", async () => {
+    const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() }, inboxReveals: { lastShownAt: new Date(Date.now() - 30 * 60_000).toISOString() } } });
     expect((await w.settings()).snooze_intro).toEqual({ due: false });
     expect(((await (await w.post("/api/inbox/snooze-intro")).json()) as Json).show).toBe(false);
     expect(w.saved().inboxSnoozeIntro.shownAt).toBeUndefined();
@@ -612,6 +612,37 @@ describe("the queue with Snooze", () => {
     expect(await stuck.next()).toBe("board");
     expect((await stuck.settings()).snooze_intro).toEqual({ due: false });
     expect((await stuck.claim()).show).toBe(true);
+  });
+
+  test("the gap is 40 minutes, with no one-a-day rule (the owner, 2026-11-09): a dialog 41 minutes ago today, the agent note's stamp included, holds nothing back", async () => {
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    const held = await world({ config: { inboxReveals: { lastShownAt: minutesAgo(39), dayShownAt: minutesAgo(39) } } });
+    expect(await held.next()).toBeNull();
+    expect((await held.claim()).show).toBe(false);
+    const free = await world({ config: { inboxReveals: { lastShownAt: minutesAgo(41), dayShownAt: minutesAgo(41) } } });
+    expect(await free.next()).toBe("board");
+    expect((await free.claim()).show).toBe(true);
+    // The agent note (it stamps only `dayShownAt`) and a card that stands aside (the star ask) start the gap too.
+    expect(await (await world({ config: { inboxReveals: { dayShownAt: minutesAgo(39) } } })).next()).toBeNull();
+    expect(await (await world({ config: { inboxReveals: { star: { shownAt: minutesAgo(39) } } } })).next()).toBeNull();
+    expect(await (await world({ config: { inboxReveals: { star: { shownAt: minutesAgo(41) } } } })).next()).toBe("board");
+  });
+
+  test("list options is skipped for someone who already picked a look (the owner, 2026-11-09): never due, never claimed, and the dialogs behind it go", async () => {
+    const due = { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } };
+    // Picked before the dialog became due (a save from Settings → Rows or the ⋮ menu: the list and its save count).
+    const picked = await world({ config: { ...due, inboxRows: ["smallNames"], inboxRowsRev: 3, inboxRowsDefaults: 2 } });
+    expect((await picked.settings()).list_intro).toEqual({ due: false });
+    expect(await picked.next()).toBe("board");
+    expect(((await (await picked.post("/api/inbox/list-intro")).json()) as Json).show).toBe(false);
+    expect(picked.saved().inboxListIntro.shownAt).toBeUndefined();
+    expect(picked.saved().inboxReveals?.lastShownAt).toBeUndefined();
+    // Picked while it waits for its moment: it drops then, as the tab icon dialog does once a favicon is chosen.
+    const later = await world({ config: due });
+    expect(await later.next()).toBe("list_intro");
+    expect((await later.post("/api/inbox/settings", { rows: ["roomy"] })).ok).toBe(true);
+    expect((await later.settings()).list_intro).toEqual({ due: false });
+    expect(await later.next()).toBe("board");
   });
 
   test("the list options dialog's claim counts toward the spacing", async () => {

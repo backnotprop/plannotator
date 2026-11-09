@@ -11,6 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealAsideNow, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
 
+const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const NOW = new Date("2026-11-07T15:00:00.000Z");
@@ -47,10 +48,10 @@ describe("the order", () => {
     expect(revealMayClaim("steps", state({ ...day6, open: { steps: true } }), NOW)).toBe(true);
   });
 
-  test("the Checklist keeps the one-day spacing after the Board", () => {
+  test("the Checklist keeps the 40-minute gap after the Board", () => {
     const after = (ms: number) => revealNext(state({ firstUseAt: ago(6 * DAY), lastShownAt: ago(ms), open: { steps: true } }), NOW);
-    expect(after(24 * HOUR - 1)).toBeNull();
-    expect(after(24 * HOUR)).toBe("steps");
+    expect(after(40 * MINUTE - 1)).toBeNull();
+    expect(after(40 * MINUTE)).toBe("steps");
   });
 
   test("the list dialog waits for five threads, fresh installs included (no day count); below that the line passes it", () => {
@@ -112,12 +113,19 @@ describe("the Checklist's who", () => {
 });
 
 describe("the spacing", () => {
-  test("never within a day of the last announcement: open again at exactly 24 h (the owner, 2026-11-06: one day apart)", () => {
-    expect(REVEAL_SPACING_MS).toBe(24 * HOUR);
-    expect(revealNext(state({ lastShownAt: ago(24 * HOUR - 1) }), NOW)).toBeNull();
-    expect(revealNext(state({ lastShownAt: ago(24 * HOUR) }), NOW)).toBe("snooze");
+  test("never within 40 minutes of the last dialog, open again at exactly 40 (the owner, 2026-11-09: no whole day), whatever the calendar day", () => {
+    expect(REVEAL_SPACING_MS).toBe(40 * MINUTE);
+    expect(revealNext(state({ lastShownAt: ago(40 * MINUTE - 1) }), NOW)).toBeNull();
+    expect(revealNext(state({ lastShownAt: ago(40 * MINUTE) }), NOW)).toBe("snooze");
     // A claim checks it too.
-    expect(revealMayClaim("snooze", state({ lastShownAt: ago(HOUR) }), NOW)).toBe(false);
+    expect(revealMayClaim("snooze", state({ lastShownAt: ago(20 * MINUTE) }), NOW)).toBe(false);
+    expect(revealMayClaim("snooze", state({ lastShownAt: ago(HOUR) }), NOW)).toBe(true);
+    // The same day is no bar any more: a dialog an hour ago, the agent note included (it stamps only `dayShownAt`).
+    expect(revealNext(state({ lastShownAt: ago(HOUR), dayShownAt: ago(HOUR) }), NOW)).toBe("snooze");
+    expect(revealNext(state({ dayShownAt: ago(40 * MINUTE - 1) }), NOW)).toBeNull();
+    // A card that stands aside (the star ask, the grill-me tip) starts the gap too, so nothing stacks on it.
+    expect(revealNext(state({ asideShownAt: ago(40 * MINUTE - 1) }), NOW)).toBeNull();
+    expect(revealNext(state({ asideShownAt: ago(40 * MINUTE) }), NOW)).toBe("snooze");
   });
 
   test("the clock is the latest stamp of any announcement, whatever key it is in", () => {
@@ -167,10 +175,12 @@ describe("the star ask's who (approval \"star-ask\")", () => {
     expect(revealAsideNow(state({ ...week, open: { steps: true, star: true } }), NOW)).toEqual(["star"]);
   });
 
-  test("only while the line is free: not on a day that had a dialog, not on the load after one, not inside the spacing", () => {
+  test("only while the line is free: not within 40 minutes of a dialog, not on the load after one, not after a Not now", () => {
     expect(star({ dayShownAt: local(0, 0, 5).toISOString() })).toBeNull();
     expect(star({ afterShowLoad: true })).toBeNull();
-    expect(star({ lastShownAt: local(-1, 9, 0).toISOString() })).toBeNull();
+    expect(star({ lastShownAt: local(0, 0, 0).toISOString() })).toBeNull();
+    // 40 minutes on, the same day: free.
+    expect(star({ lastShownAt: local(-1, 23, 50).toISOString(), dayShownAt: local(-1, 23, 50).toISOString() })).toBe("star");
     expect(star({ notNowAt: local(-2, 9, 0).toISOString() })).toBeNull();
   });
 

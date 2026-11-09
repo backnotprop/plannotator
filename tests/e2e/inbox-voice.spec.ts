@@ -1978,7 +1978,7 @@ test.describe('the announcement', () => {
     await second.page.goto(queued.url);
     await expect(second.page.locator('[data-dialog="list-look-intro"]')).toBeVisible({ timeout: 15_000 });
     await second.page.keyboard.press('Escape');
-    // One dialog a day: a long reply on this load, and on the next, finds the moment but not the day.
+    // Inside the gap, and the load after a dialog: a long reply on this load, and on the next, finds the moment but not its turn.
     await sendLong(second.page, queued, queued.threads[0]!);
     await second.page.waitForTimeout(SETTLE);
     await expect(dialog(second.page)).toHaveCount(0);

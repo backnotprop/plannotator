@@ -2,10 +2,11 @@
  * Who gets "Choose how your list looks" at a release start (inbox-list-intro.ts; approval "inbox-rows-dialog"). Pure:
  * no Inbox starts. What regresses: someone who saw the 0.28.42 dialog never seeing the new one, anyone seeing it twice
  * (each later start must leave a decided record alone, claimed or not), a fresh install left out, or version 1's
- * record cleared instead of kept.
+ * record cleared instead of kept; someone who already picked a look still being asked (the owner, 2026-11-09: "Yes,
+ * skip it for them"), or someone who never picked one being skipped (a record with no save, the old all-off default).
  */
 import { describe, expect, test } from "bun:test";
-import { LIST_INTRO_VERSION, listIntroAtStart, listIntroDue, type ListIntroSaved } from "./inbox-list-intro";
+import { LIST_INTRO_VERSION, listIntroAtStart, listIntroDue, listIntroLookPicked, type ListIntroSaved } from "./inbox-list-intro";
 
 const AT = "2026-11-08T10:00:00.000Z";
 const LATER = "2026-11-09T10:00:00.000Z";
@@ -43,5 +44,25 @@ describe("the rows dialog's seen key", () => {
     expect(listIntroDue({ dueAt: AT, version: LIST_INTRO_VERSION, shownAt: LATER })).toBe(false);
     expect(listIntroDue(undefined)).toBe(false);
     expect(listIntroDue({ version: LIST_INTRO_VERSION, shownAt: LATER })).toBe(false);
+  });
+});
+
+describe("who already picked a look (config.json inboxRows): the dialog has nothing to ask them", () => {
+  test("a saved look is a pick, whichever look it is: the defaults saved from Settings count", () => {
+    expect(listIntroLookPicked({ inboxRows: ["smallNames"], inboxRowsRev: 25 })).toBe(true);
+    expect(listIntroLookPicked({ inboxRows: ["roomy", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 })).toBe(true);
+    // Every option off, chosen since the defaults changed: the person's own.
+    expect(listIntroLookPicked({ inboxRows: [], inboxRowsRev: 4, inboxRowsDefaults: 2 })).toBe(true);
+  });
+
+  test("never saved, a list no save wrote, or the old all-off default: not a pick", () => {
+    expect(listIntroLookPicked({})).toBe(false);
+    expect(listIntroLookPicked({ inboxRowsRev: 3 })).toBe(false);
+    expect(listIntroLookPicked({ inboxRows: "roomy" as unknown as string[], inboxRowsRev: 3 })).toBe(false);
+    // Hand-written, or restored without its count: no save made it.
+    expect(listIntroLookPicked({ inboxRows: ["roomy"] })).toBe(false);
+    expect(listIntroLookPicked({ inboxRows: ["roomy"], inboxRowsRev: 0 })).toBe(false);
+    // Saved before the defaults changed with every option off: read as "never a choice" everywhere else too.
+    expect(listIntroLookPicked({ inboxRows: [], inboxRowsRev: 2 })).toBe(false);
   });
 });

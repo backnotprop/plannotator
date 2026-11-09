@@ -7,7 +7,11 @@
  * it, and a fresh install. The page still waits for a list of five threads or more (packages/inbox/listIntro.ts
  * `LIST_INTRO_MIN_ROWS`; the line's `minThreads`, shared/inbox/reveals.ts), so a new user sees it once the list has
  * grown, with no day count. Version 1's record is kept under `before`, not cleared.
+ *
+ * Never for someone who already picked a look (the owner, 2026-11-09, q-a85c7bc9: "Yes, skip it for them";
+ * `listIntroLookPicked`), as the tab icon dialog drops once a favicon is chosen.
  */
+import { inboxRowsRead } from "@plannotator/core/inbox-types";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 
 export type ListIntroSaved = NonNullable<PlannotatorConfig["inboxListIntro"]>;
@@ -31,4 +35,19 @@ export function listIntroAtStart(saved: ListIntroSaved | undefined, at: string):
  */
 export function listIntroDue(saved: ListIntroSaved | undefined): boolean {
   return typeof saved?.dueAt === "string" && saved.dueAt !== "" && !saved.shownAt;
+}
+
+/**
+ * The person already picked how their rows look (config.json `inboxRows`): the dialog has nothing to ask them. A window
+ * saves the look only when the person changes it (a row option in the ⋮ menu, a choice or preset in Settings → Rows,
+ * a look in this dialog) or, once, when it adopts a look this browser kept from before the Inbox saved it, which was
+ * the person's too. Not a pick: never saved (`inboxRows` unset, or not a list this build reads), a record with no
+ * save count (`inboxRowsRev`, written by every save), and a look saved before the defaults changed with every option
+ * off (`inboxRowsDefaults` unset: core `inboxRowsSaved` reads that one as "never a choice" too).
+ */
+export function listIntroLookPicked(config: Pick<PlannotatorConfig, "inboxRows" | "inboxRowsRev" | "inboxRowsDefaults">): boolean {
+  const rows = inboxRowsRead(config.inboxRows);
+  if (rows === null) return false;
+  if (typeof config.inboxRowsRev !== "number" || !(config.inboxRowsRev > 0)) return false;
+  return rows.length > 0 || typeof config.inboxRowsDefaults === "number";
 }

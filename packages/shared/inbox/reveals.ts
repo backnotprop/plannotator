@@ -6,7 +6,7 @@
  * every claim against it.
  *
  * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
- * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
+ * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the gap and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
@@ -15,16 +15,18 @@
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (List view: approval "inbox-one-time-dialogs", "the change") may also
- *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the day, load and
+ *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the load and
  *    spacing rules (`revealAhead`). It never goes before an update-day dialog.
- *  - At most one new dialog a calendar day (local time), the agent note included (`inboxReveals.dayShownAt`).
+ *  - No one-a-day rule (the owner, 2026-11-09: "I don't wanna wait a whole day now ... at 40 minutes, give him the new
+ *    option"): the gap below is the whole pace, so a heavy user may see several dialogs in one day, each at its moment.
  *  - Never on two page loads in a row: the load right after the one that showed the last dialog shows none
  *    (`revealAfterShowLoad`; each page sends its load id, and a load counts once, when it is first seen, so an old tab
  *    reading settings again never becomes the newest load).
- *  - Spacing (changed 2026-11-06: "one day apart, three after a Not now"): `REVEAL_SPACING_MS` (1 day) after the last
- *    dialog that stamps the clock (every one but the agent note; one clock, so the update-day dialogs keep it too),
+ *  - Spacing (changed 2026-11-09: about 40 minutes; it was one day): `REVEAL_SPACING_MS` (40 minutes) after the last
+ *    dialog of any kind: the line's own (`lastShownAt`), the agent note (`dayShownAt`) and the ones that stand aside
+ *    (`asideShownAt`: the star ask, the grill-me tip), so none stacks on another (`revealGapFree`).
  *    `REVEAL_NOT_NOW_SPACING_MS` (3 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
- *    update-day dialog's Not now keeps the 1 day). The clock also
+ *    update-day dialog's Not now keeps the 40 minutes; the agent note does not wait for it). The clock also
  *    reads the announcements' own `shownAt` stamps from before that key existed (`revealLastShown`).
  *  - Patience: an entry that has been next for `REVEAL_PATIENCE_MS` (3 days) without its moment lets the next entry
  *    that qualifies go first. It stays in line: when every qualifying entry has waited that long, the one that has
@@ -90,8 +92,8 @@ export interface RevealEntry {
  * Code review's offer (approval "code-review-offer-card", 2026-11-06; the owner: "this one needs to show up like
  * immediately"): its slot in the line. First in the queue with no tenure, so it is next on day 0 (first use not known
  * yet is fine: no tenure to count), and the page opens it at once (`atOnce`, packages/inbox/codeReviewOffer.ts) once
- * the tour's entry screen is gone, before the agent note, which then keeps the one-a-day rule and waits for the next
- * free day. Only while Code review was never decided (config.json `inboxCodeReview` unset). To move the slot, change
+ * the tour's entry screen is gone, before the agent note, which then keeps the gap and waits for a later
+ * load. Only while Code review was never decided (config.json `inboxCodeReview` unset). To move the slot, change
  * this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
  */
 export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
@@ -99,8 +101,8 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
   CODE_REVIEW_OFFER,
-  // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
-  // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.
+  // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), the line's gap apart
+  // (40 minutes): the sound on the update day, then list options and voice, each at its moment.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // "Choose how your list looks" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more threads, that's
   // the point"): due for everyone, fresh installs too, once the machine holds five threads, with no day count.
@@ -142,10 +144,11 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
 ];
 
 /**
- * Never two dialogs within this long on one machine (the agent note apart): one day (the owner, 2026-11-06, "one day
- * apart"; it was 48 h). One clock for every dialog of the line, the update-day dialogs included.
+ * Never two dialogs within this long on one machine: 40 minutes (the owner, 2026-11-09: "the user can wait 20, 40
+ * minutes, and at 40 minutes, give him the new option. They don't need to wait a whole day"; it was one day, and at
+ * most one a calendar day). One clock for every dialog: the line's, the agent note and the ones that stand aside.
  */
-export const REVEAL_SPACING_MS = DAY_MS;
+export const REVEAL_SPACING_MS = 40 * 60 * 1000;
 /** After an offer closed with Not now, the next waits this long: three days (the owner, 2026-11-06; it was four). */
 export const REVEAL_NOT_NOW_SPACING_MS = 3 * DAY_MS;
 /** An entry next this long without its moment lets the next one go first. */
@@ -162,7 +165,7 @@ export interface RevealState {
   firstUseAt?: string | null;
   /** The last dialog that stamps the spacing clock on this machine (config.json `inboxReveals.lastShownAt`). */
   lastShownAt?: string | null;
-  /** The last dialog of any kind in the line, the agent note included (config.json `inboxReveals.dayShownAt`). */
+  /** The last dialog of any kind in the line, the agent note included (config.json `inboxReveals.dayShownAt`; the name is from the one-a-day rule it once kept). */
   dayShownAt?: string | null;
   /** The last offer closed with Not now (config.json `inboxReveals.notNowAt`). */
   notNowAt?: string | null;
@@ -176,7 +179,7 @@ export interface RevealState {
   open: Partial<Record<RevealId, boolean>>;
   /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
-  /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`), for a `lastResort` entry. */
+  /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
 }
 
@@ -192,7 +195,7 @@ export function revealDay(at: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-/** The spacing holds: a day since the last dialog that stamps the clock, three since an offer's Not now. */
+/** The spacing holds: `REVEAL_SPACING_MS` since the last dialog that stamps the clock, three days since an offer's Not now. */
 export function revealSpaced(lastShownAt: string | null | undefined, now: Date, notNowAt?: string | null): boolean {
   const last = time(lastShownAt);
   if (last !== null && now.getTime() - last < REVEAL_SPACING_MS) return false;
@@ -200,22 +203,25 @@ export function revealSpaced(lastShownAt: string | null | undefined, now: Date, 
   return notNow === null || now.getTime() - notNow >= REVEAL_NOT_NOW_SPACING_MS;
 }
 
-/** No dialog of the line was shown today (local calendar day). */
-export function revealDayFree(state: Pick<RevealState, "lastShownAt" | "dayShownAt">, now: Date): boolean {
-  const today = revealDay(now.getTime());
-  return [state.lastShownAt, state.dayShownAt].every((stamp) => {
+/**
+ * No dialog of any kind was shown within `REVEAL_SPACING_MS`: the line's own, the agent note, the ones that stand
+ * aside. (Until 2026-11-09 this was "none today", a local calendar day.)
+ */
+export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShownAt" | "asideShownAt">, now: Date): boolean {
+  return [state.lastShownAt, state.dayShownAt, state.asideShownAt].every((stamp) => {
     const at = time(stamp);
-    return at === null || revealDay(at) !== today;
+    return at === null || now.getTime() - at >= REVEAL_SPACING_MS;
   });
 }
 
 /**
- * The line's own rules, for any dialog in it: not on the load right after the one that showed the last dialog, not on
- * a day that already had one, and (except the agent note, `setup`) the spacing. A dev build keeps no line: free.
+ * The line's own rules, for any dialog in it: not on the load right after the one that showed the last dialog, not
+ * within the gap of any other dialog, and (except the agent note, `setup`) not within three days of an offer's Not
+ * now. A dev build keeps no line: free.
  */
 export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now: Date): boolean {
   if (!state.release) return true;
-  if (state.afterShowLoad || !revealDayFree(state, now)) return false;
+  if (state.afterShowLoad || !revealGapFree(state, now)) return false;
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);
 }
 
@@ -361,8 +367,8 @@ export const REVEAL_LOADS_KEPT = 256;
 
 /**
  * The page loads the Inbox saw, in the order each was first seen: `newest`, and for each load the one first seen just
- * before it. Kept in memory, not in config.json: it changes on every load, and the one-a-day rule already covers the
- * load after a restart. A load counts once: an old tab reading settings again is not a new load.
+ * before it. Kept in memory, not in config.json: it changes on every load; after a restart the gap alone
+ * holds the next load. A load counts once: an old tab reading settings again is not a new load.
  */
 export interface RevealLoads {
   newest?: string;
@@ -423,8 +429,8 @@ export function revealAgentNoteAgents(value: unknown): string[] | null | undefin
 }
 
 /**
- * The agent note is shown once for each agent (approval "inbox-one-time-dialogs": setup, one a day): a claim names an
- * agent it was never shown for, so it may show (and keep the day). A note left unanswered (the tab closed) is not shown
+ * The agent note is shown once for each agent (approval "inbox-one-time-dialogs": setup): a claim names an
+ * agent it was never shown for, so it may show (and start the gap). A note left unanswered (the tab closed) is not shown
  * again for the same agents, so it never takes another day's place. `agents` null (an older page): it may show.
  */
 export function revealAgentNoteNew(shownFor: readonly string[] | undefined, agents: readonly string[] | null): boolean {

@@ -4939,7 +4939,7 @@ function Inbox() {
   // `ahead` offers and the ones beside it, and whether the list options and voice dialogs are due and next. It follows
   // each later settings read, and the load reads the line again now and then, until the load is spent (it showed or
   // claimed a one-time dialog, or had the tour or an update): a tab left loaded since before the line was free used to
-  // arm nothing for the rest of its life. The Inbox's claim still lets only one show (one a day, the load rule).
+  // arm nothing for the rest of its life. The Inbox's claim still decides each one (the gap, the load rule).
   const lineSpent =
     soundDialog !== 'none' ||
     agentNote !== 'none' ||

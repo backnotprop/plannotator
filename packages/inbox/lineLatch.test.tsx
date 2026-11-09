@@ -2,7 +2,7 @@
  * What a page load arms of the line of one-time dialogs, as time passes on a tab left loaded (reveal.ts
  * `useLineLatch`), wired to a line dialog as App wires it (`useLineReveal`, List view's moment).
  *
- * What regresses: a tab loaded while the line was held (the day after a dialog, the spacing not over) never arming
+ * What regresses: a tab loaded while the line was held (the gap after a dialog not over) never arming
  * the dialog the Inbox names later, so someone whose tab stays loaded for days never sees a one-time dialog (the
  * owner, 2026-11-09: "never saw the List view dialog"); the tab never asking the Inbox again as time passes, or asking
  * while it is hidden, or not asking when it comes back in front; a tab still armed for a dialog the line has moved
@@ -151,7 +151,7 @@ describe.skipIf(!hasDom)('what a load arms of the line, on a tab left loaded', (
     await wait(TIMES.pageAgeMs + 20);
     await readAndLeave(set);
     expect(claims).toEqual([]);
-    // Time passes: the day after the last dialog, the Inbox has List view for this page.
+    // Time passes: the gap after the last dialog is over, and the Inbox has List view for this page.
     server = { next: null, ahead: ['list_view'], line: true };
     rereads = 0;
     await until(() => rereads > 0);

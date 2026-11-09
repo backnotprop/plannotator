@@ -40,7 +40,7 @@
  */
 
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
-import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
+import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -2457,7 +2457,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
     if (via !== "local" || !soundState().dialog_due) return false;
-    // The line of one-time dialogs (shared/inbox/reveals.ts): one a day, never on the load after one, a day apart.
+    // The line of one-time dialogs (shared/inbox/reveals.ts): never on the load after one, 40 minutes apart.
     if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
     saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor }, ...lineStamp(new Date().toISOString(), true, load) });
@@ -2486,7 +2486,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * "inbox-rows-dialog"), is due once for everyone, fresh installs and those who saw version 1 included. The page
    * waits for a list of five threads or more.
    */
-  const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  const listIntroState = () => {
+    const config = loadConfig();
+    // Never for someone who already picked a look (the owner, 2026-11-09: "Yes, skip it for them"), read live as the
+    // tab icon's favicon is: a pick before its moment drops it, and it no longer holds the dialogs behind it.
+    return { due: listIntroDue(config.inboxListIntro) && !listIntroLookPicked(config) };
+  };
   const listIntroMinThreads = INBOX_REVEALS.find((entry) => entry.id === "list_intro")?.minThreads ?? 0;
   /** Due, with the threads the dialog waits for: what holds the dialogs after it back. */
   const listIntroWaits = () => listIntroState().due && store.threadIds().length >= listIntroMinThreads;
@@ -2933,7 +2938,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       open,
       waitingSince: reveals?.waitingSince,
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
-      asideShownAt: reveals?.star?.shownAt ?? null,
+      // The grill-me tip's too: the gap counts from either (`revealGapFree`).
+      asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
     };
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
