@@ -2,17 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../packages/core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../packages/core/favicon";
 
-// The two server-served entry points declare no type/sizes: their /favicon.png
-// is answered by handleFavicon(), which picks PNG or the classic SVG from the
-// persisted style, so the response Content-Type is the only truthful
-// declaration. A re-added type="image/png" would be a lie for classic users.
-const SERVED_FAVICON_LINK = '<link rel="icon" href="/favicon.png">';
+// The server-served entry points link /favicon.ico with its sizes and no type:
+// handleFavicon() answers Glass's multi-size .ico (the tab takes its
+// hand-pixelled 16 or 32 frame, as on plannotator.ai) or the Face or P PNG,
+// from the persisted style, so the response Content-Type is the truthful
+// declaration. A type="image/x-icon" would be a lie for Face and P users.
+const SERVED_FAVICON_LINK = '<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">';
 // The portal is a static site with no Plannotator server, so its favicon really
-// is always the 192px PNG the vite plugin emits and it keeps the typed hints.
+// is always the Glass .ico the vite plugin emits and it keeps the typed hint.
 const STATIC_FAVICON_LINK =
-  '<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">';
+  '<link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48" href="/favicon.ico">';
 // The marketing site serves the brand studio's web set as plain files, linked
 // with the studio's own head snippet (the .ico first, so non-retina tabs get
 // the hand-pixelled 16). It has no web manifest, so the manifest line is left out.
@@ -135,6 +136,7 @@ describe("favicon surfaces", () => {
       const html = (await readRepoFile(path)).toString();
       expect(html).toContain(SERVED_FAVICON_LINK);
       expect(html).not.toContain('rel="icon" type=');
+      expect(html).not.toContain('href="/favicon.png"');
     }
 
     expect((await readRepoFile("apps/portal/index.html")).toString()).toContain(
@@ -153,18 +155,31 @@ describe("favicon surfaces", () => {
 
   test("the share portal emits its favicon from the shared application asset", async () => {
     const portalConfig = (await readRepoFile("apps/portal/vite.config.ts")).toString();
+    expect(portalConfig).toContain("fileName: 'favicon.ico'");
+    expect(portalConfig).toContain("source: FAVICON_ICO_BYTES");
     expect(portalConfig).toContain("fileName: 'favicon.png'");
     expect(portalConfig).toContain("source: FAVICON_PNG_BYTES");
   });
 
-  test("the shared application favicon is the studio's 192px goggles icon", () => {
+  test("the apps' tab icon is the same .ico plannotator.ai serves, byte for byte", async () => {
+    // The bug this pins: the apps used the 192px PWA icon, a full square the
+    // browser shrank, while plannotator.ai showed the hand-pixelled 16 and 32.
+    const marketing = await readRepoFile("apps/marketing/public/favicon.ico");
+    expect(Buffer.from(FAVICON_ICO_BYTES).equals(marketing)).toBe(true);
+    expect(createHash("sha256").update(FAVICON_ICO_BYTES).digest("hex")).toBe(
+      "7402e8509ac4ab49194fa387ab0722766cfab5ab94230c798facfd0e97771c59",
+    );
+  });
+
+  test("/favicon.png is the studio's hand-pixelled 32 build", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
+      "02dd9afe0ab91344168142cc4aa7cdac952e2f88e1cd55c089798b7f79520d2b",
     );
     const stats = inspectPng(FAVICON_PNG_BYTES);
-    expect(stats).toMatchObject({ width: 192, height: 192 });
-    // A full tile: most pixels are opaque whatever the finish.
-    expect(stats.opaquePixels).toBeGreaterThan((192 * 192) / 2);
+    expect(stats).toMatchObject({ width: 32, height: 32 });
+    // The studio's slightly rounded tile: its corners are transparent.
+    expect(stats.transparentPixels).toBeGreaterThan(0);
+    expect(stats.opaquePixels).toBeGreaterThan((32 * 32) / 2);
   });
 
   test("the Face and P styles are their pinned PNGs", () => {

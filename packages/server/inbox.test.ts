@@ -18,7 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -1227,6 +1227,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = await fetch(`http://127.0.0.1:${server.port}/favicon.png`);
       expect(icon.status).toBe(200);
       expect(icon.headers.get("content-type")).toMatch(/^image\//);
+      // The window links /favicon.ico: Glass's .ico, so the tab shows the hand-pixelled 16 or 32.
+      const ico = await fetch(`http://127.0.0.1:${server.port}/favicon.ico`);
+      expect(ico.status).toBe(200);
+      expect(ico.headers.get("content-type")).toBe("image/x-icon");
+      expect(new Uint8Array(await ico.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

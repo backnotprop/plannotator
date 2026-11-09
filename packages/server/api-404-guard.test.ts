@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../core/favicon";
 import { saveConfig } from "./config";
 import { packApp } from "../shared/packed-app";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
@@ -276,6 +276,13 @@ describe("API route 404 guards", () => {
           FAVICON_PNG_BYTES,
         );
 
+        // /favicon.ico, what the entry HTML links: Glass's multi-size .ico on Bun and Pi alike.
+        const icoResponse = await fetch(`${server.url}/favicon.ico`);
+        expect(icoResponse.status).toBe(200);
+        expect(icoResponse.headers.get("content-type")).toBe("image/x-icon");
+        expect(icoResponse.headers.get("cache-control")).toBe("no-cache");
+        expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+
         // Cross-runtime parity for the other styles: Bun and Pi must agree on
         // both the bytes and the content type, since the entry HTML's
         // <link rel="icon"> declares no type of its own.
@@ -288,6 +295,10 @@ describe("API route 404 guards", () => {
           expect(styleResponse.status).toBe(200);
           expect(styleResponse.headers.get("content-type")).toBe("image/png");
           expect(new Uint8Array(await styleResponse.arrayBuffer())).toEqual(expected);
+          // Face and P have no .ico: /favicon.ico answers their PNG.
+          const styleIco = await fetch(`${server.url}/favicon.ico`);
+          expect(styleIco.headers.get("content-type")).toBe("image/png");
+          expect(new Uint8Array(await styleIco.arrayBuffer())).toEqual(expected);
         }
 
         const spaResponse = await fetch(`${server.url}/some/random/path`);

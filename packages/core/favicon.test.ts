@@ -6,6 +6,8 @@ import {
   DEFAULT_FAVICON_STYLE,
   FACE_FAVICON_PNG_BYTES,
   FACE_FAVICON_PNG_DATA_URL,
+  FAVICON_ICO_BYTES,
+  FAVICON_ICO_DATA_URL,
   FAVICON_PNG_BYTES,
   FAVICON_PNG_DATA_URL,
   FAVICON_STYLE_CHOICES,
@@ -14,13 +16,30 @@ import {
   P_FAVICON_PNG_DATA_URL,
   faviconBody,
   faviconDataUrl,
+  faviconIcoBody,
+  faviconLinkType,
+  faviconPngDataUrl,
   isFaviconStyle,
 } from "./favicon";
 
 describe("production favicon", () => {
-  test("embeds the studio's 192px goggles PNG exactly", () => {
+  test("the tab icon is the studio's web/favicon.ico exactly: 16, 32 and 48 frames", () => {
+    // The same file plannotator.ai serves (apps/marketing/public/favicon.ico).
+    expect(createHash("sha256").update(FAVICON_ICO_BYTES).digest("hex")).toBe(
+      "7402e8509ac4ab49194fa387ab0722766cfab5ab94230c798facfd0e97771c59",
+    );
+    const view = new DataView(FAVICON_ICO_BYTES.buffer, FAVICON_ICO_BYTES.byteOffset, FAVICON_ICO_BYTES.byteLength);
+    expect(view.getUint16(0, true)).toBe(0);
+    expect(view.getUint16(2, true)).toBe(1);
+    const count = view.getUint16(4, true);
+    const sizes = Array.from({ length: count }, (_, i) => `${view.getUint8(6 + 16 * i)}x${view.getUint8(7 + 16 * i)}`);
+    expect(sizes).toEqual(["16x16", "32x32", "48x48"]);
+    expect(FAVICON_ICO_DATA_URL).toStartWith("data:image/x-icon;base64,");
+  });
+
+  test("the one-PNG build is the studio's pixel/fav-32.png exactly", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
+      "02dd9afe0ab91344168142cc4aa7cdac952e2f88e1cd55c089798b7f79520d2b",
     );
     expect(Array.from(FAVICON_PNG_BYTES.subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -31,11 +50,10 @@ describe("production favicon", () => {
       FAVICON_PNG_BYTES.byteOffset,
       FAVICON_PNG_BYTES.byteLength,
     );
-    expect(view.getUint32(16)).toBe(192);
-    expect(view.getUint32(20)).toBe(192);
+    expect(view.getUint32(16)).toBe(32);
+    expect(view.getUint32(20)).toBe(32);
     expect(view.getUint8(24)).toBe(8);
-    // Colour type 2 (RGB) or 6 (RGBA): the studio's file decides.
-    expect([2, 6]).toContain(view.getUint8(25));
+    expect(view.getUint8(25)).toBe(6);
   });
 
   test("keeps the SVG export as a wrapper around the canonical PNG", () => {
@@ -77,7 +95,7 @@ describe("favicon style switcher", () => {
   });
 
   test("each stored id draws its icon: glass Glass, totman Face, classic the P icon", () => {
-    expect(faviconDataUrl("glass")).toBe(FAVICON_PNG_DATA_URL);
+    expect(faviconDataUrl("glass")).toBe(FAVICON_ICO_DATA_URL);
     expect(faviconDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
     expect(faviconDataUrl("classic")).toBe(P_FAVICON_PNG_DATA_URL);
     expect(faviconBody("glass")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
@@ -87,6 +105,18 @@ describe("favicon style switcher", () => {
     expect(faviconBody(undefined).body).toBe(FAVICON_PNG_BYTES);
     expect(faviconBody("navy").body).toBe(FAVICON_PNG_BYTES);
     expect(DEFAULT_FAVICON_STYLE).toBe("glass");
+    // /favicon.ico: Glass's .ico; Face and P have none, so their PNG.
+    expect(faviconIcoBody("glass")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
+    expect(faviconIcoBody(undefined).body).toBe(FAVICON_ICO_BYTES);
+    expect(faviconIcoBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
+    expect(faviconIcoBody("classic")).toEqual({ body: P_FAVICON_PNG_BYTES, contentType: "image/png" });
+    // The badge base is each style's one PNG.
+    expect(faviconPngDataUrl("glass")).toBe(FAVICON_PNG_DATA_URL);
+    expect(faviconPngDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
+    expect(faviconPngDataUrl("classic")).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(faviconLinkType("glass")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
+    expect(faviconLinkType("totman")).toEqual({ type: "image/png", sizes: "64x64" });
+    expect(faviconLinkType("classic")).toEqual({ type: "image/png", sizes: "192x192" });
   });
 
   test("the picker offers Glass, Face and P, in that order", () => {
