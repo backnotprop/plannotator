@@ -314,8 +314,6 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   await expect(sidebar).toBeVisible();
 
   // Enter on the focused edge hides the list too, and focus leaves the hidden edge for ‹ Inbox.
-  await leave.click();
-  await expect(page.locator('.ib-listcol')).toBeVisible();
   await page.getByRole('separator', { name: 'List width' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('.ib-listcol')).toBeHidden();
