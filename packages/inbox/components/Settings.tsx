@@ -23,6 +23,8 @@ import { openSidebarCustomizer } from '../sidebarLayout';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
+import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
+import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
@@ -308,6 +310,8 @@ function GeneralSection({
 }) {
   const { mode, choose } = useInboxTheme();
   const textSize = useInboxTextSize();
+  // Null from an Inbox that predates the setting: no row.
+  const favicon = useInboxFavicon();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
   const browser = browserName();
@@ -411,6 +415,33 @@ function GeneralSection({
             </span>
           </div>
           <PaletteRow />
+          {favicon && (
+            <div className="ib-prow" data-settings-favicon={favicon}>
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-favicon-label">
+                  Favicon
+                </span>
+                <span className="ib-desc">The icon on this tab. Also plan review, code review and annotate.</span>
+              </span>
+              <span className="ib-ctl">
+                <span className="ib-seg" role="radiogroup" aria-labelledby="ib-favicon-label">
+                  {FAVICON_STYLE_CHOICES.map((choice) => (
+                    <label key={choice.id} className="ib-seg-o" data-on={favicon === choice.id ? '' : undefined}>
+                      <input
+                        type="radio"
+                        name="ib-favicon"
+                        value={choice.id}
+                        checked={favicon === choice.id}
+                        onChange={() => void chooseFavicon(choice.id)}
+                      />
+                      <img src={faviconDataUrl(choice.id)} alt="" width={16} height={16} className="ib-favicon-o" />
+                      {choice.label}
+                    </label>
+                  ))}
+                </span>
+              </span>
+            </div>
+          )}
         </div>
       </section>
       <KeyboardSettings />

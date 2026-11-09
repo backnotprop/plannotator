@@ -183,6 +183,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedFavicon, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
@@ -965,7 +966,8 @@ function Inbox() {
   latestSectionsRef.current = latest?.sections ?? null;
   // The tab's count (tabCount.ts): every thread with news the person has not looked at, from the
   // latest read (not the held list on screen, and not the sidebar's project filter).
-  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]));
+  const faviconHref = useInboxFaviconHref();
+  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);
@@ -1783,6 +1785,7 @@ function Inbox() {
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
+      adoptSavedFavicon(next.favicon);
       adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
