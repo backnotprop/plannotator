@@ -5710,6 +5710,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const artifactsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'artifacts' });
+  const sendAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
   const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepsButtonSig(stepLists, stepsAnswered)].join('|');
   const rowFittedFor = useRef('');
@@ -7223,13 +7224,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 fitKey={replyFitKey}
                 send={
                   routeChoiceOpen ? null : (
-                  <Tip content={withShortcut('Send', { scope: inboxThreadShortcuts, action: 'send' })}>
-                    <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy}>
-                      {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
-                      {sending && <span className="ib-spin" aria-hidden="true" />}
-                      <span className="ib-rsend-w">Send</span>
-                    </button>
-                  </Tip>
+                  // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
+                  // (approval "inbox-send-no-shortcut-hint").
+                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
+                    {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
+                    {sending && <span className="ib-spin" aria-hidden="true" />}
+                    <span className="ib-rsend-w">Send</span>
+                  </button>
                   )
                 }
                 clip={

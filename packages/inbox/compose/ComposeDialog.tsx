@@ -48,7 +48,7 @@ import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
-import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { registerReloadFlush } from '../stalePage';
@@ -1684,7 +1684,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
         >
           <Icon name="send" size={15} />
           {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
-          <ShortcutHint scope={inboxThreadShortcuts} action="send" />
         </button>
       </div>
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">
