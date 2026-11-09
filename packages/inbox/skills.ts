@@ -96,13 +96,24 @@ export interface InboxSkillSources {
 }
 
 /**
+ * Shape's switch as this window last read it (App.tsx sets it from the settings). The review skills' drawing lines
+ * go only while it is on (approval "code-review-029-shape-off"); off until the settings say otherwise.
+ */
+let reviewSkillsShape = false;
+
+/** The window read Shape's switch: the review skills pasted from now on carry their drawing lines only while on. */
+export function setReviewSkillsShape(on: boolean): void {
+  reviewSkillsShape = on;
+}
+
+/**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
  * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
- * from disk. Undefined for any other skill.
+ * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch).
  */
-export function builtinSkillContent(ref: SkillCatalogEntry): SkillExportContent | undefined {
+export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape): SkillExportContent | undefined {
   if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name) ?? shapeSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name, { shape }) ?? shapeSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }
 
