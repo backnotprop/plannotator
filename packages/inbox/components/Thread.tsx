@@ -10,6 +10,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { messageSideSource } from '../ask/sideSource';
+import { useSideButton } from '../ask/sideButton';
 import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -979,6 +980,7 @@ export function MessageBody({
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
   // Side (ask/useInboxAsk.tsx): read through refs, as every kept closure here (#2948): naming `comments`, the message
   // or its blocks in a closure would let this body's kept closures hold a render of the whole thread view per read.
+  const sideButton = useSideButton();
   const sideFrom = useRef({ message, blocks, annotations: commentList });
   sideFrom.current = { message, blocks, annotations: commentList };
   const side = useCallback((text: string, context: SelectionActionContext) => {
@@ -1117,6 +1119,7 @@ export function MessageBody({
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
+        sideButton={sideButton}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"

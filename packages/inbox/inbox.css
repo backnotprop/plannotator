@@ -432,6 +432,11 @@ button.ib-mut { border-radius: 6px; }
 .ib-mk > svg, .ib-mk > img { width: var(--ib-mark-16); height: var(--ib-mark-16); display: block; }
 .ib-mk.ib-big { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); background: var(--muted); }
 .ib-mk.ib-big > svg, .ib-mk.ib-big > img { width: var(--ib-mark-30-g); height: var(--ib-mark-30-g); }
+/* Side in the selection bar (ask/sideButton.tsx): the thread agent's mark is the button's glyph. A block, as the
+   other buttons' glyphs are: an inline box would sit on a text line and make the button taller than its neighbours.
+   On a touch bar ui's theme.css draws every glyph at 20 px and sizes the mark's box; the last rule sizes the mark in it. */
+.annotation-toolbar [data-annotation-side] > .ib-mk { display: flex; }
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-annotation-side] > .ib-mk > :is(svg, img) { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 
 /* shell */
 .ib-shell { display: flex; height: 100%; width: 100%; overflow: hidden; }

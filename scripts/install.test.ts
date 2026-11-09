@@ -2845,10 +2845,12 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         })),
         stdout: "pipe", stderr: "pipe",
       });
-      // An Agent SDK session (T3 runs Claude through it) reaches the binary.
-      const invoked = invoke("sdk-ts");
-      expect(invoked.exitCode).toBe(0);
-      expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      // An Agent SDK session (T3 runs Claude through it and names itself `t3-code`) reaches the binary.
+      for (const entrypoint of ["sdk-ts", "t3-code"]) {
+        const invoked = invoke(entrypoint);
+        expect(invoked.exitCode).toBe(0);
+        expect(JSON.parse(invoked.stdout.toString())).toEqual({});
+      }
       // Any other Claude session is answered by the shell: no output, no decision.
       for (const entrypoint of ["cli", undefined]) {
         const skipped = invoke(entrypoint);
