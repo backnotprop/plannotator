@@ -11,10 +11,12 @@ import {
   INBOX_MESSAGE_INSTRUCTION,
   INBOX_NEW_THREAD_INSTRUCTION,
   INBOX_REASK_INSTRUCTION,
+  INBOX_STEPS_START_WAKE_LINE,
   INBOX_TAGGED_INSTRUCTION,
   INBOX_WAKE_CLOSING_LINE,
   INBOX_WAKE_INSTRUCTION,
   inboxAckLine,
+  inboxStepsWakeLine,
   inboxWakeAgo,
   inboxWakeCommand,
   inboxWakeDetailsLine,
@@ -271,4 +273,21 @@ test("a long quote is capped however the Inbox sent it", () => {
   const { line } = replyingLineOf("x".repeat(5000));
   expect(line.length).toBeLessThan(220);
   expect(line.endsWith('…"]')).toBe(true);
+});
+
+// The owner, 2026-11-09: when the person answers questions in a thread where the session keeps no checklist, the wake
+// says when to start one. What regresses: the line missing, said twice beside a checklist's own line, or moving the
+// person's words or the closing line.
+test("a reply that answers questions in a thread with no checklist: one line on when to start one, before the closing line", () => {
+  const started = wake({ context: context(), steps_start: true });
+  expect(started.endsWith(`${base.body}\n\n${INBOX_STEPS_START_WAKE_LINE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
+  expect(INBOX_STEPS_START_WAKE_LINE).toBe("If these answers start work with several steps, start a checklist here (the steps action). If not, skip it.");
+  // Without it, the wake is as before; with a checklist's own line, that line alone.
+  expect(wake({ context: context() })).toBe(started.replace(`\n\n${INBOX_STEPS_START_WAKE_LINE}`, ""));
+  const kept = wake({ context: context(), steps: { done: 1, total: 3, doing: "Backfill" }, steps_start: true });
+  expect(kept).toContain(inboxStepsWakeLine({ done: 1, total: 3, doing: "Backfill" }));
+  expect(kept).not.toContain(INBOX_STEPS_START_WAKE_LINE);
+  // Never on a 👍 or a Tidy, whatever the command says.
+  expect(wake({ ack_of: "msg_01ASKED", steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
+  expect(wake({ tidy: true, steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
 });

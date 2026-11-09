@@ -1,13 +1,18 @@
-import { useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
+import { matchesShortcutBinding } from '@plannotator/ui/shortcuts';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { isEditableTarget, keyTarget } from '../shortcuts/guards';
+import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
+import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 
 /**
@@ -69,7 +74,42 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const arm = useMessageArm();
   const named = who(message);
+  // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
+  // ⋯ menu opens, focus on the first item, as a row's and a card's menus open by key.
+  const menuPopup = useRef<HTMLDivElement>(null);
+  const keyOpened = useRef(false);
+  useEffect(() => {
+    if (!open || !keyOpened.current) return;
+    keyOpened.current = false;
+    const frame = requestAnimationFrame(() => menuPopup.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+  const onHeadKey = (event: ReactKeyboardEvent) => {
+    // A text field in the head keeps its keys (Shift+F10 there is the field's own menu).
+    if (event.nativeEvent.isComposing || open || contextOpen || isEditableTarget(keyTarget(event.nativeEvent))) return;
+    const menuKey = event.key === 'ContextMenu' || inboxThreadShortcuts.shortcuts.messageMenu.bindings.some((binding) => matchesShortcutBinding(event.nativeEvent, binding));
+    if (!menuKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyOpened.current = true;
+    setOpen(true);
+    // Windows sends the context-menu key's own `contextmenu` on keyup: that one event is not a second menu.
+    const swallow = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      done();
+    };
+    const timer = setTimeout(() => done(), 1000);
+    const done = () => {
+      clearTimeout(timer);
+      window.removeEventListener('contextmenu', swallow, true);
+      window.removeEventListener('pointerdown', done, true);
+    };
+    window.addEventListener('contextmenu', swallow, true);
+    window.addEventListener('pointerdown', done, true);
+  };
   const items = (
     <>
       {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet. */}
@@ -91,6 +131,35 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       </Menu.Item>
     </>
   );
+  if (!arm.armed) {
+    // Far from the view (messageArming.tsx): the same ⋯ and head line, with no menus behind them yet. A press (or the
+    // menu key on the head) arms the message and opens its menu.
+    const plain = (
+      <button
+        type="button"
+        className="ib-mut ib-mmore"
+        aria-haspopup="menu"
+        aria-expanded={false}
+        aria-label={`More: ${named}`}
+        data-phone={phone ? '' : undefined}
+        data-message-more={message.id}
+        onClick={() => {
+          setOpen(true);
+          arm.arm();
+        }}
+      >
+        <Icon name="dots" size={16} />
+      </button>
+    );
+    const head = props.head(plain);
+    if (phone) return head;
+    return cloneElement(head as ReactElement<{ onKeyDown?: (event: ReactKeyboardEvent) => void }>, {
+      onKeyDown: (event: ReactKeyboardEvent) => {
+        onHeadKey(event);
+        if (event.defaultPrevented) arm.arm();
+      },
+    });
+  }
   const trigger = (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Tip content="More">
@@ -108,7 +177,7 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
-          <Menu.Popup className="ib-pm" aria-label={`Message from ${named}`} data-message-menu={message.id}>
+          <Menu.Popup ref={menuPopup} className="ib-pm" aria-label={`Message from ${named}`} data-message-menu={message.id}>
             {items}
           </Menu.Popup>
         </Menu.Positioner>
@@ -119,7 +188,7 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
   if (phone) return head;
   return (
     <ContextMenu.Root onOpenChange={setContextOpen}>
-      <ContextMenu.Trigger render={head} />
+      <ContextMenu.Trigger render={head} onKeyDown={onHeadKey} />
       <ContextMenu.Portal container={portal ?? undefined}>
         <ContextMenu.Positioner className="ib-pm-pos">
           {/* Focus goes back to the message's ⋯, never the page. */}
@@ -138,6 +207,8 @@ export interface ThreadSnoozeProps {
   snoozed: boolean;
   onPick: (until: string) => void;
   onUnsnooze: () => void;
+  /** This thread's machine must update first: Snooze stays, says why and opens the update dialog. */
+  blocked?: { name: string; onPress: () => void };
 }
 
 /**
@@ -181,10 +252,12 @@ export function ThreadMore(
     snooze?: ThreadSnoozeProps;
     /** Request guided review (guideRequest.ts): its own group above Archive, only where the thread offers it. */
     requestGuide?: () => void;
+    /** Add a pull request to the thread (approval "inbox-pr-binding"): opens the PRs card on its Add field. */
+    addPull?: () => void;
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, launch } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, addPull, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -235,7 +308,14 @@ export function ThreadMore(
   const lead = phone ? (
     <>
       {readItems}
-      {snooze && (
+      {snooze?.blocked && (
+        <Menu.Item className="ib-pmi" label={`Snooze: update ${snooze.blocked.name} first`} onClick={snooze.blocked.onPress} data-thread-snooze-item="" data-snooze-blocked="">
+          <Icon name="clock" size={15} />
+          Snooze
+          <span className="ib-zsub ib-zneeds">Update {snooze.blocked.name}</span>
+        </Menu.Item>
+      )}
+      {snooze && !snooze.blocked && (
         <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} onClick={() => setView('times')} data-thread-snooze-item="">
           <Icon name="clock" size={15} />
           Snooze
@@ -337,6 +417,15 @@ export function ThreadMore(
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
+                {addPull && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
+                      <Icon name="link" size={15} />
+                      Add a pull request…
+                    </Menu.Item>
+                  </>
+                )}
                 {requestGuide && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
@@ -376,10 +465,39 @@ export function ThreadMore(
  * inbox-snooze defines them. Base UI carries the keys (arrows, type-ahead, Escape, focus back to the clock); no new
  * shortcut. Unsnooze stays in ⋯ More.
  */
-export function ThreadSnooze({ snooze }: { snooze: ThreadSnoozeProps }) {
+export function ThreadSnooze({ snooze, openRequest = 0 }: { snooze: ThreadSnoozeProps; openRequest?: number }) {
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView>('times');
+  // H (Thread.tsx): each request opens the menu at its times, focus on the first; picking still snoozes.
+  const popup = useRef<HTMLDivElement>(null);
+  const keyOpened = useRef(false);
+  const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
+  // Only a new request opens it: the clock mounting again (Z after Shift+E, J/K into a thread) keeps it shut.
+  const seenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === seenRequest.current) return;
+    seenRequest.current = openRequest;
+    keyOpened.current = true;
+    setView('times');
+    setOpen(true);
+  }, [openRequest]);
+  useEffect(() => {
+    if (!open || !keyOpened.current) return;
+    keyOpened.current = false;
+    const frame = requestAnimationFrame(() => popup.current?.querySelector<HTMLElement>('[data-snooze-choice]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+  // A machine that must update first (approval "inbox-machine-update"): Snooze stays, and says why. After the hooks.
+  if (snooze.blocked) {
+    return (
+      <Tip content={`Update ${snooze.blocked.name} to snooze here`}>
+        <button type="button" className="ib-iconbtn ib-snooze-blocked" aria-label={`Snooze: update ${snooze.blocked.name} first`} onClick={snooze.blocked.onPress} data-thread-snooze="" data-snooze-blocked="">
+          <Icon name="clock" size={17} />
+        </button>
+      </Tip>
+    );
+  }
   return (
     <Menu.Root
       modal={false}
@@ -389,14 +507,14 @@ export function ThreadSnooze({ snooze }: { snooze: ThreadSnoozeProps }) {
         if (!next) setView('times');
       }}
     >
-      <Tip content="Snooze">
-        <Menu.Trigger ref={ref} className="ib-iconbtn" aria-label="Snooze" data-thread-snooze="">
+      <Tip content={withShortcut('Snooze', { scope: inboxThreadShortcuts, action: 'snooze' })}>
+        <Menu.Trigger ref={ref} className="ib-iconbtn" aria-label="Snooze" aria-keyshortcuts={snoozeKeys} data-thread-snooze="">
           <Icon name="clock" size={17} />
         </Menu.Trigger>
       </Tip>
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4}>
-          <Menu.Popup className="ib-pm" aria-label="Snooze until" data-thread-snooze-menu="">
+          <Menu.Popup ref={popup} className="ib-pm" aria-label="Snooze until" data-thread-snooze-menu="" finalFocus={ref}>
             <SnoozeTimes view={view} onView={setView} onPick={snooze.onPick} onClose={() => setOpen(false)} />
           </Menu.Popup>
         </Menu.Positioner>

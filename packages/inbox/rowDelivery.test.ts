@@ -25,6 +25,8 @@ const connections: (RecipientConnection | null | undefined)[] = [
   { busy: true, idle_since: null, send_now: false },
   { busy: false, idle_since: AT, send_now: false },
   { busy: null, idle_since: null, send_now: false },
+  // Claude Code holds the session's replies until the person types there (approval "inbox-stopped-reply").
+  { busy: false, idle_since: AT, send_now: true, held: true },
 ];
 
 function* inputs(): Generator<DeliveryLineInput> {
@@ -96,6 +98,16 @@ describe('the row words', () => {
     expect(rowDeliverySpoken({ ...base, state: 'delivered' })).toBe('Delivered to Claude Code');
     expect(rowDeliverySpoken({ ...base, state: 'undelivered' })).toBe('Not delivered');
     expect(rowDeliverySpoken({ ...base, kind: 'ack', state: 'queued' })).toBe('Looks good, queued for Claude Code');
+  });
+
+  // Approval "inbox-stopped-reply": the accessible name says what the tooltip and the thread say, never "Queued".
+  test('held by a stopped Claude Code session: the accessible name says Stopped, as the tooltip does', () => {
+    const stopped: InboxRowDelivery = { ...base, reason: 'stopped', send_now: false };
+    expect(rowDeliverySpoken(stopped)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliveryLine(stopped, time)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliverySpoken({ ...stopped, kind: 'ack' })).toBe('Looks good, stopped: goes in when you type in that session');
+    // Once it went in: Delivered.
+    expect(rowDeliverySpoken({ ...stopped, state: 'delivered', reason: 'delivered', at: AT })).toBe('Delivered to Claude Code');
   });
 
   test("a 👍's tooltip, in its Undo window and after", () => {

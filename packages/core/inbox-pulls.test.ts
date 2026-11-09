@@ -252,7 +252,7 @@ test("inboxPullUrlsIn finds pull and merge request links, each once", () => {
 describe("a PR's address", () => {
   test("a forge's own addresses read back to the list's key", () => {
     expect(inboxPullRefOfUrl("https://github.com/northwind/web-app/pull/869")?.key).toBe("github.com/northwind/web-app#869");
-    expect(inboxPullRefOfUrl("https://gitlab.com/infra/terraform/modules/-/merge_requests/61/diffs")).toMatchObject({ key: "gitlab.com/infra/terraform/modules#61", platform: "gitlab" });
+    expect(inboxPullRefOfUrl("https://gitlab.com/infra/terraform/modules/-/merge_requests/61/diffs")).toMatchObject({ key: "gitlab.com/infra/terraform/modules#61:pull", platform: "gitlab" });
   });
 
   test("an agent-written address cannot walk out of repos/… or smuggle a query into the API call", () => {

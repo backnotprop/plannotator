@@ -36,8 +36,10 @@ async function world() {
   const client = new Client({ name: "inbox-seen-through-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  const send = async (body: string) => {
-    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, agent_session: "ses_A" } })) as {
+  /** `replyTo`: the message this one answers, so it lands in that thread. */
+  const send = async (body: string, replyTo?: string) => {
+    const args = { project_path: project, body, agent_session: "ses_A", ...(replyTo ? { reply_to: replyTo } : {}) };
+    const result = (await client.callTool({ name: "send_message", arguments: args })) as {
       isError?: boolean;
       content: { text: string }[];
       structuredContent: { thread_id: string; message_id: string; cursor: number };
@@ -69,7 +71,7 @@ async function windowThread(server: InboxServer, threadId: string): Promise<{ th
 test("through_seq stops the look at that message: a later agent message stays new", async () => {
   const { server, send } = await world();
   const first = await send("The refund webhook is wired.");
-  await send("Retries are on, three attempts.");
+  await send("Retries are on, three attempts.", first.message_id);
   const capped = await seen(server, first.thread_id, { through_seq: first.cursor });
   expect(capped.status).toBe(200);
   expect(((await capped.json()) as { thread: InboxListRow }).thread).toMatchObject({ section: "new", unseen: 1, unread: true });
@@ -81,7 +83,7 @@ test("the race: a message that lands after the window read the thread is not mar
   const read = await windowThread(server, first.thread_id);
   const shown = Math.max(...read.thread.messages.map((m) => m.seq ?? 0));
   // The agent writes between the window's read and its look.
-  await send("One more thing: the 409 path retries.");
+  await send("One more thing: the 409 path retries.", first.message_id);
   expect((await seen(server, first.thread_id, { through_seq: shown })).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ section: "new", unseen: 1 });
   // Seen on sight: the window shows it and records the look up to it.
@@ -94,11 +96,11 @@ test("the race: a message that lands after the window read the thread is not mar
 test("without through_seq (an older window, the phone door): every agent message so far, as before", async () => {
   const { server, send } = await world();
   const first = await send("The refund webhook is wired.");
-  await send("Retries are on.");
+  await send("Retries are on.", first.message_id);
   expect((await seen(server, first.thread_id, {})).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ section: "quiet", unseen: 0 });
   // null counts as absent.
-  await send("And the dashboard shows them.");
+  await send("And the dashboard shows them.", first.message_id);
   expect((await seen(server, first.thread_id, { through_seq: null })).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ unseen: 0 });
 });
@@ -106,7 +108,7 @@ test("without through_seq (an older window, the phone door): every agent message
 test("a through_seq behind the recorded look never lowers it and writes nothing", async () => {
   const { server, send } = await world();
   const first = await send("The refund webhook is wired.");
-  await send("Retries are on.");
+  await send("Retries are on.", first.message_id);
   expect((await seen(server, first.thread_id, {})).status).toBe(200);
   const before = await windowThread(server, first.thread_id);
   expect((await seen(server, first.thread_id, { through_seq: first.cursor })).status).toBe(200);
@@ -121,7 +123,7 @@ test("a through_seq behind the recorded look never lowers it and writes nothing"
 test("a through_seq past the newest message is the newest message", async () => {
   const { server, send } = await world();
   const first = await send("The refund webhook is wired.");
-  await send("Retries are on.");
+  await send("Retries are on.", first.message_id);
   expect((await seen(server, first.thread_id, { through_seq: 9_000_000 })).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ section: "quiet", unseen: 0 });
 });

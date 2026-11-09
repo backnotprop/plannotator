@@ -17,8 +17,8 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
-import { act, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
@@ -33,13 +33,24 @@ const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
+/** What the reader was last given to draw under lines (others' threads). */
+let readerNotes: { id: string; filePath: string; line: number; side: string }[] | undefined;
+/** What the reader was last given to draw about whole files (others' threads on a file). */
+let readerWhole: { id: string; filePath: string; height?: number; render: () => ReactNode }[] | undefined;
+/** The threads the details door answers, by PR key. */
+let detailThreads: Record<string, unknown[]> = {};
 /** The reader's whole-file seam as the review last gave it. */
 let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
+/** The reader's Collapse all as the review last gave it. */
+let readerCollapse: { collapsed: boolean; token: number } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles; lineNotes?: typeof readerNotes; wholeFileNotes?: typeof readerWhole; collapseAll?: typeof readerCollapse }) => {
       readerComments = props.comments;
+      readerNotes = props.lineNotes;
+      readerWhole = props.wholeFileNotes;
       readerFiles = props.fileContents;
+      readerCollapse = props.collapseAll;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -160,6 +171,9 @@ beforeEach(() => {
     ],
   };
   shown.length = 0;
+  readerNotes = undefined;
+  readerWhole = undefined;
+  detailThreads = {};
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
   diffPatch = null;
@@ -193,6 +207,10 @@ beforeEach(() => {
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       sessionReads += 1;
       return Response.json(sessionsAnswer);
+    }
+    if (url.pathname.endsWith('/pulls/details')) {
+      const key = url.searchParams.get('key')!;
+      return Response.json({ serverSession: 's', key, description: null, labels: [], reviewers: [], checks: [], comments: [], ...(detailThreads[key] ? { threads: detailThreads[key] } : {}) });
     }
     if (url.pathname.endsWith('/pulls/file')) {
       fileAsks.push(url.searchParams.get('scope')!);
@@ -228,12 +246,13 @@ async function settle() {
   }
 }
 
+
 function mount(node: React.ReactNode) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox">{node}</div>);
+    root.render(<SidebarProvider><div className="pn-inbox">{node}</div></SidebarProvider>);
   });
 }
 
@@ -273,19 +292,47 @@ test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole 
   expect(fileAsks).toEqual(['layer', 'stack']);
 });
 
+// Guards the PR page keeping the old two-mark Split | Unified switch, a Collapse all that reaches no file (approval
+// diff-controls-headers: every review header's one button, Collapse all and the gear), or its controls going back to a
+// row over the code: in the Inbox they are always in the header (the owner), before the Global comment globe.
+test.skipIf(!hasDom)("the bar holds every review header's diff controls before the globe, no row over the code, and Collapse all reaches the reader", async () => {
+  diffPatch = ['a.ts', 'b.ts'].map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('');
+  // Its own push time: the window keeps a patch read a moment ago per push, and other tests read this layer's.
+  const pushed = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, updated_at: '2026-11-03T14:00:00.000Z' } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed} />);
+  await settle();
+  expect(shown.at(-1)!.patch).toContain('b.ts');
+  const controls = el('.ib-vhead > [data-diff-controls]');
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  // Right of the spacer, before the globe's host (and so before the comments and the ending's marks).
+  expect(controls.previousElementSibling?.classList.contains('ib-sp')).toBe(true);
+  expect(controls.nextElementSibling?.hasAttribute('data-pull-controls')).toBe(true);
+  expect(document.querySelectorAll('[data-diff-controls]')).toHaveLength(1);
+  // No row of its own over the code: the split holds the rail, its handle and the code, nothing before them.
+  expect(document.querySelector('[data-pull-tabs], .ib-prp-tabs')).toBeNull();
+  expect(document.querySelector('.ib-rsplit > :not(.ib-rrail, .ib-prp-handle, .ib-gbody, .ib-gpanel)')).toBeNull();
+  expect(document.querySelector('[data-diff-style-switch]')).toBeNull();
+  expect(readerCollapse).toBeUndefined();
+  await act(async () => el('.ib-vhead [data-diff-collapse-all="open"]').click());
+  expect(readerCollapse).toEqual({ collapsed: true, token: 1 });
+  await act(async () => el('.ib-vhead [data-diff-collapse-all="collapsed"]').click());
+  expect(readerCollapse).toEqual({ collapsed: false, token: 2 });
+});
+
 test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack up to it; Next layer moves up', async () => {
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
   await settle();
   expect(asked).toEqual([{ key: stack[0]!.key, scope: 'layer' }]);
   expect(shown.at(-1)).toEqual({ patch: expect.stringContaining('layer-412.ts') as unknown as string, title: 'Layer 412' });
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 1 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[0]!.key);
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
-  expect(asked.at(-1)).toEqual({ key: stack[0]!.key, scope: 'stack' });
-  expect(shown.at(-1)!.patch).toContain('stack-412.ts');
+  // All means all: the diff up to the top, from the bottom layer as from any.
+  expect(asked.at(-1)).toEqual({ key: stack[2]!.key, scope: 'stack' });
+  expect(shown.at(-1)!.patch).toContain('stack-414.ts');
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  await act(async () => el(`[data-pull-layer-row="${stack[0]!.key}"]`).click());
   await settle();
   // Back to the layer: drawn from what was read, not asked again.
   expect(asked).toHaveLength(2);
@@ -295,7 +342,64 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   expect(asked.at(-1)).toEqual({ key: stack[1]!.key, scope: 'layer' });
   expect(shown.at(-1)!.patch).toContain('layer-413.ts');
   expect(el('[data-pull-review]').getAttribute('data-pull-review')).toBe(stack[1]!.key);
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 2 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[1]!.key);
+});
+
+test.skipIf(!hasDom)("others' threads from the details go on their lines in this layer's diff, counted on the file's row; another layer's do not", async () => {
+  diffPatch = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n';
+  const said = (id: string) => ({ id, author: 'theo', at: '2026-11-01T00:00:00Z', body: id, url: 'https://x' });
+  const thread = (id: string, fields: Record<string, unknown> = {}) => ({ id, file: 'src/a.ts', line: 2, start_line: null, side: 'new', resolved: false, outdated: false, comments: [said(`${id}-1`)], ...fields });
+  detailThreads[stack[0]!.key] = [thread('t1'), thread('t2', { side: 'old' }), thread('t3', { resolved: true, line: null, outdated: true }), thread('t4', { file: 'src/elsewhere.ts' }), thread('t5', { line: null })];
+  detailThreads[stack[1]!.key] = [thread('other-layer')];
+  // A push of its own: the window keeps a patch read a moment ago per push.
+  const pushed = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key || p.key === STACK_ID ? { ...p, updated_at: '2026-11-04T07:00:00.000Z' } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed} />);
+  await settle();
+  expect(readerNotes!.map((n) => [n.id, n.filePath, n.line, n.side])).toEqual([
+    ['forge:t1', 'src/a.ts', 2, 'new'],
+    ['forge:t2', 'src/a.ts', 2, 'old'],
+    ['forge:t3', 'src/a.ts', 1, 'new'],
+  ]);
+  // The one on the whole file is not on a line: it is the file's band, folded in its header, at a known height.
+  expect(readerWhole!.map((n) => [n.id, n.filePath, n.height])).toEqual([['forge:t5', 'src/a.ts', 32]]);
+  // Opened, it leaves the header for the top of the code (line 0), where it scrolls away with the code.
+  const bandBox = document.createElement('div');
+  document.body.append(bandBox);
+  const bandRoot = createRoot(bandBox);
+  await act(async () => bandRoot.render(<>{readerWhole![0]!.render()}</>));
+  await act(async () => (bandBox.querySelector('[data-pull-thread="t5"]') as HTMLElement).click());
+  await settle();
+  expect(readerWhole!.map((n) => n.id)).toEqual([]);
+  expect(readerNotes!.filter((n) => n.id === 'forge:t5').map((n) => [n.line, n.side])).toEqual([[0, 'new']]);
+  await act(async () => bandRoot.unmount());
+  bandBox.remove();
+  // Open threads only: the resolved one is drawn but not counted.
+  expect(el('[data-review-file="src/a.ts"] [data-pull-file-threads]').textContent).toBe('3');
+  await act(async () => el('[data-pull-layer-all]').click());
+  await settle();
+  // The whole stack's diff is the top layer's answer: this layer's threads are not on it.
+  expect((readerNotes ?? []).map((n) => n.id)).toEqual([]);
+  expect((readerWhole ?? []).map((n) => n.id)).toEqual([]);
+});
+
+test.skipIf(!hasDom)("the bar's PR title opens the details; no Details button beside it (the owner's \"title only\")", async () => {
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
+  await settle();
+  const title = el('.ib-vhead [data-pull-details-title]');
+  expect(title.tagName).toBe('BUTTON');
+  // Its name starts with the words on screen, and says what a click does.
+  expect(title.getAttribute('aria-label')).toBe('#412 Layer 412, opens details');
+  expect(title.textContent).toContain('Layer 412');
+  expect(document.querySelector('.ib-vhead [data-pull-details-button]') === null).toBe(true);
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+  await act(async () => title.click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).not.toBeNull();
+  expect(el('.ib-vhead [data-pull-details-title]').getAttribute('aria-expanded')).toBe('true');
+  // A second click closes them.
+  await act(async () => el('.ib-vhead [data-pull-details-title]').click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
 });
 
 test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its last message, naming the layer", async () => {
@@ -316,7 +420,7 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
   expect(asked).toEqual([{ key: teammate.key, scope: 'layer' }]);
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(teammate.url);
-  expect(document.querySelector('[data-pull-scope-choice]')).toBeNull();
+  expect(document.querySelector('[data-pull-layer-all]')).toBeNull();
 });
 
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
@@ -343,7 +447,6 @@ test.skipIf(!hasDom)('a PR with no agent offers posting only: the comments go on
   expect(document.querySelector('[data-review-destination]')).toBeNull();
   expect(document.querySelector('[data-pull-review-forge]')).toBeNull();
   expect(el('[data-review-posts]').getAttribute('data-review-posts')).toBe('github');
-  expect(el('[data-pull-review-foot]').textContent).toContain('your review goes on the GitHub PR');
   await act(async () => el('[data-review-posts] [data-decision-primary]').click());
   await settle();
   await act(async () => dialogButton('Post Comments').click());
@@ -593,13 +696,64 @@ test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is t
   expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
 });
 
+describe('All N layers', () => {
+  const merged = pull(411, { head: 'retry/base', state: 'merged', additions: 500, deletions: 500 });
+  const bottom = { ...stack[0]!, base: 'retry/base', additions: 3, deletions: 1 };
+  const middle = { ...stack[1]!, additions: 5, deletions: 2 };
+  const top = { ...stack[2]!, additions: 7, deletions: 3 };
+  const whole = [merged, bottom, middle, top];
+  const moved: { key: string; scope: string }[] = [];
+  const draw = async (pulls: InboxPull[], key: string, scope: 'layer' | 'stack') => {
+    moved.length = 0;
+    mount(<PullReview model={{ ...model, pulls }} modelError={null} stackId={inboxPullStacks(pulls)[0]!.id} layerKey={key} scope={scope} onLayer={(k, s) => moved.push({ key: k, scope: s })} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    return el<HTMLButtonElement>('[data-pull-layer-all]');
+  };
+
+  test.skipIf(!hasDom)('from a layer in the middle: the open layers, not the merged one, and the row goes to the top', async () => {
+    const row = await draw(whole, middle.key, 'layer');
+    expect(row.textContent).toBe('All 3 layers+15 -6');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("an address naming a lower layer's whole stack is not all: the row is not lit, and goes to the top", async () => {
+    const row = await draw(whole, middle.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("on the top, the row is lit and its counts are the diff's own", async () => {
+    const row = await draw(whole, top.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.textContent).toBe('All 3 layers+1 -1');
+  });
+
+  test.skipIf(!hasDom)('one open layer over a merged one: no row, as there is nothing more to read than the layer', async () => {
+    mount(<PullReview model={{ ...model, pulls: [merged, bottom] }} modelError={null} stackId={inboxPullStacks([merged, bottom])[0]!.id} layerKey={bottom.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    expect(document.querySelector('[data-pull-layer-row]')).not.toBeNull();
+    expect(document.querySelector('[data-pull-layer-all]')?.textContent ?? null).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('two PRs on one branch: it counts the chain its diff reads, not the sibling', async () => {
+    const sibling = { ...top, number: 415, key: top.key.replace('#414', '#415'), head: 'retry/other', base: bottom.head };
+    const row = await draw([bottom, middle, sibling], middle.key, 'layer');
+    expect(row.textContent).toMatch(/^All 2 layers/);
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: sibling.key, scope: 'stack' }]);
+  });
+});
+
 test.skipIf(!hasDom)("a Whole stack goes to the stack's one review thread, its lowest linked layer's, though another agent linked a layer above", async () => {
   // Claude has #412 (the bottom), Codex #413: the stack up to #413 covers both.
   const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
   const two: InboxPullsAnswer = { ...model, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
   mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
   await settle();
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   // No note about several agents: the verdict has one place to go.
   expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
@@ -901,13 +1055,13 @@ test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with
 test.skipIf(!hasDom)('the box: a kept pick that has gone into review since is dropped, and its words stay; one that has not stays picked', async () => {
   const started: StartThreadInput[] = [];
   const open = (pull: ReviewBoxPull) => mount(<ComposeDialog request={{ review: {} }} reviewPulls={[pull]} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open(boxPick());
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe(boxPick().id);
   act(() => root!.unmount());
   root = null;
-  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick(), link: '' });
   open({ ...boxPick(), thread: { id: 'msg_elsewhere', agent: 'Claude Code' } });
   await settle();
   expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe('choose');
@@ -978,6 +1132,44 @@ test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session i
   expect(started[0]!.thread_name_auto).toBe(true);
   // A second review of the same changes is named "… (2)" by the server, not left unnamed.
   expect(started[0]!.thread_name_numbered).toBe(true);
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the box as a Walkthrough: no changes or PR to pick, words required, and they go first with the walkthrough skill', async () => {
+  const started: StartThreadInput[] = [];
+  // A project with no changes: a walkthrough is of the code as it is, so that never holds it back.
+  changedFiles = { prj_9: 0, prj_2: 0 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  // The button names what it starts: a review on Local, a walkthrough on Walkthrough.
+  expect(el('[data-compose-send]').textContent).toContain('Start review');
+  await act(async () => el('[data-review-choice="walkthrough"]').click());
+  await settle();
+  expect(el('[data-compose-send]').textContent).toContain('Start walkthrough');
+  expect(el('[data-compose-send]').textContent).not.toContain('Start review');
+  expect(document.querySelector('[data-review-choice="branch"]')).toBeNull();
+  expect(document.querySelector('[data-review-pick]')).toBeNull();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  // No words yet: Start is off, and a press says what is missing and sends nothing.
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(true);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  expect(document.querySelector('[data-review-box]')!.textContent).toContain('say what to walk you through first');
+  const words = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(words, 'How does a failed charge get retried?');
+    words.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toHaveLength(1);
+  expect(started[0]!.review).toEqual({ kind: 'walkthrough' });
+  expect(started[0]!.body.startsWith('How does a failed charge get retried?')).toBe(true);
+  expect(started[0]!.body).toContain('/review-walkthrough');
+  expect(started[0]!.thread_name_auto).toBe(true);
   expect(posted).toEqual([]);
 });
 
@@ -1502,12 +1694,9 @@ test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading
   expect(document.body.textContent).not.toContain('Reading the diff');
 });
 
-// The cut itself is measured in tests/e2e/inbox-pull-requests.spec.ts (happy-dom lays nothing out).
-test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover', async () => {
-  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
-  const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
-  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);
+// The bar's height and the sidebar's fill hang on this class: without it both jump when the list arrives.
+test.skipIf(!hasDom)('while the list is read the page already has the wide frame', async () => {
+  mount(<PullReview model={null} modelError={null} stackId={STACK_ID} layerKey={stack[0]!.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
   await settle();
-  expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
+  expect(el('[data-pull-review]').classList.contains('ib-prr-wide')).toBe(true);
 });
-

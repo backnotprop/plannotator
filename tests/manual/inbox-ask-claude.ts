@@ -11,7 +11,6 @@
  *
  *   export SBX=$(mktemp -d /tmp/plannotator-ask-real.XXXXXX)
  *   export PLANNOTATOR_DATA_DIR=$SBX/data
- *   export PLANNOTATOR_INBOX_ASK_AI=1
  *   export PLANNOTATOR_BROWSER=/usr/bin/true
  *   export PLANNOTATOR_INBOX_CONNECT=0
  *   export PLANNOTATOR_UPDATE_CHECK=0
@@ -62,15 +61,6 @@
  *     a retry reaches the second.
  *     Then ask a long question, and while the terminal answering it runs, type
  *     into the other one: the answer still ends and is saved.
- *
- *   off: stop the Inbox, unset PLANNOTATOR_INBOX_ASK_AI, start it again:
- *     plannotator inbox stop
- *     unset PLANNOTATOR_INBOX_ASK_AI
- *     plannotator inbox --background
- *     bun tests/manual/inbox-ask-claude.ts --expect off
- *     Claude Code does nothing at all. To check, start it with
- *     PLANNOTATOR_MOD_DEBUG=1 set: "$PLANNOTATOR_DATA_DIR/claude-code-mod/debug.log"
- *     has no line that says "Ask AI client" or "bridge http".
  *
  * Afterwards: `plannotator inbox stop`, quit Claude Code, `rm -rf "$SBX"`.
  */
@@ -138,6 +128,7 @@ let firstWordMs: number | null = null;
 while (true) {
   const posted = await postAsk(inbox, threadId, turnId, question);
   console.log(`POST /ask ${posted.status} at ${elapsed()} ms`);
+  // An Inbox from before Ask AI was on for everyone, with its switch off.
   if (posted.status === 404) {
     outcome = "off";
     break;

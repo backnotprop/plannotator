@@ -211,7 +211,7 @@ test.skipIf(!hasDom)('the button swaps the messages for the grid, newest first; 
   expect(messagesBody(el).hidden).toBe(true);
   expect(el.querySelector<HTMLElement>('section.ib-pane > .ib-pfoot')!.hidden).toBe(true);
   expect(document.activeElement).toBe(view(el)!.querySelector('h2'));
-  expect(el.querySelector('[data-artifacts-summary]')!.textContent).toBe('7 from 5 messages · newest first');
+  expect(el.querySelector('[data-artifacts-switch-one]')!.textContent).toBe('Artifacts7');
   const guideTitle = 'Guided review: Token refresh';
   expect(tileNames(el)).toEqual(['flow.sql', guideTitle, 'after.png', 'traces.zip', 'sketch.png', 'before.png', 'spec.md']);
   // The tile's words: who sent it, "in text", a download.

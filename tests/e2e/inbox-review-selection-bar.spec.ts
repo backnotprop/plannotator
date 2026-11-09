@@ -102,7 +102,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true }));
+  // Show me in the bar rides Shape's own switch too (approval "code-review-029-shape-off").
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
   // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
@@ -366,6 +367,13 @@ test('Split: under the side the selection ends on', async () => {
   await setStyle(page, 'split');
 
   await select(page, LONG, 17, 19);
+  // The click left focus on the diff's root (tabindex -1) and the Shift press made it :focus-visible. It draws no
+  // ring: the clipping around the diff left only two lines, one above the file and one below it.
+  const ring = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement;
+    return { holdsDiff: !!el.querySelector('diffs-container'), focusVisible: el.matches(':focus-visible'), outline: getComputedStyle(el).outlineStyle };
+  });
+  expect(ring).toEqual({ holdsDiff: true, focusVisible: true, outline: 'none' });
   let g = await geometry(page);
   let box = clearOfLines(g);
   expect(Math.abs(box.left - g.codeAdditions!), 'the new side').toBeLessThan(1);
@@ -392,11 +400,23 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
     await select(page, TAIL, 7, 9);
     const g = await geometry(page);
     const box = clearOfLines(g);
-    const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
     expect(box.top, 'below the last line').toBeGreaterThan(g.bottom);
+    const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
     // It starts inside the file's box and may reach past it (the box now keeps room under its last line, so it
-    // need not): every word is still there to press.
+    // need not).
     expect(box.top, 'starts inside the file').toBeLessThan(shell.y + shell.height);
+    // No box around it cuts it off (the file's card included), and every word is still there to press.
+    const clippedBy = await bar(page).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if (s.overflowY === 'visible' && s.overflowX === 'visible') continue;
+        const q = p.getBoundingClientRect();
+        if (r.bottom > q.bottom + 0.5 || r.top < q.top - 0.5) return p.className || p.tagName;
+      }
+      return null;
+    });
+    expect(clippedBy, 'clipped by').toBeNull();
     for (const word of ['comment', 'ask', 'show-me']) {
       const button = bar(page).locator(`[data-selection-action="${word}"]`);
       const b = (await button.boundingBox())!;
@@ -438,12 +458,13 @@ test('the bottom of the viewport: above the first selected line, not on them, in
   for (const style of ['split', 'unified'] as const) {
     await page.setViewportSize(size);
     await setStyle(page, style);
-    await line(page, LONG, 25).scrollIntoViewIfNeeded();
-    // The last selected line is the last on screen.
-    await line(page, LONG, 27).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
+    await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
+    await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
+    await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
-    await lineAtBottom(page, LONG, 27);
-    await select(page, LONG, 25, 27);
+    await lineAtBottom(page, NEXT, 5);
+    await select(page, NEXT, 3, 5);
     const g = await geometry(page);
     const box = clearOfLines(g);
     expect(g.viewport.height - g.bottom, 'no room for it below').toBeLessThan(42);

@@ -2,7 +2,7 @@
  * A real Inbox for the Ask AI window's DOM tests, as its own process (under
  * DOM_TESTS=1 happy-dom replaces Response, which Bun.serve cannot answer with).
  *
- *   bun tests/helpers/inbox-ask-dom-server.ts <data dir> <projects dir> <on | off>
+ *   bun tests/helpers/inbox-ask-dom-server.ts <data dir> <projects dir>
  *
  * Seeds a project with one thread per test need, each owned by a live scripted
  * agent (tests/helpers/inbox-ask-agent.ts) on its own session: `first`,
@@ -16,7 +16,7 @@
  *   POST /hand-off `{}`: session-new-owner replies in `moved`, and owns it now
  *   GET  /agent?session=…  `{ asked, interrupts }`
  *
- * Runs until killed. `on` or `off` is the setting. A question with "slowly" in
+ * Runs until killed. Ask has no switch, and Code review stays off. A question with "slowly" in
  * it is not answered for 20 seconds, and one with "flaky" in it fails the first
  * time it is asked.
  */
@@ -26,13 +26,13 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { startInboxServer } from "../../packages/server/inbox";
 import { startScriptedAskAgent } from "./inbox-ask-agent";
 
-const [dataDir, projectsDir, setting] = process.argv.slice(2);
-if (!dataDir || !projectsDir) throw new Error("usage: inbox-ask-dom-server.ts <data dir> <projects dir> <on | off>");
+const [dataDir, projectsDir] = process.argv.slice(2);
+if (!dataDir || !projectsDir) throw new Error("usage: inbox-ask-dom-server.ts <data dir> <projects dir>");
 
 const project = join(projectsDir, "api");
 mkdirSync(project, { recursive: true });
 process.env.PLANNOTATOR_DATA_DIR = dataDir;
-const server = await startInboxServer({ dataDir, askAi: setting === "on", binaryPath: null });
+const server = await startInboxServer({ dataDir, binaryPath: null });
 
 const client = new Client({ name: "inbox-ask-dom", version: "1.0.0" });
 await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));

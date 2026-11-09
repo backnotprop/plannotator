@@ -235,7 +235,9 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
     await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
-    await expect(tooltip(page)).toHaveCount(0);
+    // The ⋯'s own tooltip goes with the pane. The pointer, still where the ⋯ was, may now rest on the list header's
+    // controls (the filter's funnel, #2921), whose own tooltip is not this one.
+    await expect(tooltip(page).filter({ hasText: /^More$/ })).toHaveCount(0);
   } finally {
     await context.close();
   }

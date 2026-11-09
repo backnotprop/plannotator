@@ -58,6 +58,7 @@ import {
   startInbox,
   streams,
   waitFor,
+  WORK_THREAD,
   type World,
 } from './inbox-shared-events-world';
 
@@ -88,12 +89,12 @@ async function world(browser: Browser, options: Parameters<typeof newWorld>[1] =
 /** One message so the list has a row to wait for. */
 async function seed(w: World): Promise<void> {
   const sim = await agent(w);
-  await sim.send({ project_path: w.project, body: 'Starting on the billing work.' });
+  await sim.send({ project_path: w.project, thread: WORK_THREAD, body: 'Starting on the billing work.' });
 }
 
 async function sendSome(w: World, count: number): Promise<void> {
   const sim = w.agents[0]!;
-  for (let i = 0; i < count; i++) await sim.send({ project_path: w.project, body: `Update ${Date.now()}-${i}` });
+  for (let i = 0; i < count; i++) await sim.send({ project_path: w.project, thread: WORK_THREAD, body: `Update ${Date.now()}-${i}` });
 }
 
 

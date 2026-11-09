@@ -1,10 +1,10 @@
 name: Inbox window e2e
 
-# The Plannotator Inbox window, proved in a real browser: headless Chromium
-# (Playwright, pinned in the root devDependencies) drives the COMPILED binary
-# under a temp data dir while agents write through `plannotator inbox mcp`.
-# The binary is built first, with the flags release.yml compiles with.
-# tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
+# The full browser suite. The Plannotator Inbox window, proved in a real
+# browser: headless Chromium (Playwright, pinned in the root devDependencies)
+# drives the COMPILED binary under a temp data dir while agents write through
+# `plannotator inbox mcp`. The binary is built first, with the flags release.yml
+# compiles with. tests/e2e/inbox.spec.ts (the window), notifications.spec.ts,
 # inbox-guides.spec.ts (guided reviews), inbox-new-message.spec.ts (New
 # message), inbox-order.spec.ts (newest first inside a section) and
 # inbox-phones.spec.ts (pairing a phone) say what they prove;
@@ -15,19 +15,47 @@ name: Inbox window e2e
 # the surface a phone hosts (apps/hook/dist/surface.html) in WebKit, the
 # engine WKWebView is, and the VS Code Guides webview's sanitizer and Mermaid
 # path (vscode-guides-sanitize.spec.ts) and its answer frame
-# (vscode-guides-answer.spec.ts), no binary needed. Runs only when the
-# Inbox, the ui and the guide viewer it composes, the plan editor (the Grid
+# (vscode-guides-answer.spec.ts), no binary needed. The plan editor (the Grid
 # paper spec, grid-paper-fill.spec.ts), the plan and annotate servers and the
-# draft storage they share (annotate-*.spec.ts, plan-linked-doc-drafts.spec.ts),
-# the binary entry or the build could have changed. The Pi servers are not
-# listed: these specs drive only the compiled Bun binary, and test.yml runs the
-# Pi mirrors of the same scenarios.
+# draft storage they share (annotate-*.spec.ts, plan-linked-doc-drafts.spec.ts)
+# have specs here too.
+#
+# When it runs (the owner, 2026-11-08):
+#  - On main, every two hours (`schedule`), only when main's head has had no
+#    full run yet: the head job (scripts/ci-e2e-main.ts head) skips the run
+#    quietly otherwise. A release dispatches it on its bump commit.
+#  - By hand (`workflow_dispatch`), on main or on a PR's branch.
+#  - On a PR, only with the `ci:e2e` label (or `ci:e2e-all`), for a risky PR,
+#    and then only when the Inbox, the ui and the guide viewer it composes, the
+#    plan editor, the plan and annotate servers, the binary entry or the build
+#    could have changed. Every PR runs the smoke slice instead
+#    (browser-smoke.yml). `ci:full` does not start this workflow.
+# The Pi servers are not listed: these specs drive only the compiled Bun
+# binary, and test.yml runs the Pi mirrors of the same scenarios.
+#
+# When a run on main is red, the blame job reruns only the failed spec files
+# on main's first-parent commits since the last green full run, finds the first
+# merge that turns them red, and writes it to the run summary and to the
+# `e2e-blame` artifact (blame.json: pr, sha, specs). It says so when it cannot
+# pin one PR (two breaks, or flaky). It never comments on a PR.
 #
 # The specs run as 16 parallel shards of whole spec files, balanced by
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
 # One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
 # store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
-# creep or a hung window fails the heavy tier before a merge.
+# creep or a hung window fails the run on main. Another is the heavy-thread
+# budget (inbox-heavy-thread-budget.spec.ts, #2948: 120 open messages with 30
+# full-size screenshots), so pictures loaded at full size, a JS heap or
+# listener count over budget, or a copy of the thread kept per read fails it.
+#
+# On a PR, a run whose own change is the same as an earlier run's (a merge of
+# main to pick up a fix or a quarantine after a red run, or a run cancelled
+# half way) leaves out the specs that passed there, at the same blob, and runs
+# the rest on as many shards as they need (the plan job,
+# scripts/ci-e2e-reuse.ts). A pass counts for a day from the run that really
+# ran the spec, and only with the same quarantine entries. The runs on main,
+# manual runs, PRs from forks and a PR with the `ci:e2e-all` label always run
+# every spec.
 
 on:
   # Manual runs on a branch, e.g. a stacked PR whose base is not main.
@@ -90,34 +118,66 @@ on:
       - 'scripts/inbox-sim.ts'
       - 'scripts/inbox-large-store.ts'
       - 'scripts/ci-e2e-shard.ts'
+      - 'scripts/ci-e2e-reuse.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
       - 'apps/vscode-extension/src/guides/webview-csp.ts'
       - 'apps/vscode-extension/scripts/esbuild.config.ts'
       - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
-  # Main is not run after every merge: the merge train already ran this
-  # workflow on the tree it merges. A nightly run on main catches a hand
-  # merge, and a release dispatches it on main before the tag.
+  # Main is not run after every merge: every two hours, when its head moved
+  # (the head job), and a release dispatches it on main before the tag.
   schedule:
-    - cron: "17 7 * * *"
+    - cron: "17 */2 * * *"
 
 permissions:
   contents: read
 
-# One run per PR: a newer push cancels the older run. Adding any other label
+# One run per PR: a newer push cancels the older run. Adding `ci:e2e` or
+# `ci:e2e-all` to a PR starts a run in the PR's group. Adding any other label
 # starts a run that skips every job; it gets a group of its own so it cannot
-# cancel the real one. Nightly and manual runs each get a group of their own.
+# cancel the real one. Scheduled and manual runs each get a group of their own.
 concurrency:
-  group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
+  group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:e2e' && github.event.label.name != 'ci:e2e-all' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
+  # A scheduled run only: has main's head had a full run yet (an earlier
+  # scheduled or manual run on it that ran its specs, or one still going)?
+  head:
+    name: Inbox window (has main's head had a full run?)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.head.outputs.run }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Look for a full run of main's head
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/ci-e2e-main.ts head
+
   # The apps are built once and shared with the shards; each shard compiles
   # the binary from them (a few seconds) with the flags release.yml uses.
   build:
     name: Inbox window (build the apps)
-    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
+    needs: [head]
+    # A scheduled run goes on unless the head job says main's head already had
+    # a full run (a failed lookup lets it go on); a manual run always; a PR only
+    # with `ci:e2e` or `ci:e2e-all`, and on a label event only for those two.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' && needs.head.outputs.run != 'false' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'ci:e2e') || contains(github.event.pull_request.labels.*.name, 'ci:e2e-all')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:e2e' || github.event.label.name == 'ci:e2e-all')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -153,8 +213,62 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Which specs this run leaves out and how many shards run the rest
+  # (scripts/ci-e2e-reuse.ts). Full history without blobs, for the PR's merge
+  # base; actions: read, for the earlier runs' small reuse artifacts. Any
+  # failure here gives a full run, never a red one.
+  plan:
+    name: Inbox window (plan the shards)
+    needs: [head]
+    # The build job's condition.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' && needs.head.outputs.run != 'false' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'ci:e2e') || contains(github.event.pull_request.labels.*.name, 'ci:e2e-all')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:e2e' || github.event.label.name == 'ci:e2e-all')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      count: ${{ steps.plan.outputs.count }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Plan the shards (leave out specs that passed in an earlier run of the same change)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: bun run scripts/ci-e2e-reuse.ts plan
+
+      - name: Keep the plan for the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-plan
+          path: .local/e2e-plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
+      # The key and the specs this run left out, for the PR's next run.
+      - name: Keep the reuse key
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-reuse-${{ github.run_attempt }}
+          path: .local/e2e-plan/reuse.json
+          if-no-files-found: error
+          retention-days: 7
+
   # The specs, split into whole spec files by measured time
-  # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
+  # (scripts/ci-e2e-shard.ts), 16 shards for a full run and fewer when the
+  # plan leaves specs out. Each shard is its own runner with one worker,
   # as the single job was.
   #
   # Each shard runs in the official Playwright image of the pinned version
@@ -172,8 +286,11 @@ jobs:
   # /dev/shm is too small for Chromium, which then crashes at launch or runs
   # the shard out of memory (exit 137). Playwright's Docker docs ask for it.
   inbox-window-e2e:
-    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
-    needs: build
+    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/${{ needs.plan.outputs.count }})
+    needs: [build, plan]
+    # Explicit: the head job is skipped on PRs and manual runs, and a skipped
+    # job further up the chain would skip this one by default.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.plan.result == 'success' }}
     # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
     # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
     # it moves them without a PR, and deleting it moves them back.
@@ -185,25 +302,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
+      # Bun's zip and ripgrep's tarball are kept between runs by version and
+      # checksum (in $HOME, the container's /github/home), checked every time,
+      # and on a miss downloaded with the job's token.
+      - name: Restore the Bun and ripgrep downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/e2e
+          key: e2e-tools-bun-1.4.4-bf8ccbfb2b0b-rg-14.1.1-4cf9f2741e6c
+
       # setup-bun unpacks with `unzip`, which the image lacks; the same release
       # zip setup-bun fetches, checked against its published SHA-256.
       - name: Install Bun 1.4.4
         env:
           BUN_ZIP_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir="$RUNNER_TEMP/bun"
-          mkdir -p "$dir"
-          curl -fsSL --retry 5 -o "$dir/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
-          echo "$BUN_ZIP_SHA256  $dir/bun.zip" | sha256sum -c -
-          python3 -I -m zipfile -e "$dir/bun.zip" "$dir"
+          zip="$HOME/.cache/ci-tools/e2e/bun-linux-x64.zip"
+          mkdir -p "$dir" "$(dirname "$zip")"
+          [ -f "$zip" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip "$zip"
+          echo "$BUN_ZIP_SHA256  $zip" | sha256sum -c -
+          python3 -I -m zipfile -e "$zip" "$dir"
           chmod +x "$dir/bun-linux-x64/bun"
           ln -s bun "$dir/bun-linux-x64/bunx"
           echo "$dir/bun-linux-x64" >> "$GITHUB_PATH"
@@ -223,13 +351,15 @@ jobs:
       - name: Install ripgrep
         env:
           RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir="$RUNNER_TEMP/rg"
-          mkdir -p "$dir"
-          curl -fsSL --retry 5 -o "$dir/rg.tar.gz" https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
-          echo "$RG_SHA256  $dir/rg.tar.gz" | sha256sum -c -
-          tar -xzf "$dir/rg.tar.gz" -C "$dir" --strip-components=1
+          tarball="$HOME/.cache/ci-tools/e2e/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz "$tarball"
+          echo "$RG_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" --strip-components=1
           echo "$dir" >> "$GITHUB_PATH"
           "$dir/rg" --version
 
@@ -244,9 +374,16 @@ jobs:
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
 
+      - name: Get the shard plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-plan
+          path: .local/e2e-plan
+
       - name: Run the Inbox window proof (this shard's specs)
         env:
           SHARD: ${{ matrix.shard }}
+          E2E_PLAN: .local/e2e-plan/plan.json
         run: bun run scripts/ci-e2e-shard.ts "$SHARD"
 
       # The update notices need a release-numbered binary (a 0.0.0-dev one has
@@ -265,6 +402,23 @@ jobs:
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
           PLANNOTATOR_INBOX_TEST_BINARY="$PWD/.local/plannotator" bun test packages/server/inbox-devices.test.ts packages/server/inbox-lan.test.ts
 
+      # The spec files every test of which passed here (from the JSON report the
+      # shard step writes), with their blobs: the PR's next run of the same
+      # change leaves them out.
+      - name: Record the specs this shard passed
+        if: always()
+        continue-on-error: true
+        run: bun run scripts/ci-e2e-reuse.ts passed .local/e2e-report/report.json .local/e2e-passed/passed.json
+
+      - name: Keep the passed specs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-passed-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: .local/e2e-passed/passed.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -273,13 +427,99 @@ jobs:
           path: .local/proof/
           if-no-files-found: ignore
 
-  # The merge script merges a PR only when every `Full CI (all green)` check on
-  # its head succeeded. A skipped job counts as passed elsewhere, so this job
-  # passes only when every job above ran and succeeded.
+      # Off a PR: the spec files this shard failed, for the blame job.
+      - name: Record the specs this shard failed
+        if: failure() && github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          SHARD: ${{ matrix.shard }}
+          E2E_PLAN: .local/e2e-plan/plan.json
+        run: bun run scripts/ci-e2e-main.ts failed "$SHARD" .local/e2e-report/report.json ".local/e2e-failed/failed-$SHARD.json"
+
+      - name: Keep the failed specs
+        if: failure() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-failed-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: .local/e2e-failed/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # A red run on main: which merge turned it red? Reruns only the failed spec
+  # files on main's first-parent commits since the last green full run, each
+  # built on this runner and run in the shards' Playwright image
+  # (scripts/ci-e2e-main.ts blame, scripts/ci-e2e-in-image.sh). The result goes
+  # to the run summary and to the e2e-blame artifact (blame.json). Read-only on
+  # GitHub: it never comments on a PR or opens an issue.
+  blame:
+    name: Inbox window (which merge turned main red?)
+    needs: [build, plan, inbox-window-e2e]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.inbox-window-e2e.result == 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with
+      # ripgrep: the release's static build, checked, as on the shards.
+      - name: Install ripgrep
+        env:
+          RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/rg"
+          tarball="$HOME/.cache/ci-tools/e2e/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz "$tarball"
+          echo "$RG_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+
+      # None when every failed shard died before it could record them: the
+      # blame then says it has nothing to rerun.
+      - name: Get the failed specs
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: e2e-failed-*-${{ github.run_attempt }}
+          path: .local/e2e-failed
+          merge-multiple: true
+
+      - name: Find the first merge that turns them red
+        env:
+          GH_TOKEN: ${{ github.token }}
+          E2E_FAILED_DIR: .local/e2e-failed
+          BLAME_OUT: .local/e2e-blame
+        run: bun run scripts/ci-e2e-main.ts blame
+
+      - name: Keep the blame
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-blame
+          path: .local/e2e-blame/blame.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # On a PR that asked for the full browser suite (`ci:e2e`, `ci:e2e-all`). A
+  # skipped job counts as passed elsewhere, so this job passes only when every
+  # PR job above ran and succeeded.
   full-ci:
     name: Full CI (all green)
-    needs: [build, inbox-window-e2e]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
+    needs: [build, plan, inbox-window-e2e]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'ci:e2e') || contains(github.event.pull_request.labels.*.name, 'ci:e2e-all')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:e2e' || github.event.label.name == 'ci:e2e-all') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

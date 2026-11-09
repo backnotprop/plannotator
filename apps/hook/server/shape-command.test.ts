@@ -104,9 +104,10 @@ describe("shape update", () => {
     expect(projectOf(back).worktree).toBeUndefined();
     await write(tree, main, "--id", made, "--base", "1");
     expect(projectOf(made).worktree).toBeUndefined();
-    // A `cd` out of the project: the session's project, in its own checkout.
+    // A `cd` to a folder of its own (a scratch or PR folder): that folder is the project, as the help says.
     const away = await write(tree, other);
-    expect(projectOf(away)).toMatchObject({ root: main, worktree: tree });
+    expect(projectOf(away)).toMatchObject({ root: other });
+    expect(projectOf(away).worktree).toBeUndefined();
     // `--project` says which, wherever the shell is.
     await write(main, tree, "--id", started, "--base", "2", "--project", main);
     expect(projectOf(started).worktree).toBeUndefined();
@@ -317,7 +318,8 @@ describe("the Shape switch, through the entrypoint", () => {
     writeFileSync(join(project, "old.json"), JSON.stringify({ title: "T", claim: "C", views: { reqs: { groups: [] } } }));
     const r = await run("update", "--file", "old.json");
     expect(r.code).not.toBe(0);
-    expect(r.err).toContain("views.know");
+    expect(r.err).toContain("a ref's sub");
+    expect(r.err).not.toContain("views.know");
   });
 
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json

@@ -65,7 +65,7 @@ test.beforeAll(async () => {
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-phone-compose-send-');
   const dataDir = join(root, 'data');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
@@ -197,7 +197,6 @@ async function openWorstDraft(page: Page): Promise<void> {
     ]);
     await expect(sheet.locator('[data-compose-file="done"]')).toHaveCount(2);
     await sheet.locator('[data-compose-cancel]').click();
-    await sheet.locator('[data-compose-keep]').click();
     await expect(sheet).toHaveCount(0);
     draftKept = true;
   }
@@ -498,7 +497,6 @@ for (const engine of ENGINES) {
         const field = sheet.locator('[data-compose-text] textarea');
         await field.fill(words);
         await sheet.locator('[data-compose-cancel]').click();
-        await sheet.locator('[data-compose-keep]').click();
         await expect(sheet).toHaveCount(0);
 
         // The session is gone when the draft comes back.
@@ -738,7 +736,6 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await page.locator('[data-open-compose]').first().click();
     await sheet.locator('[data-compose-text] textarea').fill('A draft to delete.');
     await page.keyboard.press('Escape');
-    await sheet.locator('[data-compose-keep]').click();
     await expect(sheet).toHaveCount(0);
     await page.goto(`${world.url}#drafts`);
     await page.locator('[data-draft-id] .ib-draft-open').first().click();

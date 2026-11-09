@@ -76,17 +76,18 @@ describe("a thread the person starts", () => {
     expect(store.listRow(message.id)!.section).toBe("quiet");
   });
 
-  test("the agent's reply_to answer lands in it; it is never a session's default thread", () => {
+  test("the agent's reply_to answer lands in it; a send without reply_to never joins it", () => {
     const { store, project } = world();
-    // The session already had a default thread of its own.
+    // The session already had a thread of its own.
     const own = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Working on the relay." });
     const { message } = store.startPersonThread({ project_id: project.id, body: "Add a retry budget.", to: claude, idempotency_key: "k" });
     const answer = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "I'll do it after the relay.", reply_to: message.id });
     expect(answer.message.thread_id).toBe(message.id);
     expect(store.listRow(message.id)!.section).toBe("new");
-    // The session's next message without reply_to joins its own default thread, not the person's.
+    // The session's next message without reply_to starts a new thread: neither its own nor the person's.
     const next = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Relay done." });
-    expect(next.message.thread_id).toBe(own.message.thread_id);
+    expect(next.message.thread_id).toBe(next.message.id);
+    expect(next.message.thread_id).not.toBe(own.message.thread_id);
     // A session with no thread yet starts a new one rather than joining the person's.
     const fresh = store.sendMessage({ project_id: project.id, author: agent("ses_new"), body: "Hello." });
     expect(fresh.message.thread_id).toBe(fresh.message.id);

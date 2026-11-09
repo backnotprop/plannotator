@@ -45,7 +45,7 @@ describe("pins in the store", () => {
     const { store, project } = open();
     const a = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One" }).message;
     const b = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "Two" }).message;
-    const reply = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One, again" }).message;
+    const reply = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One, again", reply_to: a.id }).message;
     expect(reply.thread_id).toBe(a.thread_id);
     expect(code(() => store.setPinned(reply.id, true))).toBe("thread_not_found");
     expect(code(() => store.setPinned("msg_01K70000000000000000000099", true))).toBe("thread_not_found");

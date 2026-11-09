@@ -10,11 +10,13 @@ import { formatBytes, plural } from '../format';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { Tip } from './Tip';
-import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
+import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
+import { useRowDraft } from '../fileCommentDrafts';
+import { markImageComposer } from '../pageMarks';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -114,10 +116,21 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [ratio, setRatio] = useState(attachment.width && attachment.height ? attachment.width / attachment.height : 16 / 9);
   const [failed, setFailed] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [text, setText] = useState('');
-  const [pinned, setPinned] = useState<number | null>(null);
-  const [frame, setFrame] = useState<Frame | null>(null);
-  const [markup, setMarkup] = useState<ImageAttachment | null>(null);
+  // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
+  // read again as it closes.
+  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
+  const [text, setText] = useState(waiting?.text ?? '');
+  const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
+  const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
+  const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
+  /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
+  const sentWords = useRef<string | null>(null);
+  const sendRow = async (annotation: Annotation) => {
+    sentWords.current = text;
+    const ok = await onSave(annotation);
+    if (!ok) sentWords.current = null;
+    return ok;
+  };
   // The drawing the ✓ just added to the reply: its comment, for a note, a redraw or ×.
   const [kept, setKept] = useState<{ id: string; image: ImageAttachment; time: number } | null>(null);
   // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls
@@ -134,8 +147,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (annotating) acceptable.current = true;
   }, [annotating]);
   const [saving, setSaving] = useState(false);
-  /** A phone opens the row from "Comment at 1:42". */
-  const [composing, setComposing] = useState(false);
+  /** A phone opens the row from "Comment at 1:42" (open already when it holds kept words). */
+  const [composing, setComposing] = useState(waiting !== null);
   // The `#t` fragment asks for the first frame, a free poster.
   const src = `${source.videoUrl(attachment, version)}#t=0.001`;
 
@@ -188,6 +201,13 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (time !== null) seek(time);
   }, [selectedId, annotations, seek]);
 
+  // Kept words come back at their moment.
+  useEffect(() => {
+    if (waiting?.time != null) seek(waiting.time);
+    // Once, as the row mounts with them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Pause and pin the moment the comment is about, and grab its frame. */
   const pin = useCallback(async (): Promise<Frame | null> => {
     const video = videoRef.current;
@@ -231,7 +251,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     const redraw = kept && keptNow ? keptNow : null;
     const time = redraw && kept ? kept.time : pinned ?? videoTimeOf(videoRef.current?.currentTime ?? current);
     const id = redraw?.id ?? newId();
-    const ok = await onSave(
+    const ok = await sendRow(
       redraw
         ? ({ ...redraw, text: noteOnto(redraw, words), images: [image] } as Annotation)
         : videoCommentAnnotation({ id, name: attachment.name, time, text: markupWords(words, true), frame: image }),
@@ -258,7 +278,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (kept && keptNow) {
       setSaving(true);
       // (A redraw whose save failed waits as `markup`: it goes with the note.)
-      const ok = await onSave({ ...keptNow, text: noteOnto(keptNow, text), ...(markup ? { images: [markup] } : {}) } as Annotation);
+      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, text), ...(markup ? { images: [markup] } : {}) } as Annotation);
       setSaving(false);
       if (ok) reset();
       return;
@@ -275,7 +295,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         onError(cause instanceof InboxApiError ? `The frame was not kept: ${cause.message}` : 'The frame was not kept; the comment was saved without it.');
       }
     }
-    const ok = await onSave(videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image }));
+    const ok = await sendRow(videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image }));
     setSaving(false);
     if (ok) reset();
   };
@@ -340,7 +360,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
       ) : (
         (markup || frame) && (
-          // `ib-markup` on a drawing: the pane's unsaved-comment question (unsavedComposer) knows a drawing not yet commented.
+          // `ib-markup` on a drawing: the pane (unsavedComposers) knows a drawing not yet commented.
           <Tip content={markup ? 'Your marked-up frame rides this comment' : `The frame at ${formatInboxVideoTime(shownTime)} rides this comment`}>
             <span className={`ib-vframe${markup ? ' ib-markup' : ''}`} data-video-frame="">
               <img src={markup ? getImageSrc(markup.path) : frame!.url} alt="" />
@@ -398,6 +418,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           Cancel
         </button>
       )}
+      <FullScreenCommentBin />
       <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
         {kept ? 'Add note' : 'Comment'}
       </button>
@@ -418,7 +439,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   ) : (
     !readOnly &&
     (!phone || composing) && (
-      <div className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
+      <div ref={markImageComposer} className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
         {commentCard}
       </div>
     )

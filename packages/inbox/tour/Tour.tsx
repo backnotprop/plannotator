@@ -25,6 +25,7 @@ import { Tip } from '../components/Tip';
 import { AttachmentTiles } from '../components/AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from '../components/AttachmentPane';
 import { ArtifactsView } from '../components/ArtifactsView';
+import { ArtifactsBar, ThreadViewSwitch } from '../components/ThreadLinksView';
 import { ReplyAnswers, draftAnswerWords, type DraftAnswer } from '../components/ReplyAnswers';
 import { AnnotationsChip } from '../components/AnnotationsChip';
 import { ComposeDialog, type ComposeTransport } from '../compose/ComposeDialog';
@@ -41,6 +42,7 @@ import { tourFileSource } from './fileSource';
 import { TourSettings, type TourSettingsHandle } from './TourSettings';
 import { sentAnswersOf } from '../sentReply';
 import { threadChipName } from '../threadChip';
+import { markInboxPage } from '../pageMarks';
 import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
@@ -867,7 +869,7 @@ export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPi
     }
   };
   return createPortal(
-    <div className="pn-inbox ib-tour-layer">
+    <div ref={markInboxPage} className="pn-inbox ib-tour-layer">
       <div ref={ref} className="ib-tour-viewer ib-wlayer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
         <header>
           <b>{picture.name}</b>
@@ -1585,6 +1587,11 @@ function TourThreadPane({
           </>
         )}
       </div>
+      {state.artifactsOpen && !phone && (
+        <ArtifactsBar onBack={() => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}>
+          <ThreadViewSwitch links={0} artifacts={artifacts.length} linksOn={false} onLinks={noop} />
+        </ArtifactsBar>
+      )}
       {state.artifactsOpen ? (
         <div className="ib-pbody ib-artbody">
           <ArtifactsView
@@ -1593,7 +1600,6 @@ function TourThreadPane({
             openId={state.file?.id ?? null}
             onOpen={(artifact) => onOpenFile(artifact.attachment)}
             onOpenGuide={noop}
-            onBack={phone ? undefined : () => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}
             phone={phone}
           />
         </div>

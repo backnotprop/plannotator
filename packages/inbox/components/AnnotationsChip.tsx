@@ -171,10 +171,12 @@ export function AnnotationsList({
   const name = (record: InboxAnnotationRecord) =>
     record.message
       ? (messageName?.(record) ?? 'Message')
-      : record.guide
-        ? record.guide.scope === 'general'
-          ? record.guide.title
-          : record.path
+      : record.live
+        ? `${record.live.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}${record.live.page_url ?? ''} (live)`
+        : record.guide
+          ? record.guide.scope === 'general'
+            ? record.guide.title
+            : record.path
         : (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
 
   const run = async (work: () => Promise<void>) => {

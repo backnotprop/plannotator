@@ -198,6 +198,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST launch/:id/delete": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
+  "POST update": "set",
 };
 
 const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>

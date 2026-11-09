@@ -51,8 +51,6 @@ const AGENT = 'Claude Code (worktree agent-a0316994da8440ab5)';
 const AGENT_SHORT = 'Claude Code (worktree agent-a0316994da8…';
 const SUBJECT = 'Fix flaky tests/e2e/inbox-attachment-stepping-save.spec.ts on WebKit after the Bun 1.4.4 upgrade (retry worker race)';
 const FILE = 'Q3 Board Deck — FINAL (revised) v12 [approved by legal].md';
-/** What a phone's Looks good says before the agent's name. */
-const LOOKS_GOOD_NEWS = 'Read · Sends in 10 s';
 
 const STOPPED = [
   'The retry worker races the save on WebKit. I attached the deck the board asked about.',
@@ -271,32 +269,28 @@ for (const vp of VIEWPORTS) {
         await toast.getByRole('button', { name: /Undo/ }).click();
       }
 
-      // Looks good: "Goes to <the agent, cut> in 10 s · Moves to Quiet".
+      // Looks good draws no toast (approval "inbox-reaction-tray": the line under the message says it); the live region does.
       await openThread(page, world.threads.merged, /Merged the payouts table/);
       const ack = pane(page).locator('[data-ack]');
       await ack.click();
-      // A phone puts the name last.
-      await expect(toast.locator('.ib-tdetail')).toHaveText(vp.phone ? `${LOOKS_GOOD_NEWS} · ${AGENT_SHORT}` : `Goes to ${AGENT_SHORT} in 10 s · Moves to Quiet`);
-      await expectFits(page, toast, 'Looks good');
-      if (vp.phone) expect(await newsShows(toast.locator('.ib-tdetail'), LOOKS_GOOD_NEWS), 'Looks good: the news').toBe('shows');
+      await expect(ack).toHaveAttribute('aria-pressed', 'true');
       await expect(page.locator('[data-inbox-live]')).toContainText(`Goes to ${AGENT_SHORT} in 10 seconds and moves to Quiet.`);
-      await page.screenshot({ path: join(proofDir, `${vp.name}-looks-good.png`) });
-      await toast.getByRole('button', { name: /Undo/ }).click();
+      await expect(toast).toHaveCount(0);
+      await ack.click();
       await expect(ack).toHaveAttribute('aria-pressed', 'false');
 
-      // Draft saved: the Drafts chip on screen beside the words.
+      // Draft saved: the Reopen chip on screen beside the words.
       await page.goto(world.url);
       await page.locator('[data-open-compose]:visible').first().click();
       const dialog = page.locator('dialog[data-compose]');
       await dialog.locator('[data-compose-text] textarea').fill(`A draft for ${PROJECT}, kept from ${vp.name} px.`);
-      // Closing asks to keep or discard (a phone's sheet has Cancel; a window, Escape).
+      // Closing keeps it as a draft, with no question (a phone's sheet has Cancel; a window, Escape).
       if (vp.phone) await dialog.locator('[data-compose-cancel]').click();
       else await page.keyboard.press('Escape');
-      await dialog.locator('[data-compose-keep]').click();
       await expect(dialog).toHaveCount(0);
       await expect(toast).toContainText('Draft saved');
       await expectFits(page, toast, 'Draft saved');
-      await expect(toast.locator('[data-toast-action]')).toHaveText('Drafts');
+      await expect(toast.locator('[data-toast-action]')).toHaveText('Reopen');
       // One line is as tall as before (40 px).
       if (!vp.phone) expect(await heightOf(toast), 'Draft saved: one line, height').toBe(40);
       await page.screenshot({ path: join(proofDir, `${vp.name}-draft-saved.png`) });

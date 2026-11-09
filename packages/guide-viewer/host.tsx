@@ -112,6 +112,24 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
   /**
+   * Draws a chapter's diagram (format version 5) at the top of the chapter's
+   * code pane, full width, above its first file (approval
+   * "guide-chapter-diagrams", placement A), under a "Diagram" header that
+   * folds it. The chain caps the drawing's box at 320px (the canvas fits the
+   * drawing inside it; Expand opens it full size). `index` is the chapter's
+   * 0-based place, for a drawing id unique on the page. Absent, or answering
+   * null: the chapter shows as it would with no diagram (never its source,
+   * never a note).
+   */
+  renderChapterDiagram?: (diagram: GuideOverviewDiagram, index: number) => React.ReactNode | null;
+  /**
+   * Where a chapter diagram's fold is kept, so it stays folded when the guide
+   * opens again (the review app: its cookie storage, which outlives its random
+   * ports). Absent: the browser's localStorage; with neither, the fold lasts
+   * while the page is open.
+   */
+  diagramFoldStore?: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void };
+  /**
    * A picture slot under the title when the guide's overview has no diagram
    * (the Inbox's code review: "Show me" asks the agent for one). Answering
    * null (or absent) leaves the guide exactly as it is.
@@ -172,6 +190,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
   diffStyle?: 'split' | 'unified';
   /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
   opensWholeFiles?: boolean;
+  /**
+   * Files sit flush, edge to edge (the Inbox's PR page): a content-fit box has no border, padding or corner of its own,
+   * and holds exactly its renderer's height, so one file's header meets the last code row of the file above. Absent:
+   * the bordered box, as before.
+   */
+  flushFiles?: boolean;
   /**
    * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
    * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.

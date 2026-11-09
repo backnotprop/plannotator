@@ -34,7 +34,8 @@ import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-s
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -111,16 +112,124 @@ export interface InboxMachinesContext {
   holds: (kind: HeldKind, id: string) => boolean;
   /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
   isGuest: (req: Request, via: "local" | "tailnet") => boolean;
+  /** This Inbox's own version and the newest release it knows of: the fallback when a machine knows of no update itself. */
+  ownVersions?: () => { current: string; latest: string | null };
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
 }
 
 /** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
-export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
+export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
 export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean } };
+
+/** How the window draws a machine's version (approval "inbox-machine-update"). */
+export interface MachineUpdateView {
+  phase: "behind" | "updating" | "ready" | "failed" | "restarting" | "not_back" | "updated";
+  target: string | null;
+  from: string | null;
+  /** Its door takes `update`. */
+  can_update: boolean;
+  /** Its copy was installed by the install script. */
+  self_update: boolean;
+  /** The person asked an agent there to update it (an older door): the thread (null while held) and the agent. Absent otherwise. */
+  asked?: { thread: string | null; agent: string; at: string };
+}
+
+/** How long "Updated" stays on the row, how long a machine has to come back, how long Update waits for its first answer (it asks GitHub first). */
+const UPDATED_SHOWN_MS = 2 * 60_000;
+const RESTART_BACK_MS = 3 * 60_000;
+const UPDATE_START_MS = 45_000;
+/** A press whose first `updating` has not arrived yet still reads as updating, for this long. */
+const UPDATE_ASKED_GRACE_MS = 10_000;
+/** How long an ask to an agent there is said ("Asked Claude Code on Mini"): an agent that never acts on it lets the dialog offer it again. */
+export const AGENT_ASK_KEPT_MS = 30 * 60_000;
+
+/**
+ * What the window draws about a linked machine's version. That machine's own state first; when it has no newer version
+ * to name (its checks are off), this Inbox's own version and newest known release can still show it is behind. An
+ * Inbox never offers an update to a machine that is ahead of it or level with the newest known.
+ */
+export function machineUpdateView(
+  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate"> & Partial<Pick<PeerLink, "agentAsked">>,
+  own: { current: string; latest: string | null } | null,
+  now: number,
+  clocks: { updatedShownMs: number; restartBackMs: number },
+): MachineUpdateView | null {
+  const view = pressView(peer, own, now, clocks);
+  // An agent there was asked to update it (an older door): said beside whatever the machine shows, for a while.
+  const ask = peer.agentAsked && now - peer.agentAsked.at < AGENT_ASK_KEPT_MS ? peer.agentAsked : null;
+  if (!ask || !view || view.phase === "updated") return view;
+  const asked = { thread: ask.thread, agent: ask.agent, at: new Date(ask.at).toISOString() };
+  // Gone since the ask: that agent's restart, for as long as a restart takes. Never "not back": a machine that sleeps
+  // after an ask nobody acted on is only asleep.
+  if (peer.state !== "online" && peer.since >= ask.at && now - peer.since < clocks.restartBackMs && view.phase === "behind") return { ...view, phase: "restarting", asked };
+  return { ...view, asked };
+}
+
+function pressView(
+  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate">,
+  own: { current: string; latest: string | null } | null,
+  now: number,
+  clocks: { updatedShownMs: number; restartBackMs: number },
+): MachineUpdateView | null {
+  if (peer.state === "revoked") return null;
+  const version = peer.version;
+  const can = { can_update: peer.canUpdate, self_update: peer.selfUpdate };
+  if (peer.updated && now - peer.updated.at < clocks.updatedShownMs) return { phase: "updated", target: peer.updated.to, from: peer.updated.from, ...can };
+  const far = peer.farUpdate;
+  if (peer.state === "online") {
+    // During a press, `ready` is still that press: the install script runs on after it swaps the binary (skills,
+    // plugins), and that machine restarts itself when the script ends. There is nothing to press.
+    if (far?.state === "ready" && peer.asked) return { phase: "updating", target: far.version, from: version, ...can };
+    if (far?.state === "updating" || far?.state === "failed" || far?.state === "ready") return { phase: far.state, target: far.version, from: version, ...can };
+    if (peer.noChange) return { phase: "failed", target: peer.noChange, from: version, ...can };
+    if (peer.asked && now - peer.asked.at < UPDATE_ASKED_GRACE_MS) return { phase: "updating", target: far?.version ?? null, from: version, ...can };
+  } else if (peer.asked) {
+    return { phase: now - peer.since >= clocks.restartBackMs ? "not_back" : "restarting", target: far?.version ?? null, from: version, ...can };
+  }
+  const candidates = [far?.version, own?.current, own?.latest].filter((v): v is string => !!v && !!normalizeStableVersion(v));
+  const newest = candidates.reduce<string | null>((best, v) => (!best || isNewerStableVersion(v, best) ? v : best), null);
+  if (!version || !normalizeStableVersion(version) || !newest || !isNewerStableVersion(newest, version)) return null;
+  // This Inbox runs ahead of GitHub's latest, and that machine said so when pressed: Update would only say it again.
+  // A release past that, or that machine's own answer, brings the word back.
+  if (peer.saidUpToDate && far?.state !== "available" && !isNewerStableVersion(newest, peer.saidUpToDate)) return null;
+  return { phase: "behind", target: newest, from: version, ...can };
+}
+
+/** Where that machine's update.log is, as `machinePath` sends it: a file name, or under `~` or the data folder. Never a command. */
+const FAR_LOG = /^(?:(?:~|\$PLANNOTATOR_DATA_DIR)[/\\][\p{L}\p{N} ._@+\-/\\]*)?update\.log$/u;
+
+/**
+ * The far door's answer to `GET update`, picked by name again: this window never shows a URL or a command a machine
+ * sent. The install command is this Inbox's own table, by that machine's platform and its remembered flags.
+ */
+export function parseFarDetails(raw: unknown) {
+  const body = (raw ?? {}) as Record<string, any>;
+  const platform = ["darwin", "linux", "win32"].includes(body.platform) ? (body.platform as "darwin" | "linux" | "win32") : "linux";
+  const failure = body.failure && typeof body.failure === "object" ? body.failure : null;
+  return {
+    current: farVersion(body.current),
+    update: parseFarUpdate(body.update),
+    platform,
+    // `installCommandFor` keeps only the flags on its own allowlist.
+    command: installCommandFor(platform, Array.isArray(body.flags) ? body.flags : []),
+    log: typeof body.log === "string" && FAR_LOG.test(body.log) ? body.log : "",
+    open_reviews: typeof body.open_reviews === "number" ? Math.max(0, Math.min(body.open_reviews, 9999)) : 0,
+    failure: failure
+      ? {
+          exit_code: typeof failure.exit_code === "number" ? failure.exit_code : 1,
+          ...(failure.tls === "untrusted" || failure.tls === "revoked" ? { tls: failure.tls } : {}),
+          ...(failure.release_first === true ? { release_first: true } : {}),
+          // The one kind of reason there is (stagingReason): anything else is not said here.
+          ...(typeof failure.prepare === "string" && /^(?:could not write to )?the temp folder\b/.test(failure.prepare) ? { prepare: failure.prepare.slice(0, 300) } : {}),
+          ...(failure.unchanged === true ? { unchanged: true } : {}),
+        }
+      : null,
+  };
+}
 
 export interface MachineView {
   id: string;
@@ -146,12 +255,21 @@ export interface MachineView {
   list_cursor: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
   snoozes: boolean;
+  /** Its list was read and it keeps no snoozes: an older Inbox, said so instead of Snooze vanishing. A list not read yet says nothing. */
+  snooze_old?: boolean;
+  /** Its version as the window draws it. Null: nothing to say. */
+  update?: MachineUpdateView | null;
   /**
    * Remote launch, from its health when the line connected: agents can start there (true), launch is off there
    * (false: "Starting agents is off on Mini"), or its Inbox is too old to say (null: "Update Plannotator on Mini to
    * start agents there"). Null for this Inbox, whose own launch block says.
    */
   launch: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words (its health's `message_deletions`). Not: a Delete it refuses
+   * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
+   */
+  message_deletions: boolean;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -217,8 +335,8 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
-/** Another machine's folder names, for "Another folder on <machine>…" (remote launch). */
-const FOLDERS_ROUTE = "launch/folders";
+/** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
+const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
 const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
 /** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
@@ -326,12 +444,17 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /** The door's close after the other machine's `unlink` was answered (UNLINKED_DOOR_CLOSE_MS). */
   let doorCloseTimer: ReturnType<typeof setTimeout> | null = null;
   let lastMachines = "";
+  const updatedShownMs = context.timings?.updatedShownMs ?? UPDATED_SHOWN_MS;
+  const restartBackMs = context.timings?.restartBackMs ?? RESTART_BACK_MS;
   const startedAt = new Date().toISOString();
   const json = context.json;
 
   const emit = (frame: MachineFrame) => {
     for (const listener of listeners) listener(frame);
   };
+
+  const updateView = (peer: PeerLink): MachineUpdateView | null =>
+    machineUpdateView(peer, context.ownVersions?.() ?? null, Date.now(), { updatedShownMs, restartBackMs });
 
   const machinesView = (): MachineView[] => [
     {
@@ -349,6 +472,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       list_cursor: null,
       snoozes: true,
       launch: null,
+      message_deletions: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -365,18 +489,38 @@ export function createInboxMachines(context: InboxMachinesContext) {
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
+        snooze_old: peer?.list ? !peer.list.snoozes : false,
+        update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
+        message_deletions: peer?.messageDeletions ?? false,
       } satisfies MachineView;
     }),
   ];
 
   /** Tell the windows when the machines block changed (a state, a name, the waiting count). */
   const machinesChanged = () => {
+    armUpdateClock();
     const machines = machinesView();
     const text = JSON.stringify(machines.map(({ since: _since, ...rest }) => rest));
     if (text === lastMachines) return;
     lastMachines = text;
     emit({ event: "machines", data: { machines } });
+  };
+
+  /** A machine's update changes by the clock too ("Not back", "Updated" fading): the window hears it when it does. */
+  let updateClock: ReturnType<typeof setTimeout> | null = null;
+  const armUpdateClock = () => {
+    if (updateClock) clearTimeout(updateClock);
+    updateClock = null;
+    const now = Date.now();
+    const due = [...peers.values()].flatMap((peer) => [
+      ...(peer.updated ? [peer.updated.at + updatedShownMs] : []),
+      ...(peer.asked ? [peer.state === "online" ? peer.asked.at + UPDATE_ASKED_GRACE_MS : peer.since + restartBackMs] : []),
+      ...(peer.agentAsked ? [peer.agentAsked.at + AGENT_ASK_KEPT_MS, ...(peer.state === "online" ? [] : [peer.since + restartBackMs])] : []),
+    ]).filter((at) => at > now);
+    if (due.length === 0) return;
+    updateClock = setTimeout(machinesChanged, Math.min(...due) - now + 20);
+    (updateClock as { unref?: () => void }).unref?.();
   };
 
   outbox.onChange(({ entry }) => {
@@ -665,7 +809,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts") {
+    // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -682,7 +827,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const search = forwardedReadSearch(url.search, context.isGuest(req, via));
       const headers = pick(req.headers, PASS_REQUEST);
       // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
-      if (route === FOLDERS_ROUTE) {
+      if (FOLDERS_ROUTES.has(route)) {
         if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";
@@ -903,6 +1048,76 @@ export function createInboxMachines(context: InboxMachinesContext) {
       if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
       return json({ entry: outboxView(entry) });
     }
+    // The window asked an agent on an older machine to update it (its New message went through the forward, as any
+    // compose does): remembered here so that machine's row says so, then Restarting and Updated when it comes back newer.
+    const askedMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/update\/asked$/.exec(path);
+    if (askedMatch) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const peer = peers.get(askedMatch[1]!);
+      if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
+      const thread = typeof body.thread_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(body.thread_id) ? body.thread_id : null;
+      const agent = typeof body.agent === "string" ? body.agent.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+      peer.agentAsked = { from: peer.version, at: Date.now(), thread, agent: agent || "An agent" };
+      machinesChanged();
+      return json({ ok: true, update: updateView(peer) });
+    }
+    // Update on another machine. Its own route, like its accounts: never the forward and never the outbox
+    // (an update that waits days and runs when a machine wakes is not what anyone pressed).
+    const updateMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/update$/.exec(path);
+    if (updateMatch) {
+      if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+      // Another site's page never gets here: the request guard and the tailnet listener refuse it, reads included.
+      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can update another machine from this Inbox.", code: "owner_only" }, 403);
+      const peer = peers.get(updateMatch[1]!);
+      if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
+      const name = links.get(peer.id)?.name ?? "That machine";
+      if (peer.state !== "online") {
+        peer.poke();
+        return json({ error: `${name} cannot be reached now. Nothing was sent.`, code: "machine_offline" }, 503);
+      }
+      if (req.method === "GET") {
+        try {
+          const answer = await peer.request("update", "", { method: "GET", headers: {} });
+          if (answer.status === 404) return json({ too_old: true, current: peer.version });
+          const raw = await readCapped(answer, 64 * 1024);
+          return json(parseFarDetails(raw === null ? null : JSON.parse(raw)));
+        } catch {
+          return json({ error: `${name} did not answer.`, code: "machine_offline" }, 503);
+        }
+      }
+      const stale = staleTab(await context.readBody(req));
+      if (stale) return stale;
+      try {
+        // An empty body, always: nothing the window sent reaches that machine.
+        const answer = await peer.request("update", "", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", timeoutMs: UPDATE_START_MS });
+        if (answer.status === 404) return json({ error: `${name} runs ${peer.version ?? "an older version"}, from before machines could update each other.`, code: "machine_too_old" }, 409);
+        const raw = await readCapped(answer, 4 * 1024);
+        const outcome = String((raw ? (JSON.parse(raw) as { outcome?: unknown }).outcome : "") ?? "");
+        if (outcome === "launched" || outcome === "joined" || outcome === "restarting") {
+          peer.asked = { from: peer.version, at: Date.now() };
+          machinesChanged();
+          return json({ ok: true, outcome });
+        }
+        if (outcome === "up-to-date") {
+          peer.saidUpToDate = updateView(peer)?.target ?? peer.saidUpToDate;
+          machinesChanged();
+        }
+        const words: Record<string, string> = {
+          unmanaged: `${name}'s copy of Plannotator was not installed by the install script, so it can't update itself.`,
+          "up-to-date": `${name} is up to date.`,
+          "no-release": `${name} could not reach GitHub to find the newest release.`,
+          "launch-failed": `The install script could not be started on ${name}.`,
+          "dev-build": `${name} runs a development build.`,
+        };
+        return json({ error: words[outcome] ?? `The update could not start on ${name}.`, code: `update_${outcome.replace(/-/g, "_")}` }, 409);
+      } catch {
+        return json({ error: `${name} did not answer. Nothing may have started.`, code: "machine_offline" }, 503);
+      }
+    }
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -956,6 +1171,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       doorCloseTimer = null;
       context.door.closeTailnetIfUnused();
     }
+    if (updateClock) clearTimeout(updateClock);
+    updateClock = null;
     for (const peer of peers.values()) peer.stop();
     peers.clear();
     listeners.clear();
