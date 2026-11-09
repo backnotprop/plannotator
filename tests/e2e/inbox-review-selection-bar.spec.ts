@@ -366,6 +366,13 @@ test('Split: under the side the selection ends on', async () => {
   await setStyle(page, 'split');
 
   await select(page, LONG, 17, 19);
+  // The click left focus on the diff's root (tabindex -1) and the Shift press made it :focus-visible. It draws no
+  // ring: the clipping around the diff left only two lines, one above the file and one below it.
+  const ring = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement;
+    return { holdsDiff: !!el.querySelector('diffs-container'), focusVisible: el.matches(':focus-visible'), outline: getComputedStyle(el).outlineStyle };
+  });
+  expect(ring).toEqual({ holdsDiff: true, focusVisible: true, outline: 'none' });
   let g = await geometry(page);
   let box = clearOfLines(g);
   expect(Math.abs(box.left - g.codeAdditions!), 'the new side').toBeLessThan(1);
