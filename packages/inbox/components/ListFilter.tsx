@@ -7,7 +7,7 @@
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Updated (Today,
  *   Last 7 days, Last 30 days, Custom range…), Agent (several; only with two agents or more), Pull request (Open,
- *   Draft, Merged, Closed, Has a PR, No PR, several; behind `LIST_FILTER_PULLS`), then Project last, since the
+ *   Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
@@ -29,8 +29,8 @@ import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
   UPDATED_OPTIONS,
-  listFilterPullsOn,
   rowPullMatches,
+  rowPullStates,
   type PullPick,
   agentHost,
   appliedFilter,
@@ -126,7 +126,8 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const custom = filter.updated !== null && typeof filter.updated !== 'string' ? filter.updated : null;
   const name = count > 0 ? `Filter, ${count} active` : 'Filter';
 
-  const pulls = listFilterPullsOn();
+  // Offered once a thread here has a PR, and while a pick of it is remembered (so it can be unticked).
+  const pulls = source.filter.pulls.length > 0 || rows.some((row) => rowPullStates(row).length > 0);
   const projectGroup = showProjects && (
     <Menu.Group>
       <Menu.GroupLabel className="ib-pm-glabel">Project</Menu.GroupLabel>
