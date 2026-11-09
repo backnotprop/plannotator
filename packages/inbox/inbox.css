@@ -9239,6 +9239,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    its words in the tooltip), so the verdict fits by 760. */
 @media (max-width: 959px) {
   .ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
+  /* The diff controls share the bar: its gaps narrow, so the title keeps more of its words. */
+  .ib-prreview.ib-prr-wide .ib-vhead { gap: 6px; }
 }
 /* Under 1100px Back keeps its arrow (its name for a screen reader) and gives its width to the title. */
 @media (max-width: 1100px) {
@@ -9648,7 +9650,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prreview .ib-vhead { gap: 8px; }
 .ib-prreview .ib-prr-controls [data-guide-global-comment-add] > span { display: none; }
 .ib-prreview .ib-prr-controls [data-guide-global-comment-add] { padding-inline: 8px; height: 29px; }
-.ib-prreview .ib-vhead .ib-prr-note { flex: none; max-width: 160px; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Short of room the note gives way before the title does (the title's tip names the author too): with the diff
+   controls in the bar, a note that kept its width cut the title to its mark by 800 px. */
+.ib-prreview .ib-vhead .ib-prr-note { flex: 0 1000 auto; min-width: 0; max-width: 160px; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ib-prreview .ib-rrail { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .ib-prp-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 .ib-prp-of { flex: none; white-space: nowrap; }

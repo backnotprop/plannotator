@@ -2512,11 +2512,18 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
-    // The bar has it at every width but a phone's, beside the title.
-    for (const width of [800, 1040, 1280, 1440]) {
+    // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
+    // gives way before the title does: the title's tip names the author as well.
+    for (const width of [1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     }
+    await page.setViewportSize({ width: 800, height: 900 });
+    const narrow = await review.evaluate((root) => {
+      const width = (selector: string) => root.querySelector(selector)!.getBoundingClientRect().width;
+      return { title: width('[data-pull-review-title]') > width('[data-pull-review-readonly]') + 24, overflow: root.querySelector('.ib-vhead')!.scrollWidth - root.querySelector('.ib-vhead')!.clientWidth };
+    });
+    expect(narrow).toEqual({ title: true, overflow: 0 });
     await page.setViewportSize({ width: 1440, height: 900 });
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
