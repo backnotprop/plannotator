@@ -38,7 +38,7 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
-import { choiceLetters, optionOf, optionSetId, optionSetOf } from '../optionSets';
+import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -488,10 +488,11 @@ export function MessageBody({
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**
    * A picture choice's zoom (approval "inbox-image-swipe", "Option sets"): its captured file opens in the
-   * viewer over that question's picture choices only (the question's key). Absent: it opens like any image
-   * of the body.
+   * viewer over that question's picture choices only (the question's key), on the choice zoomed (`choice`, its
+   * place among the question's choices: a picture two choices share opens as the one zoomed). Absent: it opens
+   * like any image of the body.
    */
-  onOpenOptionSet?: (key: string, image: InboxInlineImage) => void;
+  onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
   readOnly: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
@@ -730,11 +731,11 @@ export function MessageBody({
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
   const openSetRef = useRef(onOpenOptionSet);
   openSetRef.current = onOpenOptionSet;
-  /** A picture choice's zoom: its question's choices in the viewer; a picture not captured yet (or a host's own `onImage`) opens as before. */
+  /** A picture choice's zoom: its question's choices in the viewer, on this choice; a picture not captured yet (or a host's own `onImage`) opens as before. */
   const onZoomChoice = useCallback(
-    (key: string, _index: number, src: string, alt: string) => {
+    (key: string, index: number, src: string, alt: string) => {
       const image = onImageRef.current ? null : imageOf(src);
-      if (image && openSetRef.current) openSetRef.current(key, image);
+      if (image && openSetRef.current) openSetRef.current(key, image, index);
       else onImageClick(src, alt);
     },
     [imageOf, onImageClick],
@@ -2837,13 +2838,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    * through those alone, in choice order. Gone when the file on screen is not one of them (a linked page, a tile).
    */
   const namedSet = useMemo(() => optionSetOf(thread.messages, steps, file?.set ?? null), [thread.messages, steps, file?.set]);
-  const optionSet = namedSet && file && optionOf(namedSet, file.id) ? namedSet : null;
-  /** The set a file opened from the pane keeps: the one on screen when the file is one of its choices. */
-  const setFor = (attachmentId: string): string | null => (optionSet && optionOf(optionSet, attachmentId) ? optionSet.id : null);
-  /** A picture choice's zoom: the viewer over its question's choices (one picture alone is no set: the thread's files). */
-  const openOptionSet = (messageId: string, key: string, image: InboxInlineImage) => {
-    const id = optionSetId(messageId, key);
-    openFromMessage(image, null, undefined, optionSetOf(thread.messages, steps, id) ? id : null);
+  /** The choice on screen (the address's `@<choice>`; a link without one: the first choice that shows the file). */
+  const option = namedSet && file ? optionOf(namedSet, file.id, parseOptionSetId(file.set)?.choice ?? null) : null;
+  const optionSet = option ? namedSet : null;
+  /**
+   * The set a file opened from the pane keeps: the one on screen when the file is one of its choices. `at`: its
+   * place in the set when the pane stepped there, so a picture two choices share opens as the next choice.
+   */
+  const setFor = (attachmentId: string, at: number | null = null): string | null => {
+    if (!optionSet) return null;
+    const found = optionOf(optionSet, attachmentId, at === null ? null : (optionSet.choices[at]?.choice ?? null));
+    return found ? optionSetAddress(optionSet, found.choice.choice) : null;
+  };
+  /** A picture choice's zoom: the viewer over its question's choices, on the choice zoomed (one picture alone is no set: the thread's files). */
+  const openOptionSet = (messageId: string, key: string, image: InboxInlineImage, choice: number) => {
+    const set = optionSetOf(thread.messages, steps, optionSetId(messageId, key));
+    const shown = set ? optionOf(set, image.id, choice) : null;
+    openFromMessage(image, null, undefined, set && shown ? optionSetAddress(set, shown.choice.choice) : null);
   };
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
   const artifactsOn = artifactsRoute;
@@ -6707,7 +6718,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
-                  onOpenOptionSet={(key, image) => openOptionSet(message.id, key, image)}
+                  onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
@@ -7374,7 +7385,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         projectRoot={thread.project.root}
         repo={thread.project.repo ?? null}
         version={file!.version}
-        onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet?.id ?? null })}
+        onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet && option ? optionSetAddress(optionSet, option.choice.choice) : null })}
         full={shownFull}
         ask={phone ? null : askFileButton}
         fullLocked={phone || fileStacked}
@@ -7387,8 +7398,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}
         optionSet={optionSet}
+        // The choice on screen: a picture two choices share is one file, so the file alone cannot say which.
+        stepAt={optionSet && option ? option.index : null}
         // A step keeps the frame the person is in, and the option set it is in (a step out of it, from the sheet, leaves the set), and replaces the route.
-        onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null, view: currentView, set: setFor(attachmentId) }, { replace: true })}
+        onStep={(attachmentId, version, at) => onOpenFile({ id: attachmentId, version, focus: null, view: currentView, set: setFor(attachmentId, at ?? null) }, { replace: true })}
         // A link in an attached HTML page to another file of the thread: a new entry, so Back returns to the page; the frame stays.
         onOpenLinked={(attachmentId) => onOpenFile({ id: attachmentId, version: 'current', focus: null, view: currentView })}
         onInboxLink={onInboxLink}
