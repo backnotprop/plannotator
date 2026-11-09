@@ -34,7 +34,7 @@ export const LAUNCH_TIP_TIMES = {
   leaveMs: 130,
 };
 
-/** The card's width (inbox.css `.ib-lt`), and its gaps: 16 px from the box, 12 px from the window's edge. */
+/** The card's width (inbox.css `.ib-ctip`), and its gaps: 16 px from the box, 12 px from the window's edge. */
 export const LAUNCH_TIP_WIDTH = 284;
 const BESIDE_GAP = 16;
 const EDGE = 12;

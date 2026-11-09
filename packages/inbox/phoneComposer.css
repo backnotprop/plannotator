@@ -121,10 +121,11 @@
 .ib-cp-startlineb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-cp-hint { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* The Launch tip over the row, its arrow pointing down at To. */
-.ib-lt-arrow[data-side="down"] { top: auto; bottom: -5px; box-shadow: 1px 1px 0 0 var(--ib-lt-ring); }
+.ib-ctip-arrow[data-side="down"] { top: auto; bottom: -5px; box-shadow: 1px 1px 0 0 var(--ib-ctip-ring); }
 @media (prefers-reduced-motion: no-preference) {
-  .ib-tour-coach.ib-lt[data-side="above"] { animation: ib-lt-fade 160ms ease-out both; }
-  .ib-tour-coach.ib-lt[data-side="above"][data-leaving] { animation: ib-lt-fade 100ms linear reverse both; }
+  .ib-tour-coach.ib-ctip[data-side="above"]:not([data-leaving]) { animation: ib-ctip-in-down 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  @keyframes ib-ctip-in-down { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+}
 }
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -207,5 +208,5 @@
     dialog.ib-cp[data-phone] .ib-apill[data-compose-to="ended"] .ib-apill-n { display: none; }
   }
   /* The Launch tip stands over the row, edge to edge in the card. */
-  .ib-tour-coach.ib-lt[data-side="above"] { top: auto; }
+  .ib-tour-coach.ib-ctip[data-side="above"] { top: auto; }
 }

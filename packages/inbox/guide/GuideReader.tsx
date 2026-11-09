@@ -212,6 +212,7 @@ function Reader({
   selectionActions,
   renderOverviewDiagram,
   renderChapterDiagram,
+  chapterDiagramsFolded = false,
   renderOverviewFigure,
   renderHeadActions,
   highlight = null,
@@ -539,6 +540,7 @@ function Reader({
       ...(asItIs && { renderSectionEmpty: () => <p className="ib-rv-nocode" data-section-no-code="">No code in this chapter.</p> }),
       renderOverviewDiagram: drawOverviewDiagram,
       renderChapterDiagram: drawChapterDiagram,
+      ...(chapterDiagramsFolded ? { chapterDiagramsFolded: true } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
@@ -550,7 +552,7 @@ function Reader({
       ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
+    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, chapterDiagramsFolded, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

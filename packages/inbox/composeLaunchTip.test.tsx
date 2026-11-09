@@ -215,7 +215,7 @@ test.skipIf(!hasDom)('a phone: the card leaves once the message is tapped', asyn
   expect(tip()!.closest('.ib-cp-foot')).not.toBeNull();
   expect(inDialog('.ib-cp-to')).toBeNull();
   expect(tip()!.getAttribute('data-side')).toBe('above');
-  expect(tip()!.querySelector('.ib-lt-arrow')!.getAttribute('data-side')).toBe('down');
+  expect(tip()!.querySelector('.ib-ctip-arrow')!.getAttribute('data-side')).toBe('down');
   expect(inDialog('.ib-cp-foot [data-compose-to]')!.hasAttribute('data-launch-tip')).toBe(true);
   act(() => field().focus());
   await until(() => tip() === null, 'the tip gone');

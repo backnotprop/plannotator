@@ -24,6 +24,8 @@
 @source "../../packages/inbox/threadPulls/**/*.tsx";
 /* The Pull requests page (packages/inbox/prs/). */
 @source "../../packages/inbox/prs/**/*.tsx";
+/* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
+@source "../../packages/inbox/agents/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -45,6 +47,8 @@
 @import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+/* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
+@import "../../packages/inbox/agents/agents.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */
 @import "../../packages/inbox/phoneComposer.css";
 
