@@ -805,30 +805,29 @@ export function TileMenu({
   const items = (
     <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
-  if (!arm.armed) {
-    // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet (and no right-click menu: the
-    // pointer arriving arms the message). A press arms its message and opens the menu.
-    const plain =
-      apps && !empty ? (
-        <button
-          type="button"
-          className="ib-att-more"
-          aria-label={`More: ${attachment.name}`}
-          aria-haspopup="menu"
-          aria-expanded={false}
-          data-open-in-more={attachment.id}
-          onClick={() => {
-            setOpen(true);
-            arm.arm();
-          }}
-        >
-          <Icon name="dots" size={16} />
-        </button>
-      ) : null;
-    return render(plain, <Status status={status} />);
-  }
-  const more =
+  // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet; a press arms its message and opens
+  // the menu. Only the ⋯ changes: the tile (and its right-click menu) stays the same element, so arming never remounts
+  // a tile or its picture (a phone's thread would lose its place).
+  const plain =
     apps && !empty ? (
+      <button
+        type="button"
+        className="ib-att-more"
+        aria-label={`More: ${attachment.name}`}
+        aria-haspopup="menu"
+        aria-expanded={false}
+        data-open-in-more={attachment.id}
+        onClick={() => {
+          setOpen(true);
+          arm.arm();
+        }}
+      >
+        <Icon name="dots" size={16} />
+      </button>
+    ) : null;
+  const more = !arm.armed
+    ? plain
+    : apps && !empty ? (
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <Tip content="More">
           <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`More: ${attachment.name}`} data-open-in-more={attachment.id} />}>
