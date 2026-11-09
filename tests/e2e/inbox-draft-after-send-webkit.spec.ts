@@ -98,7 +98,7 @@ async function dictate(phone: Page) {
   }
 }
 
-const tapSend = (phone: Page) => pane(phone).locator('.ib-acts .ib-pri').tap();
+const tapSend = (phone: Page) => pane(phone).locator('.ib-rbox [data-reply-send]').tap();
 
 async function serverDraft(thread: string) {
   const res = await fetch(new URL(`/api/inbox/threads/${thread}/draft`, url));

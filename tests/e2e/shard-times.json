@@ -63,6 +63,7 @@
   "inbox-fullscreen-composer.spec.ts": 43,
   "inbox-fullscreen-keyboard.spec.ts": 43,
   "inbox-guides.spec.ts": 38,
+  "inbox-heavy-thread-budget.spec.ts": 60,
   "inbox-held-notice-line.spec.ts": 5,
   "inbox-html-links.spec.ts": 29,
   "inbox-html-phone.spec.ts": 63,

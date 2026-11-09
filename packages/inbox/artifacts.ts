@@ -157,11 +157,6 @@ export function artifactOfFile(artifacts: readonly Artifact[], attachmentId: str
   return null;
 }
 
-/** How many messages the artifacts came from ("11 from 5 messages"). */
-export function artifactMessageCount(artifacts: readonly Artifact[]): number {
-  return new Set(artifacts.map((a) => a.messageId)).size;
-}
-
 /**
  * What `O` opens (approval "inbox-keyboard-shortcuts"): the newest message's
  * first file that opens in the viewer (its tile says Open, not Download), the

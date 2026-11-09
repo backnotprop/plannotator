@@ -18,13 +18,13 @@
  *    through a real MediaStream stands in for the microphone), at 320 to 430 px, the keyboard a stand-in: the mic at the
  *    row's right end and still when it starts, the level drawn and moving, nothing over the clock, "Listening" whole or
  *    not there. Words land where they
- *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
+ *    did; compose's Cancel mid-take leaves no microphone open; To ends a take and keeps its words; a save waits for
  *    a take on its way. On a desktop Save draft stays put when listening starts.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
  *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
  *  - A file or the artifacts opening over the box closes the microphone.
- *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
- *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
+ *  - A take full screen's card is transcribing outlives the card: Write the reply (with a comment being written too),
+ *    the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
  *    microphone still listening closes all the same.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
@@ -37,7 +37,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
@@ -98,12 +98,15 @@ async function startWorld(options: { version?: string; config?: Record<string, u
   writeFileSync(
     join(dataDir, 'config.json'),
     JSON.stringify({
+      // A world's data dir is not inboxScratch's own `<root>/data`, and this writes config.json whole: launch off here,
+      // or New message runs `claude --version` on the runner's PATH (tests/e2e/agent-cli-stubs.ts).
+      ...E2E_LAUNCH_OFF,
       inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
       // A notification setting means someone used an Inbox here (inboxUsedBefore).
       ...(options.fresh ? {} : { inboxNotifications: { dismissed: true } }),
       inboxAgentNotes: { offered: true },
       inboxSound: { dialogShownFor: '0.29.0' },
-      inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+      inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z', version: 2 },
       ...options.config,
     }),
   );
@@ -177,7 +180,7 @@ const pane = (page: Page) => page.locator('section.ib-pane');
 const mic = (scope: Page | Locator) => scope.locator('[data-voice-mic]');
 const line = (scope: Page | Locator, state: string) => scope.locator(`[data-voice-line="${state}"]`);
 const note = (scope: Page | Locator, trouble: string) => scope.locator(`[data-voice-note="${trouble}"]`);
-const sendButton = (page: Page) => pane(page).locator('.ib-acts .ib-btn.ib-pri');
+const sendButton = (page: Page) => pane(page).locator('.ib-rbox [data-reply-send]');
 
 async function openReply(page: Page, w: World, thread: string): Promise<Locator> {
   await page.goto(`${w.url}#thread=${thread}`);
@@ -416,7 +419,7 @@ test('Esc: cancels only what runs, in the reply box and in compose; at rest it i
   await expect(box).toHaveValue('Kept words');
   await expect(box).toBeVisible();
 
-  // Compose: the dialog stays, and it does not ask about a draft.
+  // Compose: the press only cancels the take; the dialog stays.
   await page.locator('.ib-side [data-open-compose]').click();
   const dialog = page.locator('dialog[data-compose]');
   await expect(mic(dialog)).toBeVisible();
@@ -425,7 +428,6 @@ test('Esc: cancels only what runs, in the reply box and in compose; at rest it i
   await page.keyboard.press('Escape');
   await expect(line(dialog, 'tap')).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-compose-keep]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await context.close();
@@ -871,7 +873,7 @@ test('a phone: hold to talk, the keyboard stays down, Cancel on screen, and a ta
   await shot(page, 'phone-listening');
   expect(await box.evaluate((el) => el === document.activeElement)).toBe(false);
   // Nothing runs past the box, and the row never wraps.
-  const row = await pane(page).locator('.ib-rfoot').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.clientHeight }));
+  const row = await pane(page).locator('.ib-rbox [data-reply-row]').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.clientHeight }));
   expect(row.scroll).toBeLessThanOrEqual(row.client);
   await touch('touchEnd');
   await expect(line(pane(page), 'sending')).toBeVisible();
@@ -1006,31 +1008,21 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         await finish(page, context);
       });
 
-      for (const answer of ['save', 'discard', 'keep'] as const) {
-        test(`the unsaved comment’s question, ${answer}: the words still reach the reply`, async () => {
-          const { w, context, page } = await start();
-          await page.goto(`${w.url}${fileHash(w)}`);
-          const { card, field } = await transcribing(page, w);
-          await page.locator('[data-fcomp-mode="comment"]').click();
-          const comment = card.locator('[data-image-composer] textarea');
-          await comment.fill('A thought');
-          await openTheSheet(page);
-          await writeTheReply(page);
-          await page.locator('[data-step-guard]').waitFor();
-          await page.locator(`[data-guard-${answer}]`).click();
-          if (answer === 'keep') {
-            await expect(comment).toHaveValue('A thought');
-            w.send({ release: true });
-            await page.locator('[data-fcomp-mode="reply"]').click();
-            await expect(field).toHaveValue('Before. Landed.');
-          } else {
-            await expect(box(page)).toHaveValue('Before.');
-            w.send({ release: true });
-            await expect(box(page)).toHaveValue('Before. Landed.');
-          }
-          await finish(page, context);
-        });
-      }
+      test('a comment being written never stops Write the reply: the file closes on that press and the words still reach the reply', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card } = await transcribing(page, w);
+        await page.locator('[data-fcomp-mode="comment"]').click();
+        await card.locator('[data-image-composer] textarea').fill('A thought');
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+        await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+        await expect(box(page)).toHaveValue('Before.');
+        w.send({ release: true });
+        await expect(box(page)).toHaveValue('Before. Landed.');
+        await finish(page, context);
+      });
 
       test('the Comment tab: the words wait in the reply, Esc there leaves the take alone, and Reply’s Send is on again', async () => {
         const { w, context, page } = await start({ phone: false, width: 1440, height: 900 });
@@ -1221,7 +1213,7 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         });
         await box(page).focus();
         await page.keyboard.type(' Typed.');
-        await pane(page).getByRole('button', { name: 'Cancel', exact: true }).first().click();
+        await pane(page).locator('.ib-rbox [data-reply-close]').click();
         await expect(box(page)).toHaveCount(0);
         w.send({ release: true });
         await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
@@ -1421,9 +1413,10 @@ test.describe('New message dictates as the reply box does', () => {
   /** The row as drawn. `bars`: the level's strokes with room to show. */
   const readRow = (scope: Locator) =>
     scope.evaluate((box) => {
-      const row = box.querySelector('.ib-rfoot, .ib-cp-foot')!.getBoundingClientRect();
+      const row = box.querySelector('[data-reply-row], .ib-cp-foot')!.getBoundingClientRect();
       const mic = box.querySelector('[data-voice-mic]')!.getBoundingClientRect();
-      const send = box.querySelector('.ib-cp-foot [data-compose-send]')?.getBoundingClientRect();
+      // A phone's reply box has Send right after the mic too (approval "inbox-reply-box", T6).
+      const send = box.querySelector('.ib-cp-foot [data-compose-send], [data-reply-row][data-phone] [data-reply-send]')?.getBoundingClientRect();
       const strip = box.querySelector('.ib-vbars');
       const room = strip?.getBoundingClientRect();
       const strokes = strip ? [...strip.children] : [];
@@ -1582,11 +1575,14 @@ test.describe('New message dictates as the reply box does', () => {
     });
   }
 
-  test('a desktop: the mic on the same side, with room for the level, and Send still last', async () => {
+  test('a desktop: the mic at the right, with room for the level, and Send still last', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w);
     await openReply(page, w, w.threads[0]!);
-    onTheRight(await readRow(pane(page)), 'reply');
+    // The reply box on a computer has the mic at the left, after Send, the paperclip and Skills (approval
+    // "inbox-reply-box", T6; inbox-reply-foot-phone.spec.ts checks the order). New message keeps it at the right, by Send.
+    const reply = await readRow(pane(page));
+    expect(reply.mic.right, 'reply: the mic is in the row’s left half').toBeLessThan((reply.row.left + reply.row.right) / 2);
     await openCompose(page, w);
     await field(page).fill('Words already here');
     // Past the dialog's opening scale, so the place read is where it stays.
@@ -1734,7 +1730,7 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
-  test('a phone: Cancel keeps the words, and the draft question leaves no microphone open', async () => {
+  test('a phone: the take\'s Cancel keeps the words; compose\'s Cancel mid-take lets the microphone go and keeps them as a draft', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     const mics = await watchMic(page);
@@ -1750,17 +1746,15 @@ test.describe('New message dictates as the reply box does', () => {
     await expect(line(sheet(page), 'tap')).toHaveCount(0);
     await expect.poll(mics).toBe(0);
     await expect(sheet(page)).toBeVisible();
-    await expect(sheet(page).locator('[data-compose-question]')).toHaveCount(0);
     await expect(text).toHaveValue('Kept words');
 
+    // Compose's Cancel while the mic listens: the take is let go (nothing sent), and the words are kept as a draft.
     await mic(sheet(page)).tap();
     await expect(line(sheet(page), 'tap')).toBeVisible();
     await sheet(page).locator('[data-compose-cancel]').tap();
-    await expect(sheet(page).locator('[data-compose-question]')).toBeVisible();
-    await expect.poll(mics, { message: 'the question took the status and Cancel: no microphone stays open behind it' }).toBe(0);
-    await sheet(page).getByRole('button', { name: 'Keep writing' }).tap();
-    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
-    await expect(text).toHaveValue('Kept words');
+    await expect(sheet(page)).toHaveCount(0);
+    await expect.poll(mics, { message: 'closing compose leaves no microphone open' }).toBe(0);
+    await expect.poll(() => savedDrafts(w)).toContain('Kept words');
     expect(w.upstreamCalls()).toHaveLength(posts);
     await context.close();
   });
@@ -1801,20 +1795,14 @@ test.describe('New message dictates as the reply box does', () => {
     await expect(line(sheet(page), 'sending')).toBeVisible();
   }
 
-  test('a phone: Keep draft pressed before the answer waits for the words, and keeps them', async () => {
+  test('a phone: Cancel pressed before the answer waits for the words, then closes keeping them', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     await takeOnItsWay(page, w);
     await sheet(page).locator('[data-compose-cancel]').tap();
-    const keep = sheet(page).locator('[data-compose-keep]');
-    await expect(keep).toBeVisible();
-    await expect(keep, 'Keep draft waits, as Send does').toBeDisabled();
-    await keep.evaluate((button: HTMLButtonElement) => button.click());
     await page.waitForTimeout(300);
-    await expect(sheet(page), 'the press before the answer did not leave').toBeVisible();
+    await expect(sheet(page), 'the press before the answer did not leave yet').toBeVisible();
     w.send({ release: true });
-    await expect(field(page)).toHaveValue('Before. After.');
-    await keep.tap();
     await expect(sheet(page)).toHaveCount(0);
     await expect.poll(() => savedDrafts(w)).toContain('Before. After.');
     await context.close();

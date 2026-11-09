@@ -76,7 +76,7 @@ import type { TagMode } from '../api';
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from Send's row up. Elsewhere it keeps its place in the page.
+ * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
  */
 function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -92,9 +92,9 @@ function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSP
     }
     const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
     // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above Send's row up to the header (as the recipient list does).
+    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
     const above = Math.round(field.top - 10);
-    const row = foot.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
     const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
     const left = Math.round(field.left);
     const room = Math.max(88, top - headBottom - 8);

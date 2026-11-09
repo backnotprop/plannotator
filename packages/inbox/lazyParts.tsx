@@ -83,7 +83,7 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
 }
 
 /**
- * The review reader in a pane (GuidePane, ReviewPane, PullReview): drawn once its chunk is in and its diff's
+ * The review reader in a pane (ReviewPane, PullReview): drawn once its chunk is in and its diff's
  * grammars are attached in the diff themes (threadDrawReady.ts), so no diff line paints plain first. Both
  * already in (the usual case once the window has been idle): it draws in the same commit.
  */
@@ -106,6 +106,9 @@ export function ReaderPart({ diff, children }: { diff: string; children: ReactNo
 }
 
 export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
+/** The PR page's All files (the review app's tree and file view), from the reader's own chunk. */
+export const PullAllFilesPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullAllFiles })));
+export const PullRepoFilePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullRepoFile })));
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));

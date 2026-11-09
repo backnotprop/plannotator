@@ -98,9 +98,10 @@ const bodyArb = fc.oneof(
 );
 
 type Op =
-  // An agent's message without reply_to: it routes to the session's open default thread, or starts one.
+  // An agent's message without reply_to: it always starts a new thread.
   | { op: "send"; root: number; body: string; key: string | null; session?: string | null }
-  | { op: "reply"; target: number; body: string }
+  // `session`: who writes it (default ses_x).
+  | { op: "reply"; target: number; body: string; session?: string }
   | { op: "pick"; target: number; choice: number; question?: number }
   // The person's Send: the message's picks and words; `skip` is the Send that skips (false: Keep open).
   // `across` (approval "inbox-explicit-skip"): one reply to the target carries the picks (and, with `skip`,
@@ -261,7 +262,7 @@ function run(store: InboxStore, op: Op, messageIds: string[]): Outcome {
         const message = store.message(target)!;
         const result = store.sendMessage({
           project_id: message.project_id,
-          author: { kind: "agent", host: "test", session: "ses_x", name: null },
+          author: { kind: "agent", host: "test", session: op.session ?? "ses_x", name: null },
           body: op.body,
           reply_to: target,
         });
@@ -694,7 +695,7 @@ describe("InboxStore invariants", () => {
       { arbitrary: fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }), weight: 2 },
       fc.record({ op: fc.constant("seen" as const), target: fc.nat() }),
       fc.record({ op: fc.constant("personReply" as const), target: fc.nat(), key: fc.constantFrom("p1", "p2", "p3") }),
-      // A thread the person starts (compose): it must never become a session's default thread.
+      // A thread the person starts (compose): no send without reply_to joins it unless an agent named it.
       // It may carry a name the person gave (compose), which routes named sends to it.
       fc.record({
         op: fc.constant("personStart" as const),
@@ -784,7 +785,6 @@ describe("InboxStore invariants", () => {
         const lines = allLines(dir).sort((a, b) => a.seq - b.seq);
         const threadOf = new Map<string, string>();
         const resolved = new Map<string, boolean>();
-        const bySession = new Map<string, string>();
         // Every root of a name, oldest first: a name joins its newest OPEN one.
         const byName = new Map<string, string[]>();
         // Each root's name now (an agent's name replaces compose's suggestion). Only agent-started roots and
@@ -820,13 +820,9 @@ describe("InboxStore invariants", () => {
             expect(m.started_by_person).toBe(true);
             expected = m.id;
           } else {
+            // With a name, its newest open thread; without one, always a new thread.
             const name = m.thread_name ?? null;
-            const candidate =
-              name !== null
-                ? rootsNamed(`${m.project_id}\0${nameKey(name)}`).filter((root) => !resolved.get(root)).at(-1)
-                : m.author.session
-                  ? bySession.get(`${m.project_id}\0${m.author.session}`)
-                  : undefined;
+            const candidate = name !== null ? rootsNamed(`${m.project_id}\0${nameKey(name)}`).filter((root) => !resolved.get(root)).at(-1) : undefined;
             expected = candidate && !resolved.get(candidate) ? candidate : m.id;
           }
           expect(m.thread_id).toBe(expected);
@@ -842,7 +838,6 @@ describe("InboxStore invariants", () => {
               if (m.started_by_person) continue;
               byName.set(key, [...(byName.get(key) ?? []), m.id]);
             }
-            else if (m.author.kind === "agent" && m.author.session) bySession.set(`${m.project_id}\0${m.author.session}`, m.id);
           }
         }
 
@@ -1108,8 +1103,6 @@ class ThreadStateModel {
   private readonly keyed = new Map<string, string>();
   /** The person's compose keys (one namespace across projects), and the body each first sent. */
   private readonly personKeyed = new Map<string, string>();
-  /** The newest unnamed thread each agent session started, per project. */
-  private readonly sessionRoots = new Map<string, string>();
   private created: readonly string[] = [];
   private used = 0;
 
@@ -1232,11 +1225,19 @@ class ThreadStateModel {
     return this.unsent(t) ? "new" : "quiet";
   }
 
-  /** Bold: a section that waits on the person, except New held only by the person's own words. */
-  unread(t: ModelThread): boolean {
+  /** Waits on the person (what Mark all as read takes): a section that waits, except New held only by the person's own words. */
+  waits(t: ModelThread): boolean {
     const section = this.section(t);
     if (section === "new") return this.unseen(t) > 0 || this.counts(t).picked > 0;
-    return SHWN.includes(section);
+    return SHW.includes(section);
+  }
+
+  /**
+   * Bold: news the person has not seen. Stopped, Holding and Waiting while an agent message is unseen (the owner,
+   * 2026-11-08: a thread read stops being bold and keeps its group); New except when held only by the person's own words.
+   */
+  unread(t: ModelThread): boolean {
+    return this.waits(t) && (this.section(t) === "new" || this.unseen(t) > 0);
   }
 
   /**
@@ -1325,8 +1326,8 @@ class ThreadStateModel {
 
   private event(op: Op, target: string | undefined, store: InboxStore, tick: number): Outcome {
     if (op.op === "personStart") {
-      // Compose: a new thread, the person's root, addressed to a session. It
-      // is no session's default thread, so routing never joins it.
+      // Compose: a new thread, the person's root, addressed to a session.
+      // Routing never joins it.
       const body = this.personKeyed.get(op.key);
       if (body !== undefined) return body === op.body ? "replayed" : "refused:idempotency_key_reused";
       const id = this.created[this.used]!;
@@ -1348,16 +1349,10 @@ class ThreadStateModel {
         if (body !== undefined) return body === op.body ? "replayed" : "refused:idempotency_key_reused";
       }
       const session = op.session === undefined ? "ses_x" : op.session;
-      const route = session ? `${project}\0${session}` : null;
-      const joined = route ? this.sessionRoots.get(route) : undefined;
-      let thread = joined ? this.threads.get(joined) : undefined;
-      if (!thread || thread.resolved) {
-        // Resolved means done: the next message starts a new thread.
-        const id = this.created[this.used]!;
-        thread = { id, messages: [], seen: 0, read: null, seenBeforeRead: undefined, resolved: false, archive: 0, checked: 0, told: new Set() };
-        this.threads.set(id, thread);
-        if (route) this.sessionRoots.set(route, id);
-      }
+      // Without reply_to, always a new thread.
+      const id = this.created[this.used]!;
+      const thread: ModelThread = { id, messages: [], seen: 0, read: null, seenBeforeRead: undefined, resolved: false, archive: 0, checked: 0, told: new Set() };
+      this.threads.set(id, thread);
       this.addAgent(thread, tick, store, session);
       if (key !== null) this.keyed.set(`${project}\0${key}`, op.body);
       return "ok";
@@ -1366,7 +1361,7 @@ class ThreadStateModel {
     const { thread, message } = this.byMessage.get(target)!;
     switch (op.op) {
       case "reply":
-        this.addAgent(thread, tick, store);
+        this.addAgent(thread, tick, store, op.session ?? "ses_x");
         return "ok";
       case "supersede": {
         if (message.author !== "agent") return "refused:invalid_supersedes";
@@ -1766,10 +1761,9 @@ function checkThreadState(world: StateWorld): void {
     // An archived thread never counts.
     if (inboxRowArchived(row)) expect(row.unread).toBe(false);
   }
-  // Counts. Both follow from the sections by construction (the
-  // sidebar counts the rows in Stopped, Holding and Waiting; `unread` is
-  // defined from the section), so they guard the counting code more than the
-  // rules.
+  // Counts. The sidebar's follows from the sections by construction (it
+  // counts the rows in Stopped, Holding and Waiting), so it guards the
+  // counting code more than the rules.
   const inSections = (sections: readonly InboxListSection[], ids: readonly InboxSectionId[]) =>
     sections.filter((s) => ids.includes(s.id)).reduce((n, s) => n + s.threads.length, 0);
   const waiting = rows.filter((r) => SHW.includes(r.section)).length;
@@ -1779,12 +1773,13 @@ function checkThreadState(world: StateWorld): void {
   for (const project of store.listProjects()) {
     expect(waitingCount(views.exclude, project.id)).toBe(rows.filter((r) => r.project.id === project.id && SHW.includes(r.section)).length);
   }
-  // Bold is every row in Stopped, Holding, Waiting and New, except one in New only for the person's own words.
-  const unread = rows.filter((r) => r.unread).length;
-  const draftOnly = rows.filter((r) => r.section === "new" && !r.unread).length;
-  for (const r of rows) if (r.section === "new" && !r.unread) expect(r.unseen === 0 && !r.answered_not_sent && inboxHasUnsent(r.unsent)).toBe(true);
-  expect(inSections(views.include, SHWN) - draftOnly).toBe(unread);
-  expect(inSections(views.exclude, SHWN) - draftOnly).toBe(unread);
+  // Bold is news not seen: a row in Stopped, Holding or Waiting with an unseen agent message, and every row in New
+  // except one there only for the person's own words. Never a row in Sent or Quiet.
+  for (const r of rows) {
+    if (SHW.includes(r.section)) expect(r.unread).toBe(r.unseen > 0);
+    if (r.section === "new" && !r.unread) expect(r.unseen === 0 && !r.answered_not_sent && inboxHasUnsent(r.unsent)).toBe(true);
+    if (!SHWN.includes(r.section)) expect(r.unread).toBe(false);
+  }
   // Replay determinism: the store read again from disk gives the same rows and threads.
   expect(windowView(InboxStore.open(world.dir))).toEqual(windowView(store));
 }
@@ -1992,8 +1987,8 @@ describe("the thread-state model", () => {
     expect(sectionAfter([ask, reask, { op: "supersede", target: 0, whole: true, body: STATE_BODIES.news }])).not.toBe("sent");
     // The person writes words after the note: still Sent (the note still waits, and their reply waits on the agent).
     expect(sectionAfter([ask, reask, { op: "personSend", target: 0, key: "s1", words: "ok", skip: false }])).toBe("sent");
-    // ses_a writes again: the note no longer waits, and its open questions ask again.
-    expect(sectionAfter([ask, reask, { op: "send", root: 0, body: STATE_BODIES.news, key: null, session: "ses_a" }])).toBe("stopped");
+    // ses_a writes again (a reply): the note no longer waits, and its open questions ask again.
+    expect(sectionAfter([ask, reask, { op: "reply", target: 0, body: STATE_BODIES.news, session: "ses_a" }])).toBe("stopped");
   });
 
   test("Archive then Unarchive loses no message, question or pick", () => {
@@ -2115,10 +2110,10 @@ function batchStep(world: StateWorld, item: Exclude<BatchItem, { kind: "op" }>, 
     // The model decides which threads the batch takes, by its own rules.
     const threads = modelThreadsOf(world, done!.projectId).filter((t) => !world.model.archived(t));
     if (item.action === "read") {
-      // Every bold row: a row in New only for the person's own unsent words waits on nobody (approval "inbox-reply-drafts"),
+      // Every row that waits on the person: a row in New only for the person's own unsent words waits on nobody (approval "inbox-reply-drafts"),
       // and a thread whose Mark read still stands (unsent work keeps it in New) is not marked again. One that Mark
       // unread took the look back from gets the look back, named apart, so its Undo is Mark unread and not a Move back.
-      const waits = threads.filter((t) => world.model.unread(t) && !world.model.readHolds(t)).map((t) => t.id);
+      const waits = threads.filter((t) => world.model.waits(t) && !world.model.readHolds(t)).map((t) => t.id);
       expect(new Set(done!.read)).toEqual(new Set(waits));
       const looked = threads.filter((t) => world.model.readHolds(t) && world.model.unseen(t) > 0).map((t) => t.id);
       expect(new Set(done!.looked)).toEqual(new Set(looked));
@@ -2491,7 +2486,7 @@ const HAND_TRACES: TraceDef[] = [
   },
   {
     name: "hand-07-archived-next-message-starts-new-thread",
-    description: "Archive means done: the session's next message without reply_to starts a new thread; after Unarchive the session's default thread is the newest one.",
+    description: "Every message without reply_to starts a new thread, before an Archive, after it and after Unarchive alike.",
     events: [ROOT(STATE_BODIES.news, "ses_a"), ON("archive", "t1"), ROOT(STATE_BODIES.ask, "ses_a"), ON("unarchive", "t1"), ROOT(STATE_BODIES.news, "ses_a")],
   },
   {
@@ -2609,7 +2604,7 @@ const HAND_TRACES: TraceDef[] = [
   {
     name: "hand-19-person-started-thread",
     description:
-      "The person starts a thread addressed to a session (Sent); its delivery moves it to Quiet; the agent's reply_to answer lands in it (New), and a look makes it Quiet. The session's message without reply_to starts its own thread: a thread the person started is no session's default thread. A second person thread waits in Sent until delivered.",
+      "The person starts a thread addressed to a session (Sent); its delivery moves it to Quiet; the agent's reply_to answer lands in it (New), and a look makes it Quiet. The session's message without reply_to starts a thread of its own. A second person thread waits in Sent until delivered.",
     events: [
       PERSON(PERSON_BODIES[0]),
       ON("delivered", "t1"),

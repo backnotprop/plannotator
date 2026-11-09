@@ -314,6 +314,16 @@ describe("a leftover usage-counts/ folder (the removed usage counts)", () => {
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "config.json"), "utf-8")).usageCounts).toBe(false);
   });
 
+  test("the numbers Decision data keeps from deleted threads go with a purge, and stay through a plain uninstall", async () => {
+    const fixture = createFixture();
+    const lines = join(fixture.dataDir, "inbox", "decision-lines.jsonl");
+    writeText(lines);
+    await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(existsSync(lines)).toBe(true);
+    await runPlannotatorUninstall({ purge: true, dryRun: false }, fixture.environment);
+    expect(existsSync(lines)).toBe(false);
+  });
+
   test("purge removes it, listed once in a dry run", async () => {
     const fixture = createFixture();
     const dir = seed(fixture.dataDir);

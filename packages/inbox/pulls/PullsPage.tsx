@@ -14,11 +14,16 @@
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
  *
+ * - System (approval "system-inbox", screens 3, 4a and 4b; only while `systemShown`): the System button beside the
+ *   filter mark lists the drawn projects; one opens its drawing in the pane (`&system=`), with the open PRs that
+ *   change it, and a full window (`&full=1`). The list is never filtered by it. A PR's pane opened from it goes back
+ *   to the drawing when closed.
+ *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
@@ -30,7 +35,8 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
   checksWords,
@@ -51,8 +57,33 @@ import { ReviewsList } from './ReviewsList';
 import { reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
+import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { askRiskPlaces, placesWord, riskPlaceCount } from '../contextNotes/model';
+import { RiskFilter } from './RiskFilter';
+import { COULD_NOT_RANK, RiskMark } from './RiskMark';
+import { RiskRulesDialog } from './RiskRulesDialog';
+import { usePullRisk } from './usePullRisk';
 import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
+import type { SystemProjectRow } from '@plannotator/core/inbox-system';
+import { SystemButton } from '../system/SystemButton';
+import { SystemPane } from '../system/SystemPane';
+
+/** System in Reviews: present only while System shows (`systemShown`). */
+export interface PullsSystem {
+  /** The projects with their drawing's state; null until read. */
+  projects: SystemProjectRow[] | null;
+  /** The project whose drawing is open (`&system=`), its sheet (`&sheet=`) and whether it has the whole window (`&full=1`). */
+  open: string | null;
+  sheet: string | null;
+  full: boolean;
+  /** Open a project's drawing (the menu), or close it (null). */
+  onOpen: (project: string | null) => void;
+  onSheet: (sheet: string) => void;
+  onFull: (full: boolean) => void;
+  /** The menu opened: read the projects again. */
+  onMenu: () => void;
+}
 
 export interface PullsPageProps {
   state: PullsState;
@@ -78,7 +109,12 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** System's button and drawing; absent while System does not show. */
+  system?: PullsSystem | null;
 }
+
+const NO_JUDGMENTS: RiskJudgments = {};
+const NO_FAILURES: RiskFailures = {};
 
 export function PullsPage(given: PullsPageProps) {
   const model = given.state.model;
@@ -100,30 +136,69 @@ export function PullsPage(given: PullsPageProps) {
     return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
   }, [groups, model, props.stackId, props.filter, props.project]);
   const rows = useMemo(() => (answer ? reviewRowsIn(answer, props.project, props.filter) : null), [answer, props.project, props.filter]);
+  // Risk ranking (inbox-pull-risk.ts). The filter acts only once rules exist, and never closes the stack open beside the list.
+  const risk = usePullRisk(model);
+  const rulesSet = !!risk.answer?.rules;
+  const judgments: RiskJudgments = risk.answer?.judgments ?? NO_JUDGMENTS;
+  const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
+  const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const activeRisk = rulesSet ? riskFilter : 'all';
+  const ranked = useMemo(() => (rows ? filterReviewRows(rows, activeRisk, judgments, riskFailed) : null), [rows, activeRisk, judgments, riskFailed]);
   const trigger = useFilterTrigger();
+  const head = useRef<HTMLDivElement>(null);
+  const system = props.system ?? null;
+  // The drawing shows while no PR's pane does: a PR opened from it closes back to it.
+  const systemOpen = system?.open && !open ? system.open : null;
+  // The drawing closed (its ×, Escape, a phone's "Reviews"): the focus it held returns to the System button.
+  const drawingWas = useRef(system?.open ?? null);
+  useEffect(() => {
+    const was = drawingWas.current;
+    drawingWas.current = system?.open ?? null;
+    if (!was || system?.open) return;
+    requestAnimationFrame(() => {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) head.current?.querySelector<HTMLElement>('[data-system-button]')?.focus({ preventScroll: true });
+    });
+  }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
-      <div className="ib-lhead">
+      <div className="ib-lhead" ref={head}>
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
           Reviews
         </h1>
-        {/* Shown once a first answer came: before it, there is nothing to filter. */}
-        {model && (
+        {(model || system) && (
           <span className="ib-pf-slot">
-            <PullFilterControl
-              count={(project, filter) => (answer ? reviewRowsIn(answer, project, filter).length : 0)}
-              filter={props.filter}
-              project={props.project}
-              projects={offered}
-              names={props.projectNames}
-              phone={phone}
-              triggerRef={trigger}
-              onChange={props.onScope}
-            />
+            {system && <SystemButton projects={system.projects} open={systemOpen} phone={phone} portalRef={head} onOpen={system.onOpen} onMenu={system.onMenu} />}
+            {/* Shown once a first answer came: before it, there is nothing to filter. */}
+            {model && (
+              <PullFilterControl
+                count={(project, filter) => (answer ? reviewRowsIn(answer, project, filter).length : 0)}
+                filter={props.filter}
+                project={props.project}
+                projects={offered}
+                names={props.projectNames}
+                phone={phone}
+                triggerRef={trigger}
+                onChange={props.onScope}
+              />
+            )}
           </span>
+        )}
+        {risk.answer && (
+          <RiskFilter
+            value={activeRisk}
+            rulesSet={rulesSet}
+            phone={phone}
+            onChange={(next) => {
+              setRiskFilter(next);
+              saveRiskFilter(next);
+            }}
+            onRules={() => setRulesOpen(true)}
+          />
         )}
         <Tip content="New review">
           <button type="button" className="ib-iconbtn ib-pr-new" onClick={props.onNew} aria-label="New review" data-reviews-new="head">
@@ -139,12 +214,17 @@ export function PullsPage(given: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && answer && rows && (
+        {model && answer && ranked && (
           <ReviewsList
             answer={answer}
             model={model}
-            rows={rows}
+            rows={ranked.rows}
             filter={props.filter}
+            risk={activeRisk}
+            notJudged={ranked.notJudged}
+            notRanked={ranked.notRanked}
+            judgments={judgments}
+            riskFailed={riskFailed}
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
             phone={phone}
@@ -155,19 +235,49 @@ export function PullsPage(given: PullsPageProps) {
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
+      {rulesOpen && risk.answer && (
+        <RiskRulesDialog
+          answer={risk.answer}
+          onClose={() => setRulesOpen(false)}
+          onSaved={(next) => {
+            risk.setAnswer(next);
+            setRulesOpen(false);
+            // A list read is what starts the judgments of the new rules.
+            state.reload();
+          }}
+        />
+      )}
     </section>
   );
 
   if (props.threadId) return list;
+  const drawing =
+    system && systemOpen ? (
+      <SystemPane
+        key={systemOpen}
+        project={systemOpen}
+        sheet={system.sheet}
+        full={system.full}
+        phone={phone}
+        pulls={model}
+        onSheet={system.onSheet}
+        onFull={system.onFull}
+        onClose={() => system.onOpen(null)}
+        onOpenStack={(key) => props.onOpenStack(key)}
+      />
+    ) : null;
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
+    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
   }
+  if (phone && drawing) return drawing;
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
+          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+        ) : drawing ? (
+          drawing
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
             {rows && rows.length > 0 ? 'Pick a review to open it.' : null}
@@ -206,6 +316,8 @@ export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: 
 
 function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnswer | null; loading: boolean; error: string | null; onRefresh: () => void }) {
   const now = useRelativeClock(true);
+  // Shift+R runs this ↻ on Reviews (approval "inbox-refresh-key"): its keycap and key name, gone with single keys off.
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   // Only the CLIs that answered: a host that failed is said in the list, by name.
   const answered = model ? answeredClis(model) : [];
   const when = model?.fetched_at ? relativeWords(model.fetched_at, now) : null;
@@ -220,8 +332,17 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
-      <Tip content="Read again">
-        <button type="button" className="ib-iconbtn ib-pr-refresh" onClick={onRefresh} aria-label="Read the pull requests again" data-refreshing={loading ? '' : undefined} data-pulls-refresh="">
+      {/* As the list's ↻ (the owner, on #2911): "Refresh" with Shift+R's two keycaps, which Shift+R runs here. */}
+      <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })}>
+        <button
+          type="button"
+          className="ib-iconbtn ib-pr-refresh"
+          onClick={onRefresh}
+          aria-label="Read the pull requests again"
+          aria-keyshortcuts={refreshKeys}
+          data-refreshing={loading ? '' : undefined}
+          data-pulls-refresh=""
+        >
           <Icon name="refresh" size={14} />
         </button>
       </Tip>
@@ -232,8 +353,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
   );
 }
 
-function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; phone: boolean; onClose: () => void }) {
-  const { item, model, phone } = props;
+function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; riskFailed: RiskFailures; phone: boolean; onClose: () => void }) {
+  const { item, model, phone, judgments, riskFailed } = props;
   const stack = item.stack;
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
@@ -293,6 +414,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     </button>
   ) : null;
   const projects = stackProjects(model, stack);
+  const judged = stackRisk(stack, judgments);
+  const riskFailure = stackRiskFailure(stack, judgments, riskFailed);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -336,6 +459,36 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </Tip>
           )}
         </div>
+        {riskFailure && (
+          <p className="ib-pr-riskline" data-pulls-risk-line="failed">
+            <span className="ib-risk" data-risk="failed">
+              {COULD_NOT_RANK}
+            </span>
+            <span dir="auto">{riskFailure}</span>
+          </p>
+        )}
+        {judged && (
+          <p className="ib-pr-riskline" data-pulls-risk-line={judged.level}>
+            <span className="ib-risk" data-risk={judged.level}>
+              {riskLevelWord[judged.level]} risk
+            </span>{' '}
+            <span dir="auto">{judged.why}</span>
+            {/* A high judgment's places (context notes): the diff opens at the first one. */}
+            {riskPlaceCount(judged) > 0 && (
+              <button
+                type="button"
+                className="ib-ctxn-places"
+                data-pulls-risk-places={riskPlaceCount(judged)}
+                onClick={() => {
+                  askRiskPlaces(judged.key);
+                  props.onReview(stack.id, judged.key, 'layer');
+                }}
+              >
+                See the {placesWord(riskPlaceCount(judged))}
+              </button>
+            )}
+          </p>
+        )}
         {link && <ThreadLine link={link} ended={ended} mentioned={mentioned} now={now} />}
         {(primary || openDiff) && (
           <div className="ib-pr-actions">
@@ -350,7 +503,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
-              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
+              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} layerRisk={stack.layers.length > 1 ? judgments[layer.key] : undefined} layerFailed={stack.layers.length > 1 ? riskFailed[layer.key] : undefined} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
             ))}
             <li className="ib-pr-base" aria-label={`Base branch ${stack.base}`}>
               <span className="ib-pr-dot" aria-hidden="true" />
@@ -401,7 +554,7 @@ const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: bool
   );
 });
 
-function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; onReview: () => void }) {
+function Layer({ layer, stack, next, now, layerRisk, layerFailed, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; layerRisk?: InboxPullRiskJudgment; layerFailed?: string; onReview: () => void }) {
   const pill = layerPill(layer);
   const checks = checksWords(layer);
   const base = layerBaseWords(layer, stack);
@@ -422,6 +575,8 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
               Lands next
             </span>
           )}
+          {layerRisk && <RiskMark judgment={layerRisk} />}
+          {!layerRisk && layerFailed && <RiskMark failed={layerFailed} />}
         </span>
         <span className="ib-pr-l2">
           {merged ? (

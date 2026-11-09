@@ -100,10 +100,10 @@ export function DraftHead({ conflict }: { conflict: DraftConflict }) {
 }
 
 /**
- * Under the open reply box, in Send's row (approval "inbox-reply-recipient"), or above the box, at the right, on a
- * phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
+ * Above the open reply box, at the right, on a phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
  * nothing until the first save. "Not saved …" in place of the time when the words are longer than a draft holds
- * or the last save did not land.
+ * or the last save did not land. A computer saves without a word (approval "inbox-reply-box", T6): only "Not
+ * saved …" shows, on its own line over the box's row, and the bin at the row's far right is Discard.
  */
 export function DraftStamp({
   savedAt,

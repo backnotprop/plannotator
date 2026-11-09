@@ -46,6 +46,12 @@ export interface ProjectRowProps {
    * or null to take the picture away. Resolves true once the list has it. Absent: not offered.
    */
   onPicture?: (file: File | null) => Promise<boolean>;
+  /**
+   * "+" beside ⋯ (approval "launch-create-clone", F1-F7): opens New message with a new session in this project. `tip`
+   * is its tip and name ("New session in billing-svc", with the machine, and "starts when it's back" while asleep).
+   * Absent: no "+" (launch is off, or a guest's page).
+   */
+  newSession?: { tip: string; onPress: () => void };
 }
 
 /**
@@ -59,6 +65,9 @@ export interface ProjectRowProps {
  * the project. Base UI's Menu and ContextMenu carry the keys (arrows,
  * Home/End, type-ahead, Escape and Tab close, focus back to ⋯). No new
  * shortcut: the platform's context-menu key reaches the row by itself.
+ *
+ * "+" (`newSession`) sits beside ⋯ and shows with it (hover, keyboard focus, the menu open; always on a phone, each a
+ * 44 px target): a new session in this project, with no new key (Tab reaches it, Enter or Space presses it).
  *
  * Rename… (after a separator) turns the row into a field holding its name:
  * Enter saves, Escape or leaving the field cancels, and an empty name is not
@@ -93,6 +102,7 @@ export function ProjectRow(props: ProjectRowProps) {
     <div
       className="ib-projrow"
       data-project={project.id}
+      data-plus={props.newSession ? '' : undefined}
       data-menu={menuOpen || contextOpen ? '' : undefined}
       data-held={props.held ? '' : undefined}
       data-renaming={renaming ? '' : undefined}
@@ -183,6 +193,13 @@ export function ProjectRow(props: ProjectRowProps) {
           {props.count > 0 && <span className="ib-n">{formatCount(props.count)}</span>}
         </button>
       </ProjectTip>
+      {props.newSession && (
+        <Tip content={props.newSession.tip}>
+          <button type="button" className="ib-pplus" aria-label={props.newSession.tip} onClick={props.newSession.onPress} data-pplus={project.id}>
+            <Icon name="plus" size={16} />
+          </button>
+        </Tip>
+      )}
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
         <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${project.name} options`} data-pmore={project.id}>
           <Icon name="dots" size={16} />

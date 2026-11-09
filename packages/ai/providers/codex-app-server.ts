@@ -37,6 +37,7 @@ import type {
   CodexSDKConfig,
   CreateSessionOptions,
 } from "../types.ts";
+import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
 import {
   buildWindowsCommandScriptSpawnCommand,
@@ -44,7 +45,7 @@ import {
   resolveWindowsCommandShim,
 } from "./command-path.ts";
 import { guardChildStreams, writeChildLine } from "./child-io.ts";
-import { askAiChildEnv, codexAskAiConfigArgs, readCodexConfigTexts } from "./ask-ai-env.ts";
+import { askAiChildEnv, codexAskAiConfigArgs, codexOneShotConfigArgs, readCodexConfigTexts } from "./ask-ai-env.ts";
 import { CODEX_FALLBACK_MODELS, cliVersionFrom, effortList, type CatalogModel } from "@plannotator/core/model-catalog";
 
 const PROVIDER_NAME = "codex-sdk";
@@ -150,10 +151,34 @@ export function classifyRpcMessage(msg: RpcMessage): RpcClassification {
   return { kind: "unknown" };
 }
 
+/** The items that don't act: writing, and what a person's own hook or a long context adds. Any other is a tool of some kind, known or new. */
+const CODEX_ONE_SHOT_ITEMS: ReadonlySet<unknown> = new Set(["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction", "hookPrompt"]);
+
+/**
+ * In a single judgment (`oneShot`), an item that isn't plain writing counts as a tool use, not only the shell:
+ * MCP calls, web search and the like sit outside the read-only sandbox. Null for everything else.
+ */
+export function codexOneShotToolUse(notification: { method: string; params?: RpcMessage }): AIMessage | null {
+  if (notification.method !== "item/started") return null;
+  const item = notification.params?.item as RpcMessage | undefined;
+  if (!item || CODEX_ONE_SHOT_ITEMS.has(item.type)) return null;
+  return { type: "tool_use", toolName: String(item.type), toolInput: {}, toolUseId: String(item.id ?? "") };
+}
+
 /**
  * Map a Codex app-server notification (`{ method, params }`) to AIMessages.
  * `sessionId` is the resolved thread id, injected into the terminal result.
  */
+/**
+ * A TurnError's code: Codex's own `codexErrorInfo` says when the prompt was past the model's context window
+ * (`"contextWindowExceeded"`, or an object keyed by it); anything else keeps `fallback`.
+ */
+function codexErrorCode(error: RpcMessage | undefined, fallback: string): string {
+  const info = error?.codexErrorInfo;
+  const exceeded = info === "contextWindowExceeded" || (!!info && typeof info === "object" && "contextWindowExceeded" in info);
+  return exceeded ? AI_ERROR_CONTEXT_WINDOW_EXCEEDED : fallback;
+}
+
 export function mapCodexAppServerEvent(
   notification: { method: string; params?: RpcMessage },
   sessionId: string,
@@ -207,7 +232,7 @@ export function mapCodexAppServerEvent(
         return [{
           type: "error",
           error: (error?.message as string) ?? "Turn failed",
-          code: "turn_failed",
+          code: codexErrorCode(error, "turn_failed"),
         }];
       }
       return [{ type: "result", sessionId, success: true }];
@@ -224,7 +249,7 @@ export function mapCodexAppServerEvent(
       return [{
         type: "error",
         error: errObj?.message ?? (params.message as string) ?? "Unknown error",
-        code: "codex_error",
+        code: codexErrorCode(errObj as RpcMessage | undefined, "codex_error"),
       }];
     }
 
@@ -344,10 +369,11 @@ export class CodexAppServerProcess {
 
   /** Spawn + JSON-RPC initialize handshake, once. `initTimeoutMs` bounds the
    *  initialize wait (model discovery passes a short value so it can't hang).
-   *  `env`: the environment Codex runs in and whose config it reads; default this process's. */
-  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>): Promise<void> {
+   *  `env`: the environment Codex runs in and whose config it reads; default this process's.
+   *  `oneShot`: a single judgment, with web search and the MCP servers off. */
+  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>, oneShot?: boolean): Promise<void> {
     if (!this.startPromise) {
-      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env).catch((err) => {
+      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env, oneShot).catch((err) => {
         this.startPromise = null;
         throw err;
       });
@@ -355,9 +381,10 @@ export class CodexAppServerProcess {
     return this.startPromise;
   }
 
-  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env): Promise<void> {
+  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env, oneShot?: boolean): Promise<void> {
     const commandPath = resolveWindowsCommandShim(codexPath);
-    const appServerArgs = [...codexAskAiConfigArgs(readCodexConfigTexts(cwd, env)), "app-server"];
+    const configTexts = readCodexConfigTexts(cwd, env);
+    const appServerArgs = [...codexAskAiConfigArgs(configTexts), ...(oneShot ? codexOneShotConfigArgs(configTexts) : []), "app-server"];
     const command =
       buildWindowsCommandScriptSpawnCommand(commandPath, appServerArgs) ?? [
         commandPath,
@@ -675,12 +702,13 @@ export class CodexAppServerProvider implements AIProvider {
 
   async createSession(options: CreateSessionOptions): Promise<AISession> {
     const session = new CodexAppServerSession({
-      systemPrompt: buildSystemPrompt(options.context),
+      systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
       cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: null,
       codexExecutablePath: this.config.codexExecutablePath ?? "codex",
       model: options.model ?? this.config.model ?? DEFAULT_MODEL,
       reasoningEffort: options.reasoningEffort,
+      oneShot: !!options.oneShot,
       onClosed: (s) => this.sessions.delete(s),
     });
     this.sessions.add(session);
@@ -726,6 +754,8 @@ interface SessionConfig {
   model: string;
   reasoningEffort?: string;
   resumeThreadId?: string;
+  /** A single judgment (`CreateSessionOptions.oneShot`): the thread is not kept. */
+  oneShot?: boolean;
   onClosed: (session: CodexAppServerSession) => void;
 }
 
@@ -842,12 +872,23 @@ class CodexAppServerSession extends BaseSession {
           return;
         }
       }
+      const tool = this.config.oneShot ? codexOneShotToolUse(notif) : null;
+      if (tool) push(tool);
       for (const msg of mapCodexAppServerEvent(notif, this.id)) push(msg);
       if (notif.method === "turn/completed" || notif.method === "process_exited") {
         finish();
       }
     });
     const unsubRequests = proc.onRequest((method, id, params) => {
+      // A single judgment asks nothing of anyone: whatever Codex wants, the run ends with no answer.
+      if (this.config.oneShot) {
+        const requestId = String(id);
+        push({ type: "permission_request", requestId, toolName: method, toolInput: {}, toolUseId: requestId });
+        if (method === PERMISSIONS_APPROVAL_METHOD) proc.respond(id, { permissions: {}, scope: "turn" });
+        else if (method === CMD_APPROVAL_METHOD || method === FILE_APPROVAL_METHOD) proc.respond(id, { decision: "cancel" });
+        else proc.respondError(id, `Unsupported request: ${method}`);
+        return;
+      }
       // Permission-profile escalation (network/fs). Ask AI runs read-only, so
       // deny it by granting nothing — this is exactly Codex's own cancel
       // response (empty profile + turn scope), which lets the turn continue
@@ -948,7 +989,7 @@ class CodexAppServerSession extends BaseSession {
   private threadStartParams(): RpcMessage {
     return {
       method: "thread/start",
-      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only" },
+      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only", ...(this.config.oneShot && { ephemeral: true }) },
     };
   }
 
@@ -958,7 +999,7 @@ class CodexAppServerSession extends BaseSession {
 
     if (!this.process || !this.process.alive) {
       this.process = new CodexAppServerProcess();
-      await this.process.start(this.config.codexExecutablePath, this.config.cwd);
+      await this.process.start(this.config.codexExecutablePath, this.config.cwd, undefined, undefined, this.config.oneShot);
       this.threadStarted = false;
     }
     if (this.threadStarted) return;

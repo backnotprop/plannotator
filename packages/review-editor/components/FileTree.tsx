@@ -670,7 +670,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
 /** The All files list while it loads, or why there is none. */
-const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
+export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
   if (!state || state.status === 'idle' || state.status === 'loading') {
     return <div className="py-6 text-center text-xs text-muted-foreground/60" data-repo-files-loading>Listing the repository…</div>;
   }

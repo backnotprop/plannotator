@@ -215,12 +215,31 @@ export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: stri
 
 /** What a Show me points at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
 export interface InboxShowMeTarget {
-  /** The review's message id. */
-  review: string;
+  /** The review's message id; null: a Show me from a board with no review behind it (a Shape on its own). */
+  review: string | null;
   file: string | null;
   lines: [number, number] | null;
   round: number;
   words?: string;
+  /** Show me on a part of a board: `file` and `lines` are null, and the part says where. */
+  part?: InboxShowMePart;
+}
+
+/** What a Show me from a board is on: a part, words picked, a file's lines, or the whole board. */
+export interface InboxShowMePart {
+  /** The board it was pressed on. */
+  board: string;
+  /** What the person calls it: a part's heading, the words picked, or a file and its lines. */
+  name: string;
+  /** Its `data-code` value, when it has one. */
+  code?: string;
+  /** A box over several parts: their names, and `name` is "A part of the board". */
+  parts?: string[];
+  /**
+   * A box's picture, the box drawn on it: a PNG `data:` URL as the window sends it; once the Inbox keeps it in the
+   * board's folder, that file's full path, which the request names.
+   */
+  picture?: string;
 }
 
 /** "16–18" (an en dash), or "16" for one line. */
@@ -253,17 +272,30 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
   const { target, threadId } = input;
   const title = quoted(inboxReviewTitleLine(input.title));
   const words = target.words?.trim() ? `: "${quoted(target.words)}"` : '';
-  const where =
-    target.file !== null && target.lines
+  const tie = `--thread ${threadId}${target.review ? ` --through ${target.review}` : ''}`;
+  const part = target.part;
+  // A box over several parts names them; a part on its own, its code.
+  const after = part?.parts?.length ? ` (parts: ${part.parts.map(quoted).join(', ')})` : part?.code ? ` (${quoted(part.code)})` : '';
+  // The picture's line only once the Inbox kept it: the window's request, before, has none.
+  const picture = part?.picture && !part.picture.startsWith('data:') ? [`A picture of what they boxed, the box drawn on it: ${part.picture}.`] : [];
+  const where = part
+    ? `on "${quoted(part.name)}"${after} in your Shape ${part.board}, from`
+    : target.file !== null && target.lines
       ? `on ${target.lines[0] === target.lines[1] ? 'line' : 'lines'} ${inboxReviewLines(target.lines)} of ${target.file} in`
       : 'on the Overview of';
   return [
-    `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`,
+    target.review
+      ? `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`
+      : `The person pressed Show me on "${quoted(part?.name ?? '')}"${after} in your Shape ${part?.board ?? ''}${words}.`,
+    ...picture,
     input.again
       ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
-      : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
-    `Store it with \`--thread ${threadId} --through ${target.review}\`: it opens over the review by itself, so don't open a page.`,
-    'On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.',
+      : part
+        ? `Make a new Shape of that part, so they can see it the way you see it, and leave ${part.board} as it is. It can show code the board doesn't. \`plannotator shape --help\` has how.`
+        : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
+    `Store it with \`${tie}\`: it opens ${target.review ? 'over the review ' : ''}by itself, so don't open a page.`,
+    // A board with no review behind it has no diff for a click to land in: the agent draws it as any board.
+    ...(target.review ? ['On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.'] : []),
     'Then answer here in one or two sentences.',
   ].join('\n');
 }
@@ -369,3 +401,22 @@ export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [
   '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
   '  drawing by the rules in `plannotator shape --help`. Or { "kind": "mermaid", "source" }.',
 ].join('\n');
+
+/**
+ * Context notes (issue #2588, approval "inbox-context-notes"): get_guide_brief's rule for a guide's notes, served only
+ * while Code review is on, after the overview's drawing. Wording awaits the owner's OK (AGENT-TEXT, writer 1).
+ */
+export const INBOX_REVIEW_NOTES_RULE =
+  'Optional `diffs[].notes`: your notes on lines of the diff, `[{ lineStart, lineEnd, side?, text }]`. Line numbers come from the patch\'s hunk headers (`side: "old"` for removed lines), and a note must sit inside one hunk. Write a note only where a hunk needs its why, in one or two sentences: why the change is there and where that reason comes from (the PR description, a commit, a decision record, or your own reading). Notes are yours, not the person\'s comments: they are never counted, sent back to you or posted to a pull request.';
+
+/** submit_guide's `guide` field: as always with Code review off; with it on, a diff reference names its `notes`. */
+export const INBOX_GUIDE_FIELD_DESCRIPTION =
+  'The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief\'s output_schema), as an object or its JSON.';
+export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRIPTION.replace('diffs: [{ file, summary }]', 'diffs: [{ file, summary, notes? }]');
+
+/**
+ * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`, served only while
+ * Code review is on. An Ask's answer is never pinned by itself (the owner, 2026-11-07: it stays in the thread).
+ */
+export const INBOX_NOTE_BLOCK_LINE =
+  'In a thread with a review, a `:::note path#L42-L48` … `:::` block pins its words to those lines of the newest review (` old` after the lines for removed lines): your note, not the person\'s comment. Pin a note only when your words are about those lines; answer the rest in the message.';

@@ -4,8 +4,8 @@
  * person as the window's own requests. The moments that need a clock or a bad
  * server use a memory host. Real Claude Code is tests/manual/inbox-ask-claude.ts.
  *
- * This step reaches users at merge with the Inbox's setting off, so the first
- * thing guarded is that nothing happens then.
+ * Ask is on in every Inbox, so the first thing guarded is that nothing happens
+ * to a session until a question waits.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
@@ -45,13 +45,13 @@ async function until(check: () => boolean | Promise<boolean>, ms = 8_000): Promi
 }
 
 /** An Inbox with one thread the session owns, and what it takes to open a session on it. */
-async function world(askAi = true) {
+async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-mod-inbox-ask-')))
   roots.push(root)
   const project = join(root, 'api')
   mkdirSync(project, { recursive: true })
   const dataDir = join(root, 'data')
-  const server = await startInboxServer({ dataDir, askAi, binaryPath: null })
+  const server = await startInboxServer({ dataDir, binaryPath: null })
   servers.push(server)
   const client = new Client({ name: 'mod-inbox-ask-test', version: '1.0.0' })
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)))
@@ -128,32 +128,14 @@ function answeredPolls(session: ClaudeSession) {
 }
 
 describe('nothing happens until a question waits', () => {
-  test('the setting off, as every user has it at merge: polls offer to answer, and no client, turn or change to the session follows', async () => {
-    const { server, threadId, open } = await world(false)
-    const session = await open()
-    const polls = answeredPolls(session)
-    await until(() => polls.filter((poll) => poll.answered !== null).length >= 2)
-
-    expect(polls[0]!.sent.ask).toBe(true)
-    expect((await postAsk(server, threadId, 'turn-0001', 'Why now?')).status).toBe(404)
-    await session.startTurn('Keep working.')
-    session.endTurn()
-    const seen = polls.length
-    await until(() => polls.slice(seen).some((poll) => poll.answered !== null))
-    await Bun.sleep(100)
-
-    expect(clientFetches(session)).toEqual([])
-    expect(session.host.submits).toEqual([])
-    expect(session.turns.map((turn) => turn.text)).toEqual(['Keep working.'])
-    expect(polls.map((poll) => poll.answered).join('')).not.toContain('ask_waits')
-  })
-
-  test('the setting on with no question: the same', async () => {
+  test('with no question: polls offer to answer, and no client, turn or change to the session follows', async () => {
     const { open } = await world()
     const session = await open()
     const polls = answeredPolls(session)
     await until(() => polls.filter((poll) => poll.answered !== null).length >= 2)
     await Bun.sleep(100)
+
+    expect(polls[0]!.sent.ask).toBe(true)
 
     expect(clientFetches(session)).toEqual([])
     expect(session.host.submits).toEqual([])
@@ -161,7 +143,7 @@ describe('nothing happens until a question waits', () => {
   })
 })
 
-describe('the setting on', () => {
+describe('a question waits', () => {
   test('a first question connects the session, runs as a turn, streams, and is saved', async () => {
     const { server, threadId, open } = await world()
     const session = await open()

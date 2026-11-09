@@ -27,6 +27,7 @@ import {
   setFront,
   streams,
   waitFor,
+  WORK_THREAD,
   type World,
 } from './inbox-shared-events-world';
 
@@ -52,12 +53,12 @@ async function world(browser: Browser, options: Parameters<typeof newWorld>[1] =
   const w = await newWorld(browser, options);
   worlds.push(w);
   const sim = await agent(w);
-  await sim.send({ project_path: w.project, body: 'Starting on the billing work.' });
+  await sim.send({ project_path: w.project, thread: WORK_THREAD, body: 'Starting on the billing work.' });
   return w;
 }
 
 async function sendSome(w: World, count: number): Promise<void> {
-  for (let i = 0; i < count; i++) await w.agents[0]!.send({ project_path: w.project, body: `Update ${Date.now()}-${i}` });
+  for (let i = 0; i < count; i++) await w.agents[0]!.send({ project_path: w.project, thread: WORK_THREAD, body: `Update ${Date.now()}-${i}` });
 }
 
 test('WebKit has Web Locks and BroadcastChannel: 1, 3 and 8 tabs share one stream, every record once, a ninth tab loads at once', async ({ browser }) => {
@@ -132,7 +133,7 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
     join(w.project, 'busy-report.html'),
     '<!doctype html><title>Busy report</title><h1>Report</h1><script>const until = Date.now() + 8000; while (Date.now() < until) {}</script><p>Done.</p>\n',
   );
-  const sent = (await w.agents[0]!.send({ project_path: w.project, body: 'The report is attached.', attachments: ['busy-report.html'] })) as { thread_id?: string; message_id?: string };
+  const sent = (await w.agents[0]!.send({ project_path: w.project, thread: WORK_THREAD, body: 'The report is attached.', attachments: ['busy-report.html'] })) as { thread_id?: string; message_id?: string };
   const threadId = sent.thread_id ?? sent.message_id!;
   const listed = (await (await fetch(new URL(`/api/inbox/threads/${threadId}/attachments`, w.url))).json()) as { attachments: { id: string }[] };
   const attachment = listed.attachments[0]!.id;

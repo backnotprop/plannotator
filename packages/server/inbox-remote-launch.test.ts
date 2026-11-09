@@ -18,6 +18,9 @@
  *     trusts it on B (B's Claude config) and starts there.
  *  5. B asleep: a launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on
  *     B exactly once when B is back, and the cancelled one never does; an agent's bare Cancel of a held launch can't.
+ *  8. Another folder on B: A's window lists B's folder names under B's home (never hidden ones, never outside home),
+ *     an agent's bare read and a door read without the mark are refused, and a launch in a folder that is not a
+ *     project yet starts there and makes it one of B's projects.
  *  6. Readiness: A's machine list says B takes launches; B's Claude Code signed out shows in B's launch block, read
  *     through the forward, with the SSH cause when B's Inbox was started over SSH; a launch is refused in words that
  *     name B, nothing starts, and once signed in it starts at once. Launch off on B: its health says 0.
@@ -373,4 +376,55 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       }
     }
   }, 120_000);
+
+  test("8. another folder on the other machine: its folder names, the owner's window only; a launch there makes it a project", async () => {
+    for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
+      // The other machine's home (the sandbox's) has a code folder with one repository, and a hidden folder.
+      const folder = join(agentsHome(there), "code", `billing-api-${here.name.toLowerCase()}`);
+      mkdirSync(folder, { recursive: true });
+      mkdirSync(join(agentsHome(there), "code", ".cache"), { recursive: true });
+      const real = realpathSync(folder);
+      const trust = JSON.parse(readFileSync(join(agentsHome(there), ".claude.json"), "utf8")) as Json;
+      writeFileSync(join(agentsHome(there), ".claude.json"), JSON.stringify({ ...trust, projects: { ...trust.projects, [real]: { hasTrustDialogAccepted: true } } }));
+
+      const read = (path: string, headers: Record<string, string> = { "Sec-Fetch-Site": "same-origin" }) =>
+        fetch(`${base(here)}/api/inbox/m/${there.id}/launch/folders?path=${encodeURIComponent(path)}`, { headers });
+      const listed = (await (await read("~/code")).json()) as Json;
+      expect(listed.exists).toBe(true);
+      expect(listed.folders).toContain(`billing-api-${here.name.toLowerCase()}`);
+      expect(listed.folders).not.toContain(".cache");
+      expect(((await (await read("~/code/biling-api")).json()) as Json).exists).toBe(false);
+      expect(((await (await read("~/.claude")).json()) as Json).code).toBe("folder_hidden");
+      expect(((await (await read("~/..")).json()) as Json).code).toBe("folder_outside_home");
+      // A backslash is never a way into a hidden folder, and a missing folder offers the nearest one above it.
+      expect(((await (await read("~/x\\..\\.claude")).json()) as Json).code).toBe("folder_outside_home");
+      expect(((await (await read("~/code/biling-api")).json()) as Json).nearest).toMatchObject({ path: "~/code", folders: expect.arrayContaining([`billing-api-${here.name.toLowerCase()}`]) });
+      // An agent's bare read through the forward, and a read at the other door with this machine's token but no mark.
+      const bare = await read("~/code", {});
+      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
+      const door = await fetch(`${base(there)}/api/inbox/device/launch/folders?path=~/code`, { headers: { Authorization: `Bearer ${tokenFor(here, there)}` } });
+      expect([door.status, ((await door.json()) as Json).code]).toEqual([403, "window_only"]);
+
+      const before = startsIn(there, real).length;
+      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, {
+        idempotency_key: `k-folder-${here.name}`,
+        body: "Look at the retry logic in this folder.",
+        thread_name: `Folder start ${here.name}`,
+        to: { launch: { agent: "claude-code", folder: `~/code/billing-api-${here.name.toLowerCase()}` } },
+      });
+      expect(sent.status).toBe(200);
+      await waitFor(`--bg in the folder on ${there.name}`, async () => startsIn(there, real).length === before + 1);
+      expect(((await getJson(there, "/api/inbox/projects")).projects as Json[]).some((p) => p.root === real)).toBe(true);
+      // A folder that isn't there: refused, nothing starts.
+      const missing = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-missing-${here.name}`, body: "x", to: { launch: { agent: "claude-code", folder: "~/code/nope" } } });
+      expect([missing.status, ((await missing.json()) as Json).code]).toEqual([422, "folder_missing"]);
+      // Home itself, and a hidden folder by a backslash: refused there, nothing starts.
+      for (const folder of ["~", "~/\\.claude"]) {
+        const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-refused-${here.name}-${folder}`, body: "x", to: { launch: { agent: "claude-code", folder } } });
+        expect([folder, refused.status, ((await refused.json()) as Json).code]).toEqual([folder, 422, "validation_error"]);
+      }
+      expect(startsIn(there, realpathSync(agentsHome(there)))).toEqual([]);
+    }
+  }, 90_000);
 });
