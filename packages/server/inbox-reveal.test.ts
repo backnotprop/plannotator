@@ -89,6 +89,8 @@ interface Options {
   tailnet?: "owner" | "tagged";
   /** An agent was already started from this Inbox: one launched thread root in the store. */
   launched?: boolean;
+  /** A fresh install: nothing in the store, so no Inbox ran here before. */
+  fresh?: boolean;
 }
 
 type Json = Record<string, any>;
@@ -109,6 +111,8 @@ async function world(options: Options = {}) {
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
     inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString(), version: 2 },
     inboxVoiceIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
+    // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+    favicon: "glass",
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -117,15 +121,15 @@ async function world(options: Options = {}) {
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   const then = new Date(Date.now() - days * DAY);
   const store = InboxStore.open(dataDir, { now: () => then });
-  const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
+  const project = options.fresh ? null : store.ensureProject({ name: "docs", root: join(root, "docs") });
   // Each message starts its own thread.
-  for (let i = 0; i < (options.threads ?? 6); i++) {
-    store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
+  for (let i = 0; i < (options.fresh ? 0 : (options.threads ?? 6)); i++) {
+    store.sendMessage({ project_id: project!.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
   }
   let launchedThread: string | null = null;
   if (options.launched) {
     launchedThread = store.startPersonThread({
-      project_id: project.id,
+      project_id: project!.id,
       body: "Fix the totals.",
       // A launch's placeholder `to` (inbox-launch.ts): the store refuses a Send with none.
       to: { host: "claude-code", session: "launch:lch_seeded" },
@@ -617,6 +621,83 @@ describe("the queue with Snooze", () => {
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.lastShownAt).toBe(w.saved().inboxListIntro.shownAt);
     expect(await w.next()).toBeNull();
+  });
+});
+
+describe("the tab icon dialog (\"Which favicon do you prefer?\", an update-day dialog)", () => {
+  const KEY = "page-key-tab-icon";
+  /** Someone who used an earlier Inbox and never chose a favicon, on the version that ships the dialog. */
+  const unchosen = (over: Options = {}) => world({ ...over, config: { favicon: undefined, ...over.config } });
+
+  test("due for an earlier Inbox's user who never chose a favicon: next, claimed once, the line stamped, no favicon written", async () => {
+    const w = await unchosen();
+    expect(typeof w.saved().inboxReveals.tab_icon.dueAt).toBe("string");
+    expect(await w.next()).toBe("tab_icon");
+    expect((await w.claim("tab_icon", KEY)).show).toBe(true);
+    const config = w.saved();
+    // The claim only stamps it: the dialog's own button saves the favicon, as Settings does.
+    expect(config.favicon).toBeUndefined();
+    expect(config.inboxReveals.tab_icon.shownAt).toBe(config.inboxReveals.lastShownAt);
+    expect(config.inboxReveals.dayShownAt).toBe(config.inboxReveals.lastShownAt);
+    expect(await w.next()).toBeNull();
+    // The same page's retry after a lost answer is shown it again; another tab, window or device never.
+    expect((await w.claim("tab_icon", KEY)).show).toBe(true);
+    expect((await w.claim("tab_icon", "page-key-other")).show).toBe(false);
+    expect((await w.claim("tab_icon")).show).toBe(false);
+    // An update-day dialog has no Not now: the line refuses it and writes nothing.
+    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect((await w.post("/api/inbox/reveal", { id: "tab_icon", answer: "not_now" })).ok).toBe(false);
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+  });
+
+  test("a favicon chosen in Settings before its moment: no longer next, and the claim is refused", async () => {
+    const w = await unchosen();
+    expect(await w.next()).toBe("tab_icon");
+    expect((await w.post("/api/inbox/settings", { favicon: "totman" })).ok).toBe(true);
+    // The line moves on to what is behind it (the Board, at day 4).
+    expect(await w.next()).toBe("board");
+    expect((await w.claim("tab_icon", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals.tab_icon.shownAt).toBeUndefined();
+    // Glass chosen counts as chosen too.
+    const glass = await unchosen();
+    expect((await glass.post("/api/inbox/settings", { favicon: "glass" })).ok).toBe(true);
+    expect(await glass.next()).toBe("board");
+  });
+
+  test("a 'classic' left by 0.28.57 (the removed P icon) counts as never chosen: due, and the file keeps it", async () => {
+    const w = await unchosen({ config: { favicon: "classic" as never } });
+    expect(typeof w.saved().inboxReveals.tab_icon.dueAt).toBe("string");
+    expect(await w.next()).toBe("tab_icon");
+    expect(w.saved().favicon).toBe("classic");
+  });
+
+  test("a favicon chosen before the update: nothing written, never asked", async () => {
+    const w = await world({ config: { favicon: "totman" } });
+    expect(w.saved().inboxReveals?.tab_icon).toBeUndefined();
+    expect(await w.next()).toBe("board");
+    expect((await w.claim("tab_icon", KEY)).show).toBe(false);
+  });
+
+  test("a fresh install is marked at its first start and never asked, also once it has been used", async () => {
+    const w = await world({ fresh: true, config: { favicon: undefined } });
+    const mark = w.saved().inboxReveals.tab_icon;
+    expect(mark.dueAt).toBeUndefined();
+    expect(typeof mark.freshAt).toBe("string");
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("tab_icon", KEY)).show).toBe(false);
+  });
+
+  test("a dev build decides nothing; a guest is never armed and never claims; the owner's phone claims", async () => {
+    const dev = await unchosen({ version: "dev" });
+    expect(dev.saved().inboxReveals?.tab_icon).toBeUndefined();
+    const w = await unchosen({ tailnet: "owner" });
+    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
+    expect(guestSettings.reveal.next).toBeNull();
+    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "tab_icon" })).json()) as Json).show).toBe(false);
+    expect(w.saved().inboxReveals.tab_icon.shownAt).toBeUndefined();
+    const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
+    expect(ownerSettings.reveal.next).toBe("tab_icon");
+    expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "tab_icon" })).json()) as Json).show).toBe(true);
   });
 });
 

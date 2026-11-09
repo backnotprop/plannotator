@@ -212,6 +212,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       inboxBoardIntro: { shownAt: new Date(now).toISOString() },
       // Due on a used Inbox, and its check would run the `codex` on this PATH.
       inboxVoiceIntro: { shownAt: new Date(now).toISOString() },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
       inboxAgentNotes: { offered: true },
     }),
   );

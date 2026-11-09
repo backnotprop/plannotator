@@ -1885,6 +1885,20 @@ ${result.text}`);
       return { ...row, run: word, delivery };
     },
 
+    /**
+     * Every launched session not deleted, as the Agents section reads it (packages/server/inbox-agents-list.ts): its
+     * run line's state (null: no line, which is live and idle, or resting with nothing waiting on it). An agent with
+     * no host here (a downgrade) is left out, as it has no line.
+     */
+    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; run: InboxRun["state"] | null }[] {
+      return roots().flatMap((root) => {
+        const launch = root.launch!;
+        const session = inboxLaunchedSession(root);
+        if (launch.deleted_at || !session || !hostOf(launch)) return [];
+        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, run: runOfRoot(root)?.state ?? null }];
+      });
+    },
+
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
       return roots()

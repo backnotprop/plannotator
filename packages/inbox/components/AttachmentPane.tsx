@@ -96,6 +96,7 @@ import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
 import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
 import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
+import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -291,11 +292,16 @@ export interface AttachmentPaneProps {
   openIn?: OpenInSurface;
   /**
    * Ask AI's Side in the file's selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat.
-   * Absent while this thread cannot ask: no Side. The full-screen bar has no Ask icon (approval "inbox-ask-ai-flow").
+   * Absent while this thread cannot ask: no Side. No top bar has an Ask icon (the owner, 2026-11-09).
    */
   onSide?: (words: string, source?: string) => void;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
   onToast?: Notice;
+  /**
+   * The questions inside this Markdown file (issue #2828; fileQuestions.tsx): its cards answer like the message
+   * body's. Absent or null (a file whose message recorded none, the tour): the cards stay read-only.
+   */
+  questions?: FileQuestions | null;
 }
 
 /**
@@ -1478,6 +1484,43 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  // The file's question cards, answerable like the body's (issue #2828).
+  const fileQuestionProps = useFileQuestionViewerProps(kind === 'markdown' ? props.questions : null);
+  // A card asked for (the open questions list, a reply's answer row): brought into view and ringed, as the
+  // thread's jump does for a card in a message, once the file's text is drawn.
+  const questionFocus = kind === 'markdown' ? props.questions?.focus : null;
+  const questionFocusKey = questionFocus ? (props.questions?.records.find((r) => r.key === questionFocus.key)?.attachment?.key ?? null) : null;
+  const questionFocusDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!questionFocus || !questionFocusKey || !view || questionFocusDone.current === questionFocus.seq) return;
+    let frames = 0;
+    let ring: ReturnType<typeof setTimeout> | null = null;
+    let frame = requestAnimationFrame(function find() {
+      const card = scrollViewport?.querySelector<HTMLElement>(`[data-question-key="${CSS.escape(questionFocusKey)}"]`);
+      if (!card) {
+        frames += 1;
+        if (frames < 30) frame = requestAnimationFrame(find);
+        return;
+      }
+      questionFocusDone.current = questionFocus.seq;
+      card.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+      card.classList.remove('ib-q-target-out');
+      card.classList.add('ib-q-target');
+      ring = setTimeout(() => {
+        card.classList.add('ib-q-target-out');
+        card.classList.remove('ib-q-target');
+        ring = setTimeout(() => card.classList.remove('ib-q-target-out'), 700);
+      }, 1400);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (ring) clearTimeout(ring);
+    };
+    // Once per ask (its seq), and again when the text it waits for is drawn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
   // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
   const sideFrom = props.onSide
     ? (text: string, context: SelectionActionContext) =>
@@ -2883,6 +2926,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
                 questionDecisionLines={false}
+                {...fileQuestionProps}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
                 onAddAnnotation={(annotation) => void save(annotation)}

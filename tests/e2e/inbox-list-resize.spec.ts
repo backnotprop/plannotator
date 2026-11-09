@@ -265,15 +265,16 @@ test('a narrower window draws it clamped, keeping the thread pane its 480px', as
   await page.setViewportSize(VIEWPORT);
 });
 
-test('a window that leaves no room to widen into shows no separator', async () => {
+test('a window that leaves no room to widen into keeps the edge beside a thread only to hide the list', async () => {
   const { page } = world;
-  // 232 + 380 + 480 and three 8px gutters = 1116: at 1080 there is nothing to drag.
+  // 232 + 380 + 480 and three 8px gutters = 1116: at 1080 there is nothing to drag, but a click still hides the list.
   await page.setViewportSize({ width: 1080, height: 900 });
-  await expect(edge(page)).toHaveCount(0);
+  await expect(edge(page)).toHaveAttribute('aria-valuemax', String(LIST_MIN));
+  await expect(edge(page)).toHaveAttribute('aria-valuenow', String(LIST_MIN));
   expect(await width(page, '.ib-listcol')).toBe(LIST_MIN);
   await page.setViewportSize(VIEWPORT);
-  // Back with the room (the separator itself is a zero-width line).
   await expect(edge(page)).toHaveCount(1);
+  await expect.poll(async () => Number(await edge(page).getAttribute('aria-valuemax'))).toBeGreaterThan(LIST_MIN);
 });
 
 test('with a classic scrollbar on the list, the whole scrollbar stays the list’s, and the grab area is beside it', async () => {

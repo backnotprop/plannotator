@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../packages/core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "../packages/core/favicon";
 
 // The server-served entry points link /favicon.ico with its sizes and no type:
 // handleFavicon() answers Glass's multi-size .ico (the tab takes its
 // hand-pixelled 16 or 32 frame, as on plannotator.ai) or the Face or P PNG,
 // from the persisted style, so the response Content-Type is the truthful
-// declaration. A type="image/x-icon" would be a lie for Face and P users.
+// declaration. A type="image/x-icon" would be a lie for Face users.
 const SERVED_FAVICON_LINK = '<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">';
 // The portal is a static site with no Plannotator server, so its favicon really
 // is always the Glass .ico the vite plugin emits and it keeps the typed hint.
@@ -182,18 +182,22 @@ describe("favicon surfaces", () => {
     expect(stats.opaquePixels).toBeGreaterThan((32 * 32) / 2);
   });
 
-  test("the Face and P styles are their pinned PNGs", () => {
+  test("the Yellow and Face styles are their pinned icons", () => {
     // The other two things /favicon.png can answer with, so they belong in this
-    // enumeration alongside the default. Face is the icon PR 2975 replaced
-    // (eede4aecf^1); P is the studio's P icon-192.png.
+    // enumeration alongside the default. Yellow is the yellow glass set's
+    // pixel/fav-32.png (and its web/favicon.ico for /favicon.ico); Face is the
+    // icon PR 2975 replaced (eede4aecf^1).
+    expect(createHash("sha256").update(YELLOW_FAVICON_PNG_BYTES).digest("hex")).toBe(
+      "22f9b788ee9ce33caf76521b7c1e8962b82964805c54cbc139b072e7b2ba73db",
+    );
+    expect(inspectPng(YELLOW_FAVICON_PNG_BYTES)).toMatchObject({ width: 32, height: 32 });
+    expect(createHash("sha256").update(YELLOW_FAVICON_ICO_BYTES).digest("hex")).toBe(
+      "2c5bbca9b41885f9d07b8b17b50b65e88e236760888ede779192ccb59ff1f8e4",
+    );
     expect(createHash("sha256").update(FACE_FAVICON_PNG_BYTES).digest("hex")).toBe(
       "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
     );
     expect(inspectPng(FACE_FAVICON_PNG_BYTES)).toMatchObject({ width: 64, height: 64 });
-    expect(createHash("sha256").update(P_FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "f6bed7f06a78ae9d4de3d2019e7704ca447f9629c85d868ca77f5a25af82b4f8",
-    );
-    expect(inspectPng(P_FAVICON_PNG_BYTES)).toMatchObject({ width: 192, height: 192 });
   });
 
   test("the marketing site ships the studio's web icon set unchanged", async () => {

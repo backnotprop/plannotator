@@ -160,6 +160,8 @@ type BaseIcon = { dataUrl: string; image: HTMLImageElement | null };
  */
 export function useTabCount(count: number, iconHref: string | null = null, badgeHref: string | null = null): void {
   const original = useRef<{ title: string; href: string; type: string | null; badge: string } | null>(null);
+  /** The icon the page loaded with: what the tab goes back to once `iconHref` is null again (a try put back). */
+  const loaded = useRef<{ href: string; type: string | null; badge: string } | null>(null);
   const base = useRef<Promise<BaseIcon | null> | null>(null);
   const drawn = useRef(new Map<number, string>());
 
@@ -172,10 +174,12 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
         type: link?.getAttribute('type') ?? null,
         badge: '/favicon.png',
       };
+      loaded.current = { href: original.current.href, type: original.current.type, badge: original.current.badge };
     }
-    if (iconHref && iconHref !== original.current.href) {
-      // A new plain icon: forget the old one and every badge drawn over it.
-      original.current = { ...original.current, href: iconHref, type: null, badge: badgeHref ?? iconHref };
+    const plain = iconHref ? { href: iconHref, type: null, badge: badgeHref ?? iconHref } : loaded.current!;
+    if (plain.href !== original.current.href) {
+      // A new plain icon (or the loaded one back): forget the old one and every badge drawn over it.
+      original.current = { ...original.current, ...plain };
       base.current = null;
       drawn.current.clear();
     }

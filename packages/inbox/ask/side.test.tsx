@@ -132,9 +132,9 @@ const settle = async () => {
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 };
 
-async function until(check: () => boolean, what: string, ms = 3000) {
+async function until(check: () => boolean | Promise<boolean>, what: string, ms = 3000) {
   const end = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
     await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
   }
@@ -145,7 +145,6 @@ function MessageWithAsk({ phone = false }: { phone?: boolean }) {
   const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone, openThread: () => {}, replyInThread: () => {} });
   return (
     <div className="pn-inbox">
-      <div data-test-top="">{ask.button}</div>
       <MessageBody
         message={MESSAGE}
         projectRoot={PROJECT.root}
@@ -175,7 +174,6 @@ function ThreadWithAsk({ view }: { view: 'full' | 'side' }) {
         file={{ id: NOTES.id, version: 'current', focus: null, view }}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        askButton={ask.button}
         onSide={ask.side}
       />
       {ask.layer}
@@ -223,7 +221,8 @@ async function ask(words: string) {
   await until(() => queries.length > 0, 'the question to reach the agent');
 }
 
-const askIcon = () => document.querySelector<HTMLButtonElement>('[data-ask-open]');
+/** The top bar's Ask icon, gone (the owner, 2026-11-09): nothing on the page wears its mark or its name. */
+const noAskIcon = () => document.querySelectorAll('[data-ask-open], [aria-label="Ask AI about this thread"]').length === 0;
 const askBox = () => document.querySelector<HTMLTextAreaElement>('[data-chat-window] textarea');
 const side = () => document.querySelector<HTMLButtonElement>('.annotation-toolbar [data-annotation-side]');
 /** The selection bar left to right: each button's name, "|" for a divider. */
@@ -236,12 +235,11 @@ const barOrder = () =>
 test.skipIf(!hasDom)("an agent's message in a thread that can ask: Side after 👍, between dividers; it opens the chat with the words quoted", async () => {
   serve(true);
   await mount(<MessageWithAsk />);
-  await until(() => askIcon() !== null, 'the Ask icon');
-  // The top bar's icon is the two bubbles, with its name and tooltip as before.
-  expect(askIcon()!.getAttribute('aria-label')).toBe('Ask AI about this thread');
-  expect(askIcon()!.querySelectorAll('[data-ask-icon="messages-square"]')).toHaveLength(1);
-
-  await select(host!, WORDS);
+  await until(async () => {
+    await select(host!, WORDS);
+    return side() !== null;
+  }, 'Side in the selection bar');
+  expect(noAskIcon()).toBe(true);
   expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side', '|', 'Cancel']);
   expect(document.querySelectorAll('[data-chat-window]')).toHaveLength(0);
 
@@ -271,10 +269,10 @@ test.skipIf(!hasDom)('a thread that cannot ask (no live agent): no Ask icon, and
   expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
 });
 
-test.skipIf(!hasDom)('the phone layout: the top bar keeps its Ask icon, and the selection bar has no Side', async () => {
+test.skipIf(!hasDom)('the phone layout: the selection bar has no Side', async () => {
   serve(true);
   await mount(<MessageWithAsk phone />);
-  await until(() => askIcon() !== null, 'the Ask icon');
+  await settle();
   await select(host!, WORDS);
   expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Cancel']);
   expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
@@ -303,10 +301,17 @@ test.skipIf(!hasDom)('a full-screen file: its bar has no Ask icon (none on the p
   expect(queries[0]!.prompt).toBe(`${source}\n\n> five attempts\n\nWhy five?`);
 });
 
-test.skipIf(!hasDom)('the file beside the thread: the one Ask icon is in the thread top bar', async () => {
+test.skipIf(!hasDom)('the file beside the thread: the thread top bar has no Ask icon; Side in the file opens the chat', async () => {
   serve(true);
   await mount(<ThreadWithAsk view="side" />);
-  await until(() => askIcon() !== null, 'the Ask icon');
-  expect(document.querySelectorAll('[data-ask-open]')).toHaveLength(1);
-  expect(askIcon()!.closest('.ib-phead') !== null).toBe(true);
+  await until(() => document.querySelector('.ib-phead') !== null && document.body.textContent!.includes('five attempts'), 'the thread and the file');
+  const page = document.querySelector<HTMLElement>('.ib-docscroll')!;
+  await until(async () => {
+    await select(page, 'five attempts');
+    return side() !== null;
+  }, 'Side in the file');
+  expect(noAskIcon()).toBe(true);
+  await act(async () => side()!.click());
+  await until(() => askBox() !== null, 'the Ask window');
+  expect(askBox()!.value).toBe('> five attempts\n\n');
 });
