@@ -27,7 +27,8 @@
  *   answer stays on screen; a rate-limit answer holds the host for
  *   `REF_RATE_LIMIT_MS`; GitHub's GraphQL budget under
  *   `INBOX_PULLS_RATE_FLOOR` holds list reads (not diffs) until it fills. One
- *   read per host at a time.
+ *   read per host at a time, and one read for both of the person's own lists
+ *   (Reviews' scoped one and the Pull requests board's everywhere one).
  * - A layer's diff (`diff`) is read only for a PR the last list named: the
  *   PR's own diff, or the compare from the stack's base to that layer's head.
  *
@@ -204,6 +205,23 @@ export const GITHUB_PULLS_QUERY = `query InboxPulls($requested: String!, $author
   merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
 }`;
 
+/**
+ * Reviews' list and the Pull requests board in one call (the person's own lists, scoped to the projects' repositories,
+ * and the same searches everywhere, `every…`): opening Reviews, which shows the board, is one read per host.
+ */
+export const GITHUB_PULLS_BOTH_QUERY = `query InboxPulls($requested: String!, $authored: String!, $merged: String!, $assigned: String!, $everyRequested: String!, $everyAuthored: String!, $everyMerged: String!, $everyAssigned: String!) {
+  viewer { login }
+  rateLimit { cost remaining resetAt }
+  requested: search(type: ISSUE, query: $requested, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  authored: search(type: ISSUE, query: $authored, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  assigned: search(type: ISSUE, query: $assigned, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
+  everyRequested: search(type: ISSUE, query: $everyRequested, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  everyAuthored: search(type: ISSUE, query: $everyAuthored, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  everyAssigned: search(type: ISSUE, query: $everyAssigned, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  everyMerged: search(type: ISSUE, query: $everyMerged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
+}`;
+
 // --- Others: every open PR of the projects' repositories, a separate, optional, bounded read ---
 
 /** An Others search answers this many PRs at most. */
@@ -272,7 +290,7 @@ export function gitlabOthersQueries(projects: readonly string[]): { queries: str
   return { queries, covered };
 }
 
-for (const q of [GITHUB_PULLS_QUERY, GITLAB_PULLS_QUERY, githubOthersQuery(2), ...gitlabOthersQueries(["a/b"]).queries]) {
+for (const q of [GITHUB_PULLS_QUERY, GITHUB_PULLS_BOTH_QUERY, GITLAB_PULLS_QUERY, githubOthersQuery(2), ...gitlabOthersQueries(["a/b"]).queries]) {
   if (!/^query\b/.test(q)) throw new Error("inbox-pulls: every query must be a query");
 }
 
@@ -413,7 +431,8 @@ function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
 }
 
 /** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
-export type PullsPart = "own" | "others";
+/** `every`: the everywhere half of `GITHUB_PULLS_BOTH_QUERY`'s answer (its `every…` searches). */
+export type PullsPart = "own" | "others" | "every";
 
 /** A GraphQL answer that reports any error is a failed read: a part left out would read as "nothing there". */
 function hasErrors(parsed: unknown): boolean {
@@ -499,11 +518,12 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
     for (const list of others) read(list, null);
     return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), ...budget };
   }
-  read(data.authored, null);
-  read(data.merged, null);
-  read(data.assigned, "assigned");
-  read(data.requested, "requested");
-  const capped = cappedOf([data.requested, data.authored, data.assigned], "issueCount");
+  const list = (name: "authored" | "merged" | "assigned" | "requested") => (part === "every" ? data[`every${name[0]!.toUpperCase()}${name.slice(1)}`] : data[name]);
+  read(list("authored"), null);
+  read(list("merged"), null);
+  read(list("assigned"), "assigned");
+  read(list("requested"), "requested");
+  const capped = cappedOf([list("requested"), list("authored"), list("assigned")], "issueCount");
   return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}), ...budget };
 }
 
@@ -652,8 +672,8 @@ interface HostState extends OwnState {
   cli: RefCli;
   others: OthersState;
   /**
-   * The person's own lists read everywhere (the Pull requests page, `everywhere`): the same searches with no `repo:`
-   * qualifier, kept apart from the scoped read so neither page reads the other's answer again.
+   * The person's own lists read everywhere (the Pull requests board, `everywhere`): the same searches with no `repo:`
+   * qualifier, answered apart from the scoped list but by the same read (`read` fills both; its `pending` is shared).
    */
   wide: OwnState;
 }
@@ -1203,19 +1223,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     return pending;
   };
 
-  const read = (host: string, cli: RefCli, state: OwnState, repos: readonly string[], wide = false): Promise<void> => {
+  /**
+   * The person's own lists for one host, for Reviews (scoped to the projects' repositories, `state`) and the Pull
+   * requests board (everywhere, `state.wide`) in one read: Reviews shows the board, so whichever asks first reads
+   * both, and the other is answered by the same read (in flight, or cached). GitHub: one GraphQL call with both sets of
+   * searches (`GITHUB_PULLS_BOTH_QUERY`), or one set when the repositories don't fit the scope (the searches are the
+   * same then). GitLab: its own lists are never scoped, so one answer serves both.
+   */
+  const read = (host: string, cli: RefCli, state: HostState, repos: readonly string[]): Promise<void> => {
     if (state.pending) return state.pending;
-    const reposKey = wide ? "" : [...repos].map((r) => r.toLowerCase()).sort().join(" ");
+    const wide = state.wide;
+    const reposKey = [...repos].map((r) => r.toLowerCase()).sort().join(" ");
+    const failBoth = (error: InboxPullHost["error"]) => {
+      for (const own of [state, wide]) {
+        own.error = error;
+        own.failedAt = now();
+      }
+    };
     const job = (async () => {
       if (listHeld(host)) {
-        state.error = "rate_limited";
-        state.failedAt = now();
+        failBoth("rate_limited");
         return;
       }
-      // Everywhere: the bare searches, never limited to the projects' repositories.
-      const searches = cli === "gh" ? githubPullSearches(now(), wide ? [] : repos) : null;
+      const searches = cli === "gh" ? githubPullSearches(now(), repos) : null;
       // GitLab's own lists are the user's, never limited to the projects; GitHub's are while the repositories fit.
       const scoped = !!searches && searches.authored.includes(" repo:");
+      const every = scoped ? githubPullSearches(now(), []) : null;
       const args = searches
         ? [
             "api",
@@ -1223,7 +1256,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             "--hostname",
             host,
             "-f",
-            `query=${GITHUB_PULLS_QUERY}`,
+            `query=${every ? GITHUB_PULLS_BOTH_QUERY : GITHUB_PULLS_QUERY}`,
             "-f",
             `requested=${searches.requested}`,
             "-f",
@@ -1232,26 +1265,34 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             `assigned=${searches.assigned}`,
             "-f",
             `merged=${searches.merged}`,
+            ...(every
+              ? ["-f", `everyRequested=${every.requested}`, "-f", `everyAuthored=${every.authored}`, "-f", `everyAssigned=${every.assigned}`, "-f", `everyMerged=${every.merged}`]
+              : []),
           ]
         : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
       const result = await run(cli, args);
       const parsed = result.exitCode === 0 ? (cli === "gh" ? parseGithubPulls(result.stdout, host) : parseGitlabPulls(result.stdout, host)) : null;
-      if (!parsed) {
+      const parsedWide = parsed && every ? parseGithubPulls(result.stdout, host, "every") : parsed;
+      if (!parsed || !parsedWide) {
         fail(host, state, cli, result);
+        wide.error = state.error;
+        wide.failedAt = state.failedAt;
         return;
       }
       spent(host, parsed);
-      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, avatars: parsed.avatars, scoped, repos: reposKey, ...(parsed.capped ? { capped: parsed.capped } : {}) };
+      const at = now();
+      state.answer = { at, login: parsed.login, pulls: parsed.pulls, avatars: parsed.avatars, scoped, repos: reposKey, ...(parsed.capped ? { capped: parsed.capped } : {}) };
+      wide.answer = { at, login: parsedWide.login, pulls: parsedWide.pulls, avatars: parsedWide.avatars, scoped: false, repos: "", ...(parsedWide.capped ? { capped: parsedWide.capped } : {}) };
       state.error = null;
+      wide.error = null;
     })()
-      .catch(() => {
-        state.error = "unavailable";
-        state.failedAt = now();
-      })
+      .catch(() => failBoth("unavailable"))
       .finally(() => {
         state.pending = null;
+        wide.pending = null;
       });
     state.pending = job;
+    wide.pending = job;
     return job;
   };
 
@@ -1410,8 +1451,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // The searches are scoped to the projects' repositories: a new set of them reads again.
           const reposKey = [...repoNames].map((r) => r.toLowerCase()).sort().join(" ");
           const own: OwnState = everywhere ? state.wide : state;
+          // One read serves both lists (`read`): a list whose answer is fresh is answered from it, or waits for it.
           if (everywhere) {
-            if (due(own, refresh)) await read(host, cli, own, repoNames, true);
+            if (due(own, refresh)) await read(host, cli, state, repoNames);
           } else if (due(state, refresh) || (state.answer && state.answer.repos !== reposKey && !(state.error && now() - state.failedAt < REF_FAILURE_MS))) await read(host, cli, state, repoNames);
           // Others after the person's own lists (its order follows their activity), on its own path and clock, and never
           // waited for: this answer carries its last answer (and `others_pending`); a new one lands on the next list.

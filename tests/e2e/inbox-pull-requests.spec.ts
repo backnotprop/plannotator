@@ -529,7 +529,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
         },
         merged: { nodes: [ghPull(billingRepo, 411, { title: 'Idempotency keys on the charge client', state: 'MERGED', headRefName: 'retry/charge-client', mergedAt: ago(26 * 60), updatedAt: ago(26 * 60) })] },
       },
-    }),
+    }, (key, value) =>
+      // The same call answers the Pull requests board (the searches everywhere, `every…`): here, the same PRs.
+      key === 'data' ? { ...value, everyRequested: value.requested, everyAuthored: value.authored, everyAssigned: value.assigned, everyMerged: value.merged } : value,
+    ),
   );
   const mr = (iid: number, fields: Record<string, unknown>) => ({
     iid: String(iid),
@@ -786,11 +789,12 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
-  // One read per host for Reviews' list, and one for the Pull requests board in its right pane (the person's own PRs
-  // everywhere, cached apart): never more.
-  await expect.poll(() => forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'gh pulls', 'glab pulls', 'glab pulls']);
+  // One read per host: never more.
+  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
+  // The Pull requests board in the right pane (the person's own PRs everywhere) is answered by that same read.
+  await expect(page.locator('[data-prs-page] [data-pr-tile]').first()).toBeVisible();
   await page.waitForTimeout(400);
-  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'gh pulls', 'glab pulls', 'glab pulls']);
+  expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
 
   // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
@@ -2911,7 +2915,7 @@ test('a saved line comment over a push: labelled, posted at the commit read, the
     writeFileSync(named(endpoint), patch.replace(/ms-6/g, 'ms-8'));
     writeFileSync(join(world.forge, 'gh-head-880'), `${pushed}\n`);
     writeFileSync(named(`${endpoint}/commits?per_page=100`), `${read}\n${pushed}\n`);
-    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/, `$1${new Date().toISOString()}`));
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/g, `$1${new Date().toISOString()}`));
     // The list reads again on focus, at most every 20 s.
     await expect(async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));

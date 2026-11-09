@@ -90,7 +90,7 @@ function fakeGh() {
     const query = args.find((a) => a.startsWith("query=")) ?? "";
     if (query.includes("InboxPullsOthers")) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
     if (query.includes("requested: search")) {
-      own.push(args.filter((a) => /^(requested|authored|assigned|merged)=/.test(a)));
+      own.push(args.filter((a) => /^(every)?(requested|authored|assigned|merged)=/i.test(a)));
       // The same PR asked of the person and assigned to them: two searches, one PR.
       const data = {
         viewer: { login: "dana" },
@@ -99,6 +99,11 @@ function fakeGh() {
         assigned: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
         authored: { issueCount: 1, nodes: [node("northwind/ledger", 412)] },
         merged: { nodes: [] },
+        // The everywhere half (`every…`), asked with the scoped searches in the same call.
+        everyRequested: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
+        everyAssigned: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
+        everyAuthored: { issueCount: 1, nodes: [node("northwind/ledger", 412)] },
+        everyMerged: { nodes: [] },
       };
       return { stdout: JSON.stringify({ data }), stderr: "", exitCode: 0 };
     }
@@ -109,30 +114,47 @@ function fakeGh() {
 
 describe("list everywhere", () => {
   const projects = [{ host: "github.com", repo: "northwind/ledger", project_id: "prj_1" }];
-  test("unscoped searches; a PR outside the projects is kept once; the scoped read stays its own", async () => {
+  const scopedArgs = (call: string[]) => call.filter((a) => /^(requested|authored|assigned|merged)=/.test(a));
+  const everyArgs = (call: string[]) => call.filter((a) => /^every[A-Z]\w*=/.test(a));
+
+  test("one read answers both lists: the board's unscoped searches and Reviews' scoped ones in the same call; a PR outside the projects is kept once", async () => {
     const gh = fakeGh();
     const pulls = createInboxPulls({ run: gh.run });
     const wide = await pulls.list(projects, { everywhere: true });
     expect(gh.own).toHaveLength(1);
-    expect(gh.own[0]!.every((a) => !a.includes("repo:"))).toBe(true);
+    expect(everyArgs(gh.own[0]!)).toHaveLength(4);
+    expect(everyArgs(gh.own[0]!).every((a) => !a.includes("repo:"))).toBe(true);
+    expect(scopedArgs(gh.own[0]!).every((a) => a.includes("repo:northwind/ledger"))).toBe(true);
     const tool = wide.pulls.filter((p) => p.repo === "elsewhere/tool");
     expect(tool).toHaveLength(1);
     expect(tool[0]!.requested).toBe(true);
     expect(tool[0]!.assigned).toBe(true);
     expect(wide.pulls.map((p) => p.key).sort()).toEqual(["github.com/elsewhere/tool#7", "github.com/northwind/ledger#412"]);
 
-    // The Reviews page's read: its own (scoped) searches, the outside PR not in its list.
+    // The Reviews page's list: from the same read (no second call), the outside PR not in it.
     const scoped = await pulls.list(projects);
-    expect(gh.own).toHaveLength(2);
-    expect(gh.own[1]!.some((a) => a.includes("repo:northwind/ledger"))).toBe(true);
+    expect(gh.own).toHaveLength(1);
     expect(scoped.pulls.map((p) => p.key)).toEqual(["github.com/northwind/ledger#412"]);
     // The page's PR is still one the Inbox knows (its view, its merge).
     expect(pulls.find("github.com/elsewhere/tool#7")?.number).toBe(7);
 
-    // Each read is cached on its own: neither reads the forge again within the minute.
+    // Cached: neither list reads the forge again within the minute.
     await pulls.list(projects, { everywhere: true });
     await pulls.list(projects);
-    expect(gh.own).toHaveLength(2);
+    expect(gh.own).toHaveLength(1);
+  });
+
+  test("Reviews with the board on it: both lists asked at once (either first) make one read per host", async () => {
+    for (const order of ["scoped first", "everywhere first"] as const) {
+      const gh = fakeGh();
+      const pulls = createInboxPulls({ run: gh.run });
+      const asks = order === "scoped first" ? [pulls.list(projects), pulls.list(projects, { everywhere: true })] : [pulls.list(projects, { everywhere: true }), pulls.list(projects)];
+      const [first, second] = await Promise.all(asks);
+      expect(gh.own).toHaveLength(1);
+      const [scoped, wide] = order === "scoped first" ? [first!, second!] : [second!, first!];
+      expect(scoped.pulls.map((p) => p.key)).toEqual(["github.com/northwind/ledger#412"]);
+      expect(wide.pulls.map((p) => p.key).sort()).toEqual(["github.com/elsewhere/tool#7", "github.com/northwind/ledger#412"]);
+    }
   });
 });
 
