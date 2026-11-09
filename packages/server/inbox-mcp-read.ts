@@ -89,6 +89,12 @@ export interface AgentQuestionRef {
    */
   result?: string;
   /**
+   * A question asked inside a file the message attached (issue #2828): the
+   * file's name. `q` then numbers it among that file's questions, as the
+   * reply's answers section does under "Your file <name>, attached to message <id>".
+   */
+  file?: string;
+  /**
    * On a one-line message and in `thread.questions`: the prompt, clipped, so
    * an answer ("Yes") says what it answers (the reply's answers section,
    * which named it, is left out of the person's earlier messages).
@@ -325,7 +331,14 @@ export function answerWords(answer: AgentAnswer | undefined): string {
  */
 function numbering(questions: readonly InboxQuestion[]): Map<string, number> {
   const rank = (list: readonly InboxQuestion[]) => [...list].sort((a, b) => a.position - b.position).map((q, i) => [q.key, i + 1] as const);
-  return new Map([...rank(questions.filter((q) => q.kind !== "action")), ...rank(questions.filter((q) => q.kind === "action"))]);
+  // A question inside an attached file (issue #2828) is numbered among that file's questions.
+  const body = questions.filter((q) => !q.attachment);
+  const files = [...new Set(questions.flatMap((q) => (q.attachment ? [q.attachment.id] : [])))];
+  return new Map([
+    ...rank(body.filter((q) => q.kind !== "action")),
+    ...rank(body.filter((q) => q.kind === "action")),
+    ...files.flatMap((id) => rank(questions.filter((q) => q.attachment?.id === id && q.kind !== "action"))),
+  ]);
 }
 
 /** An action item's result in words, for the agent (`AgentQuestionRef.result`). */
@@ -346,6 +359,7 @@ function questionRef(q: InboxQuestion, n: number): AgentQuestionRef {
     key: q.key,
     q: n,
     state: q.state,
+    ...(q.attachment ? { file: q.attachment.name } : {}),
     ...(answer ? { answer } : {}),
     ...(result ? { result } : {}),
     ...(q.superseded_by ? { superseded_by: q.superseded_by.key ? `${q.superseded_by.message_id}/${q.superseded_by.key}` : q.superseded_by.message_id } : {}),
@@ -363,7 +377,7 @@ export function agentQuestions(questions: readonly InboxQuestion[]): AgentQuesti
  */
 export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
-  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
+  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
   const answer = answerWords(q.answer);
@@ -749,7 +763,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
           ? `picked, not sent${q.answer ? `: ${answerWords(q.answer)}` : ""}`
           : "open";
       const choices = q.choices.length > 0 ? ` Choices: ${q.choices.map((c) => clip(c, 200)).join(" | ")}` : "";
-      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}) ${state}: ${q.prompt}${choices}`);
+      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""}) ${state}: ${q.prompt}${choices}`);
     }
   }
   if (thread.questions?.length) {

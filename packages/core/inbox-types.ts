@@ -1299,6 +1299,25 @@ export interface InboxPicker {
 }
 
 /**
+ * Where a question inside an attached Markdown file sits (issue #2828): the
+ * file the message attaches, and the question's key as that file's own cards
+ * compute it (`findQuestionBlocks` over the sent text). The record's `key`
+ * is unique among the message's questions (a body question keeps its key; a
+ * file's question takes the next free `-N` when a body question or an
+ * earlier file has it), and is the one a pick, a supersede and a reply name.
+ * The record's `position` is its place among that file's questions (Q1 is
+ * the file's first card), and `parsed.line` its prompt's line in the file.
+ */
+export interface InboxQuestionAttachment {
+  /** The attachment's `att_` id on the same message. */
+  id: string;
+  /** The file's name, as the message's attachment record names it. */
+  name: string;
+  /** The question's key inside the file (what its card computes). */
+  key: string;
+}
+
+/**
  * The stored question: one per question block of an agent's message.
  * Records written before Decisions were removed (2026-10) also carry
  * `decision_on_answer`, `decision_id`, `decision_recording` and
@@ -1363,6 +1382,12 @@ export interface InboxQuestionRecord {
    * item is open, and after it is taken back.
    */
   action_result?: InboxActionResult | null;
+  /**
+   * A question asked inside a Markdown file the message attaches, not in its
+   * body (issue #2828). Absent or null: a question of the body (every record
+   * written before this field).
+   */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1507,6 +1532,8 @@ export interface InboxQuestion extends InboxQuestionContract {
   action?: InboxActionFacts | null;
   /** On an action item: what came of it, or null while open. Absent on a question and from an older Inbox. */
   action_result?: InboxActionResult | null;
+  /** A question inside an attached Markdown file (`InboxQuestionRecord.attachment`). Absent: a question of the body, or an older Inbox. */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
