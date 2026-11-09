@@ -141,6 +141,7 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
@@ -3569,6 +3570,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // More words in a thread the person started, handed to a session that has
     // seen nothing of it (the person moved them there): read the thread first.
     const continues = store.continuesThread(reply);
+    const launchedWake = inboxLaunchedWakeOf(reply);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
@@ -3583,6 +3585,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(continues && !redirected ? { continues_thread: true } : {}),
       // Send now: the connection delivers it at once, into the running turn when one runs.
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
+      // A launched thread's root, to the session its launch started: the wake says the person reads the Inbox
+      // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
+      ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,

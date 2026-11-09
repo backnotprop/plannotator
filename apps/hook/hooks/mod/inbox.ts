@@ -784,6 +784,20 @@ export interface InboxLinkOptions {
    * poll never asks, and the Inbox keeps the manual notice.
    */
   reload?: InboxLinkReload
+  /**
+   * The Inbox reminder for a launched session's first wake (`launched` on the command; approval
+   * "inbox-launched-agent-note"): that turn is a prompt this plugin submits, and Claude Code raises no plugin
+   * hook for it, so the first prompt's `prompt.submit` context never reaches it. Answers the reminder and what
+   * to call once the turn was taken, or null when none is due (the reminder off, or this conversation had it).
+   * Absent: no launched wake carries it.
+   */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
+}
+
+/** The reminder a launched session's first wake carries, and its record once the turn was taken. */
+export interface InboxLaunchReminder {
+  text: string
+  entered: () => Promise<void>
 }
 
 /** What the link drives of auto-reload.ts's AutoReload. */
@@ -880,6 +894,11 @@ export class InboxLink {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /** The reminder a launched session's first wake carries (`launchReminder`), or null; a failure is none. */
+  private async launchReminderOf(): Promise<InboxLaunchReminder | null> {
+    return (await this.options.launchReminder?.().catch(() => null)) ?? null
   }
 
   /**
@@ -1418,6 +1437,9 @@ export class InboxLink {
     this.submitting = command.id
     this.held.add(command.id)
     await this.host.writeFile(`${dir}/alive`, String(await this.host.now())).catch(() => undefined)
+    // A launched session's first wake: the reminder rides in the turn's own words (no hook adds it here).
+    const reminder = command.launched ? await this.launchReminderOf() : null
+    const wake = reminder ? `${inboxWakeText(command)}\n\n${reminder.text}` : inboxWakeText(command)
     // Decided HERE, after every await above: the turn may have ended (or one started) meanwhile. Into the
     // running turn only when the person asked, one runs that may take it, and the engine can; else as a
     // turn when idle; else (this session's own Ask question holds it) it waits, its claim given back.
@@ -1434,7 +1456,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command))
+          await this.host.appendUserRow!(wake)
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -1456,8 +1478,9 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command))
+        await this.host.submit(wake)
       }
+      await reminder?.entered().catch(() => undefined)
     } catch (error) {
       this.submitting = null
       if (error instanceof PromptDropped) {

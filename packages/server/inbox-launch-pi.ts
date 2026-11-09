@@ -57,7 +57,7 @@ import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
-import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { launchShellSwitches, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
@@ -132,9 +132,12 @@ export function piArgv(pi: string, session: string, name: string): string[] {
   return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox"];
 }
 
-/** The process's env: the login env through the launch filter, the Inbox tool on, and this Inbox's data dir when not the default. */
+/**
+ * The process's env: the login env through the launch filter, the person's own Plannotator switches
+ * (`LAUNCH_SHELL_SWITCHES`), the Inbox tool on, and this Inbox's data dir when not the default.
+ */
 export function piSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | null): LaunchEnv {
-  return { ...launchSpawnEnv(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
+  return { ...launchSpawnEnv(login), ...launchShellSwitches(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
 }
 
 /**

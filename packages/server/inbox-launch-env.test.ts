@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
-import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, parseMarkedEnv, shellSkipsPermissions } from "./inbox-launch-env";
+import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, LAUNCH_SHELL_SWITCHES, launchPlainEnv, launchSettingsEnv, launchShellSwitches, launchSpawnEnv, launchStartOf, parseMarkedEnv, shellSkipsPermissions } from "./inbox-launch-env";
+import { piSpawnEnv } from "./inbox-launch-pi";
 
 const login = {
   PATH: "/usr/bin:/bin",
@@ -31,6 +32,57 @@ describe("launchSpawnEnv", () => {
   test("the skip-permissions export never rides the --bg env (it would reach the shared supervisor)", () => {
     const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
     expect(launchSpawnEnv(shell)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
+  });
+});
+
+describe("the person's Plannotator switches (LAUNCH_SHELL_SWITCHES)", () => {
+  // What the login shell exported: the listed switches, and names a launch must never carry.
+  const shell = {
+    ...login,
+    PLANNOTATOR_PLAN_REVIEW: "0",
+    PLANNOTATOR_SHARE: "disabled",
+    PLANNOTATOR_AI: "disabled",
+    PLANNOTATOR_JINA: "0",
+    PLANNOTATOR_ANNOTATE_HISTORY: "0",
+    PLANNOTATOR_FEEDBACK_HISTORY: "false",
+    PLANNOTATOR_GUIDE_HISTORY: "0",
+    PLANNOTATOR_SESSION_PROJECT: "/elsewhere",
+    PLANNOTATOR_SESSION_ID: "s",
+    PLANNOTATOR_TEST_SANDBOX: "1",
+    PLANNOTATOR_TEST_LAUNCH_PATH: "/fakes",
+    PLANNOTATOR_INBOX_CONNECT: "0",
+    PLANNOTATOR_INBOX_TOOL: "0",
+    PLANNOTATOR_CLAUDE_MOD: "0",
+    PLANNOTATOR_REMOTE: "1",
+    PLANNOTATOR_SHARE_URL: "https://share.example.com",
+  };
+  const switches = (env: Record<string, string>) => Object.fromEntries(Object.entries(env).filter(([name]) => name.startsWith("PLANNOTATOR_") && !["PLANNOTATOR_LAUNCH", "PLANNOTATOR_LAUNCH_KEY", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_DATA_DIR"].includes(name)));
+  const listed = Object.fromEntries(LAUNCH_SHELL_SWITCHES.map((name) => [name, shell[name]]));
+
+  test("Claude Code: the listed switches reach the session through its settings file, as the shell set them; nothing else does", () => {
+    expect(switches(launchSettingsEnv(shell, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false, bypassAvailable: false }))).toEqual(listed);
+  });
+
+  test("Pi: the listed switches reach its process; the Inbox tool stays on and the data dir is the Inbox's", () => {
+    const env = piSpawnEnv(shell, "/tmp/inbox-data-of-this-inbox");
+    expect(switches(env)).toEqual(listed);
+    expect(env.PLANNOTATOR_INBOX_TOOL).toBe("1");
+    expect(env.PLANNOTATOR_DATA_DIR).toBe("/tmp/inbox-data-of-this-inbox");
+  });
+
+  test("only from a login shell read: the Inbox's own env (an agent's or a test's) carries none of them in", async () => {
+    const own = { SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", PLANNOTATOR_PLAN_REVIEW: "0", PLANNOTATOR_SHARE: "disabled" };
+    const seeds: Record<string, string | undefined>[] = [];
+    const read = createLoginEnv({ run: async (_argv, options) => (seeds.push({ ...options.env }), { exitCode: 1, stdout: "" }), env: () => own });
+    const fallback = await read();
+    expect(switches(seeds[0] as Record<string, string>)).toEqual({});
+    expect(switches(launchSettingsEnv(fallback, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false, bypassAvailable: false }))).toEqual({});
+    expect(switches(piSpawnEnv(fallback, null))).toEqual({});
+  });
+
+  test("never the spawn of claude itself (it may start the person's shared supervisor), and only the names the shell set", () => {
+    expect(switches(launchSpawnEnv(shell))).toEqual({});
+    expect(launchShellSwitches({ PATH: "/bin", PLANNOTATOR_PLAN_REVIEW: "0" })).toEqual({ PLANNOTATOR_PLAN_REVIEW: "0" });
   });
 });
 
