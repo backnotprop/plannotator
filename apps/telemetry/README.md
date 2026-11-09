@@ -15,11 +15,11 @@ A Cloudflare Worker in front of three D1 tables of daily totals. Once a UTC day,
 
 Nothing else: no IP address, no header, no `request.cf` field (country, city, network), no time finer than the day, no row per request, and no ID. The Worker never reads a request header and never logs. `wrangler.toml` turns off Workers Logs, observability and Logpush, and serves only the custom domain (`workers_dev = false`, `preview_urls = false`). Never run `wrangler tail` against production.
 
-`age_week` is the Fedora countme bucket: 1 the computer's first week, 2 weeks 2 to 4, 3 weeks 5 to 24, 4 older. `tool` is one of `inbox`, `plan`, `review`, `annotate`, `last`. `favicon` is the favicon set in Settings (config.json `favicon`): `glass`, `face` (the `totman` setting), `p` (the `classic` setting), `yellow`, or `none` when it was never picked.
+`age_week` is the Fedora countme bucket: 1 the computer's first week, 2 weeks 2 to 4, 3 weeks 5 to 24, 4 older. `tool` is one of `inbox`, `plan`, `review`, `annotate`, `last`. `favicon` is the favicon set in Settings (config.json `favicon`): `glass`, `yellow`, `face` (the `totman` setting), or `none` when it was never picked (or holds anything else).
 
 ## Routes
 
-- `POST /ping`: a body over 160 bytes gets `413`, by its Content-Length before any byte is read, or once the read passes 160 bytes; a body that is not exactly those four keys (`version` X.Y.Z, `age_week` 1-4, `tool` one of the five, `first` 0 or 1), or those four and `favicon` (one of `glass`, `face`, `p`, `yellow`, `none`), gets `400`; otherwise the upserts and `204`.
+- `POST /ping`: a body over 160 bytes gets `413`, by its Content-Length before any byte is read, or once the read passes 160 bytes; a body that is not exactly those four keys (`version` X.Y.Z, `age_week` 1-4, `tool` one of the five, `first` 0 or 1), or those four and `favicon` (one of `glass`, `yellow`, `face`, `none`), gets `400`; otherwise the upserts and `204`.
 - `GET /totals`: `{"days":[{"day","users","age_week":{"1":..},"versions":{"0.28.46":..},"tools":{"plan":..},"favicon":{"glass":..}}]}` for the last 90 days, public (`access-control-allow-origin: *`). Served from the Cache API (`caches.default`) for 5 minutes, so repeated GETs do not read D1. `users`, `age_week` and `versions` count computers (from `daily_total`); `tools` counts computers per tool (from `daily`); `favicon` counts computers per favicon (from `daily_favicon`), only from releases that send it, so it adds up to less than `users` while older releases still ping.
 - Anything else: `404`; a wrong method: `405`.
 

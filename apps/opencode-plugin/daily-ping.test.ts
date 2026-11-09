@@ -134,11 +134,11 @@ describe("the daily ping in the OpenCode plugin", () => {
     expect(bodies).toEqual([ping("plan")]);
   }, 15_000);
 
-  test("OpenCode reads the same config.json favicon as the CLI: classic is p", async () => {
-    writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ favicon: "classic" }));
+  test("OpenCode reads the same config.json favicon as the CLI: yellow is yellow", async () => {
+    writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ favicon: "yellow" }));
     await handleAnnotateCommand({ properties: { arguments: "plan.md", sessionID: "s" } }, deps() as any);
     await until(() => sent().includes("annotate"));
-    expect(bodies).toEqual(['{"version":"0.28.46","age_week":4,"tool":"annotate","first":1,"favicon":"p"}']);
+    expect(bodies).toEqual(['{"version":"0.28.46","age_week":4,"tool":"annotate","first":1,"favicon":"yellow"}']);
   });
 
   test("a local build is a dev build: no release CI mark in dist/, or one for another version", () => {

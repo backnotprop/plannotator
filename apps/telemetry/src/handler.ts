@@ -6,7 +6,7 @@
  *                   version, age bucket and tool, and, when `first` is 1 (the
  *                   computer's first ping of the day), to the day's user
  *                   total and to the day's count for that `favicon` (glass,
- *                   face, p, yellow or none), a table of its own, never stored next
+ *                   yellow, face or none), a table of its own, never stored next
  *                   to the version, age bucket or tool. The four-key body
  *                   without `favicon` (every release before it) is accepted
  *                   for ever and counts no favicon. 204, no body. Anything
@@ -56,7 +56,7 @@ export const MAX_BODY_BYTES = 160;
 export const AGE_WEEKS = [1, 2, 3, 4] as const;
 export const TOOLS = ["inbox", "plan", "review", "annotate", "last"] as const;
 /** The favicon set in Settings (packages/shared/daily-ping.ts), or none when never picked. */
-export const FAVICONS = ["glass", "face", "p", "yellow", "none"] as const;
+export const FAVICONS = ["glass", "yellow", "face", "none"] as const;
 /** How many days GET /totals answers, newest last. */
 export const TOTALS_DAYS = 90;
 

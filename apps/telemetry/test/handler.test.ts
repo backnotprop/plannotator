@@ -118,7 +118,7 @@ describe("POST /ping", () => {
       withFavicon("0.28.57", 2, "review", 0, "glass"),
       withFavicon("0.28.57", 2, "annotate", 0, "glass"),
       withFavicon("0.28.57", 1, "inbox", 1, "face"),
-      withFavicon("0.28.57", 4, "last", 1, "p"),
+      withFavicon("0.28.57", 4, "last", 1, "face"),
       withFavicon("0.28.57", 3, "plan", 1, "none"),
       withFavicon("0.28.57", 2, "plan", 1, "yellow"),
       withFavicon("0.28.57", 2, "review", 0, "yellow"),
@@ -131,8 +131,7 @@ describe("POST /ping", () => {
       expect({ b, status: (await handleRequest(ping(b), { DB: db }, NOW)).status }).toEqual({ b, status: 204 });
     expect([...favicon.values()]).toEqual([
       { day: "2026-11-03", favicon: "glass", n: 2 },
-      { day: "2026-11-03", favicon: "face", n: 2 },
-      { day: "2026-11-03", favicon: "p", n: 1 },
+      { day: "2026-11-03", favicon: "face", n: 3 },
       { day: "2026-11-03", favicon: "none", n: 1 },
       { day: "2026-11-03", favicon: "yellow", n: 1 },
     ]);
@@ -142,7 +141,7 @@ describe("POST /ping", () => {
     expect(calls.filter((c) => c.sql === FAVICON_UPSERT_SQL).map((c) => c.values)).toEqual([
       ["2026-11-03", "glass"],
       ["2026-11-03", "face"],
-      ["2026-11-03", "p"],
+      ["2026-11-03", "face"],
       ["2026-11-03", "none"],
       ["2026-11-03", "yellow"],
       ["2026-11-03", "glass"],
@@ -183,6 +182,7 @@ describe("POST /ping", () => {
       '{"version":"0.28.46","age_week":2,"tool":"plan","first":true}',
       withFavicon("0.28.46", 2, "plan", 1, "totman"),
       withFavicon("0.28.46", 2, "plan", 1, "classic"),
+      withFavicon("0.28.46", 2, "plan", 1, "p"),
       withFavicon("0.28.46", 2, "plan", 1, "Glass"),
       withFavicon("0.28.46", 2, "plan", 1, "Yellow"),
       withFavicon("0.28.46", 2, "plan", 1, ""),
