@@ -160,7 +160,7 @@ function checkPulls(value: unknown): InboxDraft["pulls"] | null {
   return { keys: [...(pulls.keys as string[])], projects: [...(pulls.projects as string[])], ask_line: pulls.ask_line };
 }
 
-/** A draft's folder pick (`InboxDraft.start`): `{ agent, machine, folder: "~/…", name, create? }`, or null. */
+/** A draft's folder pick (`InboxDraft.start`): `{ agent, machine, folder: "~/…" or "/…", name, create? }`, or null. */
 function checkStart(value: unknown): InboxDraft["start"] | null {
   if (value === null || value === undefined) return null;
   const start = value as Record<string, unknown>;
@@ -171,12 +171,14 @@ function checkStart(value: unknown): InboxDraft["start"] | null {
     !text(start.agent, 64) ||
     !(start.machine === null || isInboxId("ibx", start.machine)) ||
     !text(start.folder, 4096) ||
-    !(start.folder as string).startsWith("~/") ||
+    // A folder in home (`~/…`) or anywhere else by its full path (a drive: `/Volumes/…`); the Send checks it again.
+    !/^(~\/|\/)/.test(start.folder as string) ||
+    (start.folder as string).split("/").some((segment) => segment === ".." || segment === ".") ||
     !text(start.name, 255) ||
     !(start.create === undefined || start.create === true) ||
     !checkStartClone(start.clone)
   ) {
-    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\", name, create?, clone?: { url, branch? } } or null.", { field: "start" });
+    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\" or \"/…\", name, create?, clone?: { url, branch? } } or null.", { field: "start" });
   }
   const clone = start.clone as { url: string; branch?: string } | undefined;
   return {

@@ -35,7 +35,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
@@ -720,7 +720,6 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
             </button>
             <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || !words.trim()} aria-keyshortcuts={sendKeys} data-pulls-reply-send="">
               {sending ? 'Sending…' : 'Send'}
-              <ShortcutHint scope={inboxThreadShortcuts} action="send" />
             </button>
           </div>
         </div>
