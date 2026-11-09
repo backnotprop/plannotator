@@ -96,6 +96,7 @@ import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
 import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
 import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
+import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -296,6 +297,11 @@ export interface AttachmentPaneProps {
   onSide?: (words: string, source?: string) => void;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
   onToast?: Notice;
+  /**
+   * The questions inside this Markdown file (issue #2828; fileQuestions.tsx): its cards answer like the message
+   * body's. Absent or null (a file whose message recorded none, the tour): the cards stay read-only.
+   */
+  questions?: FileQuestions | null;
 }
 
 /**
@@ -529,8 +535,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
-  /** Full screen's composer: an image, a film and an HTML page draw it (the comment row of the first two goes inside it). */
-  const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'html');
+  /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
+  const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
   /**
    * The tools: showing (pinned), or gathered into the corner control (tucked) by » or the composer's ⌄. Every opening
    * of full screen starts showing.
@@ -807,7 +813,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // An image's or a film's comment row (a phone's "Comment at" button for a film) stays at the file's foot in full screen: the chip and a phone's toolbar sit above it.
   useEffect(() => {
     const section = sectionRef.current;
-    if (!full || !section || (kind !== 'image' && kind !== 'video' && !(kind === 'html' && hasComposer))) return;
+    if (!full || !section || (kind !== 'image' && kind !== 'video' && kind !== 'audio' && !(kind === 'html' && hasComposer))) return;
     const place = () => {
       const row = fileFootRow(section);
       // The layout height (offsetHeight), not the box on screen: a card flying into the corner control is scaled down.
@@ -1464,7 +1470,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const isText = kind === 'markdown' || kind === 'text';
   const isCode = kind === 'code';
   const isImage = kind === 'image';
-  const isVideo = kind === 'video';
+  /** A video or a recording: one player view, comments at moments (contract 4). */
+  const isVideo = kind === 'video' || kind === 'audio';
   const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
   const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
@@ -1478,6 +1485,43 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  // The file's question cards, answerable like the body's (issue #2828).
+  const fileQuestionProps = useFileQuestionViewerProps(kind === 'markdown' ? props.questions : null);
+  // A card asked for (the open questions list, a reply's answer row): brought into view and ringed, as the
+  // thread's jump does for a card in a message, once the file's text is drawn.
+  const questionFocus = kind === 'markdown' ? props.questions?.focus : null;
+  const questionFocusKey = questionFocus ? (props.questions?.records.find((r) => r.key === questionFocus.key)?.attachment?.key ?? null) : null;
+  const questionFocusDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!questionFocus || !questionFocusKey || !view || questionFocusDone.current === questionFocus.seq) return;
+    let frames = 0;
+    let ring: ReturnType<typeof setTimeout> | null = null;
+    let frame = requestAnimationFrame(function find() {
+      const card = scrollViewport?.querySelector<HTMLElement>(`[data-question-key="${CSS.escape(questionFocusKey)}"]`);
+      if (!card) {
+        frames += 1;
+        if (frames < 30) frame = requestAnimationFrame(find);
+        return;
+      }
+      questionFocusDone.current = questionFocus.seq;
+      card.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+      card.focus({ preventScroll: true });
+      card.classList.remove('ib-q-target-out');
+      card.classList.add('ib-q-target');
+      ring = setTimeout(() => {
+        card.classList.add('ib-q-target-out');
+        card.classList.remove('ib-q-target');
+        ring = setTimeout(() => card.classList.remove('ib-q-target-out'), 700);
+      }, 1400);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (ring) clearTimeout(ring);
+    };
+    // Once per ask (its seq), and again when the text it waits for is drawn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
   // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
   const sideFrom = props.onSide
     ? (text: string, context: SelectionActionContext) =>
@@ -2883,6 +2927,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
                 questionDecisionLines={false}
+                {...fileQuestionProps}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
                 onAddAnnotation={(annotation) => void save(annotation)}
@@ -2959,7 +3004,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // An edit kept when the file closed, back in its card's edit box.
             reopenEdit={panelReopenEdit}
             // A linked page takes no comments: the hint says where they can be written instead.
-            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
+            emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? `Pause at a moment and comment below the ${kind === 'audio' ? 'player' : 'film'}` : isCode ? 'Click a line to comment' : undefined}
             isOpen
             hideEmptyMessage={earlierCount > 0}
             timelineFooter={

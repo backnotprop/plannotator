@@ -35,6 +35,8 @@ writeFileSync(
     inboxAgentNotes: { offered: true },
     inboxSound: { dialogShownFor: version },
     inboxListIntro: { shownAt: "2026-10-01T10:00:00.000Z", version: 2 },
+    // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+    favicon: "glass",
   }),
 );
 

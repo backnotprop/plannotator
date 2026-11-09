@@ -96,6 +96,7 @@ import {
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
+  type InboxAgentsGroup,
   type InboxListRow,
   type InboxMessage,
   type InboxProject,
@@ -201,6 +202,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
+import { inboxAgentsGroup, inboxAgentsWithoutLabels, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -748,6 +750,7 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_not_text: 415,
   attachment_not_image: 415,
   attachment_not_video: 415,
+  attachment_not_audio: 415,
   attachment_not_html: 415,
   // "Open in" (packages/server/inbox-open-in.ts): an app the per-kind policy refuses, or one not installed.
   open_not_allowed: 422,
@@ -848,6 +851,10 @@ export const WINDOW_CSP = [
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
   "img-src 'self' data: blob:",
+  // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
+  // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
+  // Never from the web, for the same reason.
+  "media-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
@@ -1586,6 +1593,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
+    // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
+    const ownAgents = agentsOf(own, now);
     return {
       serverSession,
       version,
@@ -1621,7 +1630,51 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         .map((pin) => byId.get(pin.thread_id))
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
+      /**
+       * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
+       * merged view, this Inbox's first and then each linked machine whose list carried one, each with its `machine`.
+       * Labels are stripped for a reader who is not this computer's owner (the route).
+       */
+      agents: merged ? inboxMergedAgents(machines.selfId, ownAgents, machines.agents()) : [ownAgents],
     };
+  };
+
+  /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
+  const agentsOf = (own: InboxListRow[], now: Date): InboxAgentsGroup => {
+    const projectById = (id: string) => {
+      const project = store.project(store.canonicalProjectId(id));
+      return project ? { id: project.id, name: project.name } : null;
+    };
+    let lastThreads: ReturnType<InboxStore["lastThreadsBySession"]> | null = null;
+    const waits: InboxAgentWait[] = [];
+    const archived = new Set<string>();
+    for (const row of own) {
+      if (inboxRowArchived(row)) {
+        archived.add(row.thread_id);
+        continue;
+      }
+      if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
+      const owner = store.threadOwner(row.thread_id);
+      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
+    }
+    return inboxAgentsGroup({
+      sessions: live.agentSessions(inboxStartOfDay(live.clock())),
+      launches: launch.agents(),
+      waits,
+      archived,
+      projectOf: (root, session) => {
+        if (root !== null) {
+          const known = store.projectByRoot(root);
+          return (known && projectById(known.id)) ?? inboxFolderProject(root);
+        }
+        lastThreads ??= store.lastThreadsBySession();
+        const wrote = lastThreads.get(session);
+        return wrote ? projectById(wrote.project_id) : null;
+      },
+      projectById,
+      lastHeardOf: live.lastHeardOf,
+      labels: true,
+    });
   };
 
   /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
@@ -2178,8 +2231,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The favicon (config.json `favicon`, the value plan review, code review and
    * annotate write through POST /api/config, and the one `/favicon.png`
-   * answers with): 'glass' (the default, also when nothing is stored),
-   * 'totman' (the Face icon) or 'classic'.
+   * answers with): 'glass' (the default, also when nothing is stored or when
+   * it holds a value that is no longer a style, such as 0.28.57's 'classic'),
+   * 'yellow' or 'totman' (the Face icon).
    */
   const faviconState = (): FaviconStyle => {
     const value = loadConfig().favicon;
@@ -2187,7 +2241,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   const saveFavicon = (input: unknown, validateOnly = false): FaviconStyle => {
-    if (!isFaviconStyle(input)) throw new InboxError("validation_error", "favicon: glass, totman (Face) or classic.", { field: "favicon" });
+    if (!isFaviconStyle(input)) throw new InboxError("validation_error", "favicon: glass, yellow or totman (Face).", { field: "favicon" });
     if (validateOnly) return faviconState();
     saveConfig({ favicon: input });
     if (loadConfig().favicon !== input) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
@@ -2441,6 +2495,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
     if (next) saveConfig({ inboxListIntro: next });
   }
+
+  /**
+   * The tab icon dialog ("Which favicon do you prefer?", an update-day dialog; `tab_icon` in shared/inbox/reveals.ts):
+   * decided at the first release start of the version that ships it, as the sound's is. Someone who used an earlier
+   * Inbox gets it due (`dueAt`); a fresh install is marked (`freshAt`) and never sees it: it starts on Glass and has
+   * the Settings row. Someone who already chose a favicon is never asked, so nothing is written for them. Kept with the
+   * line's own record (`inboxReveals`), wherever that is saved.
+   */
+  if (normalizeStableVersion(version) !== null && loadConfig().inboxReveals?.tab_icon === undefined && !isFaviconStyle(loadConfig().favicon)) {
+    const at = new Date().toISOString();
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, tab_icon: usedBefore ? { dueAt: at } : { freshAt: at } } });
+  }
+  /** Due, and the person never chose a favicon (config.json `favicon` unset: here, in plan review or code review). */
+  const tabIconUndecided = () => {
+    const config = loadConfig();
+    return typeof config.inboxReveals?.tab_icon?.dueAt === "string" && !isFaviconStyle(config.favicon);
+  };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
    * never both show it. Only on this computer (a page through the tailnet leaves it for the next page opened here).
@@ -2730,7 +2801,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The line of one-time dialogs (approval "inbox-feature-reveal", and its schedule, "inbox-one-time-dialogs"; the queue
-   * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice), then Snooze, the Board
+   * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice, the tab icon), then Snooze, the Board
    * and the Checklist, with the agent note keeping the day. Read live: the days pass while the Inbox runs. A dev build
    * decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
@@ -2778,6 +2849,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
     list_view: () => true,
+    // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
+    // pick in Settings (here, plan review or code review) before its moment drops it.
+    tab_icon: tabIconUndecided,
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
@@ -2923,7 +2997,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
     const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
     const saved = loadConfig().inboxReveals;
-    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
+    // The entry's own record keeps what it already held (the tab icon's `dueAt`), so the same page's retry still holds.
+    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { ...lineOfferSaved(id), shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return lineOfferSaved(id)?.shownAt === at;
   };
@@ -3336,9 +3411,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
         // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
         const labelsHere = ownerOrLocal(req, via);
-        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean) => {
-          if (!moved && !labelsHere) return;
-          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}) })}\n\n`);
+        // `agents` (additive): the sidebar's Agents moved (inbox-agents-list.ts); every reader hears it (a guest's carry no labels).
+        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean, agents: boolean) => {
+          if (!moved && !agents && !labelsHere) return;
+          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) })}\n\n`);
         };
         if (windowId || url.searchParams.get("deliveries") === "1") deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
@@ -3930,24 +4006,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // open thread's authors read the list again.
   // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only);
   // `sessions`: a session ended or came back, which moves a row's "Session ended" whatever else it says.
-  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean) => void>();
+  // `agents`: the sidebar's Agents moved (inbox-agents-list.ts): a session started or ended, a turn started or ended, a
+  // session's folder changed, an ended one passed midnight, or a launch's line moved. A label says `labels`; a thread
+  // waiting on the person moves it through a store line, which the windows read the list for anyway.
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean, agents: boolean) => void>();
   let lastDeliverySignature = "";
   let lastPresenceSignature = live.presenceSignature();
   let lastLabelVersion = live.labelVersion();
+  // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
+  // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
+  let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
   const deliveryWatch = setInterval(() => syncSection("timer:delivery", () => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
-    const signature = live.deliverySignature() + launch.signature();
+    const launched = launch.signature();
+    const signature = live.deliverySignature() + launched;
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    if (!moved && !labels) return;
+    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}`;
+    const agents = agentsSignature !== lastAgentsSignature;
+    lastAgentsSignature = agentsSignature;
+    if (!moved && !labels && !agents) return;
     lastDeliverySignature = signature;
     lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();
-    for (const listener of deliveryListeners) listener(labels, moved, sessions);
+    for (const listener of deliveryListeners) listener(labels, moved, sessions, agents);
   }), INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -3987,8 +4073,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     onChange: () => {
-      // A run line moved: a delivery move to every window, no label change.
-      for (const listener of deliveryListeners) listener(false, true, false);
+      // A run line moved: a delivery move to every window, no label change; the Agents section shows the launch's state.
+      for (const listener of deliveryListeners) listener(false, true, false, true);
     },
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
@@ -4529,7 +4615,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
         // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
         // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
-        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows;
+        // `agents`' labels too (inbox-agents-list.ts): the owner's alone.
+        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : { ...rows, agents: inboxAgentsWithoutLabels(rows.agents) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");

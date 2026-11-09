@@ -6,6 +6,10 @@
  *   plain `http:`, local servers included);
  * - the window's own policy lets a picture in from the web again (a message's
  *   text, a diagram in it, would make the browser call the agent's site);
+ * - a page's own video or audio (`<video src="data:video/mp4;base64,…">`, a
+ *   blob:) is blocked again: neither the window's policy (a srcdoc page
+ *   inherits it) nor the page document's names a media source, so media falls
+ *   back to `default-src 'self'`;
  * - a page the Inbox no longer keeps (a restart) leaves the frame blank
  *   instead of telling the window to post it again;
  * - the store grows without bound.
@@ -33,6 +37,10 @@ describe("the window's policy", () => {
   test("loads pictures from this server, data: and blob: only, never the web", () => {
     expect(directives(WINDOW_CSP).get("img-src")).toEqual(["'self'", "data:", "blob:"]);
   });
+
+  test("plays a srcdoc page's own video and audio (data: and blob:), never the web's", () => {
+    expect(directives(WINDOW_CSP).get("media-src")).toEqual(["'self'", "data:", "blob:"]);
+  });
 });
 
 describe("an attached page's document", () => {
@@ -55,6 +63,8 @@ describe("an attached page's document", () => {
     // An opaque origin even opened as a tab: never allow-same-origin.
     expect(policy.get("sandbox")).toEqual(["allow-scripts", "allow-modals"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:", "https:", "http:"]);
+    // Its own video and audio play (data: and blob:), as in the window's srcdoc.
+    expect(policy.get("media-src")).toEqual(["'self'", "data:", "blob:"]);
     // Pictures only: nothing else reaches the web.
     for (const [name, values] of policy) {
       if (name === "img-src") continue;

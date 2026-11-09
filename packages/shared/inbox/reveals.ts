@@ -6,7 +6,7 @@
  * every claim against it.
  *
  * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
- * options, voice), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
+ * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -106,6 +106,9 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // the point"): due for everyone, fresh installs too, once the machine holds five threads, with no day count.
   { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // "Which favicon do you prefer?" (the owner, 2026-11-09: "Ship it as shown"): due for someone who used an earlier
+  // Inbox and never chose a favicon (config.json `favicon` unset), decided at the release start; fresh installs never.
+  { id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use (`revealHeavyUse`:

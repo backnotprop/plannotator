@@ -56,6 +56,7 @@ import {
 import { INBOX_HOST_NAMES, type InboxLaunchRecord, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { LaunchPermissionContext } from "./inbox-launch-host";
 import { createLaunchQuestions, lastPermissionAnswerAt, openPermissionQuestions, type PermissionAnswer, type PermissionTarget } from "./inbox-launch-permission";
+import { powerShellCommandLine } from "./inbox-launch-windows";
 
 export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
@@ -74,10 +75,18 @@ const PERMISSION_HOOK_TIMEOUT_S = 345_600;
 /** One shell word: single-quoted. */
 const shellWord = (word: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
 
-/** The per-launch PermissionRequest hook: every tool (ExitPlanMode passes straight through to plan review). */
-export function launchPermissionHooks(self: readonly string[]) {
-  const command = [...self, "inbox", "permission-hook"].map(shellWord).join(" ");
-  return { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: PERMISSION_HOOK_TIMEOUT_S }] }] };
+/**
+ * The per-launch PermissionRequest hook: every tool (ExitPlanMode passes straight through to plan review). On Windows
+ * Claude runs a hook in Git Bash where it is installed, else PowerShell: the hook names PowerShell (`shell`) and is
+ * quoted for it, so one command works with or without Git Bash.
+ */
+export function launchPermissionHooks(self: readonly string[], platform: NodeJS.Platform = process.platform) {
+  const argv = [...self, "inbox", "permission-hook"];
+  const hook =
+    platform === "win32"
+      ? { type: "command", shell: "powershell", command: powerShellCommandLine(argv), timeout: PERMISSION_HOOK_TIMEOUT_S }
+      : { type: "command", command: argv.map(shellWord).join(" "), timeout: PERMISSION_HOOK_TIMEOUT_S };
+  return { PermissionRequest: [{ matcher: "*", hooks: [hook] }] };
 }
 
 /**

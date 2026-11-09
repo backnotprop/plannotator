@@ -212,6 +212,18 @@ export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; n
       </span>
     );
   }
+  if (kind === 'audio') {
+    // A recording: its note and type, and the play mark with its length (as a film's).
+    return (
+      <>
+        <FileCard attachment={attachment} />
+        <span className="ib-wf-play" aria-hidden="true" data-face-audio="">
+          <Icon name="play" size={14} />
+          {attachment.duration_ms ? formatInboxVideoTime(attachment.duration_ms / 1000) : null}
+        </span>
+      </>
+    );
+  }
   if (kind === 'html' && preview?.html) {
     return (
       <span className="ib-wf-sheet ib-wf-page" data-face="html">

@@ -54,6 +54,7 @@
  *   POST /api/inbox/launch/:id/retry     Try again after a failed start, restart or connection
  *   POST /api/inbox/launch/:id/trust     Trust folder: the host saves the trust, then Try again (owner only, tailnet too)
  *   POST /api/inbox/launch/settings      `{ full_permissions }` or `{ scratch_dir }` (Settings → Agents)
+ *   POST /api/inbox/launch/choose-folder macOS's folder dialog on this computer ("Choose in Finder…"; its own window only)
  *   GET  /api/inbox/launch/settings      the switch as it stands (never set: what the login shell says)
  *
  * And one route for a launched session's own permission hook, guarded like
@@ -61,7 +62,25 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { checkNewHomeFolder, folderIdentity, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder, sameFolderIdentity } from "./inbox-home-folders";
+import {
+  checkNewHomeFolder,
+  folderIdentity,
+  folderPlacesFor,
+  folderRefusalMessage,
+  isHomeItself,
+  listHomeFolders,
+  makeHomeFolder,
+  noStartMessage,
+  resolveHomeFolder,
+  sameFolderIdentity,
+  shownParent,
+  type FolderPlaces,
+  type HomeFolder,
+  type HomeFolderListing,
+  type HomeFolderRefusal,
+} from "./inbox-home-folders";
+import { createFolderReader, driveOf, outsideHome } from "./inbox-folder-reader";
+import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
@@ -194,6 +213,12 @@ export function createInboxLaunch(options: {
   startedOverSsh?: boolean;
   /** This computer's name as linked machines know it: a launch another machine sends is refused in words that name it. */
   machineName?: () => string | null;
+  /** The machine's system and drive folders (`folderPlacesFor`; tests name their own). */
+  folderPlaces?: FolderPlaces;
+  /** How long a read of a folder outside home may take (`FOLDER_READ_TIMEOUT_MS`; tests shorten it). */
+  folderReadTimeoutMs?: number;
+  /** macOS's folder dialog ("Choose in Finder…"): the folder picked, or null when the person cancelled (tests stand in). */
+  chooseFolder?: () => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -214,6 +239,27 @@ export function createInboxLaunch(options: {
     return configCache.value;
   };
   const enabled = () => config().enabled;
+
+  /**
+   * Folders outside home (approval "inbox-launch-any-folder"): any folder but a system or hidden one, so a folder on
+   * another drive works. Read off this process with a short timeout (`inbox-folder-reader.ts`), so a drive that
+   * doesn't answer never freezes the Inbox; folders in home are read here, as always.
+   */
+  const places = options.folderPlaces ?? folderPlacesFor(options.platform);
+  const drives = createDriveList({ platform: options.platform });
+  const reader = createFolderReader({ home: options.homeDir, platform: options.platform, places, timeoutMs: options.folderReadTimeoutMs, drives: () => drives.known().map((d) => d.path) });
+  const resolveFolder = (typed: string): HomeFolder => resolveHomeFolder(options.homeDir, typed, places);
+  /** A typed folder, read where it is: in process in home, off it outside home (a slow drive answers `slow` with its name). */
+  const resolveFolderAnywhere = async (typed: string): Promise<{ ok: true; value: HomeFolder } | { ok: false; slow: string }> =>
+    outsideHome(options.homeDir, typed) ? await reader.resolve(typed) : { ok: true, value: resolveFolder(typed) };
+  /** A refused listing's answer: the same words here and through a linked machine's forward. */
+  const refusedListing = (refused: HomeFolderRefusal): Response =>
+    refused === "hidden"
+      ? json({ error: "Hidden folders aren't listed.", code: "folder_hidden" }, 422)
+      : refused === "system"
+        ? json({ error: "System folders aren't listed.", code: "folder_system" }, 422)
+        : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
+  const slowAnswer = (name: string): Response => json({ error: `${name} isn't responding.`, code: "folder_slow", drive: name }, 504);
 
   /**
    * Every call but a start: the Inbox's env through the launch filter, its PATH
@@ -1001,20 +1047,52 @@ ${result.text}`);
       : { enabled: false, full_permissions: false }),
   });
   /**
-   * "Another folder on <machine>…": the folder names in one folder under home (`listHomeFolders`). The owner's window
-   * only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked machine
-   * without the window's mark get `window_only`; a phone's door never reaches it (a machine-only door route).
+   * "Another folder on <machine>…": the folder names in one folder (`listHomeFolders`): in home here, outside home off
+   * this process (a drive that doesn't answer in time is `504 folder_slow`, "<drive> isn't responding."). The owner's
+   * window only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked
+   * machine without the window's mark get `window_only`; a phone's door never reaches it (a machine-only door route).
    */
-  const homeFolders = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response => {
+  const homeFolders = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
     if (!owner || options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can list its folders.", code: "owner_only" }, 403);
     const window = door ? door.window : req.headers.get("sec-fetch-site") === "same-origin";
     if (!window) return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
-    const listed = listHomeFolders(options.homeDir, new URL(req.url).searchParams.get("path") ?? "~");
-    if ("refused" in listed) {
-      return json(listed.refused === "hidden" ? { error: "Hidden folders aren't listed.", code: "folder_hidden" } : { error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422);
-    }
+    const query = new URL(req.url).searchParams;
+    const typed = query.get("path") ?? "~";
+    let listed: HomeFolderListing | { refused: HomeFolderRefusal };
+    if (outsideHome(options.homeDir, typed)) {
+      // `fresh`: the window's Try again after a drive didn't answer.
+      const off = await reader.list(typed, query.get("fresh") === "1");
+      if (!off.ok) return slowAnswer(off.slow);
+      listed = off.value;
+    } else listed = listHomeFolders(options.homeDir, typed, places);
+    if ("refused" in listed) return refusedListing(listed.refused);
     return json(listed);
+  };
+
+  /**
+   * "Choose in Finder…" (approval "inbox-launch-any-folder"): macOS's own folder dialog, on this computer, for this
+   * computer's own window only (never over the tailnet, a linked machine's forward, a guest or an agent's call). The
+   * folder picked comes back as a path; the window then reads it as any typed path, so the same rules apply.
+   */
+  let choosing: Promise<string | null> | null = null;
+  const chooseFolderRoute = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
+    if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+    if (options.platform !== "darwin") return json({ error: "Finder is on macOS only.", code: "unsupported" }, 404);
+    if (door || via !== "local" || !owner || options.isGuest?.(req, via) || req.headers.get("sec-fetch-site") !== "same-origin") {
+      return json({ error: "Finder opens from this computer's own Inbox window only.", code: "window_only" }, 403);
+    }
+    const body = await options.readBody(req);
+    if (checkServerSession(body, options.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    choosing ??= (options.chooseFolder ?? chooseFolderInFinder)().finally(() => {
+      choosing = null;
+    });
+    try {
+      const path = await choosing;
+      return json(path ? { path } : { cancelled: true });
+    } catch {
+      return json({ error: "Finder couldn't be opened.", code: "finder_failed" }, 500);
+    }
   };
 
   /** The folder reads' guard (`homeFolders`): the owner's window only, here or through a linked machine's forward. */
@@ -1040,7 +1118,7 @@ ${result.text}`);
    * `into` absent: the default clone folder. Answers `{ into, path, name, state: "clone" | "already", taken, writable }`,
    * each path as `~/…`; a URL that isn't a repo `422 validation_error`, a folder the listing refuses its `422`.
    */
-  const cloneTargetRoute = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response => {
+  const cloneTargetRoute = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
     const refused = windowRead(req, via, owner, door);
     if (refused) return refused;
     const query = new URL(req.url).searchParams;
@@ -1050,8 +1128,10 @@ ${result.text}`);
     const typedInto = query.get("into");
     let into: string;
     if (typedInto) {
-      const at = resolveHomeFolder(options.homeDir, typedInto);
-      if (!at.ok) return json(at.refused === "hidden" ? { error: "Hidden folders aren't listed.", code: "folder_hidden" } : { error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422);
+      const read = await resolveFolderAnywhere(typedInto);
+      if (!read.ok) return slowAnswer(read.slow);
+      const at = read.value;
+      if (!at.ok) return refusedListing(at.refused);
       if (!at.exists || !at.real) return json({ error: `${at.shown} isn't there.`, code: "folder_missing" }, 422);
       into = at.real;
     } else into = defaultCloneInto();
@@ -1104,11 +1184,15 @@ ${result.text}`);
   ): Promise<Response | null> => {
     if (path === "/api/inbox/launch/folders") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
-      return homeFolders(req, via, owner, door);
+      return await homeFolders(req, via, owner, door);
+    }
+    if (path === "/api/inbox/launch/choose-folder") {
+      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+      return await chooseFolderRoute(req, via, owner, door);
     }
     if (path === "/api/inbox/launch/clone" || path === "/api/inbox/launch/clone-check") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
-      return path.endsWith("check") ? await cloneCheck(req, via, owner, door) : cloneTargetRoute(req, via, owner, door);
+      return path.endsWith("check") ? await cloneCheck(req, via, owner, door) : await cloneTargetRoute(req, via, owner, door);
     }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
@@ -1149,8 +1233,11 @@ ${result.text}`);
         const raw = body.scratch_dir;
         if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "scratch_dir: a folder path, or null.", { field: "scratch_dir" });
         const typed = (raw ?? "").trim();
-        const path = typed === "~" ? options.homeDir : typed.startsWith("~/") ? join(options.homeDir, typed.slice(2)) : typed;
-        if (path && (!isAbsolute(path) || resolve(path) === resolve("/"))) throw new InboxError("validation_error", "Give a full path, such as ~/scratch.", { field: "scratch_dir" });
+        // Windows also takes `~\scratch`, and refuses any drive's root, not only the current one.
+        const homeRelative = typed.startsWith("~/") || (options.platform === "win32" && typed.startsWith("~\\"));
+        const path = typed === "~" ? options.homeDir : homeRelative ? join(options.homeDir, typed.slice(2)) : typed;
+        const root = path && (resolve(path) === resolve("/") || (options.platform === "win32" && /^[A-Za-z]:[\\/]*$/.test(path)));
+        if (path && (!isAbsolute(path) || root)) throw new InboxError("validation_error", "Give a full path, such as ~/scratch.", { field: "scratch_dir" });
         const repository = path ? repositoryHolding(path) : null;
         if (repository) {
           throw new InboxError("validation_error", `That folder is inside the git repository ${options.displayFolder(repository)}. Pick one outside any repository.`, { field: "scratch_dir" });
@@ -1391,6 +1478,32 @@ ${result.text}`);
     }
   };
 
+  /**
+   * Whether a project's folder is there, for the folder menu. A project on a network drive is looked at off this
+   * process, in the background: the menu has the last answer (there, until one comes), and `slow` while the drive
+   * doesn't answer. Any other folder is looked at here, as always (a drive that isn't plugged in is simply not there).
+   */
+  const networkSeen = new Map<string, { at: number; exists: boolean; slow: boolean; reading: boolean }>();
+  const NETWORK_LOOK_MS = 10_000;
+  const projectThere = (root: string, mounted: readonly { path: string; network?: true }[]): { exists: boolean; slow?: true } => {
+    const drive = mounted.find((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
+    if (!drive) return { exists: isFolder(root) };
+    const seen = networkSeen.get(root) ?? { at: 0, exists: true, slow: false, reading: false };
+    if (!seen.reading && now() - seen.at > NETWORK_LOOK_MS) {
+      seen.reading = true;
+      networkSeen.set(root, seen);
+      void reader.resolve(root).then(
+        (read) => {
+          const next = { at: now(), reading: false, slow: !read.ok, exists: read.ok ? read.value.ok && read.value.exists : seen.exists };
+          networkSeen.set(root, next);
+          if (next.slow !== seen.slow || next.exists !== seen.exists) options.onChange();
+        },
+        () => networkSeen.set(root, { ...seen, at: now(), reading: false }),
+      );
+    }
+    return { exists: seen.exists, ...(seen.slow ? { slow: true as const } : {}) };
+  };
+
   return {
     enabled,
     settingsState,
@@ -1465,11 +1578,16 @@ ${result.text}`);
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
-      // A folder under home (not a project yet): by the folder listing's rules; it becomes a project below.
-      const typed = "folder" in target ? resolveHomeFolder(options.homeDir, target.folder) : null;
-      // Home itself is listed, never started in: an agent there reaches every folder under it, hidden ones too.
-      if (typed && (!typed.ok || (typed.real && isHomeItself(options.homeDir, typed.real)))) {
-        throw new InboxError("validation_error", typed.ok === false && typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      // A folder (not a project yet): by the folder listing's rules; it becomes a project below. Outside home it is
+      // read off this process first: a drive that doesn't answer is said, and nothing more of it is touched.
+      const read = "folder" in target ? await resolveFolderAnywhere(target.folder) : null;
+      if (read && !read.ok) throw new InboxError("folder_unavailable", `${read.slow} isn't responding. Nothing was sent.`, { field: "to.launch" });
+      const typed = read?.ok ? read.value : null;
+      if (typed && !typed.ok) throw new InboxError("validation_error", folderRefusalMessage(typed.refused), { field: "to.launch" });
+      // Home itself, a folder above it, `/` and a drives folder are listed, never started in: an agent there reaches
+      // every folder under it, hidden ones too.
+      if (typed?.ok && typed.state === "folder" && !typed.start) {
+        throw new InboxError("validation_error", noStartMessage(typed.real && isHomeItself(options.homeDir, typed.real) ? "~" : typed.shown), { field: "to.launch" });
       }
       // Clone from a git URL: the folder named is where the clone goes. The same repo there already is started in as it
       // is (C9); a name taken by anything else since the pick moves to the next free one, and the line says so (E11).
@@ -1480,21 +1598,21 @@ ${result.text}`);
         const key = `${cloneOf.host}/${cloneOf.slug}`.toLowerCase();
         if (!(typed.state === "folder" && typed.real && originKeyOf(typed.real) === key)) {
           const segments = typed.shown.split("/");
-          const parentShown = segments.slice(0, -1).join("/") || "~";
-          const parent = resolveHomeFolder(options.homeDir, parentShown);
+          const parentShown = shownParent(typed.shown);
+          const parent = resolveFolder(parentShown);
           const free = parent.ok && parent.real ? cloneTarget({ into: parent.real, repo: segments[segments.length - 1]!, key, exists: existsSync, originOf: originKeyOf }) : null;
           if (!free) throw new InboxError("folder_unavailable", `${typed.shown} is taken. Pick another folder. Nothing was sent.`, { field: "to.launch" });
           cloneRenamedFrom = typed.shown;
           cloneFolder = tildeOf(realOrSelf(options.homeDir), free.path);
         }
       }
-      const cloneTyped = cloneOf && cloneFolder !== null && cloneRenamedFrom ? resolveHomeFolder(options.homeDir, cloneFolder) : null;
-      if (cloneTyped && !cloneTyped.ok) throw new InboxError("validation_error", "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      const cloneTyped = cloneOf && cloneFolder !== null && cloneRenamedFrom ? resolveFolder(cloneFolder) : null;
+      if (cloneTyped && !cloneTyped.ok) throw new InboxError("validation_error", folderRefusalMessage(cloneTyped.refused), { field: "to.launch" });
       const pathTyped = (cloneTyped ?? typed) as Extract<NonNullable<typeof typed>, { ok: true }> | null;
       const cloning = !!cloneOf && pathTyped?.ok === true && pathTyped.state !== "folder";
       // Create a folder (`create`), or a clone's folder: a path whose last folder isn't there is checked now and made last, after every check.
       const creating =
-        pathTyped?.ok && pathTyped.state !== "folder" && "folder" in target && (target.create === true || cloning) ? checkNewHomeFolder(options.homeDir, cloneFolder ?? target.folder) : null;
+        pathTyped?.ok && pathTyped.state !== "folder" && "folder" in target && (target.create === true || cloning) ? checkNewHomeFolder(options.homeDir, cloneFolder ?? target.folder, places) : null;
       if (creating && !creating.ok) throw new InboxError(creating.code, creating.message, { field: "to.launch" });
       if (pathTyped?.ok && pathTyped.state === "locked") throw new InboxError("folder_unavailable", `Can't open ${pathTyped.shown}: no permission. Nothing was sent.`, { field: "to.launch" });
       if (pathTyped && !creating && (!pathTyped.exists || !pathTyped.real)) throw new InboxError("folder_missing", `${pathTyped.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
@@ -1502,6 +1620,11 @@ ${result.text}`);
       let folderTarget = pathTyped?.ok && pathTyped.real ? pathTyped.real : null;
       const chosen = "project_id" in target ? store.project(target.project_id) : folderTarget ? (store.listProjects().find((p) => p.root === folderTarget) ?? null) : null;
       if ("project_id" in target && !chosen) throw new InboxError("project_not_found", `No project ${target.project_id}.`);
+      // A project on another drive is looked at off this process: a drive that doesn't answer is said, never waited on.
+      if (chosen && outsideHome(options.homeDir, chosen.root)) {
+        const there = await reader.resolve(chosen.root);
+        if (!there.ok) throw new InboxError("folder_unavailable", `${there.slow} isn't responding. Nothing was sent.`, { field: "to.launch" });
+      }
       if (chosen && !isFolder(chosen.root)) {
         throw new InboxError("folder_missing", `${options.displayFolder(chosen.root)} isn't there any more. Pick another project. Nothing was sent.`, { field: "to.launch" });
       }
@@ -1638,9 +1761,11 @@ ${result.text}`);
       for (const row of store.listRows()) if ((recency.get(row.project.id) ?? "") < row.last_at) recency.set(row.project.id, row.last_at);
       // A scratch folder Delete removed is not offered again (it would only be listed struck through).
       const removed = new Set(roots().filter((root) => root.launch!.scratch && root.launch!.deleted_at).map((root) => root.launch!.folder));
+      // The drives mounted now: the folder menu's drive rows, and how a project on a network drive is looked at.
+      const mounted = options.platform === "win32" ? [] : await drives.list();
       const projects = store
         .listProjects()
-        .map((p) => ({ id: p.id, name: p.name, root: p.root, exists: isFolder(p.root) }))
+        .map((p) => ({ id: p.id, name: p.name, root: p.root, ...projectThere(p.root, mounted) }))
         .filter((p) => p.exists || !removed.has(p.root))
         .sort((a, b) => (recency.get(b.id) ?? "").localeCompare(recency.get(a.id) ?? "") || a.name.localeCompare(b.name));
       /** The folders `host` does not trust and could from here, by project id (`INBOX_SCRATCH_PICK`: the scratch root). */
@@ -1677,7 +1802,15 @@ ${result.text}`);
         const code = last.code ?? "unknown";
         return [{ agent: host.agent, name: host.name, code, ...(code === "signed_out" && options.startedOverSsh ? { over_ssh: true as const } : {}) }];
       });
-      return { agents: offered.flat(), projects, scratch: { root }, clone: { into: defaultCloneInto() }, ...(notReady.length > 0 ? { not_ready: notReady } : {}) };
+      return {
+        agents: offered.flat(),
+        projects,
+        scratch: { root },
+        clone: { into: defaultCloneInto() },
+        ...(notReady.length > 0 ? { not_ready: notReady } : {}),
+        drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}) })),
+        ...(options.platform === "darwin" ? { finder: true as const } : {}),
+      };
     },
 
     /**
@@ -1811,6 +1944,20 @@ ${result.text}`);
       return { ...row, run: word, delivery };
     },
 
+    /**
+     * Every launched session not deleted, as the Agents section reads it (packages/server/inbox-agents-list.ts): its
+     * run line's state (null: no line, which is live and idle, or resting with nothing waiting on it). An agent with
+     * no host here (a downgrade) is left out, as it has no line.
+     */
+    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; run: InboxRun["state"] | null }[] {
+      return roots().flatMap((root) => {
+        const launch = root.launch!;
+        const session = inboxLaunchedSession(root);
+        if (launch.deleted_at || !session || !hostOf(launch)) return [];
+        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, run: runOfRoot(root)?.state ?? null }];
+      });
+    },
+
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
       return roots()
@@ -1824,3 +1971,35 @@ ${result.text}`);
 }
 
 export type InboxLaunch = ReturnType<typeof createInboxLaunch>;
+
+/** How long macOS's folder dialog may stay open before the Inbox stops waiting on it. */
+const FINDER_WAIT_MS = 10 * 60_000;
+
+/**
+ * macOS's own folder dialog ("Choose in Finder…"), shown in front: the full path of the folder picked, or null when
+ * the person cancelled. The sandbox stands one in (`PLANNOTATOR_TEST_CHOOSE_FOLDER`, the test sandbox only), so no
+ * dialog ever opens there.
+ */
+async function chooseFolderInFinder(): Promise<string | null> {
+  const stub = process.env.PLANNOTATOR_TEST_SANDBOX ? process.env.PLANNOTATOR_TEST_CHOOSE_FOLDER : undefined;
+  if (stub !== undefined) {
+    await Bun.sleep(600);
+    return stub === "" ? null : stub;
+  }
+  const child = Bun.spawn(["/usr/bin/osascript", "-e", "activate", "-e", 'POSIX path of (choose folder with prompt "Pick a folder to start the agent in")'], {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { PATH: "/usr/bin:/bin" },
+  });
+  const timer = setTimeout(() => child.kill("SIGKILL"), FINDER_WAIT_MS);
+  try {
+    const [out, err, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    if (exit === 0 && out.trim()) return out.trim();
+    // Cancel is AppleScript's error -128.
+    if (/-128/.test(err)) return null;
+    throw new Error(err.trim() || `osascript ended with ${exit}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}

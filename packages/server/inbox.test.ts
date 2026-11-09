@@ -18,7 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -869,7 +869,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
       expect(await read()).toBe("glass");
       expect(await icon()).toEqual(FAVICON_PNG_BYTES);
-      for (const bad of ["face", "Glass", "", null, 1, { style: "glass" }]) {
+      // "classic" was the P icon until it was removed after 0.28.57: no longer a choice.
+      for (const bad of ["face", "Glass", "classic", "", null, 1, { style: "glass" }]) {
         const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
         expect(refused.status).toBe(422);
         expect((await refused.json()).code).toBe("validation_error");
@@ -881,7 +882,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       for (const [style, bytes] of [
         ["totman", FACE_FAVICON_PNG_BYTES],
-        ["classic", P_FAVICON_PNG_BYTES],
+        ["yellow", YELLOW_FAVICON_PNG_BYTES],
         ["glass", FAVICON_PNG_BYTES],
       ] as const) {
         const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: style });
@@ -894,6 +895,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
       expect(await read()).toBe("totman");
+      // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      expect(onDisk().favicon).toBe("classic");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

@@ -35,7 +35,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
@@ -98,6 +98,8 @@ export interface PullsPageProps {
   phone: boolean;
   /** Reviews' thread open beside the list: the page draws only the list, and the window the thread (the Inbox's own pane). */
   threadId?: string | null;
+  /** Beside that thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. */
+  onHide?: () => void;
   /** The header's +, the empty state's New review. */
   onNew: () => void;
   onOpenStack: (id: string | null) => void;
@@ -256,7 +258,7 @@ export function PullsPage(given: PullsPageProps) {
         )}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
-      {!phone && <ListColumnEdge />}
+      {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
         <RiskRulesDialog
           answer={risk.answer}
@@ -718,7 +720,6 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
             </button>
             <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || !words.trim()} aria-keyshortcuts={sendKeys} data-pulls-reply-send="">
               {sending ? 'Sending…' : 'Send'}
-              <ShortcutHint scope={inboxThreadShortcuts} action="send" />
             </button>
           </div>
         </div>
