@@ -51,6 +51,7 @@ import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { openItemsLabel } from '../openQuestions';
+import { markFullScreenComposer } from '../pageMarks';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
@@ -283,6 +284,15 @@ export function FullScreenComposer({
   const state = useComposerState(threadId, hasDraft, takesComments, foldedByDefault);
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
+  // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
+  const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
+    cardRef.current = el;
+    const release = markFullScreenComposer(el);
+    return () => {
+      cardRef.current = null;
+      release?.();
+    };
+  }, []);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const commentsRef = useRef<HTMLButtonElement | null>(null);
@@ -553,7 +563,7 @@ export function FullScreenComposer({
       </div>
     )}
     <div
-      ref={cardRef}
+      ref={cardRefMarked}
       className={`ib-fcomp ib-mode-${mode}${phone ? ' ib-phone' : ''}`}
       role="group"
       aria-label={label}

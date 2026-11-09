@@ -201,7 +201,7 @@ function shapeBoxPart(target: { el: HTMLElement; view: string | null; id: string
   return { name: Array.from(name).slice(0, 600).join(''), ...(code ? { code } : {}) };
 }
 
-export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, headSide, codeView = true, review = null, boxSelect, darkContrast = false, stackBadges = false }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, headSide, codeView = true, review = null, boxSelect, darkContrast = false, stackBadges = false, dockRef, pillRef }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -1058,9 +1058,9 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           </div>
 
           {updated ? (
-            <div className="shp-pill" role="status"><Pebble alive reshaping={busy} size={16} />{updated}</div>
+            <div ref={pillRef} className="shp-pill" role="status"><Pebble alive reshaping={busy} size={16} />{updated}</div>
           ) : waiting > 0 && session.state === 'gone' ? (
-            <div className="shp-pill waits" role="status">
+            <div ref={pillRef} className="shp-pill waits" role="status">
               <Pebble alive={false} size={16} />
               {waiting === 1 ? '1 change waits for the agent' : `${waiting} changes wait for the agent`}
               {host.resumePrompt && (
@@ -1075,7 +1075,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
             </button>
           )}
 
-          <div className="shp-dock" role="toolbar" aria-label="Shape toolbar">
+          <div ref={dockRef} className="shp-dock" role="toolbar" aria-label="Shape toolbar">
             {/* A board with no view to show (only `views.know`, say) has no empty group in the dock. */}
             {views.length > 0 && <div className="shp-tgroup" role="group" aria-label="Views">
               {views.map((v) => (

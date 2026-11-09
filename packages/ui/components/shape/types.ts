@@ -7,7 +7,7 @@
  * (SPEC.md §3, "Host seam"); the dev harness passes an in-memory one.
  */
 import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, ReactNode, Ref } from 'react';
 import type { ShapeCodeTarget, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
 export type { ShapeBoard, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
@@ -253,4 +253,11 @@ export interface ShapeSurfaceProps {
    * none of it, whatever the board holds.
    */
   stackBadges?: boolean;
+  /**
+   * Refs on the dock (`.shp-dock`) and on the update pill (`.shp-pill`, either kind), each set while it is in the page:
+   * for a host that keys its own page styles on them being there (the Inbox lifts its toast above them, with page
+   * marks instead of a `body:has()`). Absent: none.
+   */
+  dockRef?: Ref<HTMLDivElement>;
+  pillRef?: Ref<HTMLDivElement>;
 }
