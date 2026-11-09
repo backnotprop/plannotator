@@ -43,3 +43,19 @@ test("a slow answer of an earlier save never takes the newer one's place", () =>
   expect(own.explains(q(6))).toBe(true);
   expect(own.explains(q(7))).toBe(false);
 });
+
+test("an echo is covered only by a read that started after its save's answer, and a later save is not", () => {
+  const own = createOwnSaves();
+  own.saved([q(4)]);
+  expect(own.covered(q(4))).toBe(false);
+  own.readsStarted();
+  expect(own.covered(q(4))).toBe(true);
+  expect(own.covered(q(3))).toBe(true);
+  // A newer save's answer lands after that read started: its echo still owes the read.
+  own.saved([q(5)]);
+  expect(own.covered(q(5))).toBe(false);
+  // News is never covered.
+  own.readsStarted();
+  expect(own.covered(q(6))).toBe(false);
+  expect(own.covered(q(5, { state: 'sent', sent_revision: 5 }))).toBe(false);
+});

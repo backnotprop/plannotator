@@ -888,9 +888,9 @@ function Inbox() {
   /**
    * The questions the open thread is saving, whether one's record came meanwhile (`held`: those records), and the
    * reads they owe (`onPickSaves`): `read` everything, as for a record no one placed; `readHeld` what the held
-   * records owe, at once.
+   * records owe, at once; `readOwn` what a run with no record held owes (the list, the decisions, the drafts).
    */
-  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, held: [] as InboxEvent[], read: () => {}, readHeld: (_held: InboxEvent[]) => {} });
+  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, held: [] as InboxEvent[], read: () => {}, readOwn: () => {}, readHeld: (_held: InboxEvent[]) => {} });
   /** What this window's own question saves brought back: their records are echoes, not news (ownSaves.ts). */
   const [ownSaves] = useState(createOwnSaves);
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
@@ -2044,6 +2044,8 @@ function Inbox() {
      * once, the records still waiting their pause too (a run of saves that just ended: its reads were held already).
      */
     const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean } = {}) => {
+      // Every answer this window's saves brought back so far is covered by the read about to start (ownSaves.ts).
+      if (how.now) ownSaves.readsStarted();
       if (how.own) noteOwnRecord(batch, how.own);
       else noteRecord(batch, event);
       if (timer) clearTimeout(timer);
@@ -2105,6 +2107,13 @@ function Inbox() {
       event.kind === 'question' && typeof event.thread_id === 'string' && event.thread_id !== '' && ownSaves.explains(event.question) ? event.thread_id : null;
     // The window's own pick saves owe a read with no record of their own: everything is read, the open thread too.
     pickSaves.current.read = () => readAfterRecord(null);
+    // A run of saves on the open thread ended with no record held: what shows the pick besides the pane, at once.
+    pickSaves.current.readOwn = () => {
+      const open = routeRef.current.thread;
+      // No thread open (a save that landed after its pane closed): the list, as before.
+      if (open) readAfterRecord(null, { own: open, now: true });
+      else void refreshList(false);
+    };
     // A run of saves ended with their records held: one read for them all, at once. An echo of the window's own save
     // reads what shows the pick besides the pane (the list, the decisions, the drafts); anything else, what it owes.
     pickSaves.current.readHeld = (held) => {
@@ -2164,8 +2173,13 @@ function Inbox() {
             return;
           }
           // The record of a save of this window that already landed (it came after the save's answer): it owes what
-          // shows the pick besides the pane, never the open thread or its files.
+          // shows the pick besides the pane, never the open thread or its files; nothing once that read started after
+          // the save's answer (the run's end read it).
           const own = event ? ownEcho(event) : null;
+          if (own && event?.kind === 'question' && ownSaves.covered(event.question)) {
+            emitFloaterEvent('record', null);
+            return;
+          }
           readAfterRecord(event, own ? { own } : {});
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
@@ -2326,6 +2340,7 @@ function Inbox() {
     return () => {
       cancelled = true;
       pickSaves.current.read = () => {};
+      pickSaves.current.readOwn = () => {};
       pickSaves.current.readHeld = () => {};
       discardPreparedInboxEvents();
       unsubscribe();
@@ -3046,7 +3061,8 @@ function Inbox() {
     const held = pickSaves.current.held;
     pickSaves.current.held = [];
     if (!pickSaves.current.owed) {
-      if (!paneClosed) void refreshList(false);
+      // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
+      if (!paneClosed) pickSaves.current.readOwn();
       return;
     }
     pickSaves.current.owed = false;

@@ -242,23 +242,21 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
   expect(count(`${threadRoute()}/attachments`)).toBe(0);
 });
 
-test.skipIf(!hasDom)("a save's record that comes after its answer reads no thread or files, and a list read with nothing new draws nothing", async () => {
+test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
   const field = await open();
   type(field, 'a');
-  await until(() => saves === 1 && count('/api/inbox/threads') === 1, 'the list read after the save');
+  // The save landed with no record yet: what its record will owe is read at once (the list, the drafts).
+  await until(() => saves === 1 && count('/api/inbox/threads') === 1 && count('/api/inbox/drafts') === 1, 'the reads after the save');
   await wait(200);
   reads = [];
-  // The record of that save, after its answer (the stream was slower than the save): an echo.
+  // The record of that save, after its answer (the stream was slower than the save): an echo, already read for.
   expect(lastPicked).not.toBeNull();
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_own', thread_id: world.waiting, question: lastPicked });
-  await until(() => count('/api/inbox/threads') === 1, 'the list read for the echo');
-  await wait(200);
-  expect(count(threadRoute())).toBe(0);
-  expect(count(`${threadRoute()}/attachments`)).toBe(0);
+  await wait(250);
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
   // Nothing changed since the last list read: it draws nothing.
   const drawn = commits;
-  reads = [];
   frame('pins', {});
   await until(() => count('/api/inbox/threads') === 1, 'the list read for the pins');
   await wait(80);
