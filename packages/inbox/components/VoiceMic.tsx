@@ -7,7 +7,7 @@
  * The level reaches the screen by direct writes from `subscribeMeter`, so a hold re-renders nothing but the one line
  * that shows its seconds.
  */
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ComposerMirrorPaint } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { Icon } from '../icons';
 import { useVoiceBlock, useVoiceSettings, useVoiceShown, voiceWhere, type VoiceBlock, type VoiceHandle } from '../voice';
@@ -112,6 +112,31 @@ export function VoiceFoot({ voice, phone, children }: { voice: VoiceHandle; phon
   );
 }
 
+/**
+ * The mic alone, for a host that keeps the status in a place of its own in its row (`VoiceStatusLine`): the reply box,
+ * where the mic never moves while a take runs (approval "inbox-reply-box", T6).
+ */
+export function VoiceMicButton({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
+  const shown = useVoiceShown();
+  const block = useVoiceBlock(shown);
+  if (!shown) return null;
+  return (
+    <>
+      <MicButton voice={voice} phone={phone} block={block} />
+      <span className="ib-sr" role="status">
+        {voice.view.said}
+      </span>
+    </>
+  );
+}
+
+/** The status alone (Listening, the level, the time, Cancel; then Transcribing), for `VoiceMicButton`'s host. Nothing while idle. */
+export function VoiceStatusLine({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
+  const shown = useVoiceShown();
+  if (!shown) return null;
+  return <VoiceStatus voice={voice} phone={phone} />;
+}
+
 /** The foot in a host with no toolbar of its own. */
 export function VoiceFootRow({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const shown = useVoiceShown();
@@ -180,16 +205,61 @@ function blockNote(block: VoiceBlock, api: boolean, where: string): Note {
     : { tone: 'quiet', text: notReadyText(api, where), settings: true };
 }
 
-export function VoiceNote({ voice }: { voice: VoiceHandle }) {
+type ShownNote = { note: Note; kept: boolean; settings: boolean };
+
+/**
+ * The line under the words for what needs words or a choice. `glide` (the reply box): a note that goes is drawn as it
+ * was, without its buttons, for its closing motion (160 ms, inbox.css), so it never leaves in one frame; under reduced
+ * motion it goes at once. Elsewhere it goes at once, as before.
+ */
+export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?: boolean }) {
   const settings = useVoiceSettings();
   const shown = useVoiceShown();
   const block = useVoiceBlock(shown);
-  if (!shown) return null;
   const { session, view } = voice;
   const api = (view.engine ?? settings?.engine) === 'api';
   const where = voiceWhere(settings);
-  const note = view.trouble ? troubleNote(view.trouble, api, where) : block ? blockNote(block, api, where) : null;
-  if (!note) return null;
+  const note = !shown ? null : view.trouble ? troubleNote(view.trouble, api, where) : block ? blockNote(block, api, where) : null;
+  const [leaving, setLeaving] = useState<ShownNote | null>(null);
+  const last = useRef<ShownNote | null>(null);
+  useEffect(() => {
+    if (note) {
+      last.current = { note, kept: view.kept, settings: !!note.settings };
+      setLeaving(null);
+      return;
+    }
+    if (!glide || !last.current) return;
+    setLeaving(last.current);
+    last.current = null;
+    // The note's identity is what it is about (a re-render draws a new element for the same words).
+  }, [note ? (view.trouble ?? block ?? '') : null, view.kept, glide]);
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(() => setLeaving(null), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 170);
+    return () => clearTimeout(timer);
+  }, [leaving]);
+  if (!note) {
+    // The render that drops the note already draws it leaving (the effect that keeps it runs after the paint).
+    const going = glide ? (leaving ?? last.current) : null;
+    if (!going) return null;
+    return (
+      <div className={`ib-vnote ib-vnote-leaving${going.note.tone === 'error' ? ' ib-verr' : ''}`} aria-hidden="true" data-voice-note-leaving="">
+        <span className="ib-vnote-t">{going.note.text}</span>
+        {/* Its buttons' words, not buttons: the same height as it goes, and nothing to press on the way out. */}
+        {(going.kept || going.settings) && (
+          <span className="ib-vnote-a">
+            {going.kept && (
+              <>
+                <span className="ib-dtlink ib-vstrong">Retry</span>
+                <span className="ib-dtlink">Discard</span>
+              </>
+            )}
+            {going.settings && <span className="ib-dtlink ib-vstrong">Voice settings</span>}
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className={`ib-vnote${note.tone === 'error' ? ' ib-verr' : ''}`} role={note.tone === 'error' ? 'alert' : 'status'} data-voice-note={view.trouble ?? block ?? undefined}>
       <span className="ib-vnote-t">{note.text}</span>

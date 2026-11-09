@@ -4,13 +4,25 @@ import { createContext, useContext } from "react";
  * What a host makes of an image a document references (`![shot](img/a.png)`,
  * or an `<img src>` in a raw HTML block):
  *
- * - `src`: load the image from this URL instead of the default resolution.
+ * - `src`: load the image from this URL instead of the default resolution
+ *   (with `width`, laid out at that width as the original would be).
  * - `unavailable`: draw a small inert placeholder (the alt text, `title` as
  *   its tooltip) instead of an `<img>`, so nothing is fetched.
  * - `null` from the resolver: the renderer's default for that image.
  */
 export type ImageResolution =
-  | { kind: "src"; src: string }
+  | {
+      kind: "src";
+      src: string;
+      /**
+       * The picture's own width in pixels, when `src` serves a smaller copy
+       * of it (the Plannotator Inbox's `?w=`, for a big screenshot drawn at
+       * the width of a message): the `<img>` gets it as its `width`, so it is
+       * laid out exactly as the original would be (still at most 100% wide),
+       * while the browser decodes only the copy.
+       */
+      width?: number;
+    }
   | { kind: "unavailable"; title: string };
 
 /** Called with the image source exactly as the document wrote it. */

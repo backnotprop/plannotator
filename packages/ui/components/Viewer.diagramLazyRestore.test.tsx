@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import type { ViewerHandle } from './Viewer';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { AnnotationType, type Annotation } from '../types';
 import { parseMarkdownToBlocks } from '../utils/parser';
@@ -205,5 +206,65 @@ describe.if(hasDom)('Viewer: a diagram comment restored before the diagram mount
     expect(host!.querySelector(`[data-annotation-panel] [data-annotation-id="${RESTORED.id}"]`)).not.toBeNull();
     expect(reports.flatMap((r) => r.unanchored)).not.toContain(RESTORED.id);
     expect(host!.querySelectorAll('[data-diagram-mark]')).toHaveLength(1);
+  });
+});
+
+describe.if(hasDom)('Viewer.reopenComment on a diagram part', () => {
+  test('asked while the engine is still loading, the diagram opens its composer at the part once drawn, holding the words', async () => {
+    const engine = gatedRuntime();
+    setLoader(engine.loader as never);
+    const added: Annotation[] = [];
+    const ref = React.createRef<ViewerHandle>();
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(
+        <Viewer
+          ref={ref}
+          blocks={BLOCKS}
+          markdown={MARKDOWN}
+          annotations={[]}
+          onAddAnnotation={(annotation) => { added.push(annotation); }}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="comment"
+          taterMode={false}
+          disableCodePathValidation
+        />,
+      );
+    });
+    let answer: boolean | undefined;
+    await act(async () => { answer = ref.current!.reopenComment!({ ...RESTORED, id: 'kept', text: 'Typed before the close' }); });
+    expect(answer).toBe(true);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+
+    engine.arrive();
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer] textarea')).not.toBeNull());
+    const area = host!.querySelector<HTMLTextAreaElement>('[data-diagram-composer] textarea')!;
+    expect(area.value).toBe('Typed before the close');
+    expect(added).toHaveLength(0);
+    await act(async () => {
+      area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(added).toHaveLength(1));
+    expect(added[0]!.blockId).toBe(FENCE_ID);
+    expect(added[0]!.diagramAnchor).toMatchObject({ kind: 'node', id: 'D' });
+    expect(added[0]!.text).toBe('Typed before the close');
+  });
+
+  test('a fence no longer in the document: onMissing', async () => {
+    const ref = React.createRef<ViewerHandle>();
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(
+        <Viewer ref={ref} blocks={BLOCKS} markdown={MARKDOWN} annotations={[]} onAddAnnotation={() => {}} onSelectAnnotation={() => {}} selectedAnnotationId={null} mode="comment" taterMode={false} disableCodePathValidation />,
+      );
+    });
+    let missing = 0;
+    await act(async () => { ref.current!.reopenComment!({ ...RESTORED, blockId: 'goneFence' }, () => { missing += 1; }); });
+    expect(missing).toBe(1);
   });
 });

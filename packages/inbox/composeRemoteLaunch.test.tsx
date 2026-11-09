@@ -57,7 +57,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let requests: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
 let machines: MachineView[] = [SELF_VIEW];
-let miniBlock: InboxComposeLaunch = MINI_BLOCK;
+/** Mac mini's sessions read: its launch block, absent while launch is off there (as a real Inbox answers). */
+let miniBlock: InboxComposeLaunch | undefined = MINI_BLOCK;
 let sendAnswer: () => Response = () => Response.json({ thread_id: 'msg_01ARZ3NDEKTSV4RRFFQ69G5FT1', launch: { id: 'lch_1', state: 'starting' } });
 let sent: ComposeSent[] = [];
 let held: ComposeHeld[] = [];
@@ -291,13 +292,24 @@ test.skipIf(!hasDom)("Claude Code not ready on that machine: its group is one li
   expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`)).toHaveLength(0);
 });
 
-test.skipIf(!hasDom)('launch off on that machine: one line says so, and its sessions are never read', async () => {
+test.skipIf(!hasDom)('launch off on that machine: one line says so, and none of its projects', async () => {
   machines = [SELF_VIEW, view(MINI, 'Mac mini', { launch: false })];
+  miniBlock = undefined;
   await open();
   await startAndOpenMenu();
   await until(() => inDialog(`[data-compose-folder-notice="${MINI}"]`) !== null, 'the notice');
   expect(inDialog(`[data-compose-folder-notice="${MINI}"]`)!.textContent).toBe('Starting agents is off on Mac mini');
-  expect(machinesRead()).toBe(false);
+  expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`)).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)("its switch turned on there since the link connected: its sessions read says so, and its projects are offered", async () => {
+  // The link's health still says off (read once per connection); Settings → Agents there is live.
+  machines = [SELF_VIEW, view(MINI, 'Mac mini', { launch: false })];
+  await open();
+  await until(machinesRead, "Mac mini's sessions read");
+  await startAndOpenMenu();
+  await until(() => all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`).length > 0, "Mac mini's projects");
+  expect(inDialog(`[data-compose-folder-notice="${MINI}"]`)).toBeNull();
 });
 
 test.skipIf(!hasDom)('the default start is never an asleep machine\'s project while this computer has one, though the menu still leads with the machine used last', async () => {

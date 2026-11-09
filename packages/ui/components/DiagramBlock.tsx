@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
+import { diagramTargetText, type DiagramAnchor, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { useConfigValue } from '../config';
@@ -15,6 +15,7 @@ import { diagramAskAIContext } from '../utils/diagramAskAI';
 import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
+import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
 
@@ -87,6 +88,18 @@ export interface DiagramBlockProps {
   onAskAI?: CommentAskAIHandler;
   /** The document's path, sent with an Ask AI question (`sourcePath`). */
   askAISourcePath?: string;
+  /** Opt-in: a diagram whose source does not render shows that source as the
+   * plain fence, not the error panel (a host showing a diagram the person did
+   * not write, such as a guide's overview). A renderer that failed to load
+   * keeps the panel and its Retry. Absent: the error panel, as before. */
+  sourceOnError?: boolean;
+  /** Opt-in: a comment being written that the host kept, put back in the
+   * inline diagram's composer (see `DiagramReopenRequest`). */
+  reopenComment?: DiagramReopenRequest;
+  /** Opt-in: the part the diagram's composer is on as it opens, null as it
+   * closes (`where`: the inline diagram's or the popout's composer). Reads
+   * only. Absent: nothing changes. */
+  onComposerAnchor?: (blockId: string, where: 'inline' | 'popout', anchor: DiagramAnchor | null) => void;
 }
 
 const NO_ANNOTATIONS: readonly Annotation[] = [];
@@ -102,8 +115,15 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onRestoreReport,
   onAskAI,
   askAISourcePath,
+  sourceOnError = false,
+  reopenComment,
+  onComposerAnchor,
 }) => {
   const label = LABELS[kind];
+  const onComposerAnchorRef = useRef(onComposerAnchor);
+  onComposerAnchorRef.current = onComposerAnchor;
+  const inlineComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'inline', anchor), [block.id]);
+  const popoutComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'popout', anchor), [block.id]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -292,6 +312,9 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
+      if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
+        return <DiagramInlineSource block={block} kind={kind} />;
+      }
       if (state.error !== null) {
         return (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden">
@@ -324,7 +347,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // so this shows only before the first diagram lands.
       return <DiagramPending block={block} kind={kind} />;
     },
-    [block, kind, label],
+    [block, kind, label, sourceOnError],
   );
 
   const viewerProps = {
@@ -400,6 +423,8 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
               renderFallback={renderFallback}
+              reopenComment={reopenComment}
+              onComposerAnchor={inlineComposerAnchor}
             />
           </div>
         )}
@@ -416,6 +441,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               title={`${label} diagram`}
               renderId={`${kind}-${block.id}-popout`}
               onAskAI={handlePopoutAskAI}
+              onComposerAnchor={popoutComposerAnchor}
               dataAttributes={{ 'data-block-id': block.id }}
             />
           </Suspense>

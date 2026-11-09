@@ -82,6 +82,8 @@ export function useListGroups(remember = true): {
   toggle: (id: InboxListGroupId) => void;
   /** Back to its default (closed), as the Snoozed band comes back folded each time it shows. */
   reset: (id: InboxListGroupId) => void;
+  /** Open each of these groups that is closed, as a click on its header does (Show opens the groups its rows land in). */
+  open: (ids: readonly InboxListGroupId[]) => void;
 } {
   const raw = useSyncExternalStore(subscribe, read, () => '');
   const [local, setLocal] = useState<Choices>(() => new Map());
@@ -107,7 +109,23 @@ export function useListGroups(remember = true): {
         return next;
       });
     },
+    open: (ids) => {
+      if (remember) {
+        const now = parseListGroups(read());
+        const next = opened(now, ids);
+        if (next !== now) write(next);
+        return;
+      }
+      setLocal((last) => opened(last, ids));
+    },
   };
+}
+
+/** The choices with each of `ids` open: the toggle's change for each one closed; the same choices when none is. */
+function opened(choices: Choices, ids: readonly InboxListGroupId[]): Choices {
+  let next = choices;
+  for (const id of ids) if (!groupState(next, id).open) next = toggled(next, id, Date.now());
+  return next;
 }
 
 /** Tests only: forget every choice (the cookie and the page's own copy), so each test starts at the defaults. */

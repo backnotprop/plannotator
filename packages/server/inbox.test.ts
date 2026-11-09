@@ -18,6 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -854,6 +855,51 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  test("the favicon saves into config.json `favicon`, glass unless chosen, and /favicon.png answers with it", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      const server = await start(dataDir);
+      const base = `http://127.0.0.1:${server.port}`;
+      const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()).favicon;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { favicon?: unknown; theme?: unknown };
+      const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      for (const bad of ["face", "Glass", "", null, 1, { style: "glass" }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      // A refused part saves nothing, the valid parts beside it included.
+      const mixed = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" }, favicon: "navy" });
+      expect(mixed.status).toBe(422);
+      expect(existsSync(join(dataDir, "config.json")) ? onDisk().theme : undefined).toBeUndefined();
+
+      for (const [style, bytes] of [
+        ["totman", FACE_FAVICON_PNG_BYTES],
+        ["classic", P_FAVICON_PNG_BYTES],
+        ["glass", FAVICON_PNG_BYTES],
+      ] as const) {
+        const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: style });
+        expect(saved.status).toBe(200);
+        expect((await saved.json()).favicon).toBe(style);
+        expect(onDisk().favicon).toBe(style);
+        expect(await read()).toBe(style);
+        expect(await icon()).toEqual(bytes);
+      }
+      // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
+      expect(await read()).toBe("totman");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   // Approval "inbox-customize-rows" (the owner, 2026-11-02: "Whatever they set goes wherever they're using the app").
   test("the rows' look saves into config.json `inboxRows`, null until first saved, and every open window hears it", async () => {
     const root = tempRoot();
@@ -927,6 +973,64 @@ describe("the window's routes: settings, restart, favicon", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
       expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-reaction-tray": two windows (a laptop and a phone) saving emoji never write over each other's.
+  test("the tray's saved emoji change one at a time on the list as it is, count their saves, and every open window hears them", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
+      const server = await start(dataDir);
+      const settings = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { reactions: unknown; reactions_rev: unknown };
+      const change = (reaction_change: unknown) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, reaction_change });
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      expect(await settings()).toMatchObject({ reactions: [], reactions_rev: 0 });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-reactions-1&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+      // Window A saves 🚀; window B, which never heard of it, saves 🔥: both are kept, in the order saved.
+      expect(await (await change({ op: "add", emoji: "🚀" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }], reactions_rev: 1 });
+      expect(await (await change({ op: "add", emoji: "🔥" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }, { emoji: "🔥" }], reactions_rev: 2 });
+      // A name with a bidi override and a zero-width space keeps only what shows.
+      expect(await (await change({ op: "name", emoji: "🚀", label: "Ship‮ it​" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🔥" }], reactions_rev: 3 });
+      expect(await (await change({ op: "change", emoji: "🔥", to: "🎉" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], reactions_rev: 4 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxReactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], inboxReactionsRev: 4 });
+      // A name for an emoji another window took out changes nothing and writes nothing.
+      expect(await (await change({ op: "name", emoji: "🦄", label: "Gone" })).json()).toMatchObject({ reactions_rev: 4 });
+
+      const deadline = Date.now() + 1500;
+      while (!text.includes('"rev":4') && Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.value) text += decoder.decode(chunk.value);
+      }
+      controller.abort();
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀" }], rev: 1 })}`);
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], rev: 4 })}`);
+
+      // Refused: not an emoji, 👍 (the tray's first), and a sixth emoji. Nothing changes.
+      for (const bad of [{ op: "add", emoji: "ok" }, { op: "add", emoji: "👍" }, { op: "rename", emoji: "🚀" }, { op: "change", emoji: "🚀" }]) {
+        const refused = await change(bad);
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      for (const emoji of ["🧪", "👀", "❤️"]) expect((await change({ op: "add", emoji })).status).toBe(200);
+      const full = await change({ op: "add", emoji: "🌮" });
+      expect(full.status).toBe(422);
+      expect(await settings()).toMatchObject({ reactions_rev: 7 });
+      expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
@@ -1123,6 +1227,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = await fetch(`http://127.0.0.1:${server.port}/favicon.png`);
       expect(icon.status).toBe(200);
       expect(icon.headers.get("content-type")).toMatch(/^image\//);
+      // The window links /favicon.ico: Glass's .ico, so the tab shows the hand-pixelled 16 or 32.
+      const ico = await fetch(`http://127.0.0.1:${server.port}/favicon.ico`);
+      expect(ico.status).toBe(200);
+      expect(ico.headers.get("content-type")).toBe("image/x-icon");
+      expect(new Uint8Array(await ico.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

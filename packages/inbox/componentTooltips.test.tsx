@@ -15,7 +15,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { armTip, openTooltips, sized, tooltipOf, unhover } from './testing/tooltip';
+import { armTip, openTooltips, settle, sized, tooltipOf, unhover } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -81,6 +81,26 @@ const label = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[d
 
 /** Every element under `el` with a native title. */
 const nativeTitles = (el: HTMLElement) => [...el.querySelectorAll('[title]')].map((node) => node.getAttribute('title'));
+
+// The owner, after #2911: hovering the word "Inbox" (where most people point, the ↻ is hidden until then) shows
+// "Refresh" with Shift+R's keys, as the ↻ does; a name the header cuts still shows the whole name.
+test.skipIf(!hasDom)('the list title’s name opens Refresh with ⇧ R, as its ↻ does; a cut name opens the whole name', async () => {
+  const el = mount(
+    <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={false} onRefresh={() => {}} />,
+  );
+  const name = el.querySelector<HTMLElement>('.ib-lhead-tt')!;
+  sized(name, 60, 60);
+  expect((await tooltipOf(name))?.replace(/\s+/g, '')).toMatch(/^Refresh(⇧|Shift)R$/);
+  unhover(name);
+  await settle();
+  const icon = el.querySelector<HTMLElement>('[data-list-refresh-icon]')!;
+  expect((await tooltipOf(icon))?.replace(/\s+/g, '')).toMatch(/^Refresh(⇧|Shift)R$/);
+  unhover(icon);
+  await settle();
+  sized(name, 140, 60);
+  expect(await tooltipOf(name)).toBe('Inbox');
+  unhover(name);
+});
 
 test.skipIf(!hasDom)('a cut project label in a wide row opens the component tooltip; one that fits opens none; neither has a native title', async () => {
   const el = list(false);

@@ -78,7 +78,7 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
  * `https://github.com-evil.example/o/r/pull/1` as github.com. A host that only starts like a
  * public forge (`github.com-…`, `github.com.…`) is no forge at all.
  */
-function webForgeHost(hostname: string): string | null {
+export function webForgeHost(hostname: string): string | null {
   const h = hostname.toLowerCase();
   if (!/^[a-z0-9.-]+$/.test(h) || !h.includes(".")) return null;
   if (/^(github|gitlab)\.com[.-]/.test(h)) return null;
@@ -187,3 +187,45 @@ export type ForgeRefCardResult =
 
 export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
+
+const SHORT_GITHUB_PULL = /^([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})#([1-9]\d{0,9})$/;
+const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\/([A-Za-z0-9_.-]{1,100})!([1-9]\d{0,9})$/;
+
+/**
+ * A pull or merge request as an agent or the person names one for a thread
+ * (the Inbox's PR coupling), or null: `owner/repo#123` (github.com),
+ * `group/sub/project!45` (gitlab.com), or the PR's or MR's URL on any GitHub
+ * or GitLab host. An issue link, a bare `#123` and anything else are not one.
+ */
+export function parseForgePullRef(text: string): ForgeRef | null {
+  const value = text.trim();
+  if (/^https:\/\//i.test(value)) {
+    const ref = parseForgeRefUrl(value);
+    return ref && ref.kind === "pull" ? ref : null;
+  }
+  const github = SHORT_GITHUB_PULL.exec(value);
+  if (github && github[1] !== "." && github[1] !== ".." && github[2] !== "." && github[2] !== "..") {
+    return { platform: "github", host: "github.com", owner: github[1]!, repo: github[2]!, number: Number(github[3]), kind: "pull" };
+  }
+  const gitlab = SHORT_GITLAB_PULL.exec(value);
+  if (gitlab && ![...gitlab[1]!.split("/"), gitlab[2]!].some((part) => part === "." || part === "..")) {
+    return { platform: "gitlab", host: "gitlab.com", owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
+  }
+  return null;
+}
+
+/** A pull or merge request's web address. */
+export function forgePullUrl(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  return `https://${ref.host}/${ref.owner}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`;
+}
+
+/**
+ * How an agent writes a pull or merge request back: `owner/repo#123` on
+ * github.com, `group/project!45` on gitlab.com, the URL on any other host
+ * (the short forms name only those two).
+ */
+export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  if (ref.platform === "github" && ref.host === "github.com") return `${ref.owner}/${ref.repo}#${ref.number}`;
+  if (ref.platform === "gitlab" && ref.host === "gitlab.com") return `${ref.owner}/${ref.repo}!${ref.number}`;
+  return forgePullUrl(ref);
+}

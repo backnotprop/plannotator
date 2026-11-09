@@ -92,7 +92,7 @@ function render(filtered: boolean, narrow = false): HTMLElement {
  * A phone row's three lines (approval "inbox-list-row-v2"): line 1 in reading order (the project's text, the
  * agents' tiles by their name as `agents:<name>`, which CSS draws before the project, the time as `time`), the
  * title, and line 3 (the preview by its text, the open count
- * as `?N`, anything else by its text), or `null` when the row has no line 3.
+ * as `?N`, `?N:stop` or `?N:hold` when filled, anything else by its text), or `null` when the row has no line 3.
  */
 function lines(el: HTMLElement, id: string): { l1: string[]; title: string; l3: string[] | null } {
   const r = el.querySelector<HTMLElement>(`.ib-mrow[data-thread-id="${id}"]`);
@@ -105,7 +105,7 @@ function lines(el: HTMLElement, id: string): { l1: string[]; title: string; l3: 
     ...[...from.children].map((c) => (c.getAttribute('role') === 'img' ? `agents:${c.getAttribute('aria-label')}` : c.textContent ?? '')),
     ...[...m1!.children].filter((c) => c !== from).map((c) => (c.classList.contains('ib-t') ? 'time' : c.className)),
   ];
-  const named = (c: Element) => (c.classList.contains('ib-qn') ? `?${c.getAttribute('data-open-count')}` : c.textContent ?? '');
+  const named = (c: Element) => (c.classList.contains('ib-qn') ? `?${c.getAttribute('data-open-count')}${c.getAttribute('data-wait-step') === 'open' ? '' : `:${c.getAttribute('data-wait-step')}`}` : c.textContent ?? '');
   return { l1, title: m2!.textContent ?? '', l3: m3!.children.length ? [...m3!.children].map(named) : null };
 }
 
@@ -120,13 +120,13 @@ describe.if(hasDom)('the list on a phone', () => {
     }
   });
 
-  test('three lines: the agents, the project and when; the title; then the preview, the badge and the count at its end', () => {
+  test('three lines: the agents, the project and when; the title; then the preview and the question mark at its end', () => {
     const el = render(false);
-    // An unnamed thread: its subject is the title, and line 3 holds the badge and ?N alone.
+    // An unnamed thread: its subject is the title, and line 3 holds ?N alone, filled as the row is stopped.
     expect(lines(el, 'msg_stop')).toEqual({
       l1: ['payments-reconciliation-service-v2', 'agents:Claude Code', 'time'],
       title: 'Subject msg_stop',
-      l3: ['Stopped', '?2'],
+      l3: ['?2:stop'],
     });
     // A named thread: the name is the title, whole however long; the subject is the preview, then the guided review book.
     expect(lines(el, 'msg_wait')).toEqual({

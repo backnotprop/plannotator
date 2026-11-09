@@ -181,8 +181,14 @@ test('desktop beside the list: full screen, then Mark read and Snooze lead befor
   await expect(subject).toHaveAttribute('data-on', '');
   await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Invoice list: cards or a table?');
   await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
-  await subject.hover();
-  await expect(page.locator('[data-side].bg-popover')).toHaveText('Invoice list: cards or a table?');
+  // The tooltip hangs on the words, not on the title's box (which takes the bar's free room): it opens over "invoices",
+  // not far to the right over the empty room (the owner, 2026-11-08).
+  const words = subject.locator('[data-header-title]');
+  await words.hover();
+  const subjectTip = page.locator('[data-side].bg-popover');
+  await expect(subjectTip).toHaveText('Invoice list: cards or a table?');
+  const [wordsBox, tipBox] = await Promise.all([words.boundingBox(), subjectTip.boundingBox()]);
+  expect(Math.abs(tipBox!.x + tipBox!.width / 2 - (wordsBox!.x + wordsBox!.width / 2))).toBeLessThan(2);
   await page.mouse.move(0, 0);
   const [clockBox, subjectBox, artifactsBox] = await Promise.all([pane.locator('[data-thread-snooze]').boundingBox(), subject.boundingBox(), pane.locator('[data-artifacts-button]').boundingBox()]);
   expect(subjectBox!.x).toBeGreaterThanOrEqual(clockBox!.x + clockBox!.width - 0.5);

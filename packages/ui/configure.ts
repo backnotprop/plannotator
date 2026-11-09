@@ -14,16 +14,21 @@ import { setIdentityGenerator, type IdentityGenerator } from './utils/generateId
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
 import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
+import { setCodeHighlightWorker, setDeferOffscreenCodeHighlight, type CodeHighlightWorker } from './utils/codeHighlight';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
 import { setComponentTooltips } from './components/HostTitle';
 import { setRichCopyEnabled } from './utils/richCopyPolicy';
-import { setDigitHexIssueRefs } from './components/InlineMarkdown';
+import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
+import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
+import { setPageMarks } from './utils/pageMarks';
+import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
+export type { CommentCardLayout } from './utils/commentCardPolicy';
 export type {
   ImageSrcResolver,
   DocPreviewFetcher,
@@ -48,6 +53,7 @@ export type {
   AlertIconRenderer,
   FenceThemeResolver,
   RefCardTransport,
+  CodeHighlightWorker,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -139,6 +145,17 @@ export interface PlannotatorUIConfig {
    */
   digitHexIssueRefs?: boolean;
   /**
+   * Link an `owner/repo#123` ref where the text's caller names no repo of
+   * its own (`InlineMarkdown` without `githubRepo`). `true`: on github.com.
+   * `{ host }`: on that host, by `forgeRefLinks`' rule (GitLab's
+   * `/-/issues/N`; a host it cannot form a link for leaves refs plain).
+   * Default: false, such refs stay plain text exactly as before. A caller
+   * that names its repo is unchanged, and bare `#123` still needs that repo.
+   * May be called again later: mounted text re-renders with the new host.
+   * The Plannotator Inbox passes the host most of its projects use.
+   */
+  crossRepoRefsWithoutRepo?: CrossRepoRefsWithoutRepo;
+  /**
    * Make the selection toolbar's Copy button (Viewer and HtmlViewer) copy rich
    * text: text/html plus text/plain in one clipboard write, and show Copy
    * where `hideCopyButton` hid it (the Viewer on desktop). Default: false,
@@ -147,11 +164,70 @@ export interface PlannotatorUIConfig {
    */
   richCopy?: boolean;
   /**
+   * Draw `CommentPopover` as the small comment card (no header line, no
+   * blurred page behind, a chevron that closes and keeps the words, a solid
+   * "Comment" button at the row's right end). Import
+   * `@plannotator/ui/comment-card.css` with it. An object turns it on and
+   * names, as CSS selectors, the host's pane (where a docked card spans) and
+   * the things at its foot the card never covers. Default: false, the popover
+   * exactly as before. The Plannotator Inbox turns it on
+   * (`utils/commentCardPolicy`).
+   */
+  commentCard?: boolean | CommentCardLayout;
+  /**
+   * Keep a closed text-selection comment that holds words visible: a pale
+   * highlight and a floating "Draft" badge under the words' end, a press on
+   * either reopening the box (Viewer). Default: false, a closed box leaves no
+   * mark, as before. The Plannotator Inbox passes true.
+   */
+  visibleCommentDrafts?: boolean;
+  /**
+   * On a touch screen (main pointer a finger), put the selection toolbar
+   * (`AnnotationToolbar`) below the selection, where iOS Safari's own edit
+   * menu does not go, keep it inside the visible screen with an 8px margin
+   * and the safe-area insets, and give its buttons 44px targets
+   * (`utils/touchToolbarPlacement`).
+   * Default: false, the toolbar placed and sized exactly as before. With it
+   * on, nothing changes with a mouse or trackpad. Plannotator's plan review,
+   * annotate, code review and Inbox pass true.
+   */
+  touchSelectionToolbar?: boolean;
+  /**
+   * Mark the page's root while a part a theme.css or comments.css `:has()` on
+   * `html` or `body` keys on is there: `<body data-pn-popout>` while a popout
+   * dialog is open, `<html data-pn-selection-chooser>` while the diff's
+   * selection chooser shows (`utils/pageMarks`). For a host that rewrites
+   * those `:has()` selectors to the marks in its build: on a long page each
+   * such `:has()` costs a style pass over the whole document on every DOM
+   * change. Default: false, nothing is marked. The Plannotator Inbox passes
+   * true (build/inbox-page-marks.ts).
+   */
+  pageMarks?: boolean;
+  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
    */
   refCardTransport?: RefCardTransport;
+  /**
+   * Highlight a code fence only when it comes near the screen (a screen
+   * above or below it), and the rest in idle time, nearest first
+   * (`utils/codeHighlight`). A fence on screen is still highlighted before
+   * it is drawn; one farther away keeps its plain text (the same characters
+   * and size) until then. For a host that shows many fences at once (a long
+   * thread), where highlighting all of them at once blocks the page for
+   * seconds. Default: false, every fence highlighted when it mounts, as
+   * before. The Plannotator Inbox passes true.
+   */
+  deferOffscreenCodeHighlight?: boolean;
+  /**
+   * With `deferOffscreenCodeHighlight`: make a waiting fence's markup off the
+   * main thread (`utils/codeHighlight` `CodeHighlightWorker`, e.g. a Web
+   * Worker with its own Shiki core). Only the markup is written on the page.
+   * Default: none, every fence's tokens made on the page. The Plannotator
+   * Inbox passes one (`packages/inbox/codeHighlightWorker.ts`).
+   */
+  codeHighlightWorker?: CodeHighlightWorker;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -178,8 +254,15 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
+  if (config.crossRepoRefsWithoutRepo !== undefined) setCrossRepoRefsWithoutRepo(config.crossRepoRefsWithoutRepo);
   if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
+  if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
+  if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
+  if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
+  if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
+  if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
+  if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }

@@ -35,7 +35,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -115,7 +115,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const data = join(root, 'data');
   mkdirSync(data, { recursive: true });
   // The Board on, its first-visit dialog already seen (inbox-board.spec.ts proves both).
-  writeFileSync(join(data, 'config.json'), JSON.stringify({ inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
+  writeFileSync(join(data, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
   // No HOME of our own: PLANNOTATOR_TEST_SANDBOX gives the Inbox a scratch agent home inside its data dir.
   const env = {
     PATH: process.env.PATH ?? '',

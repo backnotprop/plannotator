@@ -164,6 +164,40 @@ describe("openDecisions", () => {
     expect(store.openDecisions()).toEqual([]);
   });
 
+  test("a question's card shows only its own pictures: another question's picture choices are left out", () => {
+    const { store, project } = open();
+    const image = (ref: string, n: number) => ({ id: `att_${"0".repeat(25)}${n}`, path: `/work/billing/${ref}`, named_path: null, name: ref, kind: "image" as const, sent_sha256: "a".repeat(64), size: 1, sent_mtime: "2026-11-01T00:00:00.000Z", ref });
+    const body = [
+      "Marker styles. ![Today](today.png)",
+      "",
+      ":::question",
+      "Which marker?",
+      "",
+      "- [ ] A · Mark — ![Mark](mark.png) a mark",
+      "- [ ] B · Dot — ![Dot](dot.png) a dot",
+      ":::",
+      "",
+      ":::question",
+      "Which variant?",
+      "",
+      "- [ ] A · Strip — ![Strip](strip.png) the strip",
+      "- [ ] B · Mark again — ![Mark](mark.png) the mark, shared",
+      "- [ ] C · Bar — ![Bar](bar.png) a bar",
+      ":::",
+    ].join("\n");
+    store.sendMessage({
+      project_id: project.id,
+      author: AGENTS[0]!,
+      body,
+      inline_images: ["today.png", "mark.png", "dot.png", "strip.png", "bar.png"].map((ref, n) => image(ref, n)) as never,
+    });
+    const refs = (prompt: string) => store.openDecisions().find((d) => d.question.prompt === prompt)!.pictures.inline.map((p) => p.ref).sort();
+    // Its own choices' pictures and the message's other images; not Q1's Dot. Mark is Q2's own choice too, so it stays.
+    expect(refs("Which variant?")).toEqual(["bar.png", "mark.png", "strip.png", "today.png"]);
+    // Q1 never shows Q2's Strip or Bar.
+    expect(refs("Which marker?")).toEqual(["dot.png", "mark.png", "today.png"]);
+  });
+
   test("the excerpt is the prose before the first block, one line, cut", () => {
     expect(inboxDecisionExcerpt("Hello **there**.\n\n![shot](a.png) See [the plan](x.md).\n\n:::question\nQ?\n:::")).toBe("Hello **there**. See the plan.");
     expect(inboxDecisionExcerpt(":::question\nQ?\n:::")).toBeNull();

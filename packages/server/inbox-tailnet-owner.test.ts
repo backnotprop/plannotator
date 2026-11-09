@@ -262,6 +262,19 @@ describe("what the approval opened, by caller", () => {
     }
   }
 
+  test("the settings model gives the person's own name to the owner, never to a guest", async () => {
+    const w = await world({ config: { displayName: "Dana" } });
+    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
+    expect((await read("local")).display_name).toBe("Dana");
+    expect((await read("owner")).display_name).toBe("Dana");
+    expect((await read("guest")).display_name).toBeUndefined();
+  });
+
+  test("the settings model has no name until one is set", async () => {
+    const w = await world();
+    expect(((await (await call(w, "local", { path: "/api/inbox/settings" })).json()) as Json).display_name).toBeNull();
+  });
+
   test("the settings model tells the page who it is, and shows a guest nothing of what closed", async () => {
     const w = await world();
     const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
@@ -839,8 +852,10 @@ describe("the login header counts only on the tailnet listener", () => {
 describe("a linked machine gains none of it", () => {
   test("no opened route is a door route or a forwardable write", () => {
     const names = doorRouteNames().join("\n");
-    for (const word of ["update", "agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
-    for (const route of ["update", "update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
+    for (const word of ["agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
+    // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
+    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
+    for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
       expect([route, doorWriteKind(route)]).toEqual([route, null]);
     }
   });
@@ -863,7 +878,11 @@ describe("a linked machine gains none of it", () => {
     const machine = ((await linked.json()) as Json).machine.id as string;
     await waitOnline(w, machine);
 
-    for (const route of ["update", "update/check", "update/snooze", "agents", "agents/notes", "settings", "cards/marks", "voice/key"]) {
+    // `update` has a window route of its own, so the forward itself refuses it, read and write.
+    const update = `/api/inbox/m/${machine}/update`;
+    expect(await answerOf(await call(w, "owner", { path: update }))).toEqual([404, "not_found"]);
+    expect(await answerOf(await call(w, "owner", { path: update, body: { auto_update: true } }))).toEqual([404, "not_found"]);
+    for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "settings", "cards/marks", "voice/key"]) {
       const path = `/api/inbox/m/${machine}/${route}`;
       expect([route, ...(await answerOf(await call(w, "owner", { path })))]).toEqual([route, 404, "device_route_not_found"]);
       expect([route, ...(await answerOf(await call(w, "owner", { path, body: { key: KEY, auto_update: true, reach: true, agent: "codex" } })))]).toEqual([route, 404, "not_found"]);

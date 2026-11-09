@@ -13,7 +13,8 @@
  *     agent starts here.
  *  3. "Another folder on Mac mini…": a folder in Mac mini's home that is no project yet, typed and picked through
  *     Mac mini's own folder route; Start puts "billing-api · Mac mini" in To and Send starts Claude Code there on Mac
- *     mini (MacBook's fake starts nothing); a missing path says so, with the folders that are there under the line.
+ *     mini (MacBook's fake starts nothing); a name Mac mini doesn't have offers Create, with the folders that are
+ *     there under its line.
  *  4. An untrusted folder picked that way (Mac mini's fake checks Claude's folder trust): the Send still goes, the
  *     start stops on trust, and the thread's run line Trust folder (through the forward) starts it there.
  *  5. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
@@ -233,6 +234,16 @@ async function window(browser: Browser, phone: boolean): Promise<Page> {
 const dialog = (page: Page) => page.locator('dialog[data-compose]');
 
 /** New message → To → New Claude Code session → words → the folder menu, open once Mac mini's group is in. */
+/** Close compose keeping nothing: closing with words keeps a draft (approval "inbox-compose-escape-keeps"), so empty it first. */
+async function closeEmpty(page: Page, how: 'cancel' | 'escape'): Promise<void> {
+  const d = dialog(page);
+  await d.getByRole('textbox', { name: 'Message' }).fill('');
+  await d.getByRole('textbox', { name: 'Thread name' }).fill('');
+  if (how === 'cancel') await d.locator('[data-compose-cancel]').click();
+  else await d.getByRole('textbox', { name: 'Message' }).press('Escape');
+  await expect(d).toHaveCount(0);
+}
+
 async function openFolderMenu(page: Page, words: string, wantGroup: string): Promise<void> {
   await page.locator('[data-open-compose]:visible').first().click();
   const d = dialog(page);
@@ -265,8 +276,7 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   await folderShot(phone, 'row');
   await phone.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await shot(phone, 'to-line-390');
-  await phone.locator('[data-compose-cancel]').click();
-  await dialog(phone).locator('[data-compose-discard]').click();
+  await closeEmpty(phone, 'cancel');
 
   await openFolderMenu(page, 'The staging certs expire in a week. Rotate them and update the three cron jobs that read them.', 'Mac mini');
   const groups = page.locator('[data-compose-folder-group]');
@@ -333,7 +343,7 @@ test("2. Another folder on MacBook…: this computer's own folder route, and the
   trustProjects(macbook);
 });
 
-test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing path says so', async () => {
+test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing name offers Create there', async () => {
   const [page, phone] = contexts.map((c) => c.pages()[0]!) as [Page, Page];
   // Folders in Mac mini's home that are no project of its Inbox (the sandboxed Inbox's home is its agents' home).
   for (const name of ['billing-api', 'billing-reports', 'billing-svc']) mkdirSync(join(homeOf(mini), 'code', name), { recursive: true });
@@ -357,23 +367,24 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await folderShot(phone, 'to-line');
   await dialog(phone).locator('[data-compose-folder]').click();
   await browse(phone, mini.id, '~/code/biling-svc');
-  await expect(phone.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
-  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  // A name Mac mini doesn't have: Create leads (read there: its ~/code has no such folder), and under its line Mac mini's
+  // folders in ~/code, the closest to what was typed first.
+  await expect(phone.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
+  await expect(phone.locator('[data-home-folders-after]')).toHaveText("A new, empty folder. Or pick one that's there:");
   await expect(phone.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
   expect(await phone.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(phone, 'missing');
   await phone.locator('[data-home-folders-back]').click();
   await phone.locator('[data-compose-folders] .ib-cp-back').first().click();
-  await phone.locator('[data-compose-cancel]').click();
-  await dialog(phone).locator('[data-compose-discard]').click();
+  await closeEmpty(phone, 'cancel');
   expect(phoneReads.length).toBeGreaterThan(0);
   expect(phoneReads.every((r) => r.machine === mini.id)).toBe(true);
 
   // The desktop: the same, then Send.
   await openFolderMenu(page, words, 'Mac mini');
   await browse(page, mini.id, '~/code/biling-svc');
-  await expect(page.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
-  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  await expect(page.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
+  await expect(page.locator('[data-home-folders-after]')).toHaveText("A new, empty folder. Or pick one that's there:");
   await expect(page.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
   expect(await page.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(page, 'missing');
@@ -439,10 +450,8 @@ test('4. an untrusted folder picked there: the start stops on trust, and the run
     await openFolderMenu(window, 'Nothing to send.', 'Mac mini');
     await expect(window.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'billing-reports' })).toHaveCount(1, { timeout: 20_000 });
     await window.keyboard.press('Escape');
-    await window.keyboard.press('Escape');
-    const discard = dialog(window).locator('[data-compose-discard]');
-    if (await discard.isVisible().catch(() => false)) await discard.click();
-    await expect(dialog(window)).toHaveCount(0);
+    await expect(window.locator('[data-compose-folders]')).toHaveCount(0);
+    await closeEmpty(window, 'escape');
   }
 });
 

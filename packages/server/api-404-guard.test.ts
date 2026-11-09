@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "../core/favicon";
 import { saveConfig } from "./config";
 import { packApp } from "../shared/packed-app";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
@@ -268,7 +268,7 @@ describe("API route 404 guards", () => {
         const faviconResponse = await fetch(`${server.url}/favicon.png`);
         expect(faviconResponse.status).toBe(200);
         expect(faviconResponse.headers.get("content-type")).toBe("image/png");
-        // Was `public, max-age=86400`. One URL now has two possible bodies
+        // Was `public, max-age=86400`. One URL has three possible bodies
         // (the style is a live preference), so a day-long cache would re-paint
         // the previous icon on the next session after a switch.
         expect(faviconResponse.headers.get("cache-control")).toBe("no-cache");
@@ -276,14 +276,30 @@ describe("API route 404 guards", () => {
           FAVICON_PNG_BYTES,
         );
 
-        // Cross-runtime parity for the classic style: Bun and Pi must agree on
+        // /favicon.ico, what the entry HTML links: Glass's multi-size .ico on Bun and Pi alike.
+        const icoResponse = await fetch(`${server.url}/favicon.ico`);
+        expect(icoResponse.status).toBe(200);
+        expect(icoResponse.headers.get("content-type")).toBe("image/x-icon");
+        expect(icoResponse.headers.get("cache-control")).toBe("no-cache");
+        expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+
+        // Cross-runtime parity for the other styles: Bun and Pi must agree on
         // both the bytes and the content type, since the entry HTML's
         // <link rel="icon"> declares no type of its own.
-        saveConfig({ favicon: "classic" });
-        const classicResponse = await fetch(`${server.url}/favicon.png`);
-        expect(classicResponse.status).toBe(200);
-        expect(classicResponse.headers.get("content-type")).toBe("image/svg+xml");
-        expect(await classicResponse.text()).toBe(CLASSIC_FAVICON_SVG);
+        for (const [style, expected] of [
+          ["totman", FACE_FAVICON_PNG_BYTES],
+          ["classic", P_FAVICON_PNG_BYTES],
+        ] as const) {
+          saveConfig({ favicon: style });
+          const styleResponse = await fetch(`${server.url}/favicon.png`);
+          expect(styleResponse.status).toBe(200);
+          expect(styleResponse.headers.get("content-type")).toBe("image/png");
+          expect(new Uint8Array(await styleResponse.arrayBuffer())).toEqual(expected);
+          // Face and P have no .ico: /favicon.ico answers their PNG.
+          const styleIco = await fetch(`${server.url}/favicon.ico`);
+          expect(styleIco.headers.get("content-type")).toBe("image/png");
+          expect(new Uint8Array(await styleIco.arrayBuffer())).toEqual(expected);
+        }
 
         const spaResponse = await fetch(`${server.url}/some/random/path`);
         expect(spaResponse.status).toBe(200);

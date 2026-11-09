@@ -235,10 +235,14 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
   // "Another folder on <machine>…": folder names under that machine's home, for a linked machine's window only.
   { method: "GET", route: /^launch\/folders$/, window: () => "/api/inbox/launch/folders", machineOnly: true },
+  // Clone from a git URL: where a URL would be cloned on that machine, and whether its git can read it.
+  { method: "GET", route: /^launch\/(clone|clone-check)$/, window: (m) => `/api/inbox/launch/${m[1]}`, machineOnly: true },
 ];
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
-const MACHINE_DOOR_WRITES = ["link-back", "unlink"] as const;
+const MACHINE_DOOR_WRITES = ["link-back", "unlink", "update"] as const;
+/** Read and start this computer's update, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches it. */
+const MACHINE_DOOR_UPDATE = "update";
 /** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
 const MACHINE_DOOR_ACCOUNTS = "accounts";
 
@@ -341,6 +345,8 @@ export interface InboxDevicesContext {
   phones?: boolean;
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
+  /** A linked machine's Update (inbox-updates.ts). */
+  machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
 }
 
 /**
@@ -875,6 +881,11 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const [linkBack, unlink] = MACHINE_DOOR_WRITES;
       if (machines && req.method === "POST" && route === linkBack) return machines.linkBack(device.id, await context.readBody(req));
       if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
+      // The body is never read, so a machine cannot name a version or a place to download from.
+      if (context.machineUpdate && route === MACHINE_DOOR_UPDATE) {
+        if (req.method === "GET") return json(context.machineUpdate.read());
+        if (req.method === "POST") return json(await context.machineUpdate.start());
+      }
       // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
       if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
     }

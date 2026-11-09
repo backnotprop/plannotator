@@ -34,7 +34,7 @@ writeFileSync(
     inboxNotifications: { dismissed: true },
     inboxAgentNotes: { offered: true },
     inboxSound: { dialogShownFor: version },
-    inboxListIntro: { shownAt: "2026-10-01T10:00:00.000Z" },
+    inboxListIntro: { shownAt: "2026-10-01T10:00:00.000Z", version: 2 },
   }),
 );
 

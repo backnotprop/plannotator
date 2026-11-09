@@ -78,6 +78,8 @@ export interface RepoFileViewProps {
   crumb?: JumpCrumbData | null;
   onNavigateBack?: () => void;
   tokens?: FileTokenHandlers;
+  /** How the file is read (default `fetch` of `/api/repo-file`); a host serving it elsewhere maps the URL. */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -100,8 +102,9 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   crumb,
   onNavigateBack,
   tokens,
+  fetchImpl,
 }) => {
-  const text = useRepoFileText(filePath, snapshotId);
+  const text = useRepoFileText(filePath, snapshotId, fetchImpl);
   const { revealLine, missed } = useRevealedLine(filePath, text.status === 'ready' ? text.content : null, revealTarget);
   const fileAnnotations = useMemo(() => wholeFileAnnotations(annotations, filePath), [annotations, filePath]);
   const slash = filePath.lastIndexOf('/');

@@ -10,7 +10,7 @@ import {
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -425,21 +425,42 @@ describe("handleFavicon", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("serves the production PNG when no style is persisted", async () => {
+  test("serves the Glass PNG when no style is persisted", async () => {
     const response = handleFavicon();
     expect(response.headers.get("content-type")).toBe("image/png");
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(bytes).toEqual(FAVICON_PNG_BYTES);
   });
 
-  test("serves the classic SVG, correctly typed, when the style is classic", async () => {
-    saveConfig({ favicon: "classic" });
-    const response = handleFavicon();
-    // The whole point of reading config here: without the right content type the
-    // browser has nothing to go on, since the entry HTML's <link> declares none.
-    // An image/png header over SVG bytes would be the pre-fix flash again.
-    expect(response.headers.get("content-type")).toBe("image/svg+xml");
-    expect(await response.text()).toBe(CLASSIC_FAVICON_SVG);
+  test("serves each persisted style's own PNG: glass, totman (Face), classic (P)", async () => {
+    for (const [style, expected] of [
+      ["glass", FAVICON_PNG_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", P_FAVICON_PNG_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style });
+      const response = handleFavicon();
+      // The entry HTML's <link> declares no type, so the header is all the browser has.
+      expect(response.headers.get("content-type"), style).toBe("image/png");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
+  });
+
+  test("/favicon.ico, what every page links: Glass's multi-size .ico, Face and P their PNGs", async () => {
+    const glass = handleFavicon("/favicon.ico");
+    expect(glass.headers.get("content-type")).toBe("image/x-icon");
+    expect(glass.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await glass.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+    for (const [style, expected] of [
+      ["glass", FAVICON_ICO_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", P_FAVICON_PNG_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style });
+      const response = handleFavicon("/favicon.ico");
+      expect(response.headers.get("content-type"), style).toBe(style === "glass" ? "image/x-icon" : "image/png");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
   });
 
   test("ignores an unknown persisted style and falls back to the PNG", async () => {

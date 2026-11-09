@@ -28,7 +28,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
+import { inboxReviewStartOf } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewLinkAnswer, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
@@ -163,7 +164,7 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
   /** A session's long poll, as an agent's connection makes it: it is live for a while after. */
   const poll = (session: string) =>
     fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` }, body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false }) });
-  return { project, dataDir, base, forge: f, posts, poll, server, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
+  return { client, project, dataDir, base, forge: f, posts, poll, server, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
 }
 
 const rowsOf = (answer: InboxReviewsAnswer, threadId: string): InboxReviewRow[] => answer.rows.filter((row) => row.thread_id === threadId);
@@ -421,6 +422,66 @@ describe("the read that follows the store (?cached=1)", () => {
     for (const answer of answers) expect(answer.rows.some((row) => row.stacks.length > 0)).toBe(true);
     const cached = (await (await fetch(`${w.base}/api/inbox/reviews?cached=1`)).json()) as InboxReviewsAnswer;
     expect(cached.rows.some((row) => row.stacks.length > 0)).toBe(true);
+  });
+});
+
+describe("a pull request link", () => {
+  test("a started link's row survives a restart: the store reads back what it wrote", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-links-"));
+    const start = inboxReviewStartOf({ kind: "link", url: "https://github.com/northwind/payments/pull/231", title: "Idempotent refunds", mine: false, ask: "guide" }, { host: "claude-code", project_id: "prj_1", at: "2026-11-05T10:00:00.000Z" })!;
+    createInboxPullLinks(dir).start("msg_1", start);
+    expect(createInboxPullLinks(dir).started().get("msg_1")?.pull?.number).toBe(231);
+  });
+
+  const LINK = "https://github.com/northwind/payments/pull/231";
+  const read = async (w: Awaited<ReturnType<typeof world>>, ref: string) => {
+    const res = await fetch(`${w.base}/api/inbox/reviews/link?ref=${encodeURIComponent(ref)}`);
+    return { status: res.status, body: (await res.json()) as InboxReviewLinkAnswer & { code?: string } };
+  };
+  const payments = { state: "open", title: "Idempotent refunds", html_url: LINK, head: { ref: "refunds" }, base: { ref: "main" }, user: { login: "tomas" } };
+
+  test("reads that one PR, and who the person is when no list has said, and says what it found and where it could go", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    w.forge.prState.answer = payments;
+    const before = w.forge.calls.length;
+    const { body } = await read(w, "northwind/payments#231");
+    expect(body).toMatchObject({ ok: true, cli: "gh", pull: { number: 231, title: "Idempotent refunds", repo: "northwind/payments", author: "tomas", mine: false, base: "main", head: "refunds", state: "open" }, projects: [], thread_id: null });
+    expect(w.forge.calls.slice(before).filter((call) => call.args[0] === "api").map((call) => call.args.join(" "))).toEqual(["api --hostname github.com repos/northwind/payments/pulls/231", "api --hostname github.com user"]);
+  });
+
+  test("Bitbucket and not-a-link make no call; a PR the forge won't answer for names the tool and the host", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const before = w.forge.calls.length;
+    expect((await read(w, "https://bitbucket.org/acme/mobile/pull-requests/88")).body).toMatchObject({ ok: false, reason: "bitbucket" });
+    expect((await read(w, "retries")).body).toMatchObject({ ok: false, reason: "not_a_link" });
+    expect(w.forge.calls.length).toBe(before);
+    expect((await read(w, "https://gitlab.example.com/g/app/-/merge_requests/9")).body).toMatchObject({ ok: false, reason: "unreadable", cli: "glab", host: "gitlab.example.com" });
+  });
+
+  test("a PR of one of the person's projects says so, one on the list needs no call, and one in review names its thread", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    await w.reviews();
+    const before = w.forge.calls.length;
+    const listed = (await read(w, PULL_URL)).body as Extract<InboxReviewLinkAnswer, { ok: true }>;
+    expect(listed.projects.length).toBe(1);
+    expect(listed.pull.number).toBe(412);
+    expect(listed.thread_id).toBeNull();
+    expect(w.forge.calls.length).toBe(before);
+    expect((await w.post("/api/inbox/pulls/owner", { keys: [listed.pull.key], thread_id: r1.thread_id })).status).toBe(200);
+    expect(((await read(w, PULL_URL)).body as { thread_id: string | null }).thread_id).toBe(r1.thread_id);
+  });
+
+  test("Code review off refuses it and calls nothing", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const { status, body } = await read(w, LINK);
+    expect(status).toBe(409);
+    expect(body.code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
   });
 });
 
@@ -779,3 +840,97 @@ function snapshotOf(source: Record<string, unknown>, review: Record<string, unkn
     source,
   };
 }
+
+describe("a walkthrough", () => {
+  const guide = (file = "src/retry.ts", lines: unknown = "2-3") => ({ title: "How retries work", intent: "Follow one failed charge.", sections: [{ title: "The loop", overview: "It waits, then tries again.", diffs: [{ file, lines, summary: "The wait." }] }] });
+  const source = (w: Awaited<ReturnType<typeof world>>, text = "one\ntwo\nthree\nfour\n") => {
+    mkdirSync(join(w.project, "src"), { recursive: true });
+    writeFileSync(join(w.project, "src/retry.ts"), text);
+  };
+  const guideOf = (w: Awaited<ReturnType<typeof world>>, id: string) => w.server.store.message(id)!.guide!;
+  /** A refusal comes back as the tool's error text. */
+  const refusal = async (w: Awaited<ReturnType<typeof world>>, args: Record<string, unknown>) => {
+    const answer = (await w.client.callTool({ name: "submit_guide", arguments: { project_path: w.project, agent_session: "ses_retries", agent_name: "Claude Code", agent_host: "claude-code", ...args } })) as { isError?: boolean; content: { text: string }[] };
+    expect(answer.isError).toBe(true);
+    return answer.content[0]!.text;
+  };
+
+  test("the agent names lines; the Inbox reads them when sent and keeps them, whatever the file does after", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    const ref = guideOf(w, sent.message_id);
+    expect(ref).toMatchObject({ walkthrough: true, review: true, additions: 0, deletions: 0 });
+    source(w, "changed\n");
+    const stored = JSON.parse(readFileSync(inboxBlobPath(w.server.store.dir, ref.sha256), "utf8")) as { review: { rawPatch: string } };
+    expect(stored.review.rawPatch).toContain(" two\n three\n");
+    expect(stored.review.rawPatch).not.toContain("changed");
+  });
+
+  test("its row asks for no verdict: On you, and it's the thread's, by the guide's word", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ reviewed: true, move: "on_you", reason: "review_ready", review: { walkthrough: true } }]);
+  });
+
+  test("the person's reply leaves On you, and the agent's answer, a plain message, brings it back", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    await w.say(sent.message_id, "00000000-0000-4000-8000-000000000012", "Where does the 200 come from?");
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "agents", reason: "feedback_sent" }]);
+    await w.call("send_message", { reply_to: sent.message_id, body: "From charge.ts, line 4." });
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+  });
+
+  test("the agent's own patch, or an empty one, can't break it: what it named is what shows", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    for (const [index, patch] of ["", "diff --git a/other.ts b/other.ts\n--- a/other.ts\n+++ b/other.ts\n@@ -1 +1 @@\n-a\n+b\n", "not a diff"].entries()) {
+      const sent = await w.call("submit_guide", { guide: guide(), patch, walkthrough: true, thread: `retries-${index}` });
+      expect(guideOf(w, sent.message_id)).toMatchObject({ walkthrough: true, additions: 0, deletions: 0, files: 1 });
+    }
+  });
+
+  test("in a thread the box started as one, every guide is a walkthrough, flag or no flag", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    await w.poll("ses-live");
+    const started = await w.post("/api/inbox/messages", { to: { host: "claude-code", session: "ses-live" }, body: "Please walk me through this.", idempotency_key: "00000000-0000-4000-8000-000000000011", review: { kind: "walkthrough" } });
+    expect(started.status).toBe(200);
+    const { thread_id, message } = (await started.json()) as { thread_id: string; message: { id: string } };
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ reason: "curating", started: { kind: "walkthrough" } }]);
+    const sent = await w.call("submit_guide", { guide: guide(), patch: "", reply_to: message.id });
+    expect(sent.thread_id).toBe(thread_id);
+    expect(guideOf(w, sent.message_id).walkthrough).toBe(true);
+    expect(createInboxPullLinks(w.dataDir).started().get(thread_id)?.kind).toBe("walkthrough");
+  });
+
+  test("a refusal names the file and nothing lands", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    expect(await refusal(w, { guide: guide("src/gone.ts"), walkthrough: true, thread: "retries" })).toContain("src/gone.ts isn't a file in the project.");
+    expect((await w.reviews()).rows.filter((row) => row.reviewed)).toEqual([]);
+  });
+
+  test("Code review off: not a field, and refused rather than sent", async () => {
+    const w = await world();
+    source(w);
+    expect((await w.client.listTools()).tools.find((tool) => tool.name === "submit_guide")!.inputSchema.properties).not.toHaveProperty("walkthrough");
+    await refusal(w, { guide: guide(), walkthrough: true, thread: "retries" });
+  });
+
+  test("a guide without the flag, in another thread, is still a review of a diff", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const sent = await w.sendReview("retries", "r1");
+    expect(guideOf(w, sent.message_id).walkthrough).toBeUndefined();
+  });
+});

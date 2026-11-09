@@ -270,7 +270,13 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
 test.skipIf(!hasDom)("a plain update opened from New, its row held in New: the header's button is Mark unread (the owner, 2026-11-02), which closes it and leaves it unread", async () => {
   const id = ids.news[0]!;
   expect(await serverSection(id)).toBe('new');
-  await renderApp(`#thread=${id}`);
+  // Opened from the list, as a person opens it. Opened by address, the list's first read could land after the look
+  // and draw the row in Quiet, never held in New, so the header's button raced the read (a flaky failure).
+  await renderList(id);
+  await until(() => sectionOfRow(id) === 'new', 'the row in New');
+  await act(async () => rowButton(id)!.click());
+  await until(() => !!head(), 'the thread header');
+  await until(() => posted.some((p) => p.path.endsWith('/seen')), 'the look sent');
   await until(async () => (await serverSection(id)) === 'quiet', 'the look');
   // Held in New (held.ts), read on the server: the header says Mark unread, not Mark read (v0.28.45 and before:
   // Mark read, with Mark unread only in ⋯ More). Labels compared as text: an action label, pinned on purpose.

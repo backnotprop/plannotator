@@ -1,0 +1,81 @@
+---
+// One Inbox phone screen (390 x 844) in a phone frame, always in its light
+// render: the 2x and 3x captures ship as <name>-light.webp and
+// <name>-light@2x.webp. A click opens the 3x render in the page's lightbox.
+interface Props {
+  name: string;
+  alt: string;
+}
+
+const { name, alt } = Astro.props;
+const base = `/assets/inbox/${name}-light`;
+---
+<figure class="ib-phone">
+  <button
+    type="button"
+    class="ib-phone-btn"
+    data-lightbox-dark={`${base}@2x.webp`}
+    data-lightbox-light={`${base}@2x.webp`}
+    data-lightbox-alt={alt}
+    aria-label={`View ${alt} full size`}
+  >
+    <img
+      src={`${base}.webp`}
+      srcset={`${base}.webp 780w, ${base}@2x.webp 1170w`}
+      sizes="(min-width: 1152px) 260px, (min-width: 768px) 22vw, 44vw"
+      width="780"
+      height="1688"
+      loading="lazy"
+      decoding="async"
+      alt={alt}
+    />
+  </button>
+</figure>
+
+<style>
+  .ib-phone {
+    margin: 0;
+    padding: 7px;
+    border-radius: 34px;
+    background: #f4f4f2;
+    border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+    box-shadow:
+      0 24px 60px -24px color-mix(in oklab, #000 45%, transparent),
+      0 1px 2px color-mix(in oklab, var(--foreground) 8%, transparent);
+  }
+
+  :global(.light) .ib-phone {
+    background: #fff;
+    box-shadow:
+      0 24px 50px -26px color-mix(in oklab, var(--foreground) 30%, transparent),
+      0 1px 2px color-mix(in oklab, var(--foreground) 8%, transparent);
+  }
+
+  .ib-phone-btn {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    cursor: zoom-in;
+    border-radius: 27px;
+    overflow: hidden;
+  }
+
+  .ib-phone-btn img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .ib-phone-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 4px;
+  }
+
+  @media (max-width: 639px) {
+    .ib-phone { padding: 5px; border-radius: 26px; }
+    .ib-phone-btn { border-radius: 21px; }
+  }
+</style>

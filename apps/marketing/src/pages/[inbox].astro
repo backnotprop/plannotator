@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
+import InboxPhone from '../components/inbox/InboxPhone.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
 import installPrompt from '../lib/inbox-prompt.md?raw';
 
@@ -326,17 +327,20 @@ const steps = [
         <h2 class="font-display ib-arc-title">What arrives during one run</h2>
       </section>
 
-      <section class="ib-beat" id="plan">
+      <section class="ib-beat" id="design-doc">
         <div class="ib-beat-head">
           <p class="ib-beat-n">01</p>
-          <h3 class="font-display ib-title">The plan</h3>
+          <h3 class="font-display ib-title">The design doc</h3>
           <p class="ib-body">
-            The agent drafts a plan and asks what it cannot decide alone. The plan opens next to the thread. You comment
-            on a line and pick the answers. Nothing reaches the agent until you send.
+            The agent sends you its design doc and keeps working. The doc opens next to the thread with its diagrams
+            drawn. You comment on the lines you care about. Nothing reaches the agent until you send.
           </p>
-          <p class="ib-note">If the agent edits the plan after sending it the Inbox says so and opens the version it sent.</p>
+          <p class="ib-note">If the agent edits the doc after sending it the Inbox says so and opens the version it sent.</p>
         </div>
-        <InboxShot name="2.2" alt="Two questions from Claude Code next to its plan with a comment on one line" />
+        <InboxShot
+          name="design-doc"
+          alt="Claude Code's design doc next to its thread with a Mermaid diagram two saved comments and a third being written"
+        />
       </section>
 
       <div class="ib-interlude">
@@ -350,16 +354,16 @@ const steps = [
           <p class="ib-beat-n">02</p>
           <h3 class="font-display ib-title">A prototype</h3>
           <p class="ib-body">
-            The agent attaches the prototype. It opens inside the Inbox at full screen. You pin comments on the parts to
-            change. The comments go with your next send.
+            The agent sends you the prototype. It opens next to the thread or at full screen. You pin comments on the
+            parts to change. The comments go with your next send.
           </p>
           <p class="ib-note">Markdown and HTML and Mermaid and Graphviz. Plannotator's annotation tools.</p>
         </div>
         <InboxShot
-          name="proto-inbox"
-          alt="The releases prototype open full screen in the Inbox with one comment pinned on the Forced badge"
+          name="prototype"
+          alt="The invoices prototype next to its thread with four numbered comments pinned and a fifth being written"
         />
-        <p class="ib-caption">The prototype open in the Inbox with one comment pinned</p>
+        <p class="ib-caption">The prototype next to its thread with four comments pinned and a fifth being written</p>
       </section>
 
       <section class="ib-payoff" id="guide">
@@ -373,6 +377,20 @@ const steps = [
         <div class="ib-pair">
           <InboxShot name="4.1" alt="A guided review arriving in a thread from Pi" />
           <InboxShot name="4.2" alt="The guided review open at section two of four next to its diff" />
+        </div>
+      </section>
+
+      <!-- ── Review anything ── -->
+      <section class="ib-payoff" id="review">
+        <h2 class="font-display ib-arc-title ib-payoff-title">A full review surface</h2>
+        <p class="ib-body ib-payoff-body">
+          A question can offer pictures as its choices. You pick the variant you want by looking at it. Documents and
+          prototypes and diagrams and images and videos and code all open at full screen. You can comment on every one
+          of them and draw on images. It is Plannotator's annotation and review in every file.
+        </p>
+        <div class="ib-pair">
+          <InboxShot name="question-pictures" alt="A question from OpenCode with three invoice layouts as picture choices and the second one picked" />
+          <InboxShot name="full-screen" alt="An invoice layout open at full screen with a circle and an arrow drawn on it and a comment being written" />
         </div>
       </section>
 
@@ -424,10 +442,28 @@ const steps = [
         </ul>
       </section>
 
-      <!-- ── 7. Hosted ── -->
+      <!-- ── 7. On your phone ── -->
+      <section class="ib-arc ib-arc-gap" id="phone">
+        <h2 class="font-display ib-arc-title">An excellent mobile experience</h2>
+        <p class="ib-body">
+          The Inbox works on your phone. Open it through Tailscale and read and answer and review from
+          anywhere. Question cards and documents and prototypes and your comments all fit the small screen.
+        </p>
+        <p class="ib-links">
+          <a href="/docs/reference/inbox/#over-your-tailnet">Open the Inbox over your tailnet</a>
+          <a href="https://docs.plannotator.ai/open-source/remote-access">Open Plannotator on another device</a>
+        </p>
+      </section>
+      <div class="ib-phones">
+        <InboxPhone name="phone-list" alt="The Inbox list on a phone" />
+        <InboxPhone name="phone-question" alt="A question with picture choices on a phone" />
+        <InboxPhone name="phone-doc" alt="The design doc with its diagram and comments on a phone" />
+        <InboxPhone name="phone-prototype" alt="The invoices prototype with numbered comments on a phone" />
+      </div>
+
+      <!-- ── 8. Teams ── -->
       <p class="ib-hosted">
-        <span class="ib-soon font-mono text-[0.6875rem] rounded bg-primary/15 text-primary border border-primary/30 leading-none">coming</span>
-        The same inbox hosted and on your phone.
+        Want to see the version of this that helps your team? <a href="/workspaces/">Sign up for Workspaces</a>.
       </p>
 
       <!-- The post, linked here because /blog redirects to the docs' Learn page. -->
@@ -436,7 +472,7 @@ const steps = [
         <a href={`/blog/${INBOX_POST_ID}/`}>An Async Surface for Long-Running Agents</a>
       </p>
 
-      <!-- ── 8. Install ── -->
+      <!-- ── 9. Install ── -->
       <section class="ib-cta" id="install">
         <h2 class="font-display ib-title">Install</h2>
         <p class="ib-body">Install Plannotator and run <code>plannotator inbox</code>.</p>
@@ -1244,6 +1280,33 @@ const steps = [
     margin-top: 1.75rem;
   }
 
+  /* ── On your phone ── */
+  .ib-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .ib-links a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+    text-underline-offset: 3px;
+  }
+
+  .ib-links a:hover { text-decoration-color: var(--primary); }
+
+  .ib-phones {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+  }
+
+  @media (min-width: 768px) {
+    .ib-phones { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.75rem; }
+  }
+
   /* ── Connections ── */
   .ib-hosts {
     display: grid;
@@ -1305,7 +1368,7 @@ const steps = [
     color: var(--ib-dim);
   }
 
-  /* ── Hosted line ── */
+  /* ── Workspaces line ── */
   .ib-hosted {
     margin: 4rem 0 0;
     padding: 1.5rem 0;
@@ -1318,11 +1381,14 @@ const steps = [
     text-wrap: balance;
   }
 
-  .ib-soon {
-    padding: 2px 6px;
-    margin-right: 0.5rem;
-    vertical-align: 1px;
+  .ib-hosted a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--primary) 55%, transparent);
+    text-underline-offset: 3px;
   }
+
+  .ib-hosted a:hover { text-decoration-color: var(--primary); }
 
   .ib-post {
     margin-top: 2.5rem;

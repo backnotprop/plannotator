@@ -12,11 +12,11 @@ export function startFirstDrawing(_project: SystemSetupProject, _setup: SystemSe
  * TODO(B5/A6 firstDrawPrompt): use packages/system's `firstDrawPrompt({ project, worktree, repos, docs })` once it lands.
  * Until then a placeholder that names the project and what to read.
  */
-export function systemFirstDrawPrompt(project: Pick<SystemSetupProject, 'name' | 'root' | 'repo'>, setup: Pick<SystemSetup, 'repos' | 'docs' | 'model'>): string {
+export function systemFirstDrawPrompt(project: Pick<SystemSetupProject, 'name' | 'root' | 'repo' | 'drawing'>, setup: Pick<SystemSetup, 'repos' | 'docs' | 'model'>): string {
   const lines = [
     `[Placeholder: the System drawing recipe is not in this build yet.]`,
     ...(setup.model ? [`Use the model ${setup.model}.`] : []),
-    `Draw the system of ${project.name} (${project.root}) into .plannotator/system.`,
+    `Draw the system of ${project.name} (${project.root}) into ${project.drawing}.`,
     `Read the code of ${[project.repo, ...setup.repos].join(', ')}.`,
   ];
   if (setup.docs.length > 0) lines.push(`Read the doc sites ${setup.docs.join(', ')}.`);
