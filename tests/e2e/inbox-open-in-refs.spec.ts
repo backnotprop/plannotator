@@ -701,7 +701,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
 
       // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
-      await page.locator('section.ib-pane [data-ask-open]').click();
+      // The thread has a chat: Ask's row in the corner opens it (the top bar has no Ask icon, the owner 2026-11-09).
+      await openAskFromCorner(page);
       const ask = page.locator('[data-chat-window]');
       await expect(ask).toContainText('from the table in');
       // Read once, the review's message is folded in the thread: the review opens by its address too.
@@ -754,7 +755,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, `33-phone-review-thread-${colorScheme}`);
       await sheet.locator('[data-code-hover-close]').tap();
       await expect(sheet).toHaveCount(0);
-      await page.locator('[data-ask-open]').first().tap();
+      await openAskFromCorner(page, true);
       const ask = page.locator('[data-chat-window]');
       // Ask AI's window on a phone is the whole screen, as it is with Code review off.
       await expect(ask).toBeVisible();
@@ -770,6 +771,17 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await context.close();
     }
   });
+}
+
+/** A thread that has a chat: Ask's row in the corner opens it; a phone's round button may open its sheet first. */
+async function openAskFromCorner(page: Page, phone = false): Promise<void> {
+  if (!phone) {
+    await page.locator('[data-rf-card="ask"] .ib-rf-cardopen').click();
+    return;
+  }
+  await page.locator('button[data-rf-corner]').tap();
+  const row = page.locator('[data-rf-sheet] [data-rf-row="ask"]');
+  if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.tap();
 }
 
 /** Press in the text before `words`, and drag past them into the text after. */
@@ -887,7 +899,7 @@ test('Ask AI\'s window in a small window keeps its place, and a code span in it 
   const { context, page } = await windowAt(browser, 700, 500, 'dark');
   try {
     await page.goto(`${world.url}#thread=${world.prReviewThread}`);
-    await page.locator('section.ib-pane [data-ask-open]').click();
+    await openAskFromCorner(page);
     const ask = page.locator('[data-chat-window]');
     await expect(ask).toContainText('from the table in');
     const box = (await ask.boundingBox())!;

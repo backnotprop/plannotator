@@ -92,7 +92,52 @@ async function shot(page: Page, name: string, scheme: 'light' | 'dark') {
   await page.screenshot({ path: join(shotsDir, `${name}.png`) });
 }
 
-const askIcon = (page = world.page) => page.locator('section.ib-pane [data-ask-open]');
+/** The top bar's Ask icon, gone (the owner, 2026-11-09). */
+const askIcon = (page = world.page) => page.locator('section.ib-pane [data-ask-open], section.ib-pane .ib-phead [aria-label="Ask AI about this thread"]');
+const side = (page = world.page) => page.locator('.annotation-toolbar [data-annotation-side]');
+
+/** Drag over `words` in the thread's messages with the real mouse: the selection bar opens over them. */
+async function selectInThread(page: Page, words: string): Promise<void> {
+  const box = await page.evaluate((needle) => {
+    const root = document.querySelector('section.ib-pane');
+    if (!root) return null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent?.indexOf(needle) ?? -1;
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + needle.length);
+      const rects = [...range.getClientRects()];
+      const first = rects[0]!;
+      const last = rects[rects.length - 1]!;
+      return { x1: first.left + 1, y1: first.top + first.height / 2, x2: last.right - 1, y2: last.top + last.height / 2 };
+    }
+    return null;
+  }, words);
+  expect(box, `"${words}" is on screen`).not.toBeNull();
+  await page.mouse.move(box!.x1, box!.y1);
+  await page.mouse.down();
+  await page.mouse.move((box!.x1 + box!.x2) / 2, (box!.y1 + box!.y2) / 2, { steps: 6 });
+  await page.mouse.move(box!.x2, box!.y2, { steps: 6 });
+  await page.mouse.up();
+}
+
+/** Side in the selection bar over `words` starts the thread's chat (no Ask icon in the top bar). */
+async function sideOn(page: Page, words: string): Promise<void> {
+  await expect(async () => {
+    await selectInThread(page, words);
+    await expect(side(page)).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await side(page).click();
+}
+
+/** A phone has no Side: a thread that has a chat opens it from the corner's round button (its sheet, with drafts too). */
+async function cornerOn(phone: Page): Promise<void> {
+  await phone.locator('button[data-rf-corner]').tap();
+  const row = phone.locator('[data-rf-sheet] [data-rf-row="ask"]');
+  if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.tap();
+}
 const frame = (page = world.page) => page.locator('[data-chat-window]');
 const agentRow = (page = world.page) => frame(page).locator('[data-message-role="assistant"]:not([data-text-part])');
 const chip = (page = world.page) => frame(page).locator('[data-ask-chip]');
@@ -206,15 +251,16 @@ test.afterAll(async () => {
   }
 });
 
-test('the icon opens the thread’s chat, and a question gets its answer from the real agent', async () => {
+test('Side opens the thread’s chat (no Ask icon in the top bar), and a question gets its answer from the real agent', async () => {
   const { page, threads, url } = world;
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.goto(`${url}#thread=${threads.push}`);
-  await expect(askIcon()).toBeVisible();
+  await expect(page.locator('section.ib-pane .ib-phead')).toBeVisible();
   await expect(frame()).toHaveCount(0);
-  await askIcon().click();
+  await sideOn(page, 'retry budget');
   await expect(box()).toBeFocused();
-  await expect(askIcon()).toHaveAttribute('aria-pressed', 'true');
+  await expect(box()).toHaveValue('> retry budget\n\n');
+  await expect(askIcon()).toHaveCount(0);
   await expect(frame().locator('xpath=ancestor::section')).toHaveCount(0);
 
   const rect = (await frame().boundingBox())!;
@@ -291,12 +337,12 @@ test('picking a chat moves to its thread and shows that chat', async () => {
 test('Mod+Enter and Escape in the window leave the reply draft and the thread alone', async () => {
   const { page, threads, url } = world;
   await page.goto(`${url}#thread=${threads.keys}`);
-  await expect(askIcon()).toBeVisible();
+  await expect(page.locator('section.ib-pane .ib-phead')).toBeVisible();
   await page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).click();
   const reply = page.locator('section.ib-pane textarea');
   await reply.fill('A reply that must stay a draft');
   await expect(page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Send' })).toBeEnabled();
-  await askIcon().click();
+  await sideOn(page, 'what you think');
   await expect(box()).toBeFocused();
   await box().fill('Half a thought');
 
@@ -332,9 +378,11 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   try {
+    // The first test's chat: the corner's round button opens it (a phone has no Side, and the top bar no Ask icon).
     await phone.goto(`${url}#thread=${threads.push}`);
-    await expect(askIcon(phone)).toBeVisible();
-    await askIcon(phone).tap();
+    await expect(phone.locator('section.ib-pane .ib-phead')).toBeVisible();
+    await expect(askIcon(phone)).toHaveCount(0);
+    await cornerOn(phone);
     await expect(frame(phone)).toBeVisible();
     const rect = (await frame(phone).boundingBox())!;
     expect(rect.x).toBe(0);
@@ -357,8 +405,8 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
     await phone.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).tap();
     const reply = phone.locator('section.ib-pane textarea');
     await reply.fill('A draft from the phone');
-    await expect(askIcon(phone)).toBeVisible();
-    await askIcon(phone).tap();
+    await reply.blur();
+    await cornerOn(phone);
     // The window fills a phone: it steps aside for the reply.
     await frame(phone).getByRole('button', { name: 'Reply in the thread' }).tap();
     await expect(frame(phone)).toHaveCount(0);

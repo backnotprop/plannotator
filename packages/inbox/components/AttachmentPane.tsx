@@ -291,7 +291,7 @@ export interface AttachmentPaneProps {
   openIn?: OpenInSurface;
   /**
    * Ask AI's Side in the file's selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat.
-   * Absent while this thread cannot ask: no Side. The full-screen bar has no Ask icon (approval "inbox-ask-ai-flow").
+   * Absent while this thread cannot ask: no Side. No top bar has an Ask icon (the owner, 2026-11-09).
    */
   onSide?: (words: string, source?: string) => void;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
