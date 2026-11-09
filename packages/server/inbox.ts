@@ -1395,7 +1395,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
       // When its letter mark's picture was set (Set picture…), additive: the window's key for the picture.
       const picture = projectPictures.uploadedAt(project.id);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
+      // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
+      const repo = repos.peek(project.root);
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 

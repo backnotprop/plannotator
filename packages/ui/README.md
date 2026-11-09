@@ -39,7 +39,7 @@ configurePlannotatorUI({
   commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
   visibleCommentDrafts,        // true: a Viewer comment closed with words keeps its highlight and a floating "Draft" badge that reopens it (default false)
   digitHexIssueRefs,           // true: digit-only #123456 / #12345678 link as issue refs (when a ref link can be built), not hex swatches (default false)
-  crossRepoRefsWithoutRepo,    // true: owner/repo#123 links on github.com where InlineMarkdown has no githubRepo (default false: plain text)
+  crossRepoRefsWithoutRepo,    // true | { host }: owner/repo#123 links on github.com, or that host, where InlineMarkdown has no githubRepo (default false: plain text); may be set again, mounted text re-renders
   touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
   refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last

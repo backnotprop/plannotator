@@ -474,6 +474,17 @@ describe('cross-repo refs where the caller names no repo (crossRepoRefsWithoutRe
     expect(render('See owner/repo#5', { githubRepo: 'a/b', repoHost: 'git.internal.example' })).not.toContain('<a');
   });
 
+  test('{ host }: it links on that host by the forge rule; a host no link can be formed for leaves it plain', () => {
+    setCrossRepoRefsWithoutRepo({ host: 'gitlab.example.com' });
+    expect(hrefs(render('See group/project#7 and #3.'))).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
+    // A caller with its own repo keeps it.
+    expect(hrefs(render('See owner/repo#5', { githubRepo: 'acme/web', repoHost: 'github.com' }))).toEqual(['https://github.com/owner/repo/issues/5']);
+    setCrossRepoRefsWithoutRepo({ host: 'git.internal.example' });
+    expect(render('See owner/repo#5')).not.toContain('<a');
+    setCrossRepoRefsWithoutRepo(false);
+    expect(render('See owner/repo#5')).not.toContain('<a');
+  });
+
   test('on: paths, versions, addresses, code and URLs are still not refs', () => {
     setCrossRepoRefsWithoutRepo(true);
     for (const text of ['docs/guide.md#2', 'src/foo.ts#10', '../repo#3', 'owner/repo.git#4', 'v1.2.3/beta#4', 'node 20.1/x#2', 'example.com/page#1', 'john@owner/repo#1', 'and/or#1', '1/2#3', 'Run `gh pr view owner/repo#12`']) {

@@ -66,6 +66,12 @@ describe('what the message draws as a link', () => {
     expect(hrefs('fixed in #12 and other/lib#7, not a1#3 or `#4`', repo)).toEqual(['https://github.com/acme/web/issues/12', 'https://github.com/other/lib/issues/7']);
     expect(hrefs('other/lib#7 and #3', { display: 'team/app', host: 'gitlab.example.com' })).toEqual(['https://gitlab.example.com/other/lib/-/issues/7', 'https://gitlab.example.com/team/app/-/issues/3']);
     expect(hrefs('other/lib#7 and #3', { display: 'team/app', host: 'git.internal.example' })).toEqual([]);
+    // No repo, and most projects on GitLab (defaultRefHost.ts): the ref on that host, as the message draws it.
+    expect(linksOfBody('other/lib#7 and #3', null, 'gitlab.example.com').map((l) => l.href)).toEqual(['https://gitlab.example.com/other/lib/-/issues/7']);
+    // The same message read again under another host is read again, not served from the first read.
+    const hostOf = (fallback?: string) => threadLinks([{ id: 'm9', body: 'other/lib#7' }], null, fallback).repos.map((r) => r.host);
+    expect(hostOf()).toEqual(['github.com']);
+    expect(hostOf('gitlab.example.com')).toEqual(['gitlab.example.com']);
   });
 });
 

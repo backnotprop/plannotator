@@ -120,3 +120,18 @@ test.skipIf(!hasDom)("with the Inbox's own configuration, a GitLab project's ref
   expect(note.querySelector('a')?.getAttribute('href')).toBe('https://gitlab.example.com/group/project/-/issues/8');
   expect(host!.querySelector('a[href^="https://github.com"]')).toBeNull();
 });
+
+test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, owner/repo#N links on GitLab, and an open message follows a change', async () => {
+  await import('./App');
+  const { learnDefaultRefHost, resetDefaultRefHost } = await import('./defaultRefHost');
+  try {
+    learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }, {}]);
+    await render('See group/project#7 and #3.', null);
+    expect([...host!.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
+    // A later list read where github.com ties: the message already on screen re-renders on github.com.
+    act(() => learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }]));
+    expect([...host!.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://github.com/group/project/issues/7']);
+  } finally {
+    resetDefaultRefHost();
+  }
+});
