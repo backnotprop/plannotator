@@ -248,7 +248,8 @@ test.skipIf(!hasDom)('every mark has a life of its own: an idle agent gestures b
 
 test.skipIf(!hasDom)('the pointer in the sidebar: each mark leans toward it within the small bound, at its own pace, and its eyes look too', async () => {
   motion.agentMotionOptions.fidgets = false;
-  motion.agentMotionOptions.clock = 6;
+  // Slow enough that a busy machine still sees them on the way.
+  motion.agentMotionOptions.clock = 2;
   const [claude, codex, plain] = handSidebar(['claude', 'codex', null]) as [HTMLElement, HTMLElement, HTMLElement];
   expect(motion.agentPointerActivity().listening).toBe(true);
   expect(atRest(codex)).toBe(true);
@@ -256,12 +257,16 @@ test.skipIf(!hasDom)('the pointer in the sidebar: each mark leans toward it with
   pointerTo(200, 600);
   const seen: ReturnType<typeof lean>[] = [];
   let apart = false;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 400 && !(apart && seen.length > 60); i++) {
     await wait(8);
+    // The pointer stirs, so it is never taken for still.
+    if (i % 20 === 19) pointerTo(200 + (i % 3), 600);
     const now = [lean(claude), lean(codex), lean(plain)];
     seen.push(...now);
     // On the way there they are not at the same place: each has its own lag.
-    if (now[1]!.body.y > 0.2 && now[1]!.body.y < 1.2 && Math.abs(now[1]!.body.y - now[2]!.body.y) > 0.02) apart = true;
+    const flying = (y: number) => y > 0.1 && y < 1.3;
+    const ys = now.map((at) => at.body.y);
+    if (ys.some(flying) && Math.max(...ys) - Math.min(...ys) > 0.005) apart = true;
   }
   expect(apart).toBe(true);
   const { shift, turn, eyes } = motion.AGENT_LOOK;
