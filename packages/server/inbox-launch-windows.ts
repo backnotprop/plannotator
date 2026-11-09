@@ -151,7 +151,6 @@ export function windowsAttributesOf(path: string): number | null | undefined {
   if (process.platform !== "win32") return undefined;
   if (getAttributes === undefined) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const ffi = require("bun:ffi") as typeof import("bun:ffi");
       const lib = ffi.dlopen("kernel32.dll", { GetFileAttributesW: { args: [ffi.FFIType.ptr], returns: ffi.FFIType.u32 } });
       getAttributes = (target: string) => {
