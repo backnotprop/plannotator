@@ -37,6 +37,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -1047,7 +1048,7 @@ test('a long line scrolls sideways in the code by wheel or trackpad, and the pag
   await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await settled(body);
 
-  const line = (await shell.locator('[data-line-type]').first().boundingBox())!;
+  const line = await diffRowBox(shell.locator('[data-line-type]').first());
   const shellBox = (await shell.boundingBox())!;
   const top = await body.evaluate((el) => el.scrollTop);
   await page.mouse.move(shellBox.x + shellBox.width * 0.7, line.y + 30);
@@ -1141,7 +1142,7 @@ test('a phone: a sideways drag on the code scrolls it, and the page does not mov
     await settled(body);
 
     const shellBox = (await shell.boundingBox())!;
-    const line = (await shell.locator('[data-line-type]').nth(4).boundingBox())!;
+    const line = await diffRowBox(shell.locator('[data-line-type]').nth(4));
     const top = await body.evaluate((el) => el.scrollTop);
     await fingerDrag(page, { x: shellBox.x + shellBox.width * 0.8, y: line.y + line.height / 2 }, { x: -170, y: 0 }, async () => {
       await expect.poll(scrolled).toBeGreaterThan(0);

@@ -71,6 +71,7 @@ import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { COLLIDING_PATHS_DIFF } from '../helpers/colliding-paths-diff';
 import { expectNoBlankFiles } from './on-screen-files';
+import { diffRowBox } from './diff-row-box';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { startFakeAvatars, type FakeAvatars } from '../helpers/fake-avatars';
@@ -1081,7 +1082,7 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   // boundingBox() does not wait: the view can be mounted before its lines are drawn on a busy runner.
   await expect(sqlShell.locator('[data-line="5"]').first()).toBeVisible();
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
-  const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
+  const sqlLast = await diffRowBox(sqlShell.locator('[data-line="5"]').first());
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
   // Global comment is a quiet mark in the bar; the diff controls (one Split / Unified button, Collapse all, the gear) sit
   // in the bar too, before it, as in a thread's review (the owner: in the Inbox they are always in the header).
