@@ -18,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import type { SidebarProps } from '../components/Sidebar';
+import type { AgentRigKind } from './rigs';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -174,7 +175,7 @@ const place = (el: Element, left: number, top: number, width: number, height: nu
   el.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 };
 /** A 232 px sidebar with a mark in every row from y = 100, 36 px apart, each 24 px at x = 17. */
-function handSidebar(rigs: (import('./rigs').AgentRigKind | null)[]): HTMLElement[] {
+function handSidebar(rigs: (AgentRigKind | null)[]): HTMLElement[] {
   const side = document.createElement('aside');
   side.className = 'ib-side';
   place(side, 0, 0, 232, 800);
