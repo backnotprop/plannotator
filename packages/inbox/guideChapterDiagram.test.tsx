@@ -4,7 +4,8 @@
  * is the full-window review (as guideOverviewMermaid.test.tsx), with the Inbox's doors stubbed at `fetch` and the
  * Mermaid runtime stood in for through ui's test hook. What regresses:
  *
- *  - a chapter's Mermaid diagram not drawn, or drawn outside its chapter or below the chapter's words;
+ *  - a chapter's Mermaid diagram not drawn, or drawn outside its chapter's code pane or below its first file
+ *    (placement A: the top of the code pane, full width);
  *  - a chapter without a diagram looking any different from before;
  *  - two chapters' drawings sharing one id (one would draw over the other);
  *  - an old guide whose overview carries a diagram no longer opening, or losing that diagram.
@@ -153,10 +154,10 @@ const withChapterDiagrams = (sources: Array<string | null>, base: GuideSnapshot 
     sections: base.guide.sections.map((section, i) => (sources[i] ? { ...section, diagram: { kind: 'mermaid' as const, source: sources[i]! } } : section)),
   },
 });
-const chapter = (i: number) => document.querySelector(`[data-guide-section="${i}"] [data-guide-section-narrative]`);
+const chapter = (i: number) => document.querySelector(`[data-guide-section="${i}"]`);
 const pane = () => <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
 
-test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram inside that chapter, above its words, with Expand", async () => {
+test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram at the top of that chapter's code pane, above its first file, with Expand", async () => {
   snapshot = withChapterDiagrams([LR]);
   await mount(pane());
   const box = chapter(0)!.querySelector('[data-guide-chapter-diagram="mermaid"]');
@@ -165,23 +166,28 @@ test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram inside that cha
   expect(box!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
   expect(box!.querySelector('[aria-label="Expand diagram"]') !== null).toBe(true);
   expect(box!.querySelector('pre') === null).toBe(true);
-  // Above the chapter's own words.
-  const words = Array.from(chapter(0)!.querySelectorAll('p')).find((p) => (p.textContent ?? '').includes(FIXTURE_V1_LOCAL.guide.sections[0]!.overview.slice(0, 20)))!;
-  expect(box!.compareDocumentPosition(words) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // In the code pane, above the chapter's first file; not in the chapter's text column.
+  expect(chapter(0)!.querySelector('[data-guide-section-narrative] [data-guide-chapter-diagram]') === null).toBe(true);
+  const firstFile = chapter(0)!.querySelector('[data-guide-file-shell]')!;
+  expect(box!.compareDocumentPosition(firstFile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // The other chapter has none; nothing above the chapters either.
   expect(chapter(1)!.querySelector('[data-guide-chapter-diagram]') === null).toBe(true);
   expect(document.querySelector('[data-guide-overview-diagram]') === null).toBe(true);
 });
 
 test.skipIf(!hasDom)('a chapter without a diagram is drawn exactly as before', async () => {
+  // Its text column byte for byte (the code pane's diff carries layout numbers that vary between mounts), and no
+  // diagram anywhere in it.
+  const text = () => chapter(1)!.querySelector('[data-guide-section-narrative]')!.innerHTML;
   snapshot = { ...withChapterDiagrams([]), version: 1 };
   await mount(pane());
-  const before = chapter(1)!.innerHTML;
+  const before = text();
   act(() => root?.unmount());
   host?.remove();
   snapshot = withChapterDiagrams([LR]);
   await mount(pane());
-  expect(chapter(1)!.innerHTML).toBe(before);
+  expect(text()).toBe(before);
+  expect(chapter(1)!.querySelector('[data-guide-chapter-diagram]') === null).toBe(true);
 });
 
 test.skipIf(!hasDom)("each chapter's drawing has its own id", async () => {

@@ -461,7 +461,7 @@ function Reader({
   }, [scrollTarget]);
   // Every guide the Inbox opens draws its Mermaid overview diagram, whatever the host draws itself.
   const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
-  // And each chapter's diagram (format version 5), at the top of the chapter's text.
+  // And each chapter's diagram (format version 5), at the top of the chapter's code pane.
   const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
   const host = useMemo(
     () => ({

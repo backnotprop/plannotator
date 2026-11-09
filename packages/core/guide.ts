@@ -43,7 +43,7 @@ export interface GuideSection {
    *  deliberate prose-only context section (no diffs, real overview text) is
    *  a valid model output and is preserved as-is rather than dropped. */
   diffs: GuideDiffRef[];
-  /** Optional: one diagram drawn at the top of the chapter's text, the same
+  /** Optional: one diagram drawn at the top of the chapter's code pane, the same
    *  shape as an overview's (snapshot format version 5, written only when a
    *  chapter has one). Readers that cannot draw it show the chapter as before. */
   diagram?: GuideOverviewDiagram;

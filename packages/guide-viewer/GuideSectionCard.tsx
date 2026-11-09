@@ -164,6 +164,86 @@ function SectionTab({ fill, lead, children }: { fill: string; lead?: React.React
   );
 }
 
+/** Where folded chapter diagrams are listed (one key, newest last), and how many it keeps. */
+const DIAGRAM_FOLDS_KEY = 'plannotator-guide-diagram-folds';
+const DIAGRAM_FOLDS_KEPT = 60;
+
+type FoldStore = { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void };
+
+/** The browser's localStorage, when the page has one it may use. */
+function localFoldStore(): FoldStore | null {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A short name for one chapter's diagram: its chapter's title and its source, so a redrawn diagram opens again. */
+export function chapterDiagramFoldId(title: string, source: string): string {
+  let hash = 5381;
+  const text = `${title}\n${source}`;
+  for (let i = 0; i < text.length; i++) hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+  return hash.toString(36);
+}
+
+function readFolds(store: FoldStore | null): string[] {
+  try {
+    return (store?.getItem(DIAGRAM_FOLDS_KEY) ?? '').split(' ').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function writeFold(store: FoldStore | null, id: string, folded: boolean): void {
+  const rest = readFolds(store).filter((kept) => kept !== id);
+  const next = folded ? [...rest, id].slice(-DIAGRAM_FOLDS_KEPT) : rest;
+  try {
+    store?.setItem(DIAGRAM_FOLDS_KEY, next.join(' '));
+  } catch {
+    // Storage refused (private mode, quota): the fold lasts while the page is open.
+  }
+}
+
+/**
+ * A chapter's diagram at the top of its code pane: a "Diagram" header whose caret folds it, as a file's does, and
+ * the host's drawing under it, its box capped at 320px (the canvas fits the drawing inside it; Expand opens it full
+ * size) so a tall diagram does not push the chapter's code away. The fold is
+ * kept (the host's store, else localStorage), so the diagram stays folded when the guide opens again.
+ */
+function ChapterDiagram({ kind, foldId, children }: { kind: string; foldId: string; children: React.ReactNode }) {
+  const { diagramFoldStore } = useGuideHost();
+  const store = diagramFoldStore ?? localFoldStore();
+  const [folded, setFolded] = useState(() => readFolds(store).includes(foldId));
+  const toggle = () => {
+    const next = !folded;
+    setFolded(next);
+    writeFold(store, foldId, next);
+  };
+  return (
+    <div data-guide-chapter-diagram={kind} data-folded={folded ? '' : undefined} className="min-w-0">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={!folded}
+        className="group flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        title={folded ? 'Show diagram' : 'Hide diagram'}
+      >
+        <ChevronDown className={`flex-shrink-0 transition-transform ${folded ? '-rotate-90' : ''}`} size={13} />
+        Diagram
+      </button>
+      {!folded && (
+        <div
+          data-guide-chapter-diagram-body=""
+          className="mt-1.5 min-w-0 [&_[data-diagram-block]]:!my-0 [&_[data-diagram-inline]]:max-h-[320px]"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface GuideSectionCardProps {
   section: GuideSection;
   files: DiffFile[];
@@ -213,8 +293,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const position = numbered ? `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}` : null;
   const isCollapsed = showReviewed ? collapsedOverride ?? reviewed : collapsedOverride === true;
-  // A chapter's diagram (format version 5), drawn by the host at the top of the chapter's text; a host that cannot
-  // draw it leaves the chapter exactly as it is without one.
+  // A chapter's diagram (format version 5), drawn by the host at the top of the chapter's code pane; a host that
+  // cannot draw it leaves the chapter exactly as it is without one.
   const chapterDiagram = section.diagram && !isCollapsed ? (host.renderChapterDiagram?.(section.diagram, index) ?? null) : null;
 
   const filesByPath = useMemo(() => new Map(host.files.map((file) => [file.path, file])), [host.files]);
@@ -344,12 +424,6 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
             </div>
             )}
 
-            {chapterDiagram && (
-              <div data-guide-chapter-diagram={section.diagram?.kind} className="mt-3.5 min-w-0 md:flex-none">
-                {chapterDiagram}
-              </div>
-            )}
-
             {section.overview && (
               <div className="mt-3.5 space-y-2.5 md:flex-none">{renderMarkdownProse(section.overview, { tone: 'muted', renderLink })}</div>
             )}
@@ -378,6 +452,11 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
         </div>
 
         <div className="min-w-0 space-y-4 bg-muted/[0.07] px-1.5 py-3 md:px-4 md:py-4">
+          {chapterDiagram && section.diagram && (
+            <ChapterDiagram kind={section.diagram.kind} foldId={chapterDiagramFoldId(section.title, section.diagram.source)}>
+              {chapterDiagram}
+            </ChapterDiagram>
+          )}
           {orderedFiles.length > 0 ? (
             orderedFiles.map((file) => (
               <GuideFileCard
