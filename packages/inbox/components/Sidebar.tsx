@@ -35,7 +35,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
@@ -48,6 +48,8 @@ export interface SidebarProps {
    */
   onPulls?: () => void;
   pullsCount?: number;
+  /** The Pull requests page (approval "inbox-pr-dashboard"), under the same Code review switch as `onPulls`. */
+  onPullRequests?: () => void;
   /**
    * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
    * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
@@ -449,6 +451,18 @@ export function Sidebar(props: SidebarProps) {
               {formatCount(props.pullsCount ?? 0)}
             </span>
           )}
+        </button>
+      )}
+      {props.onPullRequests && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'prs' ? ' ib-on' : ''}`}
+          onClick={pick(props.onPullRequests)}
+          aria-current={props.page === 'prs' ? 'page' : undefined}
+          data-prs-nav=""
+        >
+          <Icon name="pullRequest" />
+          Pull requests
         </button>
       )}
       {(props.draftsCount ?? 0) > 0 && props.onDrafts && (

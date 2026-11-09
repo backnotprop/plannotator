@@ -20,6 +20,8 @@
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */
 @source "../../packages/inbox/floaters/**/*.tsx";
+/* The Pull requests page (packages/inbox/prs/). */
+@source "../../packages/inbox/prs/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -35,6 +37,8 @@
 @import "../../packages/system/src/system.css";
 /* Floating reply drafts and Ask AI in the corner. */
 @import "../../packages/inbox/floaters/floaters.css";
+/* The Pull requests page and a stack's page (packages/inbox/prs/). */
+@import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 

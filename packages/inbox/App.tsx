@@ -182,6 +182,11 @@ import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
+import { SheetPage, type SheetView } from './prs/SheetPage';
+import { StackPage } from './prs/StackPage';
+import { useSheetPulls } from './prs/useSheetPulls';
+import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
+import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
 import { reviewsAlias } from './reviewsRoute';
@@ -351,7 +356,14 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs';
+  /**
+   * Pull requests (`#prs`, Code review on; approval "inbox-pr-dashboard"): Open or Merged (`&state=merged`), a stack's
+   * page (`&stack=`, a layer's key), a PR opened from it (`&layer=`, `&scope=stack`), and `&from=sheet` when the PR was
+   * opened from a tile (its Back is the Sheet, not the stack's page).
+   */
+  prsView?: SheetView;
+  prsFrom?: 'sheet' | 'stack';
   /**
    * Reviews (`#reviews`, Code review on; `#pulls` is its permanent alias): the stack open beside the list (`&stack=`, its top layer's key),
    * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
@@ -457,6 +469,20 @@ function routeOf(fullHash: string): Route {
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
+  if (params.has('prs')) {
+    const stack = params.get('stack') || null;
+    const layer = stack ? params.get('layer') || null : null;
+    return {
+      page: 'prs',
+      project: null,
+      thread: null,
+      prsView: params.get('state') === 'merged' ? 'merged' : 'open',
+      stack,
+      layer,
+      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      prsFrom: layer && params.get('from') === 'sheet' ? 'sheet' : 'stack',
+    };
+  }
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
   // `#pulls…` is rewritten to this address on arrival (reviewsAlias): it may still be read here in the same breath.
   const fromReviews = params.has('reviews') || params.has('pulls');
@@ -528,6 +554,12 @@ function hashOf(route: Route): string {
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
       systemHashOf(route) +
       (route.new ? '&new' : '');
+  else if (route.page === 'prs')
+    hash =
+      'prs' +
+      (route.prsView === 'merged' ? '&state=merged' : '') +
+      (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -5033,6 +5065,8 @@ function Inbox() {
   pagesRef.current = { pulls: pullsShown, drafts: (drafts?.length ?? 0) + replyDrafts.length > 0, composing: compose !== null };
   const onReviews = route.page === 'reviews' || !!route.reviews;
   const pulls = usePulls(onReviews && pullsShown, pullsShown, (route.reviews?.view ?? route.view) === 'others');
+  // The Pull requests page's own list (everywhere, mine): read only while it, a stack's page or a PR opened from it shows.
+  const sheetPulls = useSheetPulls(route.page === 'prs' && pullsShown);
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
@@ -5066,6 +5100,13 @@ function Inbox() {
     if (onReviews && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onReviews, guestPage]);
+  // Pull requests lives under Code review: off (or a guest's page), `#prs` goes where `#reviews` does, in place.
+  useEffect(() => {
+    if (route.page !== 'prs' || settings === null) return;
+    if (guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+    else if (!codeReviewOn) writeRoute({ page: 'reviews', project: null, thread: null }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.page, settings === null, guestPage, codeReviewOn]);
   // Code review turned off (from another window, say): nothing starts a review from here, and the box says why it went.
   // Its words stay in memory for when it's back.
   const reviewBoxOpen = !!compose?.review;
@@ -6270,6 +6311,53 @@ function Inbox() {
         marks={settings !== null && !guestPage}
       />
     );
+  } else if (route.page === 'prs' && pullsShown && route.stack && route.layer) {
+    // A PR opened from the Sheet or a stack's page: the Inbox's own PR view, on the page's list.
+    main = (
+      <PullReview
+        model={sheetPulls.model}
+        modelError={sheetPulls.error}
+        stackId={route.stack}
+        layerKey={route.layer}
+        scope={route.scope ?? 'layer'}
+        onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
+        onBack={() => close(route.prsFrom === 'sheet' ? { ...route, stack: null, layer: null, scope: 'layer', prsFrom: 'stack' } : { ...route, layer: null, scope: 'layer', prsFrom: 'stack' })}
+        onPosted={sheetPulls.refresh}
+        onSent={() => {
+          close(route.prsFrom === 'sheet' ? { ...route, stack: null, layer: null, scope: 'layer', prsFrom: 'stack' } : { ...route, layer: null, scope: 'layer', prsFrom: 'stack' });
+          showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
+        }}
+      />
+    );
+  } else if (route.page === 'prs' && pullsShown && route.stack) {
+    const stacks = sheetPulls.model ? inboxPullStacks(sheetPulls.model.pulls) : [];
+    const stack = stacks.find((s) => s.id === route.stack || s.layers.some((l) => l.key === route.stack)) ?? null;
+    main = (
+      <StackPage
+        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
+        loading={!sheetPulls.model}
+        repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
+        phone={phone}
+        onBack={() => close({ page: 'prs', project: null, thread: null, prsView: route.prsView })}
+        onOpenLayer={(pull) => go({ ...route, layer: pull.key, scope: 'layer', prsFrom: 'stack' })}
+      />
+    );
+  } else if (route.page === 'prs' && pullsShown) {
+    main = (
+      <SheetPage
+        model={sheetPulls.model}
+        error={sheetPulls.error}
+        loading={sheetPulls.loading}
+        phone={phone}
+        view={route.prsView ?? 'open'}
+        onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
+        onOpenPull={(pull, stack) => go({ ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' })}
+        onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
+        onMerged={sheetPulls.refresh}
+      />
+    );
+  } else if (route.page === 'prs') {
+    main = <section className="ib-prs" aria-busy="true" data-prs-page="" />;
   } else if (route.page === 'reviews' && pullsShown && route.stack && route.layer) {
     main = (
       <PullReview
@@ -6810,6 +6898,7 @@ function Inbox() {
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
+            onPullRequests={pullsShown ? () => leave({ page: 'prs', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
             onShape={shapeOn && shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
