@@ -6,7 +6,7 @@
  */
 
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -329,6 +329,11 @@ export interface ListModel {
    * an older Inbox and for a tailnet guest, which then read every session as before.
    */
   session_labels?: Record<string, string>;
+  /**
+   * Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked
+   * machine's on the merged view. Absent from an older Inbox.
+   */
+  agents?: InboxAgentsGroup[];
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
@@ -2247,7 +2252,7 @@ export interface InboxEventHandlers {
    * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
    * and the authors read the list again.
    */
-  onDeliveries?: (change?: { labels: boolean; sessions: boolean }) => void;
+  onDeliveries?: (change?: { labels: boolean; sessions: boolean; agents?: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -2384,14 +2389,17 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'deliveries': {
       let labels = false;
       let sessions = false;
+      let agents = false;
       try {
-        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown } | null;
+        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown; agents?: unknown } | null;
         labels = change?.labels === true;
         sessions = change?.sessions === true;
+        // The sidebar's Agents moved (agentsList.ts).
+        agents = change?.agents === true;
       } catch {
         // An empty or malformed frame is a delivery change alone.
       }
-      handlers.onDeliveries?.({ labels, sessions });
+      handlers.onDeliveries?.({ labels, sessions, agents });
       return;
     }
     case 'pins':

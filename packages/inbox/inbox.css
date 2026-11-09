@@ -1494,9 +1494,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    (the phone block at the end). */
 .ib-body { overflow-wrap: break-word; }
 .ib-body :not(pre) > code { overflow-wrap: break-word; word-break: break-word; }
-.ib-body [data-question-key] { min-width: 0; max-width: 100%; }
+:is(.ib-body, .ib-docscroll) [data-question-key] { min-width: 0; max-width: 100%; }
 /* The choices are a grid: its one column takes the card's width, not the longest choice's. */
-.ib-body [data-question-key] > :is([role="radiogroup"], [role="group"]) { grid-template-columns: minmax(0, 1fr); }
+:is(.ib-body, .ib-docscroll) [data-question-key] > :is([role="radiogroup"], [role="group"]) { grid-template-columns: minmax(0, 1fr); }
 .ib-qfoot-st { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; }
 /* The card's footer (ui's QuestionBlock: Add note, Skip, then Accept recommended and the host's status in one
    right-aligned box). No button ever shrinks or breaks a word ("Acce pt reco mme nded" on a phone); when the row
@@ -2629,6 +2629,8 @@ pre code.pn-code {
 pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
+  /* As wide as its longest line, so the background follows the text when the block scrolls sideways. */
+  min-width: max-content;
 }
 
 /* a guided review: the card at the foot of its message (the record's 4.1) and the guide open over the window (4.2) */
@@ -3495,8 +3497,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   /* a phone breaks a long token anywhere, and the question card's eyebrow and tags wrap inside it (an iPhone SE's 320 px) */
   .ib-msg, .ib-body { min-width: 0; }
   .ib-body { overflow-wrap: anywhere; }
-  .ib-body [data-question-key] > [data-pinpoint-ignore]:first-child,
-  .ib-body [data-question-key] > [data-pinpoint-ignore]:first-child > span:last-child { flex-wrap: wrap; row-gap: 4px; }
+  :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:first-child,
+  :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:first-child > span:last-child { flex-wrap: wrap; row-gap: 4px; }
   .ib-msg, .ib-pane.ib-withfile .ib-msg { padding-left: 0; }
   /* a message landed on from search: its ring clears the text (the message has no padding of its own here), and nothing moves */
   .pn-inbox [data-message-article].ib-q-target, .pn-inbox [data-message-article].ib-q-target-out { margin-inline: -8px; padding-inline: 8px; }
@@ -3511,14 +3513,14 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   /* A diagram's comment composer, inline or in the popout (which portals to body): buttons a thumb can hit. */
   body:has(.pn-inbox) [data-diagram-composer] button { min-height: 44px; }
   /* the question cards (ui's QuestionBlock): rows and buttons a thumb can hit */
-  .ib-body [data-question-option]:not([data-question-tile] > *) { min-height: 44px; align-items: center; padding-top: 8px; padding-bottom: 8px; }
+  :is(.ib-body, .ib-docscroll) [data-question-option]:not([data-question-tile] > *) { min-height: 44px; align-items: center; padding-top: 8px; padding-bottom: 8px; }
   /* A picture tile: its caption row is the 44 px target, the radio or checkbox drawn at 20 px. */
-  .ib-body [data-question-tile] [data-question-control] { width: 20px; height: 20px; margin-top: 0; }
-  .ib-body [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
-  .ib-body [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
-  .ib-body [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
-  .ib-body [data-question-key] input[type="text"] { min-height: 40px; }
-  .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > button, .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: var(--ib-fs-14, 14px); }
+  :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-control] { width: 20px; height: 20px; margin-top: 0; }
+  :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
+  :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
+  :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
+  :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
+  :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > button, :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: var(--ib-fs-14, 14px); }
   /* The footer on a touch phone: the buttons and the status never fit one row, so the status leads on its own
      line and the buttons follow it in reading order (one that does not fit goes to the next line, below). A
      narrow desktop window keeps the base rule (one row when it fits, else the status above, wrap-reverse). */
@@ -5111,8 +5113,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox .ib-readline > button { color: var(--ib-sf-primary-s, var(--primary)); }
   .pn-inbox fieldset.question-block { --primary: var(--ib-qc-primary-s, var(--ib-primary0)); }
 }
-.pn-inbox .ib-body fieldset.question-block { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--border) 85%, transparent)); border-radius: var(--ib-qc-r-s, 10px); background: var(--ib-qc-bg-s, color-mix(in oklab, var(--background) 35%, var(--card))); }
-.pn-inbox .ib-body fieldset.question-block[data-question-status="answered"] { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--primary) 45%, transparent)); box-shadow: var(--ib-qc-answered-s, none); }
+.pn-inbox :is(.ib-body, .ib-docscroll) fieldset.question-block { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--border) 85%, transparent)); border-radius: var(--ib-qc-r-s, 10px); background: var(--ib-qc-bg-s, color-mix(in oklab, var(--background) 35%, var(--card))); }
+.pn-inbox :is(.ib-body, .ib-docscroll) fieldset.question-block[data-question-status="answered"] { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--primary) 45%, transparent)); box-shadow: var(--ib-qc-answered-s, none); }
 .pn-inbox .question-block > div:first-child > span:first-child { font-weight: var(--ib-qc-eye-w-s, 600); letter-spacing: var(--ib-qc-eye-track-s, 0.08em); text-transform: var(--ib-qc-eye-case-s, uppercase); }
 /* The eyebrow's tags. Off, each keeps its tone (ui's Tag: rec primary/15, ok success/15, skip muted, open a
    dashed border); the tone's own values ride --ib-qt-*0, set below from ui's classes. */

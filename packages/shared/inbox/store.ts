@@ -43,6 +43,8 @@ import {
   derivePersonThreadSubject,
   inboxQuestionState,
   inboxReplyStillOpenOf,
+  inboxFileQuestionKey,
+  inboxQuestionsInPlaceOrder,
   inboxQuestionWaitsOnPerson,
   inboxRowWaits,
   isInboxQuestionSupersedable,
@@ -52,6 +54,7 @@ import {
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
+  type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import {
@@ -264,6 +267,14 @@ export interface InboxSendInput {
   thread?: string | null;
   /** The files attached, already recorded (blobs written) by recordInboxAttachments. */
   attachments?: InboxAttachment[];
+  /**
+   * The question blocks inside attached Markdown files (issue #2828), read by
+   * the server from each sent version (`parseInboxQuestionBlocks` as the
+   * file's viewer reads it), by the attachment's id. Each becomes a question
+   * of this message (`InboxQuestionRecord.attachment`), after the body's, in
+   * attachment order. An id that names none of `attachments` is ignored.
+   */
+  attachment_questions?: readonly { attachment_id: string; questions: readonly ParsedInboxQuestion[] }[];
   /**
    * The images the body shows, already captured (blobs written) by
    * captureInboxInlineImages. Absent: the body shows none (nothing is
@@ -1732,7 +1743,8 @@ export class InboxStore {
   private questionRecords(messageId: string): InboxQuestionRecord[] {
     const out: InboxQuestionRecord[] = [];
     for (const id of this.messageQuestions.get(messageId) ?? []) out.push(this.questions.get(id)!);
-    return out.sort((a, b) => a.position - b.position);
+    // The body's by position, then each attached file's (issue #2828), the files in the order they were written.
+    return inboxQuestionsInPlaceOrder(out);
   }
 
   private isResolved(threadId: string): boolean {
@@ -4076,9 +4088,12 @@ export class InboxStore {
     // Action items (approval "inbox-next-actions"): `:::action` blocks, kept as
     // question records of kind "action", numbered on their own (A1, A2…).
     const actions = parseInboxActionBlocks(body);
+    // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
+    // question of this message has (inboxFileQuestionKey), numbered within its file.
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
-    const superseding = this.planSupersede(threadId, id, supersedes, parsed, actions);
+    const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
     const agentSubject = subjectCheck.subject;
     const message: InboxMessage = {
@@ -4133,6 +4148,31 @@ export class InboxStore {
           picked_by: null,
           picked_at: null,
           sent_reply_id: null,
+        },
+        at,
+      );
+    }
+    for (const { key: fileKey, question, attachment } of fileQuestions) {
+      this.appendQuestion(
+        {
+          id: `${id}/${fileKey}`,
+          project_id: projectId,
+          message_id: id,
+          key: fileKey,
+          position: question.position,
+          kind: question.kind,
+          prompt: question.prompt,
+          parsed: question.parsed,
+          stopped: question.stopped,
+          holds_up: question.holds_up,
+          asked_by_agent_id: input.author.session,
+          answer: null,
+          revision: 0,
+          sent_revision: 0,
+          picked_by: null,
+          picked_at: null,
+          sent_reply_id: null,
+          attachment: { id: attachment.id, name: attachment.name, key: question.key },
         },
         at,
       );
@@ -4209,6 +4249,32 @@ export class InboxStore {
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
+  }
+
+  /**
+   * The questions of a send's attached Markdown files (issue #2828), in
+   * attachment order and each file's block order, with the record key each
+   * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
+   * item or an earlier file has it). Only files this send attaches; an
+   * action block in a file is not read (only questions).
+   */
+  private fileQuestionsOf(
+    attachments: readonly InboxAttachment[],
+    asked: NonNullable<InboxSendInput["attachment_questions"]>,
+    bodyKeys: readonly string[],
+  ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
+    if (asked.length === 0) return [];
+    const taken = new Set(bodyKeys);
+    const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
+    for (const attachment of attachments) {
+      const entry = asked.find((a) => a.attachment_id === attachment.id);
+      if (!entry) continue;
+      for (const question of entry.questions) {
+        const key = inboxFileQuestionKey(question.key, taken);
+        if (key !== null) out.push({ key, question, attachment });
+      }
+    }
+    return out;
   }
 
   /** send_message's `done` as the store keeps it: trimmed, each once, in order. */

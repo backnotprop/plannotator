@@ -145,6 +145,13 @@ describe('the row words', () => {
     expect(deliveriesReadList({ labels: true, sessions: false }, quiet)).toBe(true);
     expect(deliveriesReadList(undefined, section([{ ...base, state: 'queued' }]))).toBe(true);
   });
+
+  test('the agents moved: the list is read again only while something draws them (the Agents section)', () => {
+    const quiet: InboxListSection[] = [{ id: 'sent', label: 'Sent', threads: [] }];
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, true)).toBe(true);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, false)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: false }, quiet, true)).toBe(false);
+  });
 });
 
 const roots: string[] = [];

@@ -1299,6 +1299,25 @@ export interface InboxPicker {
 }
 
 /**
+ * Where a question inside an attached Markdown file sits (issue #2828): the
+ * file the message attaches, and the question's key as that file's own cards
+ * compute it (`findQuestionBlocks` over the sent text). The record's `key`
+ * is unique among the message's questions (a body question keeps its key; a
+ * file's question takes the next free `-N` when a body question or an
+ * earlier file has it), and is the one a pick, a supersede and a reply name.
+ * The record's `position` is its place among that file's questions (Q1 is
+ * the file's first card), and `parsed.line` its prompt's line in the file.
+ */
+export interface InboxQuestionAttachment {
+  /** The attachment's `att_` id on the same message. */
+  id: string;
+  /** The file's name, as the message's attachment record names it. */
+  name: string;
+  /** The question's key inside the file (what its card computes). */
+  key: string;
+}
+
+/**
  * The stored question: one per question block of an agent's message.
  * Records written before Decisions were removed (2026-10) also carry
  * `decision_on_answer`, `decision_id`, `decision_recording` and
@@ -1363,6 +1382,12 @@ export interface InboxQuestionRecord {
    * item is open, and after it is taken back.
    */
   action_result?: InboxActionResult | null;
+  /**
+   * A question asked inside a Markdown file the message attaches, not in its
+   * body (issue #2828). Absent or null: a question of the body (every record
+   * written before this field).
+   */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1507,6 +1532,8 @@ export interface InboxQuestion extends InboxQuestionContract {
   action?: InboxActionFacts | null;
   /** On an action item: what came of it, or null while open. Absent on a question and from an older Inbox. */
   action_result?: InboxActionResult | null;
+  /** A question inside an attached Markdown file (`InboxQuestionRecord.attachment`). Absent: a question of the body, or an older Inbox. */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -3161,6 +3188,56 @@ export interface InboxComposeSession {
 export interface InboxComposeProject {
   project: { id: string | null; name: string; root: string };
   sessions: InboxComposeSession[];
+}
+
+/**
+ * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
+ * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
+ * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ */
+export interface InboxAgent {
+  /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
+  id: string;
+  /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
+  session: string;
+  /** Set when the Inbox launched it: the launch's id and its thread. */
+  launch?: { id: string; thread_id: string };
+  /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
+  host: string | null;
+  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  label?: string;
+  /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
+  project: { id: string | null; name: string } | null;
+  /**
+   * `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does);
+   * else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
+   */
+  state: "waiting" | "working" | "idle" | "ended";
+  /** How many of its threads wait on the person (0 when none). */
+  waiting: number;
+  /** Its session is live now (polls, or a launch that a reply starts again); false for an ended one. */
+  live: boolean;
+  /** When it started; null when this Inbox never heard it start (it only owns a waiting thread). */
+  started_at: string | null;
+  /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
+  last_seen_at: string | null;
+}
+
+/** The most agents a list names per machine; `total` says how many there are past that. */
+export const INBOX_AGENTS_LISTED_MAX = 40;
+
+/**
+ * One machine's agents on the list model (`agents`, one group per machine): waiting first (most waiting first),
+ * then working, idle and ended, each the most recently heard first, at most `INBOX_AGENTS_LISTED_MAX`.
+ */
+export interface InboxAgentsGroup {
+  /** The machine (its `ibx_` id), on the merged view (`machines=1`) only. */
+  machine?: string;
+  agents: InboxAgent[];
+  /** Every agent of the machine, those past the cap included. */
+  total: number;
+  /** How many of `total` ended today (each `ended`). */
+  ended_today: number;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
