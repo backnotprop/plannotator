@@ -16,12 +16,13 @@
  * hidden ones too. A drive's own root (`/Volumes/Studio SSD`) can be started in. A path that isn't there (or is a file)
  * is `{ exists: false }`, with the nearest folder above it that is (`nearest`), so the window can offer what is there.
  *
- * This file imports only `node:fs` and `node:path`: its own source runs in a child process for a folder outside home
- * (`inbox-folder-reader.ts`), so a drive that doesn't answer never stops the Inbox.
+ * This file imports only `node:fs`, `node:path` and Windows' own folder rules (`inbox-launch-windows.ts`, which imports
+ * nothing): its source, bundled with them, runs in a child process for a folder outside home (`inbox-folder-reader.ts`),
+ * so a drive that doesn't answer never stops the Inbox.
  */
 import { accessSync, constants, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { windowsFolderHidden, windowsTypedUnderHome } from "./inbox-launch-windows";
+import { windowsAttributesOf, windowsFolderHidden, windowsFolderRefusal, windowsTypedUnderHome } from "./inbox-launch-windows";
 
 /** At most this many names come back for one folder (alphabetical): the window filters as the person types. */
 export const HOME_FOLDERS_MAX = 500;
@@ -102,14 +103,23 @@ const hiddenUnder = (real: string, realHome: string) => {
  */
 function judge(real: string, realHome: string, places: FolderPlaces): { refused: HomeFolderRefusal | null; start: boolean } {
   if (inside(real, realHome)) return hiddenUnder(real, realHome) ? { refused: "hidden", start: false } : { refused: null, start: real !== realHome };
-  const refused = refusedOutside(real, places);
+  const refused = refusedOutside(real, realHome, places);
   if (refused) return { refused, start: false };
   const above = realHome === real || under(realHome, real);
   return { refused: null, start: !above && !places.containers.includes(real) };
 }
 
-/** Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. */
-function refusedOutside(real: string, places: FolderPlaces): HomeFolderRefusal | null {
+/**
+ * Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. On
+ * Windows, by Windows' own rules (`windowsFolderRefusal`: the Windows and Program Files folders, other profiles, a
+ * folder with the Hidden or System attribute).
+ */
+function refusedOutside(real: string, realHome: string, places: FolderPlaces): HomeFolderRefusal | null {
+  if (process.platform === "win32") {
+    const env = process.env;
+    const programFiles = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432].filter((path): path is string => Boolean(path));
+    return windowsFolderRefusal(real, { systemRoot: env.SystemRoot ?? env.windir, programFiles, programData: env.ProgramData, home: realHome }, windowsAttributesOf);
+  }
   if (real.split(sep).some((segment) => segment.startsWith("."))) return "hidden";
   if (places.system.some((root) => under(real, root)) && !places.open.some((root) => under(real, root))) return "system";
   return null;

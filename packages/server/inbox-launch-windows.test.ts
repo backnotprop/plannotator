@@ -7,7 +7,7 @@
  * `windows.yml`; they start only stub programs (cmd scripts and node), in temp folders: never an agent CLI or an Inbox.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -224,6 +224,23 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
     const typed = `${home.slice(0, 1).toLowerCase()}${home.slice(1).toUpperCase()}\\code`;
     expect(resolveHomeFolder(home, typed)).toMatchObject({ ok: true, exists: true, shown: "~/code" });
     expect(resolveHomeFolder(home, "D:\\elsewhere")).toEqual({ ok: false, refused: "outside" });
+  });
+
+  test("a junction in home that leads to the Windows folder is never listed or opened", () => {
+    const home = tempDir("junction");
+    mkdirSync(join(home, "code"));
+    // A junction needs no admin rights; it lands outside home, where Windows' own folder rules judge it.
+    const junction = join(home, "win");
+    symlinkSync(process.env.SystemRoot ?? "C:\\Windows", junction, "junction");
+    try {
+      const listed = listHomeFolders(home, "~");
+      expect("folders" in listed ? listed.folders : null).toEqual(["code"]);
+      expect(resolveHomeFolder(home, "~/win")).toEqual({ ok: false, refused: "system" });
+      expect(resolveHomeFolder(home, "~/win/System32")).toEqual({ ok: false, refused: "system" });
+    } finally {
+      // The junction alone (rmdir removes the link, never what it leads to), before the scratch folder's removal.
+      rmdirSync(junction);
+    }
   });
 
   test("a .cmd CLI found through Path runs through cmd.exe with its arguments whole", async () => {
