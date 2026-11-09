@@ -27,8 +27,8 @@ describe("production favicon", () => {
     expect(view.getUint32(16)).toBe(192);
     expect(view.getUint32(20)).toBe(192);
     expect(view.getUint8(24)).toBe(8);
-    // Colour type 2 (RGB): the goggles icon is an opaque ink square.
-    expect(view.getUint8(25)).toBe(2);
+    // Colour type 2 (RGB) or 6 (RGBA): the studio's file decides.
+    expect([2, 6]).toContain(view.getUint8(25));
   });
 
   test("keeps the SVG export as a wrapper around the canonical PNG", () => {

@@ -1,6 +1,6 @@
 /**
  * Canonical production favicon: the goggles icon, the brand studio's
- * web/icon-192.png (192x192 RGB PNG), embedded byte for byte.
+ * web/icon-192.png (192x192 PNG), embedded byte for byte.
  * Source SHA-256: e7d047d1a462a92f14b0222856c1939f60edef4be2485576d32c88dfa2492e92
  */
 export const FAVICON_PNG_BASE64 = [
