@@ -6,7 +6,7 @@ import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { ThemeProvider } from './ThemeProvider';
 import {
   FACE_FAVICON_PNG_DATA_URL,
-  FAVICON_PNG_DATA_URL,
+  FAVICON_ICO_DATA_URL,
   P_FAVICON_PNG_DATA_URL,
 } from '@plannotator/core/favicon';
 
@@ -78,10 +78,11 @@ describe('ThemeProvider favicon synchronization', () => {
 
     await mount();
 
+    // The .ico with its three frames, so the tab takes the hand-pixelled 16 or 32.
     const link = getFaviconLink();
-    expect(link?.href).toBe(FAVICON_PNG_DATA_URL);
-    expect(link?.type).toBe('image/png');
-    expect(link?.getAttribute('sizes')).toBe('192x192');
+    expect(link?.href).toBe(FAVICON_ICO_DATA_URL);
+    expect(link?.type).toBe('image/x-icon');
+    expect(link?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
   });
 
   test.skipIf(!hasDom)('updates document link[rel="icon"] href, type, and sizes when faviconStyle changes', async () => {
@@ -111,9 +112,9 @@ describe('ThemeProvider favicon synchronization', () => {
     });
 
     const glassLink = getFaviconLink();
-    expect(glassLink?.href).toBe(FAVICON_PNG_DATA_URL);
-    expect(glassLink?.type).toBe('image/png');
-    expect(glassLink?.getAttribute('sizes')).toBe('192x192');
+    expect(glassLink?.href).toBe(FAVICON_ICO_DATA_URL);
+    expect(glassLink?.type).toBe('image/x-icon');
+    expect(glassLink?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
   });
 
   test.skipIf(!hasDom)('classic, stored by anyone who chose the old navy P, draws the P icon', async () => {

@@ -6157,7 +6157,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
-      if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
+      if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
       // person's signed-in dev app; another site's page is refused, reads included.

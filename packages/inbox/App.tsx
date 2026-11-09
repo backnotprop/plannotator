@@ -183,7 +183,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
-import { adoptSavedFavicon, useInboxFaviconHref } from './faviconChoice';
+import { adoptSavedFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
@@ -967,7 +967,8 @@ function Inbox() {
   // The tab's count (tabCount.ts): every thread with news the person has not looked at, from the
   // latest read (not the held list on screen, and not the sidebar's project filter).
   const faviconHref = useInboxFaviconHref();
-  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref);
+  const faviconBadgeHref = useInboxFaviconBadgeHref();
+  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref, faviconBadgeHref);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);

@@ -10,7 +10,7 @@ import {
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -442,6 +442,23 @@ describe("handleFavicon", () => {
       const response = handleFavicon();
       // The entry HTML's <link> declares no type, so the header is all the browser has.
       expect(response.headers.get("content-type"), style).toBe("image/png");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
+  });
+
+  test("/favicon.ico, what every page links: Glass's multi-size .ico, Face and P their PNGs", async () => {
+    const glass = handleFavicon("/favicon.ico");
+    expect(glass.headers.get("content-type")).toBe("image/x-icon");
+    expect(glass.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await glass.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+    for (const [style, expected] of [
+      ["glass", FAVICON_ICO_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", P_FAVICON_PNG_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style });
+      const response = handleFavicon("/favicon.ico");
+      expect(response.headers.get("content-type"), style).toBe(style === "glass" ? "image/x-icon" : "image/png");
       expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
     }
   });

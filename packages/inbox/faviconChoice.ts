@@ -6,7 +6,7 @@
  * One shared choice: config.json `favicon`, which plan review, code review
  * and annotate write through POST /api/config and which the Inbox writes
  * through POST /api/inbox/settings `{ favicon }`. Every server's
- * `/favicon.png` answers with it, so the next page load of any of them shows it.
+ * `/favicon.ico` and `/favicon.png` answer with it, so the next page load of any of them shows it.
  *
  * A pick here shows at once, without a reload: the tab icon becomes the
  * chosen icon's data URL, and the tab count (tabCount.ts) redraws its badge
@@ -15,7 +15,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { faviconDataUrl, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import { faviconDataUrl, faviconPngDataUrl, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
 import { inboxApi } from './api';
 
 /** config.json's choice, from the settings read; null until it answers (or from an older Inbox). */
@@ -60,6 +60,15 @@ export function useInboxFaviconHref(): string | null {
   return useSyncExternalStore(
     subscribe,
     () => (chosenHere ? faviconDataUrl(chosenHere) : null),
+    () => null,
+  );
+}
+
+/** The picked icon as one PNG, what the tab-count badge is drawn over; null like useInboxFaviconHref. */
+export function useInboxFaviconBadgeHref(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => (chosenHere ? faviconPngDataUrl(chosenHere) : null),
     () => null,
   );
 }
