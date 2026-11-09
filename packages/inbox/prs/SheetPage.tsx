@@ -16,6 +16,8 @@ import { inboxApi } from '../api';
 import { forgeName, hostName } from '../pulls/labels';
 import { pullsEmptyWords, pullsNotices } from '../pulls/notices';
 import { usePullRisk } from '../pulls/usePullRisk';
+import { Named, Person } from '../pulls/Face';
+import { facesOnce } from '../pulls/words';
 import { ChecksMark, checksLabel } from './ChecksMark';
 import {
   agoWords,
@@ -28,7 +30,7 @@ import {
   needsYou,
   sheetModel,
   stackCounts,
-  statusWords,
+  statusParts,
   type RiskLevels,
 } from './sheetModel';
 
@@ -517,7 +519,7 @@ function TilePopover(props: {
   const open = inboxPullIsOpen(pull);
   const canMerge = open && mergeOffered(pull);
   const checks = checksLabel(pull.checks);
-  const status = statusWords(pull, now);
+  const status = statusParts(pull, now);
   const layerAt = isStack(stack) ? stack.layers.findIndex((l) => l.key === pull.key) + 1 : 0;
 
   const pressMerge = () => {
@@ -591,14 +593,14 @@ function TilePopover(props: {
           {pull.title || inboxPullLabel(pull)}
         </p>
         <p className="ib-prpop-meta">
-          {pull.author && <span>{pull.mine ? 'You' : pull.author}</span>}
+          {pull.author && <span>{pull.mine ? 'You' : <Person login={pull.author} host={pull.host} />}</span>}
           <span>updated {agoWords(pull.updated_at, now)}</span>
           <span className="ib-prpop-diff">
             +{pull.additions.toLocaleString()} −{pull.deletions.toLocaleString()}
           </span>
         </p>
         <p className="ib-prpop-status" data-tone={you ? 'you' : pull.checks === 'failure' && open ? 'bad' : undefined}>
-          {status}
+          <Named words={facesOnce(status)} host={pull.host} />
         </p>
         {open && checks && (
           <p className="ib-prpop-checks">
