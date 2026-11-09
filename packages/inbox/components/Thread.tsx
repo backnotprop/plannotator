@@ -1329,13 +1329,11 @@ export interface ThreadPaneProps {
   /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
   replyRequest?: string | null;
   onReplyOpened?: () => void;
-  /** Ask AI's icon (ask/useInboxAsk.tsx): null while this thread cannot ask, always null with Ask off (the tour, a tailnet guest). */
-  askButton?: React.ReactNode;
   /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
   shapeButton?: React.ReactNode;
   /**
    * Ask AI's Side for the selection bars of the agents' messages and of the open file (ask/useInboxAsk.tsx `side`).
-   * Absent while this thread cannot ask: no Side. A full-screen file's bar has no Ask icon (approval "inbox-ask-ai-flow").
+   * Absent while this thread cannot ask: no Side. The top bar has no Ask icon (the owner, 2026-11-09): Side starts a chat.
    */
   onSide?: (selected: string, source?: string) => void;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
@@ -1678,7 +1676,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -6000,7 +5998,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -6229,8 +6227,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {/* Full screen covers this bar and the file's bar has no Ask icon: Side in a selection, or leaving full screen, reaches the chat. */}
-            {!shownFull && askButton}
             {shapeButton}
             <ThreadMore
               {...copyHost}
