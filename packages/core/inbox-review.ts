@@ -407,16 +407,20 @@ export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review dra
  * diagram's doc: approval "guide-chapter-diagrams"). The Mermaid kind is offered whether Shape is on or off; the html
  * kind (a drawing by Shape's rules), its words and its drawing only while Shape is on too (approval
  * "code-review-029-shape-off": with Shape off an agent reads no word of Shape). get_guide_brief passes `shapeOn`.
- * AGENT TEXT: these words await the owner's OK and a clean-room test.
+ * AGENT TEXT: the rule's words are the owner's (clean-room verdict, "Candidate entry"); the html lines are the PR's.
  */
 export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
   return [
-    '- **sections[].diagram** (optional): one diagram at the top of a chapter, only when a',
-    '  picture explains that chapter better than words (a flow across steps, how parts',
-    '  connect). Most chapters need none. It sits above the chapter\'s code, full width and',
-    '  at most about 320px tall (the person can expand it), so prefer a left-to-right flow',
-    '  (`flowchart LR`) and keep it to a handful of boxes.',
-    shapeOn ? '  Mermaid, preferred: { "kind": "mermaid", "source" }.' : '  Mermaid: { "kind": "mermaid", "source" }.',
+    '- **sections[].diagram** (optional): one diagram at the top of a chapter, when a',
+    '  picture explains that chapter better than words. A chapter whose code is a flow of',
+    '  3 or more steps or outcomes (a request through middleware and a cache, a state',
+    '  machine, a handshake) gets one. A rename, a config value or one small function gets',
+    '  none. If a flow runs across several chapters, draw it once, in the chapter that holds',
+    '  most of it. It sits above the chapter\'s code, full width and at most about 320px tall',
+    '  (the person can expand it), so prefer a left-to-right flow (`flowchart LR`) and keep',
+    '  it to a handful of boxes. Mermaid arrows such as `-->` are fine: the rule against',
+    '  double hyphens is for prose.',
+    '  Mermaid: { "kind": "mermaid", "source" }.',
     ...(shapeOn
       ? ['  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a', '  drawing by the rules in `plannotator shape --help`.']
       : []),

@@ -42,7 +42,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
  */
 const SHOW_ME_WORDS = {
   /** inboxReviewChapterDiagramDoc(true): the html kind's words (approval "guide-chapter-diagrams"), Shape on only */
-  get_guide_brief: ["plannotator shape --help", "Mermaid, preferred"],
+  get_guide_brief: ["plannotator shape --help", "drawing by the rules in"],
   /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
   "review draw": ["review_draw_gone", "Show me makes a Shape"],
   /** INBOX_REVIEW_CURATE_DRAWING_LINE (Shape on; with Shape off the line names Mermaid only) */
