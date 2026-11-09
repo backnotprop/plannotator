@@ -48,8 +48,6 @@ export interface SidebarProps {
    */
   onPulls?: () => void;
   pullsCount?: number;
-  /** The Pull requests page (approval "inbox-pr-dashboard"), under the same Code review switch as `onPulls`. */
-  onPullRequests?: () => void;
   /**
    * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
    * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
@@ -439,30 +437,18 @@ export function Sidebar(props: SidebarProps) {
       {props.onPulls && (
         <button
           type="button"
-          className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
+          className={`ib-nav${props.page === 'reviews' || props.page === 'prs' ? ' ib-on' : ''}`}
           onClick={pick(props.onPulls)}
-          aria-current={props.page === 'reviews' ? 'page' : undefined}
+          aria-current={props.page === 'reviews' || props.page === 'prs' ? 'page' : undefined}
           data-pulls-nav=""
         >
-          <Icon name="reviews" />
+          <Icon name="pullRequest" />
           Reviews
           {(props.pullsCount ?? 0) > 0 && (
             <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
               {formatCount(props.pullsCount ?? 0)}
             </span>
           )}
-        </button>
-      )}
-      {props.onPullRequests && (
-        <button
-          type="button"
-          className={`ib-nav${props.page === 'prs' ? ' ib-on' : ''}`}
-          onClick={pick(props.onPullRequests)}
-          aria-current={props.page === 'prs' ? 'page' : undefined}
-          data-prs-nav=""
-        >
-          <Icon name="pullRequest" />
-          Pull requests
         </button>
       )}
       {(props.draftsCount ?? 0) > 0 && props.onDrafts && (

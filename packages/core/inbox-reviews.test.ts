@@ -17,7 +17,7 @@
  *  - a teammate's PR (a fork's, or on a long-lived branch) claimed by branch
  *    into the person's local review, hiding its row or the review;
  *  - a PR merely mentioned in a review thread claimed into its row, hiding a
- *    teammate's "asked for your review" row;
+ *    teammate's "Review requested" row;
  *  - a source field that an agent made multi-line or unbounded.
  */
 import { describe, expect, test } from "bun:test";

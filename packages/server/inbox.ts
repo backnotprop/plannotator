@@ -4718,6 +4718,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
+        // The next list shows it merged at once, even from the read cache or a forge search that still says open.
+        pulls.markMerged(key);
         return json({ serverSession, ok: true, key, method: result.method, url: pull.url });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {

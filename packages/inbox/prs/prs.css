@@ -20,8 +20,11 @@
 .ib-prs-title { display: flex; align-items: center; gap: 8px; }
 .ib-prs-head h1,
 .ib-prst-head h1 { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; outline: none; }
-.ib-prs-sum { display: flex; flex-wrap: wrap; column-gap: 0; row-gap: 2px; margin: 4px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-prs-sum > span + span::before { content: '·'; padding: 0 6px; color: var(--ib-prt-quiet); }
+/* Every count has its "·" in front; the line starts 13px left and that band is clipped, so a count that wraps to the
+   start of a line has no dot in front of it (a narrow pane, about 1024 px wide). */
+.ib-prs-sum { display: flex; flex-wrap: wrap; column-gap: 0; row-gap: 2px; margin: 4px 0 0 -13px; clip-path: inset(-4px -4px -4px 13px); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-prs-sum > span { white-space: nowrap; }
+.ib-prs-sum > span::before { content: '·'; display: inline-block; width: 13px; text-align: center; color: var(--ib-prt-quiet); }
 .ib-prs-you { color: var(--primary); }
 .ib-prs-bad { color: var(--destructive); }
 
@@ -128,7 +131,7 @@
 .ib-prpop {
   position: fixed;
   z-index: 60;
-  width: 320px;
+  width: 352px;
   max-width: calc(100vw - 16px);
   padding: 12px 14px;
   border-radius: 8px;
@@ -168,7 +171,11 @@
 /* The second click: green, the colour of landed. */
 .ib-prpop-btn[data-merge='confirm'] { background: var(--success, oklch(0.62 0.15 150)); color: var(--success-foreground, #fff); }
 .ib-prpop-btn:disabled { opacity: 0.6; cursor: default; }
-.ib-prpop-merged { display: inline-flex; align-items: center; gap: 4px; color: var(--success, oklch(0.62 0.15 150)); }
+/* Merge's slot: every word it can say stacked in one cell, so the slot is as wide as the widest and never moves. */
+.ib-prpop-mslot { display: inline-grid; }
+.ib-prpop-mslot > * { grid-area: 1 / 1; justify-content: center; }
+.ib-prpop-msize { visibility: hidden; }
+.ib-prpop-btn.ib-prpop-merged { background: none; color: var(--success, oklch(0.62 0.15 150)); cursor: default; }
 .ib-prpop-hint { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-prpop-err { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); overflow-wrap: anywhere; }
 .ib-prpop-x { margin-left: 4px; }
@@ -181,7 +188,7 @@
 .ib-prpop[data-phone] .ib-prpop-stack { min-height: 44px; }
 .ib-prpop[data-phone] .ib-prpop-acts { display: grid; grid-template-columns: 1fr 1fr; }
 .ib-prpop[data-phone] .ib-prpop-btn { justify-content: center; }
-.ib-prpop[data-phone] .ib-prpop-btn[data-merge] { grid-column: 1 / -1; }
+.ib-prpop[data-phone] .ib-prpop-mslot { grid-column: 1 / -1; display: grid; }
 
 /* A stack's page. */
 .ib-prst-crumb { display: flex; align-items: center; gap: 4px; padding: 16px 0 0; margin-left: -4px; font-size: var(--ib-fs-14, 14px); }
@@ -261,11 +268,22 @@
 
 /* A phone: one column, tighter gutters; the counts part by space (a dot would dangle at a line's start). */
 .ib-prs[data-phone] .ib-prs-scroll { padding: 0 14px 32px; }
-.ib-prs[data-phone] .ib-prs-sum { column-gap: 12px; }
-.ib-prs[data-phone] .ib-prs-sum > span + span::before { content: none; }
+.ib-prs[data-phone] .ib-prs-sum { column-gap: 12px; margin-left: 0; clip-path: none; }
+.ib-prs[data-phone] .ib-prs-sum > span::before { content: none; }
 .ib-prs[data-phone] .ib-prs-field { flex: 1 1 100%; }
 .ib-prs[data-phone] .ib-prs-sech { flex-wrap: wrap; }
 .ib-prs[data-phone] .ib-prs-strip { flex-wrap: wrap; height: auto; min-height: 36px; padding: 6px 10px; row-gap: 4px; white-space: normal; }
 .ib-prs[data-phone] .ib-prt { height: 32px; padding: 0 10px; }
 .ib-prs[data-phone] .ib-prs-mark { width: 32px; height: 32px; }
 .ib-prs[data-phone] .ib-prst-row { min-height: 48px; }
+
+/* Inside Reviews (the owner's pick, take C): the board in Reviews' right pane; a phone gets a row at the top of the list. */
+.ib-prs.ib-prs-inpane .ib-prs-scroll { padding: 0 28px 40px; }
+/* The pane is narrower than the page: a stack's strip wraps its counts under its marks rather than over them. */
+.ib-prs-inpane .ib-prs-strip { flex-wrap: wrap; height: auto; min-height: 30px; padding: 5px 10px; row-gap: 4px; white-space: normal; text-align: start; }
+.ib-prs-inpane .ib-prs-strip-marks { flex: none; }
+.ib-prs-entry { display: flex; align-items: center; gap: 8px; width: calc(100% - 8px); margin: 4px 4px 8px; padding: 12px 12px; border: 0; border-radius: 8px; background: var(--ib-band); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); text-align: left; cursor: pointer; }
+.ib-prs-entry:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-entry-t { font-weight: 600; }
+.ib-prs-entry-n { margin-left: auto; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-prs-entry > svg:last-child { color: var(--muted-foreground); }

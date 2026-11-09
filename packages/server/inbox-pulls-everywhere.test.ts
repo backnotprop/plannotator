@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import type { RefRunner } from "@plannotator/shared/ref-cards";
-import { createInboxPulls, mergeListedPulls } from "./inbox-pulls";
+import { createInboxPulls, INBOX_PULLS_MERGED_HOLD_MS, INBOX_PULLS_REFRESH_MS, mergeListedPulls } from "./inbox-pulls";
 
 const pull = (repo: string, number: number, over: Partial<InboxPull> = {}): InboxPull => ({
   key: `github.com/${repo}#${number}`,
@@ -133,5 +133,36 @@ describe("list everywhere", () => {
     await pulls.list(projects, { everywhere: true });
     await pulls.list(projects);
     expect(gh.own).toHaveLength(2);
+  });
+});
+
+describe("merged from this Inbox", () => {
+  const projects = [{ host: "github.com", repo: "northwind/ledger", project_id: "prj_1" }];
+  const KEY = "github.com/northwind/ledger#412";
+  test("leaves Open at once: from the read cache, and from a forge read that still says open, until the hold ends", async () => {
+    const gh = fakeGh();
+    let clock = Date.parse("2026-11-08T12:00:00Z");
+    const pulls = createInboxPulls({ run: gh.run, now: () => clock });
+    const stateOf = async (options: { refresh?: boolean; everywhere?: boolean }) => (await pulls.list(projects, options)).pulls.find((p) => p.key === KEY)?.state;
+    expect(await stateOf({ everywhere: true })).toBe("open");
+    expect(await stateOf({})).toBe("open");
+    const reads = gh.own.length;
+
+    pulls.markMerged(KEY);
+    // Both cached answers (the page's and Reviews'), with no new read, and the PR the merge and review routes find.
+    expect(await stateOf({ everywhere: true })).toBe("merged");
+    expect(await stateOf({})).toBe("merged");
+    expect(gh.own).toHaveLength(reads);
+    expect(pulls.find(KEY)?.state).toBe("merged");
+    expect(pulls.find(KEY)?.merged_at).toBe(new Date(clock).toISOString());
+
+    // A refresh reads the forge again, whose search still says open (it lags): still merged here.
+    clock += INBOX_PULLS_REFRESH_MS + 1;
+    expect(await stateOf({ everywhere: true, refresh: true })).toBe("merged");
+    expect(gh.own.length).toBeGreaterThan(reads);
+
+    // Past the hold the forge's word stands again.
+    clock += INBOX_PULLS_MERGED_HOLD_MS;
+    expect(await stateOf({ everywhere: true, refresh: true })).toBe("open");
   });
 });

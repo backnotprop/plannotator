@@ -51,6 +51,13 @@ export interface SheetPageProps {
   onMerged: () => void;
   /** For tests and shots: the clock. */
   now?: number;
+  /**
+   * `page`: its own page (`#prs`, a phone's way in from Reviews); `pane`: Reviews' right pane while no review is open
+   * there (approval "inbox-pr-dashboard", the owner's pick "in Reviews", take C), with no sidebar button of its own.
+   */
+  mode?: 'page' | 'pane';
+  /** The page's back arrow, to Reviews (in place of the sidebar button). */
+  onBack?: () => void;
 }
 
 /** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
@@ -63,9 +70,22 @@ interface Pop {
 
 const HOVER_OPEN_MS = 280;
 const HOVER_CLOSE_MS = 180;
+/** How long "✓ Merged" stays in the popover before it closes and the PR leaves Open. */
+export const MERGED_SHOWN_MS = 1500;
+
+/** The list with the PRs merged from this page shown merged, before the next read says so. */
+function withMergedHere(model: InboxPullsAnswer | null, merged: ReadonlyMap<string, string>): InboxPullsAnswer | null {
+  if (!model || merged.size === 0) return model;
+  return { ...model, pulls: model.pulls.map((pull) => (merged.has(pull.key) && inboxPullIsOpen(pull) ? { ...pull, state: 'merged' as const, merged_at: pull.merged_at ?? merged.get(pull.key)! } : pull)) };
+}
 
 export function SheetPage(props: SheetPageProps) {
-  const { model, phone, view } = props;
+  const { phone, view } = props;
+  // A PR merged here leaves Open as its popover closes, whatever the list on screen still says.
+  const [mergedHere, setMergedHere] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const model = useMemo(() => withMergedHere(props.model, mergedHere), [props.model, mergedHere]);
+  // A merge under way or just done holds its popover open: the pointer leaving or another tile doesn't close it.
+  const held = useRef(false);
   // The clock moves with the list (ages and "this week" are read against the answer on screen).
   const readAt = useMemo(() => Date.now(), [model]);
   const now = props.now ?? readAt;
@@ -109,6 +129,7 @@ export function SheetPage(props: SheetPageProps) {
       if (event.pointerType !== 'mouse' || phone) return;
       const anchor = event.currentTarget;
       clearTimers();
+      if (held.current) return;
       if (pop && !pop.pinned) setPop({ pull, stack, anchor, pinned: false });
       else if (!pop) openTimer.current = setTimeout(() => setPop({ pull, stack, anchor, pinned: false }), HOVER_OPEN_MS);
     },
@@ -116,17 +137,17 @@ export function SheetPage(props: SheetPageProps) {
       if (event.pointerType !== 'mouse' || phone) return;
       if (openTimer.current) clearTimeout(openTimer.current);
       openTimer.current = null;
-      closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned ? null : was)), HOVER_CLOSE_MS);
+      closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned && !held.current ? null : was)), HOVER_CLOSE_MS);
     },
     onFocus: (event: ReactFocusEvent<HTMLButtonElement>) => {
-      if (phone || !event.currentTarget.matches(':focus-visible')) return;
+      if (phone || held.current || !event.currentTarget.matches(':focus-visible')) return;
       show({ pull, stack, anchor: event.currentTarget, pinned: false });
     },
     onBlur: (event: ReactFocusEvent<HTMLButtonElement>) => {
       // Into the pinned popover is not away.
       const to = event.relatedTarget as Node | null;
       if (to && document.querySelector('[data-pr-pop]')?.contains(to)) return;
-      setPop((was) => (was && !was.pinned && was.anchor === event.currentTarget ? null : was));
+      setPop((was) => (was && !was.pinned && !held.current && was.anchor === event.currentTarget ? null : was));
     },
     onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
       const anchor = event.currentTarget;
@@ -301,12 +322,50 @@ export function SheetPage(props: SheetPageProps) {
     );
   }
 
+  const mode = props.mode ?? 'page';
+  const popover = pop && (
+    <TilePopover
+      key={pop.pull.key}
+      pop={pop}
+      phone={phone}
+      now={now}
+      onEnter={() => clearTimers()}
+      onLeave={() => {
+        if (pop.pinned) return;
+        closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned && !held.current ? null : was)), HOVER_CLOSE_MS);
+      }}
+      onClose={(returnFocus) => hide(returnFocus)}
+      onOpen={() => {
+        hide(false);
+        props.onOpenPull(pop.pull, pop.stack);
+      }}
+      onOpenStack={() => {
+        hide(false);
+        props.onOpenStack(pop.stack);
+      }}
+      onHold={(hold) => {
+        held.current = hold;
+      }}
+      onMerged={(key) => {
+        held.current = false;
+        setMergedHere((was) => new Map(was).set(key, new Date().toISOString()));
+        hide(false);
+        props.onMerged();
+      }}
+    />
+  );
   return (
-    <section className="ib-prs" aria-labelledby={titleId} data-prs-page="" data-phone={phone ? '' : undefined}>
+    <section className={`ib-prs${mode === 'pane' ? ' ib-pane ib-prs-inpane' : ''}`} aria-labelledby={titleId} data-prs-page="" data-phone={phone ? '' : undefined}>
       <div className="ib-prs-scroll">
         <header className="ib-prs-head">
           <div className="ib-prs-title">
-            <SidebarTrigger />
+            {props.onBack ? (
+              <button type="button" className="ib-iconbtn" onClick={props.onBack} aria-label="Back to Reviews" data-prs-back="">
+                <Icon name="chevL" size={18} />
+              </button>
+            ) : mode === 'page' ? (
+              <SidebarTrigger />
+            ) : null}
             <h1 id={titleId} tabIndex={-1}>
               Pull requests
             </h1>
@@ -371,29 +430,7 @@ export function SheetPage(props: SheetPageProps) {
         {model && props.error && <p className="ib-prs-notices">Couldn’t read the list again: {props.error} Showing the last read.</p>}
         <div className="ib-prs-body">{body}</div>
       </div>
-      {pop && (
-        <TilePopover
-          key={pop.pull.key}
-          pop={pop}
-          phone={phone}
-          now={now}
-          onEnter={() => clearTimers()}
-          onLeave={() => {
-            if (pop.pinned) return;
-            closeTimer.current = setTimeout(() => setPop((was) => (was && !was.pinned ? null : was)), HOVER_CLOSE_MS);
-          }}
-          onClose={(returnFocus) => hide(returnFocus)}
-          onOpen={() => {
-            hide(false);
-            props.onOpenPull(pop.pull, pop.stack);
-          }}
-          onOpenStack={() => {
-            hide(false);
-            props.onOpenStack(pop.stack);
-          }}
-          onMerged={props.onMerged}
-        />
-      )}
+      {popover}
     </section>
   );
 }
@@ -401,6 +438,8 @@ export function SheetPage(props: SheetPageProps) {
 function joinOr(names: readonly string[]): string {
   return names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
 }
+
+const MERGE_WORDS = ['Merge', 'Confirm merge', 'Merging…', 'Merged'] as const;
 
 type MergePhase = { at: 'idle' } | { at: 'confirm' } | { at: 'merging' } | { at: 'done' } | { at: 'failed'; message: string };
 
@@ -413,7 +452,10 @@ function TilePopover(props: {
   onClose: (returnFocus: boolean) => void;
   onOpen: () => void;
   onOpenStack: () => void;
-  onMerged: () => void;
+  /** A merge under way or done: keep the popover open (true), or let it go again (false). */
+  onHold: (hold: boolean) => void;
+  /** The merge went and "Merged" was shown for `MERGED_SHOWN_MS`: close, and the PR leaves Open. */
+  onMerged: (key: string) => void;
 }) {
   const { pop, phone, now } = props;
   const { pull, stack } = pop;
@@ -485,16 +527,37 @@ function TilePopover(props: {
     }
     if (merge.at !== 'confirm' || !pull.head_sha) return;
     setMerge({ at: 'merging' });
+    props.onHold(true);
     inboxApi.pullMerge(pull.key, pull.head_sha).then(
       () => {
         setMerge({ at: 'done' });
-        props.onMerged();
+        // Long enough to read; the timer runs on if the popover is closed meanwhile, so the PR still leaves Open.
+        setTimeout(() => props.onMerged(pull.key), MERGED_SHOWN_MS);
       },
-      (cause: unknown) => setMerge({ at: 'failed', message: cause instanceof Error ? cause.message : 'The merge didn’t go.' }),
+      (cause: unknown) => {
+        props.onHold(false);
+        setMerge({ at: 'failed', message: cause instanceof Error ? cause.message : 'The merge didn’t go.' });
+      },
     );
   };
 
   const tabIndex = pinned ? undefined : -1;
+  // The confirm hint and a refusal: under the buttons on a desktop (the popover grows down, the buttons stay); above
+  // them on a phone's bottom sheet (it grows up, the buttons stay at the bottom).
+  const notes = (
+    <>
+      {merge.at === 'confirm' && (
+        <p className="ib-prpop-hint" id={`${labelId}-confirm`}>
+          Click again to merge {inboxPullLabel(pull)} into {pull.base}.
+        </p>
+      )}
+      {merge.at === 'failed' && (
+        <p className="ib-prpop-err" role="alert">
+          {merge.message}
+        </p>
+      )}
+    </>
+  );
   return (
     <>
       {phone && <div className="ib-prpop-scrim" onClick={() => props.onClose(false)} aria-hidden="true" />}
@@ -552,6 +615,7 @@ function TilePopover(props: {
             </span>
           </button>
         )}
+        {phone && notes}
         <div className="ib-prpop-acts">
           <button type="button" className="ib-prpop-btn" data-primary="" onClick={props.onOpen} tabIndex={tabIndex} data-pr-pop-first="" data-pr-pop-open="">
             Open
@@ -560,38 +624,39 @@ function TilePopover(props: {
             Open on {forgeName(pull)}
             <Icon name="external" size={12} />
           </a>
-          {/* Refused by the forge: its words say why, and Merge is not offered again until the list says otherwise. */}
-          {canMerge && merge.at !== 'done' && merge.at !== 'failed' && (
-            <button
-              type="button"
-              className="ib-prpop-btn"
-              data-merge={merge.at}
-              onClick={pressMerge}
-              disabled={merge.at === 'merging'}
-              tabIndex={tabIndex}
-              data-pr-pop-merge=""
-              aria-describedby={merge.at === 'confirm' ? `${labelId}-confirm` : undefined}
-            >
-              {merge.at === 'confirm' ? 'Confirm merge' : merge.at === 'merging' ? 'Merging…' : 'Merge'}
-            </button>
-          )}
-          {merge.at === 'done' && (
-            <span className="ib-prpop-merged" role="status">
-              <Icon name="check" size={13} />
-              Merged
+          {/* Refused by the forge: its words say why, and Merge is not offered again until the list says otherwise. One
+              slot as wide as its widest word, so Merge, Confirm merge, Merging… and Merged stay where the pointer is. */}
+          {canMerge && merge.at !== 'failed' && (
+            <span className="ib-prpop-mslot" data-pr-pop-mslot="">
+              {MERGE_WORDS.map((words) => (
+                <span key={words} className="ib-prpop-btn ib-prpop-msize" aria-hidden="true">
+                  {words === 'Merged' && <Icon name="check" size={13} />}
+                  {words}
+                </span>
+              ))}
+              {merge.at === 'done' ? (
+                <span className="ib-prpop-btn ib-prpop-merged" role="status" data-pr-pop-merged="">
+                  <Icon name="check" size={13} />
+                  Merged
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="ib-prpop-btn"
+                  data-merge={merge.at}
+                  onClick={pressMerge}
+                  disabled={merge.at === 'merging'}
+                  tabIndex={tabIndex}
+                  data-pr-pop-merge=""
+                  aria-describedby={merge.at === 'confirm' ? `${labelId}-confirm` : undefined}
+                >
+                  {merge.at === 'confirm' ? 'Confirm merge' : merge.at === 'merging' ? 'Merging…' : 'Merge'}
+                </button>
+              )}
             </span>
           )}
         </div>
-        {merge.at === 'confirm' && (
-          <p className="ib-prpop-hint" id={`${labelId}-confirm`}>
-            Click again to merge {inboxPullLabel(pull)} into {pull.base}.
-          </p>
-        )}
-        {merge.at === 'failed' && (
-          <p className="ib-prpop-err" role="alert">
-            {merge.message}
-          </p>
-        )}
+        {!phone && notes}
       </div>
     </>
   );

@@ -791,7 +791,7 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
-  await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText('tomas asked for your review');
+  await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
   const fold = list.locator('[data-reviews-fold="not_reviewed"]');
   await expect(fold).toHaveAttribute('aria-expanded', 'false');
   await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);

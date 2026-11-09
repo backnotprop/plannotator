@@ -82,6 +82,8 @@ import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts
 export const INBOX_PULLS_FRESH_MS = 60_000;
 /** A refresh reads again what is older than this. */
 export const INBOX_PULLS_REFRESH_MS = 20_000;
+/** How long a PR merged from this Inbox shows merged whatever the forge's reads still say (`markMerged`). */
+export const INBOX_PULLS_MERGED_HOLD_MS = 10 * 60_000;
 /** GitHub's GraphQL budget below this many points: the host is not read again until it fills (`rateLimit.resetAt`). */
 export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
@@ -683,6 +685,12 @@ export interface InboxPulls {
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  /**
+   * This Inbox merged the PR (the Pull requests page's Merge): every list from now on shows it merged, even a cached
+   * answer read before the merge or a forge read that still says open (GitHub's search lags), for
+   * `INBOX_PULLS_MERGED_HOLD_MS` or until a read says it is no longer open.
+   */
+  markMerged(key: string): void;
   /** Whether this CLI says it's signed in to the host: nothing is asked of a host it isn't. */
   signedInTo(cli: RefCli, host: string): Promise<boolean>;
   /**
@@ -1068,6 +1076,22 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   let knownWide = new Map<string, InboxPull>();
   let lastWideRepos = new Set<string>();
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
+  /** PRs merged from this Inbox, by key: when (`markMerged`). */
+  const mergedHere = new Map<string, number>();
+  const asMerged = (pull: InboxPull, at: number): InboxPull => ({ ...pull, state: "merged", merged_at: pull.merged_at ?? new Date(at).toISOString() });
+  /** A list's PRs with the ones this Inbox merged shown merged (a read that says they are not open any more ends the hold). */
+  const withMergedHere = (pulls: InboxPull[]): InboxPull[] => {
+    if (mergedHere.size === 0) return pulls;
+    return pulls.map((pull) => {
+      const at = mergedHere.get(pull.key);
+      if (at === undefined) return pull;
+      if (now() - at > INBOX_PULLS_MERGED_HOLD_MS || (pull.state !== "open" && pull.state !== "draft")) {
+        mergedHere.delete(pull.key);
+        return pull;
+      }
+      return asMerged(pull, at);
+    });
+  };
   /** A repository one of the last lists (scoped or everywhere) showed. */
   const listedRepo = (pull: InboxPull): boolean => lastRepos.has(inboxPullRepoKey(pull.host, pull.repo)) || lastWideRepos.has(inboxPullRepoKey(pull.host, pull.repo));
   let avatars = new Map<string, Record<string, string>>();
@@ -1396,8 +1420,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }),
       );
       asked.sort((a, b) => a.host.localeCompare(b.host));
-      const pulls: InboxPull[] = [];
-      for (const { state, own } of asked) pulls.push(...mergeListedPulls(own.answer?.pulls ?? [], state.others.answer?.pulls ?? [], wanted, everywhere));
+      const listed: InboxPull[] = [];
+      for (const { state, own } of asked) listed.push(...mergeListedPulls(own.answer?.pulls ?? [], state.others.answer?.pulls ?? [], wanted, everywhere));
+      const pulls = withMergedHere(listed);
       if (everywhere) {
         knownWide = new Map(pulls.map((p) => [p.key, p]));
         lastWideRepos = new Set(pulls.map((p) => inboxPullRepoKey(p.host, p.repo)));
@@ -1466,6 +1491,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     find(key) {
       return findKnown(key) ?? null;
+    },
+    markMerged(key) {
+      const at = now();
+      mergedHere.set(key, at);
+      for (const map of [known, knownWide]) {
+        const pull = map.get(key);
+        if (pull) map.set(key, asMerged(pull, at));
+      }
     },
     signedInTo: async (cli, host) => (await signedIn(cli)).has(host),
     async othersSettled() {
