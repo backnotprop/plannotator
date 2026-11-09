@@ -5886,7 +5886,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
     const section = sectionRef.current;
-    const order = threadAlone ? ['[data-full-back]'] : ['[data-full-in]', '[data-stack-back]', 'h2.ib-subject'];
+    const order = threadAlone ? ['[data-full-back]'] : ['[data-stack-back]', 'h2.ib-subject'];
     for (const selector of order) {
       const el = section?.querySelector<HTMLElement>(selector);
       if (el) {
@@ -6142,16 +6142,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
-            {!threadAlone && !stacked && !backBesideFile && onFull && (
-              <>
-                <Tip content={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'}>
-                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'} data-full-in="">
-                    <Icon name="panelsHide" size={17} />
-                  </button>
-                </Tip>
-                <span className="ib-vsep" aria-hidden="true" />
-              </>
-            )}
+            {/* Hiding the list is the list column's edge (click it, drag to resize), not a button here. */}
             {/* A file beside the thread hides the list: the same way back leads; it closes the file. */}
             {backBesideFile && (
               <>

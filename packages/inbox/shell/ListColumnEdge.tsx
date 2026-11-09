@@ -25,7 +25,7 @@ export const LIST_COLUMN_WIDTH_KEY = "plannotator-inbox-list-width";
  * beside the list (a thread, the thread panel) and the window is not a phone's;
  * unmounting hands the width back to the stylesheet.
  */
-export function ListColumnEdge({ controls }: { controls?: string }) {
+export function ListColumnEdge({ controls, onCollapse }: { controls?: string; onCollapse?: () => void }) {
 	// The edge's own element, not a ref from the list: a child's ref is set
 	// before its layout effects run, a parent's only after them.
 	const edge = useRef<HTMLDivElement>(null);
@@ -71,6 +71,8 @@ export function ListColumnEdge({ controls }: { controls?: string }) {
 			{room && (
 				<CollapsibleEdge
 					label="List width"
+					onCollapse={onCollapse}
+					collapseTip="Click to hide the list, drag to resize"
 					controls={controls}
 					isDragging={resize.isDragging}
 					resize={{ value, min: resize.minWidth, max: resize.maxWidth, resizeTo: resize.resizeTo }}

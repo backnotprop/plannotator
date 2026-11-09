@@ -36,6 +36,7 @@ const KEYBOARD_STEP = 10;
  */
 export function CollapsibleEdge({
 	onCollapse,
+	collapseTip = "Click to collapse, drag to resize",
 	label,
 	controls,
 	isDragging,
@@ -43,6 +44,8 @@ export function CollapsibleEdge({
 	children,
 }: {
 	onCollapse?: () => void;
+	/** The tooltip while `onCollapse` is set (the list column says what it hides). */
+	collapseTip?: string;
 	/** Accessible name for the focusable edge. */
 	label: string;
 	/** The id of the panel the edge resizes (aria-controls). */
@@ -94,7 +97,7 @@ export function CollapsibleEdge({
 					<Tooltip.Portal>
 						<Tooltip.Positioner side="bottom" sideOffset={14} className="ib-edge-tip-pos">
 							<Tooltip.Popup className="ib-edge-tip">
-								{onCollapse ? "Click to collapse, drag to resize" : "Drag to resize"}
+								{onCollapse ? collapseTip : "Drag to resize"}
 							</Tooltip.Popup>
 						</Tooltip.Positioner>
 					</Tooltip.Portal>

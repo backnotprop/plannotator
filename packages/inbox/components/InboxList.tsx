@@ -46,6 +46,8 @@ import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen }
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 
 export interface InboxListProps {
+  /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
+  onHide?: () => void;
   title: string;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
@@ -1724,7 +1726,7 @@ export function InboxList(props: InboxListProps) {
           Reconnecting…
         </p>
       )}
-      {resizable && <ListColumnEdge controls={columnId} />}
+      {resizable && <ListColumnEdge controls={columnId} onCollapse={props.onHide} />}
     </section>
   );
 }
