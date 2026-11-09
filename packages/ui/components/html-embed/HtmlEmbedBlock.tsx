@@ -53,7 +53,7 @@ export const EMBED_CLIP_PX = 480;
 const EMBED_FIRST_HEIGHT = 120;
 
 /** The host's theme, read from the page's tokens once they have applied. */
-function useEmbedTheme(): EmbedTheme {
+export function useEmbedTheme(): EmbedTheme {
   const { colorTheme, resolvedMode } = useTheme();
   const read = useCallback((): EmbedTheme => {
     const style = getComputedStyle(document.documentElement);

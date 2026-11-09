@@ -1,12 +1,15 @@
 /**
  * A ```svg fence drawn as an image (approval "inbox-inline-html"), for a host
  * with `htmlEmbeds`. Through `<img>` an SVG runs no script and loads nothing,
- * so it needs no frame. Code shows the source in its place.
+ * so it needs no frame. Code shows the source in its place. The host's theme
+ * tokens are written into the drawing, so one drawn with them follows the theme.
  */
 
 import { Code } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { themedSvg } from '@plannotator/core/html-embed';
 import type { Block } from '../../types';
+import { useEmbedTheme } from './HtmlEmbedBlock';
 import { CodeBlock } from '../blocks/CodeBlock';
 
 /** Larger than this, the drawing stays code. */
@@ -15,7 +18,9 @@ const SVG_MAX_CHARS = 512 * 1024;
 export function SvgFenceBlock({ block }: { block: Block }) {
   const [showCode, setShowCode] = useState(false);
   const [broken, setBroken] = useState(false);
-  const src = useMemo(() => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(block.content)}`, [block.content]);
+  // The host's colors go in with the markup: an image reads nothing from the page around it (themedSvg).
+  const theme = useEmbedTheme();
+  const src = useMemo(() => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(themedSvg(block.content, theme))}`, [block.content, theme]);
   const drawable = block.content.length <= SVG_MAX_CHARS && /<svg[\s>]/i.test(block.content);
   if (!drawable) return <CodeBlock block={block} isHovered={false} />;
   return (

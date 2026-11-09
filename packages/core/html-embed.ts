@@ -167,6 +167,33 @@ export const EMBED_BOOTSTRAP = `(function () {
   });
 })();`;
 
+/** The chart colors a drawing gets where the host's theme has none (BASE_CSS's). */
+const SVG_BASE_VARS = "--chart-1:#4f6bed;--chart-2:#e8833a;--chart-3:#2fa37a;--chart-4:#d64c63;--chart-5:#8b5cf6;";
+
+/**
+ * A ```svg fence's markup with the host's theme in it, for a drawing shown
+ * through `<img>` (which reads nothing from the page around it): the tokens
+ * as CSS variables of the same name on its root, `currentColor` as the
+ * host's text color, and the host's font. So a drawing written with
+ * `var(--foreground)`, `var(--chart-1)` … and no background of its own sits
+ * in the message like its words, in light and in dark. One `<style>` first
+ * in the `<svg>`; the drawing's own styles come after it and win. Markup
+ * with no `<svg …>` opening tag is returned as it is.
+ */
+export function themedSvg(source: string, theme: EmbedTheme): string {
+  const open = /<svg\b[^>]*>/i.exec(source);
+  if (!open || open[0].endsWith("/>")) return source;
+  let vars = SVG_BASE_VARS;
+  for (const name of EMBED_THEME_TOKENS) {
+    const value = theme.vars[name];
+    // A value that could end the rule or the element is left out: the drawing falls back to its own.
+    if (typeof value === "string" && value && !/[<>{};&]/.test(value)) vars += `${name}:${value};`;
+  }
+  const css = `:root{${vars}color-scheme:${theme.scheme};color:var(--foreground,CanvasText);font-family:var(--font-sans,system-ui,sans-serif)}`;
+  const at = open.index + open[0].length;
+  return `${source.slice(0, at)}<style>${css}</style>${source.slice(at)}`;
+}
+
 /** A doctype (after any comments) at the very start of the page: ours replaces it. */
 const LEADING_DOCTYPE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
 

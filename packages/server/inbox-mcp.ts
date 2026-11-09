@@ -194,7 +194,7 @@ export const INBOX_TRADEOFFS_EXAMPLE = [
 const sectionLabel = (id: InboxSectionId): string => INBOX_SECTIONS.find((section) => section.id === id)?.label ?? id;
 
 export const SEND_BODY_DESCRIPTION = [
-  "The message, markdown. Question blocks render as answerable cards. Blocks fenced as `mermaid` or `dot` draw as diagrams; one fenced as `html` draws as a live, sandboxed page in the message (chart, SVG, mock; https libraries load). Leave its background transparent; use var(--foreground), var(--chart-1)…var(--chart-5). Let content set its height: no vh units or height:100% on html or body.",
+  "The message, markdown. Question blocks render as answerable cards. Blocks fenced as `mermaid` or `dot` draw as diagrams. One fenced as `svg` draws as a picture, drawn as you write it: give it no background, and color it only with currentColor and var(--foreground), var(--muted), var(--border), var(--chart-1)…var(--chart-5), so it fits light and dark. One fenced as `html` draws as a live, sandboxed page in the message (chart, SVG, mock; https libraries load). Leave its background transparent; use var(--foreground), var(--chart-1)…var(--chart-5). Let content set its height: no vh units or height:100% on html or body.",
   INBOX_REF_LINK_RULE,
   "",
   "Two Inbox-only lines a question block can carry, each on its own line after the question:",
