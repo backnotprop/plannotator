@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo } from "react";
+import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -471,6 +471,45 @@ export function getDigitHexIssueRefs(): boolean {
 }
 
 /**
+ * Whether, and on which host, an `owner/repo#123` ref links when the caller
+ * names no repo of its own (no `githubRepo`). `false` (the default): such refs
+ * stay plain text, exactly as before. `true`: they link on github.com
+ * (`forgeRefLinks`' rule for a repo with no host). `{ host }`: they link on
+ * that host by the same rule (GitLab's `/-/issues/N`; a host `forgeRefLinks`
+ * cannot form a link for leaves them plain). A caller that names its repo is
+ * unchanged either way (that repo's forge host decides). The Plannotator
+ * Inbox turns it on through `configurePlannotatorUI({ crossRepoRefsWithoutRepo })`
+ * with the host most of its projects use: a thread whose project has no git
+ * origin still links the refs agents are told to write. Changing it re-renders
+ * every mounted `InlineMarkdown`.
+ */
+export type CrossRepoRefsWithoutRepo = boolean | { host: string };
+let crossRepoDefault: { host?: string } | null = null;
+const crossRepoListeners = new Set<() => void>();
+
+export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
+  const next = on === false ? null : on === true ? {} : { host: on.host };
+  if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
+  crossRepoDefault = next;
+  for (const listener of crossRepoListeners) listener();
+}
+
+export function resetCrossRepoRefsWithoutRepo(): void {
+  setCrossRepoRefsWithoutRepo(false);
+}
+
+export function getCrossRepoRefsWithoutRepo(): CrossRepoRefsWithoutRepo {
+  if (!crossRepoDefault) return false;
+  return crossRepoDefault.host === undefined ? true : { host: crossRepoDefault.host };
+}
+
+function subscribeCrossRepoDefault(listener: () => void): () => void {
+  crossRepoListeners.add(listener);
+  return () => crossRepoListeners.delete(listener);
+}
+const crossRepoDefaultSnapshot = () => crossRepoDefault;
+
+/**
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
  * [label](url) / ![alt](src) / <autolink>, bare https:// URLs, [[wiki-links]],
@@ -517,11 +556,13 @@ export const InlineMarkdown: React.FC<{
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
-  // Cross-repo `owner/repo#123` refs: only for a caller that names its
-  // project's repo (it knows the forge); otherwise they stay plain text, never
-  // a guessed github.com link. With a code-file handler, an `owner/repo` that
-  // is a code path not known to be missing stays the file (`src/app.js#12`).
-  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  // Cross-repo `owner/repo#123` refs: for a caller that names its project's
+  // repo (it knows the forge); otherwise they stay plain text, unless the
+  // host opted in (`crossRepoRefsWithoutRepo`: the host it names, else
+  // github.com). With a code-file handler, an `owner/repo`
+  // that is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoFallback = useSyncExternalStore(subscribeCrossRepoDefault, crossRepoDefaultSnapshot, crossRepoDefaultSnapshot);
+  const crossRepoProject = githubRepo ? { host: repoHost } : crossRepoFallback;
   const crossRepoAccept = (ref: CrossRepoRef): boolean =>
     !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];

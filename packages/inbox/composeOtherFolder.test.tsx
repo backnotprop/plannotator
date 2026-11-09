@@ -462,8 +462,8 @@ test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it c
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
   key(pathField(), 'Enter');
   type(inDialog('textarea') as HTMLTextAreaElement, 'Add a pricing page.');
+  // One Escape keeps it (approval "inbox-compose-escape-keeps"): no question.
   key(inDialog('textarea')!, 'Escape');
-  act(() => inDialog('[data-compose-keep]')!.click());
   await until(() => saved.length === 1, 'the draft saved');
   const start = saved[0]!.body.start;
   expect(start).toEqual({ agent: AGENT, machine: null, folder: '~/code/pricing-page', name: 'pricing-page', create: true });

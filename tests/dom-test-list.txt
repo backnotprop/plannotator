@@ -148,6 +148,7 @@ packages/inbox/decisionAsk.test.tsx
 packages/inbox/decisionData.test.tsx
 packages/inbox/settingsStorageActivity.test.tsx
 packages/inbox/composeTrust.test.tsx
+packages/inbox/composeEscape.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
 packages/inbox/runLineClone.test.tsx
@@ -638,3 +639,5 @@ packages/inbox/composeLaunchTip.test.tsx
 packages/inbox/prototypeWindow.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx
+packages/review-editor/components/guide/GuideDiffControls.test.tsx
+packages/review-editor/components/ReviewHeaderMenu.test.tsx

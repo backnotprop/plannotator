@@ -279,19 +279,18 @@ for (const vp of VIEWPORTS) {
       await ack.click();
       await expect(ack).toHaveAttribute('aria-pressed', 'false');
 
-      // Draft saved: the Drafts chip on screen beside the words.
+      // Draft saved: the Reopen chip on screen beside the words.
       await page.goto(world.url);
       await page.locator('[data-open-compose]:visible').first().click();
       const dialog = page.locator('dialog[data-compose]');
       await dialog.locator('[data-compose-text] textarea').fill(`A draft for ${PROJECT}, kept from ${vp.name} px.`);
-      // Closing asks to keep or discard (a phone's sheet has Cancel; a window, Escape).
+      // Closing keeps it as a draft, with no question (a phone's sheet has Cancel; a window, Escape).
       if (vp.phone) await dialog.locator('[data-compose-cancel]').click();
       else await page.keyboard.press('Escape');
-      await dialog.locator('[data-compose-keep]').click();
       await expect(dialog).toHaveCount(0);
       await expect(toast).toContainText('Draft saved');
       await expectFits(page, toast, 'Draft saved');
-      await expect(toast.locator('[data-toast-action]')).toHaveText('Drafts');
+      await expect(toast.locator('[data-toast-action]')).toHaveText('Reopen');
       // One line is as tall as before (40 px).
       if (!vp.phone) expect(await heightOf(toast), 'Draft saved: one line, height').toBe(40);
       await page.screenshot({ path: join(proofDir, `${vp.name}-draft-saved.png`) });
