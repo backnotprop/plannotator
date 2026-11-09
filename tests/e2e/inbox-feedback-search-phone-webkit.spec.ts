@@ -80,7 +80,7 @@ test('the line is a full 44 px target', async ({ page }) => {
 test('with the keyboard down, a few lines show and Send stays put', async ({ page }) => {
   await openSheet(page);
   const before = await rect(page, send);
-  await page.keyboard.type('the diff view is slow', { delay: 15 });
+  await page.keyboard.type('mermaid diagram rendering', { delay: 15 });
   await expect(page.locator('[data-feedback-related] li:visible')).toHaveCount(3);
   expect(await rect(page, send)).toEqual(before);
 });
