@@ -283,7 +283,7 @@ test.skipIf(!hasDom)('tooltips: the read button says its words, with E for Mark 
 
 test.skipIf(!hasDom)("a phone's ⋯ leads with the read action, then Snooze, a divider, Pin, and the rest", async () => {
   await render(OPENED, true);
-  expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Request guided review', '—', 'Archive thread']);
+  expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Add a pull request…', '—', 'Request guided review', '—', 'Archive thread']);
   await press(threadMenu()!.querySelector('[data-thread-unread-item]')!);
   expect(calls).toEqual(['mark unread']);
   act(() => root!.unmount());

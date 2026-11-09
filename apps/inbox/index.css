@@ -20,6 +20,8 @@
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */
 @source "../../packages/inbox/floaters/**/*.tsx";
+/* A thread's PRs: the mark, the button and its card (packages/inbox/threadPulls/). */
+@source "../../packages/inbox/threadPulls/**/*.tsx";
 /* The Pull requests page (packages/inbox/prs/). */
 @source "../../packages/inbox/prs/**/*.tsx";
 

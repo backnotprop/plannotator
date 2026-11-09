@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
@@ -7,7 +8,9 @@ import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeIn
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
-import type { Annotation, Block } from '@plannotator/ui/types';
+import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
+import { messageSideSource } from '../ask/sideSource';
+import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -41,7 +44,7 @@ import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
-import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
+import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
@@ -535,6 +538,8 @@ export function MessageBody({
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
     revealed?: string | null;
+    /** Ask AI's Side in the selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat, with where they came from (ask/sideSource.ts). Absent: no Side. */
+    onSide?: (selected: string, source?: string) => void;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -971,6 +976,14 @@ export function MessageBody({
     });
   }, []);
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
+  // Side (ask/useInboxAsk.tsx): read through refs, as every kept closure here (#2948): naming `comments`, the message
+  // or its blocks in a closure would let this body's kept closures hold a render of the whole thread view per read.
+  const sideFrom = useRef({ message, blocks, annotations: commentList });
+  sideFrom.current = { message, blocks, annotations: commentList };
+  const side = useCallback((text: string, context: SelectionActionContext) => {
+    const from = sideFrom.current;
+    commentsRef.current?.onSide?.(text, messageSideSource(from.message, { selected: text, blockId: context.blockId, blocks: from.blocks, annotations: from.annotations }));
+  }, []);
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
   const answerQuestion = useCallback((_blockId: string, answer: QuestionAnswer | null, key: string) => pickRef.current(key, answer), []);
@@ -1102,6 +1115,7 @@ export function MessageBody({
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
+        onSide={comments?.onSide ? side : undefined}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
@@ -1185,6 +1199,11 @@ export interface ThreadPaneProps {
    * The meta line under the subject names it, or says it is away since when.
    */
   machine?: MachineView | null;
+  /**
+   * Update a linked machine (by id): the error line's "Update" when a Delete there was refused because its Inbox is
+   * too old. Absent: the line says so without it.
+   */
+  onMachineUpdate?: (machineId: string) => void;
   /** An archived thread's reuse button: New message with this file. Absent: an archived thread offers no button. */
   onNewMessageWith?: (source: ReuseSource) => void;
   /**
@@ -1314,8 +1333,11 @@ export interface ThreadPaneProps {
   askButton?: React.ReactNode;
   /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
   shapeButton?: React.ReactNode;
-  /** The same icon for the bar of a full-screen file, whose bar hides the thread's. */
-  askFileButton?: React.ReactNode;
+  /**
+   * Ask AI's Side for the selection bars of the agents' messages and of the open file (ask/useInboxAsk.tsx `side`).
+   * Absent while this thread cannot ask: no Side. A full-screen file's bar has no Ask icon (approval "inbox-ask-ai-flow").
+   */
+  onSide?: (selected: string, source?: string) => void;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
@@ -1656,7 +1678,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1990,6 +2012,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [error, setError] = useState<string | null>(null);
   /** A failed Send's own words, behind Details on its line (decision D3), for as long as that line is the error shown. */
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
+  /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
+  const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
   const voice = useVoiceSession();
   /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
   const lateVoice = useRef<string[]>([]);
@@ -2763,6 +2787,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       saveRecord(result.annotation);
       return true;
     } catch (cause) {
+      // A Delete on another machine's message, refused (422) by an Inbox too old to take one (it does not say
+      // `message_deletions`): say so, with that machine's Update, not its store's words (approval "inbox-toolbar-delete").
+      const home = machineOf(messageId) ?? machineOf(thread.thread_id);
+      if (home !== null && annotation.type === AnnotationType.DELETION && cause instanceof InboxApiError && cause.status === 422 && machine?.message_deletions !== true) {
+        const line = `${machine?.name ?? 'That machine'} needs an update to delete words`;
+        setError(line);
+        setErrorUpdate({ for: line, machine: home });
+        return false;
+      }
       setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
       return false;
     }
@@ -5420,9 +5453,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }
       : null;
   const errorMore = error !== null && errorDetails?.for === error ? errorDetails.text : null;
+  const errorUpdateFor = error !== null && errorUpdate?.for === error && onMachineUpdate ? errorUpdate.machine : null;
   const errorLine = (
     <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
       {lineError}
+      {errorUpdateFor !== null && (
+        <>
+          {' · '}
+          <button type="button" className="ib-errup" data-error-update={errorUpdateFor} onClick={() => onMachineUpdate?.(errorUpdateFor)}>
+            Update
+          </button>
+        </>
+      )}
       {/* A failed Send's own words (a path, the Inbox's message), one press away (decision D3). */}
       {errorMore && (
         <details className="ib-errd" data-error-details="">
@@ -5949,6 +5991,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
   const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
   const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
+  const pullsOffered = !machine && !guest;
+  const [addingPull, setAddingPull] = useState(false);
   const snoozeProps = snoozeBlocked && !resolved ? { snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: snoozeBlocked } : onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
   // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
@@ -6147,6 +6192,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </Tip>
               </span>
             )}
+            {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
+                (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
+            {!artifactsOn && pullsOffered && (
+              <ThreadPullsButton threadId={thread.thread_id} summary={row?.pulls} adding={addingPull} onAddingDone={() => setAddingPull(false)} />
+            )}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
@@ -6179,7 +6229,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {/* A full-screen file's bar carries it instead: one launcher on the page, so focus has one way back. */}
+            {/* Full screen covers this bar and the file's bar has no Ask icon: Side in a selection, or leaving full screen, reaches the chat. */}
             {!shownFull && askButton}
             {shapeButton}
             <ThreadMore
@@ -6192,6 +6242,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               launch={launchMenu}
               snooze={snoozeProps}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
+              addPull={pullsOffered && !artifactsOn ? () => setAddingPull(true) : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
@@ -6770,6 +6821,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpen: openListAt,
                           openId: commentsList?.at ?? null,
                           revealed: revealedComment,
+                          onSide,
                         }
                       : undefined
                   }
@@ -6946,6 +6998,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <div className="ib-pbody ib-artbody" ref={artifactsBodyRef} hidden={linksOn}>
           <ArtifactsView
             ref={artifactsHeadingRef}
+            threadId={thread.thread_id}
             artifacts={files === null ? null : artifactList}
             annotationCounts={countsByPath}
             openId={file && !shownFull ? file.id : null}
@@ -7393,6 +7446,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       <AttachmentPane
         ref={paneRef}
         attachment={openAttachment}
+        pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
         records={fileRecords}
@@ -7405,7 +7459,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         version={file!.version}
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet && option ? optionSetAddress(optionSet, option.choice.choice) : null })}
         full={shownFull}
-        ask={phone ? null : askFileButton}
+        onSide={onSide}
         fullLocked={phone || fileStacked}
         // Full screen opened from the thread alone: × and Escape close the file, back to the thread as it was.
         exitCloses={fullScreenExit(fullFromSide, phone || fileStacked) === 'close'}

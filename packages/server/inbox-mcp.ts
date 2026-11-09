@@ -49,8 +49,9 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -313,6 +314,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * a `steps` call answers `steps_off` with nothing written. Absent: off.
    */
   stepsOn?: () => boolean;
+  /**
+   * A thread's PRs (approval "inbox-pr-binding"): the state reader, for what
+   * it knows now (checks) and a read of the PRs an agent just added. Absent:
+   * the states as stored, and nothing is read.
+   */
+  pulls?: InboxPullsMcpLive;
   /**
    * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
    * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
@@ -1130,6 +1137,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .describe(
               `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
             ),
+          // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
+          pulls: PULLS_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
         })
@@ -1144,9 +1153,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           if (!context.stepsOn?.()) throw new InboxError("steps_off", INBOX_STEPS_OFF_TEXT.replace(/^steps_off: /, ""));
           checkStepsInput(withSteps, stepsAgent(input));
         }
+        // PRs that do not read are refused before anything is sent, so a message never lands without them.
+        const pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
         const project = await sendProject(context, input);
         const wakes = await senderWakes(context, ctx, input);
-        const { steps: _steps, ...message } = input as typeof input & { steps?: unknown };
+        const { steps: _steps, pulls: _pulls, ...message } = input as typeof input & { steps?: unknown };
         const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
         // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
         // since (the steps action) is never put back to this older one.
@@ -1157,6 +1168,18 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
                 const { record } = store.setThreadSteps({ thread_id: String(sent.structured.thread_id), agent: stepsAgent(input), steps: withSteps });
                 return record && record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
               })();
+        // The PRs join the thread the message landed in; the sender is in it now. A refusal here (the thread's
+        // 20) never undoes the send: the result says so. Not on a replay (the first answer stands).
+        let pullsLine = "";
+        if (pullRefs.length > 0 && !sent.replayed) {
+          try {
+            const change = await changePullsAsAgent(context, { thread_id: String(sent.structured.thread_id), add: pullRefs, remove: [], actor: pullsActor(input) });
+            const done = pullsChangeText({ ...change, missing: [] });
+            pullsLine = done ? ` PRs: ${done}` : "";
+          } catch (error) {
+            pullsLine = ` PRs not added (${error instanceof InboxError ? `${error.code}: ${error.message}` : String(error)})`;
+          }
+        }
         // Named a thread (reply_to, or a thread name) this session has not looked at for hours (or ever):
         // one line naming its subject. Not for a message that starts a new thread,
         // never on a replay (the first answer stands), and it never blocks the send.
@@ -1182,7 +1205,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
@@ -1262,7 +1285,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
           const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader) : [];
           const lists = steps.length > 0 ? { steps: store.threadSteps(threadId).map(({ agent, steps: list, updated_at }) => ({ agent, steps: list, updated_at })) } : {};
-          return okComplete(windowedThreadText(result, order, naming?.line ?? "", steps), { ...result, ...(naming?.structured ?? {}), ...lists });
+          // The thread's PRs (approval "inbox-pr-binding"), after its open questions: with who added each, and what was removed lately.
+          const pulls = threadPullsText(context, threadId, reader);
+          const prs = pulls.length > 0 ? { pulls: store.threadPulls(threadId).map(({ pull: _key, id: _id, ...rest }) => rest) } : {};
+          return okComplete(windowedThreadText(result, order, naming?.line ?? "", [...pulls, ...steps]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
         }
         if (input.expand || input.before !== undefined || input.after !== undefined) {
           throw new InboxError("validation_error", "expand, before and after read one thread: pass thread_id (or message_id).");
@@ -1346,6 +1372,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
   // Snooze, when the person asks an agent to: packages/server/inbox-mcp-snooze.ts.
   registerInboxSnoozeTool(server, context);
+
+  // A thread's PRs (approval "inbox-pr-binding"): packages/server/inbox-mcp-pulls.ts. Always served.
+  registerInboxThreadPullsTool(server, context);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

@@ -12,16 +12,18 @@ import {
   UPDATE_OTHER_TMPDIR_COMMAND,
   updateStagingAdvice,
 } from '@plannotator/core/update-exit-codes';
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { ImageResolverContext, type ImageResolution } from '@plannotator/ui/components/ImageResolverContext';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
-import { whatsNewImageUrl, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel } from '../api';
+import { whatsNewImageUrl, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel, type WhatsNewReleasesModel } from '../api';
 import { clockTime, dayWords, formatCount, tildePath, whenTime } from '../format';
 import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
 import { SidebarTrigger } from '../shell/sidebar';
+import { releasesBetween } from '../whatsNew';
+import { KnownLine, NotesMissing, ReleasesPanel, ReleasesSheet, TldrLedger, centerRow } from './WhatsNewReleases';
 
 type Update = NonNullable<InboxHealth['update']>;
 
@@ -515,19 +517,19 @@ export function FailedDialog({
 
 // ───────────────────────────── What's new ─────────────────────────────
 
-/** "October 15, 2026", from an ISO date. */
+/** "Nov 8, 2026", from an ISO date. */
 function releasedLong(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
+  return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
 }
 
 const STABLE = /^\d+\.\d+\.\d+$/;
 
 /**
  * Where the person stands relative to the release the page shows (the
- * header's one chip): on it, on a development build, behind it (with the
- * releases in between, which the chip jumps to), or past it.
+ * heading's meta): on it, on a development build, behind it (with the
+ * releases in between, which the meta jumps to in the panel), or past it.
  */
 export type WhatsNewStanding =
   | { kind: 'current' }
@@ -535,10 +537,17 @@ export type WhatsNewStanding =
   | { kind: 'behind'; current: string; between: number }
   | { kind: 'ahead'; current: string };
 
-export function whatsNewStanding(model: Pick<WhatsNewModel, 'version' | 'current' | 'skipped'>): WhatsNewStanding {
+/**
+ * `versions`: the releases this computer knows of (the panel's rows); the
+ * releases in between are counted from them and from the notes' own list of
+ * skipped releases.
+ */
+export function whatsNewStanding(model: Pick<WhatsNewModel, 'version' | 'current' | 'skipped'>, versions: readonly string[] = []): WhatsNewStanding {
   if (!STABLE.test(model.current)) return { kind: 'dev' };
   if (model.current === model.version) return { kind: 'current' };
-  if (newerThan(model.version, model.current)) return { kind: 'behind', current: model.current, between: model.skipped.length };
+  if (newerThan(model.version, model.current)) {
+    return { kind: 'behind', current: model.current, between: releasesBetween(model.current, model.version, [...versions, ...model.skipped.map((s) => s.version)]) };
+  }
   return { kind: 'ahead', current: model.current };
 }
 
@@ -547,67 +556,92 @@ export function whatsNewCanUpdate(model: Pick<WhatsNewModel, 'version'> | null, 
   return !!model && !!update && update.version === model.version && (update.state === 'available' || update.state === 'ready');
 }
 
-const SKIPPED_ID = 'ib-wn-since';
-
-function StandingChip({ standing, onJump }: { standing: WhatsNewStanding; onJump: () => void }) {
+function Standing({ standing, onJump }: { standing: WhatsNewStanding; onJump: (() => void) | null }) {
   switch (standing.kind) {
     case 'current':
       return (
-        <span className="ib-wn-chip ib-good" data-whats-new-standing="current">
-          <Icon name="check" />
+        <span className="ib-wn-st" data-whats-new-standing="current">
+          <i className="ib-wn-dot ib-wn-d-yours" aria-hidden="true" />
           You&apos;re on this version
         </span>
       );
     case 'dev':
       return (
-        <span className="ib-wn-chip" data-whats-new-standing="dev">
+        <span className="ib-wn-st" data-whats-new-standing="dev">
           Development build
         </span>
       );
     case 'ahead':
       return (
-        <span className="ib-wn-chip" data-whats-new-standing="ahead">
-          You have {standing.current}
+        <span className="ib-wn-st" data-whats-new-standing="ahead">
+          You have <span className="ib-wn-mono">{standing.current}</span>
         </span>
       );
     case 'behind':
-      // Nothing listed in between (the notes name none): the version alone, with nowhere to jump.
-      if (standing.between === 0) {
+      // Nothing known in between: the version alone. No row of yours to go to: the same words, not a link.
+      if (standing.between === 0 || !onJump) {
         return (
-          <span className="ib-wn-chip" data-whats-new-standing="behind">
-            You have {standing.current}
+          <span className="ib-wn-st" data-whats-new-standing="behind">
+            You have <span className="ib-wn-mono">{standing.current}</span>
+            {standing.between > 0 && ` · ${formatCount(standing.between)} ${standing.between === 1 ? 'release' : 'releases'} in between`}
           </span>
         );
       }
       return (
-        <button type="button" className="ib-wn-chip ib-lk" data-whats-new-standing="behind" aria-controls={SKIPPED_ID} onClick={onJump}>
-          You have {standing.current} · {formatCount(standing.between)} {standing.between === 1 ? 'release' : 'releases'} in between
-          <Icon name="arrowDown" />
+        <button type="button" className="ib-wn-st ib-wn-lk" data-whats-new-standing="behind" onClick={onJump}>
+          You have <span className="ib-wn-mono">{standing.current}</span> · {formatCount(standing.between)} {standing.between === 1 ? 'release' : 'releases'} in between
         </button>
       );
   }
 }
 
+/** The panel shows beside the notes from this window width; under it, the bar's version picker opens the sheet. */
+const PANEL_MEDIA = '(min-width: 1100px)';
+function panelFits(): boolean {
+  return typeof window.matchMedia === 'function' ? window.matchMedia(PANEL_MEDIA).matches : true;
+}
+
+/** Why the notes are not on the page (the What's new route's refusal). */
+export interface WhatsNewError {
+  message: string;
+  /** `notes_unreachable`: GitHub could not be reached; `notes_not_found`: no source has them. */
+  code: string | null;
+}
+
 /**
- * The What's new page (design of record `.product/approved/inbox-whats-new-header/`,
- * variant Toolbar): a sticky bar with the way back on the left (`‹ Inbox |
- * What's new`) and the release link and Update on the right, then the
- * release itself under it, aligned to the notes: the version large, the date,
- * and one chip saying where the person stands.
+ * The What's new page (design of record `.product/approved/inbox-whats-new-tldr/`,
+ * round 2; the bar from `.product/approved/inbox-whats-new-header/`, variant
+ * Toolbar): a sticky bar with the way back on the left (`‹ Inbox | What's
+ * new`) and the release link and Update on the right; then "Plannotator
+ * 0.28.53" with its date and where the person stands on one baseline, the
+ * release's TL;DR, and its notes; beside them the releases panel, or a
+ * version picker in the bar where it does not fit.
  */
 export function WhatsNewPage({
-  model,
+  version: routeVersion,
+  model: loaded,
   error,
+  releases,
   update,
   onBack,
   onUpdate,
+  onOpenRelease,
+  onRetry,
   onTakeTour,
 }: {
+  /** The release the page shows (`#whats-new=0.28.53`); the model's when absent. */
+  version?: string | null;
   model: WhatsNewModel | null;
-  error: string | null;
+  error: string | WhatsNewError | null;
+  /** The releases panel's model; null while it loads (or when it could not be read). */
+  releases?: WhatsNewReleasesModel | null;
   update: InboxHealth['update'];
   onBack: () => void;
   onUpdate: () => void;
+  /** A release picked in the panel or the sheet. */
+  onOpenRelease?: (version: string) => void;
+  /** Try again, when GitHub could not be reached. */
+  onRetry?: () => void;
   /**
    * The quiet line under the notes (approval "inbox-onboarding-tour",
    * returning users: no dialog): "New: a 2-minute tour…". The window passes
@@ -615,6 +649,9 @@ export function WhatsNewPage({
    */
   onTakeTour?: () => void;
 }) {
+  const version = routeVersion ?? loaded?.version ?? null;
+  // The model of another release (the one before a switch) is never drawn under this one's heading.
+  const model = loaded && (!version || loaded.version === version) ? loaded : null;
   const blocks = useMemo(() => parseMarkdownToBlocks(model?.notes ?? '', { frontmatter: false }), [model?.notes]);
   // The notes' images load from the copies the Inbox saved (never from GitHub:
   // the window's CSP allows only its own origin). One not saved is drawn as
@@ -629,19 +666,51 @@ export function WhatsNewPage({
     },
     [modelVersion, storedImages],
   );
-  const released = releasedLong(model?.published_at);
+  const rows = releases?.releases ?? [];
+  const row = (version && rows.find((r) => r.version === version)) || null;
+  const current = model?.current ?? releases?.current ?? null;
+  const released = releasedLong(model?.published_at ?? row?.published_at);
   const canUpdate = whatsNewCanUpdate(model, update);
-  const standing = model ? whatsNewStanding(model) : null;
-  const jumpToSkipped = () => {
-    const section = document.getElementById(SKIPPED_ID);
-    if (!section) return;
-    if (section instanceof HTMLDetailsElement) section.open = true;
-    const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    section.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-    section.focus({ preventScroll: true });
+  const standing = model ? whatsNewStanding(model, rows.map((r) => r.version)) : current && version ? whatsNewStanding({ version, current, skipped: [] }, rows.map((r) => r.version)) : null;
+  const releaseUrl = model?.release_url ?? (version ? `https://github.com/backnotprop/plannotator/releases/tag/v${version}` : null);
+  const err: WhatsNewError | null = typeof error === 'string' ? { message: error, code: null } : error;
+  const missing = !model && err && (err.code === 'notes_unreachable' || err.code === 'notes_not_found');
+  const loading = !model && !err && !!version;
+
+  const [sheet, setSheet] = useState<{ focus: string | null } | null>(null);
+  const page = useRef<HTMLDivElement>(null);
+  const panelScroll = useRef<HTMLDivElement>(null);
+  // A switch to another release starts at its top.
+  useEffect(() => {
+    if (page.current) page.current.scrollTop = 0;
+  }, [version]);
+  // The panel is as tall as the pane under its bar: the pane's height, measured (--ib-wn-h).
+  useEffect(() => {
+    const el = page.current;
+    if (!el || typeof ResizeObserver !== 'function') return;
+    const measure = () => el.style.setProperty('--ib-wn-h', `${el.clientHeight}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const mine = current && rows.some((r) => r.version === current) ? current : null;
+  const jumpToMine = mine
+    ? () => {
+        if (!panelFits()) {
+          setSheet({ focus: mine });
+          return;
+        }
+        const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        // The panel's list scrolls; the notes stay where they are.
+        centerRow(panelScroll.current, mine, !reduce)?.focus({ preventScroll: true });
+      }
+    : null;
+  const open = (next: string) => {
+    if (next !== version) onOpenRelease?.(next);
   };
   return (
-    <div className="ib-wn" aria-label="What's new" tabIndex={-1} data-whats-new-page={model?.version ?? ''}>
+    <div className="ib-wn" aria-label="What's new" tabIndex={-1} data-whats-new-page={model?.version ?? version ?? ''} ref={page}>
       <div className="ib-wn-bar">
         <SidebarTrigger />
         <button type="button" className="ib-pback" onClick={onBack} data-whats-new-back="">
@@ -651,8 +720,21 @@ export function WhatsNewPage({
         <span className="ib-wn-div" aria-hidden="true" />
         <span className="ib-wn-title">What&apos;s new</span>
         <div className="ib-wn-acts">
-          {model && (
-            <a className="ib-wn-gh" href={model.release_url} target="_blank" rel="noopener noreferrer" data-whats-new-github="">
+          {version && rows.length > 0 && (
+            <button
+              type="button"
+              className="ib-wn-picker"
+              aria-haspopup="dialog"
+              aria-label={`Release ${version}. Show all releases`}
+              onClick={() => setSheet({ focus: null })}
+              data-whats-new-picker=""
+            >
+              <span className="ib-wn-mono">{version}</span>
+              <Icon name="chevD" />
+            </button>
+          )}
+          {releaseUrl && (
+            <a className="ib-wn-gh" href={releaseUrl} target="_blank" rel="noopener noreferrer" data-whats-new-github="">
               <Icon name="github" />
               <span className="ib-wn-gh-l">GitHub</span>
               <span className="ib-sr"> release (opens in a new tab)</span>
@@ -667,89 +749,99 @@ export function WhatsNewPage({
           )}
         </div>
       </div>
-      <div className="ib-wn-in">
-        <header className="ib-wn-hero">
-          <p className="ib-wn-pre">What&apos;s new in Plannotator</p>
-          <h1>{model?.version ?? '…'}</h1>
-          {model && (
-            <p className="ib-wn-line">
-              {released && <span>Released {released}</span>}
-              {standing && <StandingChip standing={standing} onJump={jumpToSkipped} />}
-            </p>
-          )}
-        </header>
-        {error && <div className="ib-error">{error}</div>}
-        {model && model.notes ? (
-          <div className="ib-body ib-wn-body">
-            <ImageResolverContext.Provider value={resolveImage}>
-            <Viewer
-              blocks={blocks}
-              markdown={model.notes}
-              annotations={NO_ANNOTATIONS}
-              onAddAnnotation={noop}
-              onSelectAnnotation={noop}
-              selectedAnnotationId={null}
-              mode="selection"
-              taterMode={false}
-              maxWidth={null}
-              stickyActions={false}
-              disableCodePathValidation
-              answerOnly
-              readOnly
-            />
-            </ImageResolverContext.Provider>
+      <div className={rows.length > 0 ? 'ib-wn-grid ib-wn-has-panel' : 'ib-wn-grid'}>
+        <div className="ib-wn-read">
+          <div className="ib-wn-in">
+            <header className="ib-wn-hero">
+              <div className="ib-wn-hrow">
+                <h1>
+                  <span className="ib-wn-prod">Plannotator</span> <span className="ib-wn-v">{version ?? '…'}</span>
+                </h1>
+                {(released || standing) && (
+                  <p className="ib-wn-meta">
+                    {released && (
+                      <span>
+                        Released <span className="ib-wn-mono">{released}</span>
+                      </span>
+                    )}
+                    {standing && <Standing standing={standing} onJump={jumpToMine} />}
+                  </p>
+                )}
+              </div>
+            </header>
+            {model ? (
+              <>
+                {model.tldr && model.tldr.length > 0 ? <TldrLedger lines={model.tldr} /> : <div className="ib-wn-gap" />}
+                {model.notes ? (
+                  <div className="ib-body ib-wn-body">
+                    <ImageResolverContext.Provider value={resolveImage}>
+                      <Viewer
+                        blocks={blocks}
+                        markdown={model.notes}
+                        annotations={NO_ANNOTATIONS}
+                        onAddAnnotation={noop}
+                        onSelectAnnotation={noop}
+                        selectedAnnotationId={null}
+                        mode="selection"
+                        taterMode={false}
+                        maxWidth={null}
+                        stickyActions={false}
+                        disableCodePathValidation
+                        answerOnly
+                        readOnly
+                      />
+                    </ImageResolverContext.Provider>
+                  </div>
+                ) : (
+                  <p className="ib-sum">The release has no notes. They are on GitHub.</p>
+                )}
+                {onTakeTour && (
+                  <p className="ib-wn-tour" data-whats-new-tour="">
+                    New: a 2-minute tour of how we built the Inbox with the Inbox.{' '}
+                    <button type="button" className="ib-lnk" onClick={onTakeTour}>
+                      Take the tour
+                    </button>
+                  </p>
+                )}
+              </>
+            ) : missing && version ? (
+              <>
+                <KnownLine row={row} loading={false} />
+                <NotesMissing
+                  version={version}
+                  unreachable={err!.code === 'notes_unreachable'}
+                  message={err!.message}
+                  releaseUrl={releaseUrl!}
+                  {...(onRetry && { onRetry })}
+                />
+              </>
+            ) : err ? (
+              <div className="ib-error">{err.message}</div>
+            ) : loading ? (
+              <>
+                <KnownLine row={row} loading />
+                <div className="ib-wn-loading" data-whats-new-loading="">
+                  <p className="ib-wn-wait" role="status">
+                    <span className="ib-wn-spin" aria-hidden="true" />
+                    Getting the notes from GitHub
+                  </p>
+                  {[92, 84, 88, 36, 0, 70, 90, 82, 56].map((w, i) =>
+                    w ? <span key={i} className="ib-wn-sk" style={{ width: `${w}%` }} /> : <span key={i} className="ib-wn-sk-gap" />,
+                  )}
+                </div>
+              </>
+            ) : null}
           </div>
-        ) : (
-          model && <p className="ib-sum">The release has no notes. They are on GitHub.</p>
-        )}
-        {model && onTakeTour && (
-          <p className="ib-wn-tour" data-whats-new-tour="">
-            New: a 2-minute tour of how we built the Inbox with the Inbox.{' '}
-            <button type="button" className="ib-lnk" onClick={onTakeTour}>
-              Take the tour
-            </button>
-          </p>
-        )}
-        {/* The skipped releases come after this release's notes, folded when there are more than a few (decision 7). */}
-        {model && model.skipped.length > 0 && <SkippedReleases since={model.since ?? model.current} skipped={model.skipped} />}
+        </div>
+        {releases && rows.length > 0 && <ReleasesPanel releases={releases} showing={version} onOpen={open} scrollRef={panelScroll} />}
       </div>
+      {sheet && releases && rows.length > 0 && (
+        <ReleasesSheet releases={releases} showing={version} focusVersion={sheet.focus} onOpen={open} onClose={() => setSheet(null)} />
+      )}
     </div>
   );
 }
 
-/** More skipped releases than this are folded under their heading. */
-const SKIPPED_SHOWN = 3;
-
-function SkippedReleases({ since, skipped }: { since: string; skipped: WhatsNewModel['skipped'] }) {
-  const items = (
-    <ul>
-      {skipped.map((h) => (
-        <li key={h.version}>
-          <b>{h.version}</b> {h.text.replace(/`/g, '')}
-        </li>
-      ))}
-    </ul>
-  );
-  const heading = `Also in the releases since ${since}`;
-  if (skipped.length <= SKIPPED_SHOWN) {
-    return (
-      <section className="ib-wn-skipped" id={SKIPPED_ID} tabIndex={-1} aria-label={heading} data-skipped-releases="">
-        <h2>{heading}</h2>
-        {items}
-      </section>
-    );
-  }
-  return (
-    <details className="ib-wn-skipped" id={SKIPPED_ID} tabIndex={-1} data-skipped-releases="">
-      <summary>
-        <h2>
-          {heading} <span className="ib-n">· {skipped.length}</span>
-        </h2>
-      </summary>
-      {items}
-    </details>
-  );
-}
 
 // ──────────────────────── Checking for updates is failing ────────────────────────
 

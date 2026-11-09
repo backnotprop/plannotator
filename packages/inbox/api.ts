@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
@@ -12,6 +13,7 @@ import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannota
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
+import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -80,6 +82,7 @@ import type {
   InboxCardRef,
   InboxCardWire,
   InboxStepsWire,
+  InboxThreadPullsAnswer,
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
@@ -217,6 +220,11 @@ export interface MachineView {
    * null for this machine, whose own launch block says). Absent from an older Inbox.
    */
   launch?: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words. Not: a Delete it refuses (422) reads "<name> needs an
+   * update to delete words · Update". Absent from an older Inbox serving the window; false for a linked one too old.
+   */
+  message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
@@ -419,12 +427,51 @@ export interface WhatsNewModel {
   published_at: string | null;
   release_url: string;
   notes: string;
+  /**
+   * The `### TL;DR` at the top of the notes (taken out of `notes`): `label` is
+   * New, Changed, Fixed, Removed or Off by default (another label as written,
+   * "" for none). Absent from an older Inbox (read as none).
+   */
+  tldr?: TldrLine[];
   skipped: { version: string; text: string }[];
   /**
    * The notes' image sources (as written) saved on this computer, loaded from
    * `whatsNewImageUrl`. Absent from an older Inbox (no image is loaded).
    */
   images?: string[];
+}
+
+/** One line of a release's TL;DR. */
+export interface TldrLine {
+  label: string;
+  text: string;
+}
+
+/** One release in What's new's releases panel (GET /api/inbox/whats-new/releases). */
+export interface WhatsNewRelease {
+  version: string;
+  published_at: string | null;
+  /** Its TL;DR (empty: none). */
+  tldr: TldrLine[];
+  /** Its line in the newest saved "Missed recent releases?" table, and the release whose notes carry it. */
+  listed: { text: string; in: string } | null;
+  /** The first sentence of its saved notes. */
+  sentence: string | null;
+  /** Its notes are saved on this computer. */
+  saved: boolean;
+}
+
+export interface WhatsNewReleasesModel {
+  /** The newest release (the Latest card); null with no rows. */
+  latest: string | null;
+  current: string;
+  /** Newest first. */
+  releases: WhatsNewRelease[];
+  /** The list is being asked for now: ask again shortly. */
+  refreshing: boolean;
+  /** The last request for the list failed. */
+  offline: boolean;
+  fetched_at: string | null;
 }
 
 /** Where the What's new page loads one of the notes' saved images. */
@@ -540,6 +587,10 @@ export interface SettingsModel {
   rows?: InboxRowsOption[] | null;
   /** How many times `rows` was saved (config.json `inboxRowsRev`): a window takes a look only when it is newer. */
   rows_rev?: number;
+  /** The sidebar's layout (config.json `inboxSidebar`, approval "inbox-sidebar-customize"): null until first saved; absent from an older Inbox. */
+  sidebar?: unknown;
+  /** How many times `sidebar` was saved (config.json `inboxSidebarRev`): a window takes a layout only when it is newer. */
+  sidebar_rev?: number;
   /** The name on this person's comments (config.json `displayName`): null when never set. Absent for a guest and from an older Inbox. */
   display_name?: string | null;
   /**
@@ -1019,6 +1070,16 @@ export type OpenInFileScope = { thread: string; message?: string; from?: 'root' 
 /** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
+/** A thread's PRs answer as the window uses it: anything missing reads as none. */
+function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
+  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
+  return {
+    pulls: Array.isArray(value.pulls) ? value.pulls : [],
+    groups: Array.isArray(value.groups) ? value.groups : [],
+    removed: Array.isArray(value.removed) ? value.removed : [],
+  };
+}
+
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
@@ -1454,6 +1515,23 @@ export const inboxApi = {
     }
   },
   /**
+   * A thread's PRs (approval "inbox-pr-binding"): the live list with stack groups and state, and what was removed
+   * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
+   * threads answers 404: both read as none.
+   */
+  threadPulls: async (threadId: string): Promise<InboxThreadPullsAnswer> => {
+    if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
+    try {
+      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`)));
+    } catch (cause) {
+      if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
+      throw cause;
+    }
+  },
+  /** The person adds or removes a thread's PRs (the popover). `remove: ['all']` takes off every one. */
+  changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
+    threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
+  /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).
@@ -1620,7 +1698,10 @@ export const inboxApi = {
   updateNow: () => post<{ ok: true; version: string; update: InboxHealth['update'] }>(inboxUrl('/update'), {}),
   snoozeUpdate: () => post<{ ok: true; update: InboxHealth['update'] }>(inboxUrl('/update/snooze'), {}),
   checkForUpdate: () => post<UpdateDetails & { checked: { ok: boolean; error?: string } }>(inboxUrl('/update/check'), {}),
-  whatsNew: (version: string) => get<WhatsNewModel>(inboxUrl(`/whats-new?version=${encodeURIComponent(version)}`)),
+  /** `retry`: the person's Try again, which asks GitHub whatever the throttle says. */
+  whatsNew: (version: string, retry = false) =>
+    get<WhatsNewModel>(inboxUrl(`/whats-new?version=${encodeURIComponent(version)}${retry ? '&retry=1' : ''}`)),
+  whatsNewReleases: () => get<WhatsNewReleasesModel>(inboxUrl('/whats-new/releases')),
   saveUpdateSwitches: (change: { update_check?: boolean; auto_update?: boolean }) =>
     post<{ updates: UpdateSwitches }>(inboxUrl('/settings'), change),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
@@ -1669,6 +1750,8 @@ export const inboxApi = {
   changeReaction: (change: InboxReactionChange) => post<{ reactions: InboxReaction[]; reactions_rev: number }>(inboxUrl('/settings'), { reaction_change: change }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
   saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
+  /** The sidebar's layout, written to config.json `inboxSidebar`: every window open hears it (`event: sidebar`). */
+  saveSidebar: (sidebar: InboxSidebarLayout) => post<{ sidebar: unknown; sidebar_rev: number }>(inboxUrl('/settings'), { sidebar }),
   /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
   saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
     post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
@@ -1912,6 +1995,20 @@ export const inboxApi = {
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
+  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
+  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
+  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
+  /** The Artifacts wall: a page of every thread's artifacts, newest first. */
+  artifacts: (query: { pinned?: boolean; type?: InboxArtifactType | null; archived?: boolean; cursor?: string | null; limit?: number }, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (query.pinned) params.set('pinned', '1');
+    if (query.type) params.set('type', query.type);
+    params.set('archived', query.archived ? 'include' : 'exclude');
+    if (query.cursor) params.set('cursor', query.cursor);
+    if (query.limit) params.set('limit', String(query.limit));
+    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
+  },
   pin: (threadId: string, pinned: boolean) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pin`), { pinned }),
   /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */
@@ -1998,8 +2095,8 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
-    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
+  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk, source?: string) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}), ...(source ? { source } : {}) }),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -2013,6 +2110,8 @@ export interface InboxAskTurnWire {
   host: string | null;
   question: string;
   passage?: string;
+  /** Where a Side's quoted words came from: what the agent gets in front of `question`. */
+  source?: string;
   answer?: string;
   answered_at?: string;
   stopped?: boolean;
@@ -2093,7 +2192,9 @@ export type InboxEvent =
   /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
   | { seq: number; kind: 'steps'; id: string; thread_id: string }
   /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
-  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative };
+  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative }
+  /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
+  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
@@ -2164,10 +2265,14 @@ export interface InboxEventHandlers {
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
+  /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
+  onArtifactPins?: () => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
+  /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
+  onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
@@ -2209,7 +2314,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2292,6 +2397,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'pins':
       handlers.onPins?.();
       return;
+    case 'artifact-pins':
+      handlers.onArtifactPins?.();
+      return;
     case 'snoozes':
       handlers.onSnoozes?.();
       return;
@@ -2299,6 +2407,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
         handlers.onRows?.(data.rows, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'sidebar':
+      try {
+        const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
+        handlers.onSidebar?.(data.sidebar, data.rev);
       } catch {
         // A malformed frame changes nothing.
       }
@@ -2341,7 +2457,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
           // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
           // neither rings nor makes the open thread read again.
-          if ((data.record as { kind?: unknown } | undefined)?.kind === 'steps') return;
+          // A linked machine's thread PRs line (approval "inbox-pr-binding"): the same, its threads show none here.
+          const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
+          if (machineKind === 'steps' || machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
         }

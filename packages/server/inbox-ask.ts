@@ -18,7 +18,7 @@
  *   GET  /api/inbox/threads/:id/ask        `{ subject, project, conversation, damaged?, running, can_ask, agent }`:
  *                                          null when none, the turn id being answered, whether the
  *                                          icons show, and who answers
- *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: claim the owner's
+ *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage?, source? }`: claim the owner's
  *                                          slot, save the question, wait for its client
  *   POST /api/inbox/threads/:id/ask/seen   `{ seen_at }`: the person saw the answers up to then
  *   POST /api/inbox/threads/:id/ask/stop   `{ turn_id }`: stop that turn, which needs no AI session,

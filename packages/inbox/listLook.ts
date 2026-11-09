@@ -71,7 +71,7 @@ export interface ListLook {
   /**
    * Settings → Rows only: Show → Status mark, one mark at the row's end (`StatusMark`, RowStatus.tsx): waiting on you
    * (an open question or action item) or done (Quiet), in place of the action pill and `?N`, whose words are its name
-   * and tooltip. Stopped and Holds up keep their triangles.
+   * and tooltip. Stopped and Holds up keep their filled question mark (or action box) beside it.
    */
   statusMark: boolean;
   /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */

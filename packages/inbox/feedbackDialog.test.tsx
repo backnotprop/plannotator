@@ -529,7 +529,8 @@ describe.skipIf(!hasDom)('the sidebar row', () => {
     const host = sidebar(() => (opened += 1));
     const row = host.querySelector<HTMLButtonElement>('[data-feedback-nav]')!;
     expect(row.closest('.ib-side-foot')).not.toBeNull();
-    expect(row.nextElementSibling?.classList.contains('ib-setrow')).toBe(true);
+    // Each sidebar item sits in a `display: contents` wrapper (`.ib-side-item`), so the rows are the wrappers' children.
+    expect(row.closest('.ib-side-item')?.nextElementSibling?.querySelector(':scope > .ib-setrow')).not.toBeNull();
     expect(row.getAttribute('aria-haspopup')).toBe('dialog');
     await act(async () => row.click());
     expect(opened).toBe(1);

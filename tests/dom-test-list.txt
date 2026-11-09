@@ -86,12 +86,14 @@ packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
 packages/inbox/whatsNewLink.test.tsx
+packages/inbox/whatsNewPanel.test.tsx
 packages/inbox/whatsNewHeader.test.tsx
 packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
 packages/inbox/reask.test.tsx
 packages/inbox/openQuestions.test.tsx
+packages/inbox/threadPulls/ThreadPulls.test.tsx
 packages/inbox/threadSteps.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
@@ -181,6 +183,7 @@ packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
+packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/actionChecklist.test.tsx
@@ -207,6 +210,7 @@ packages/inbox/copyMessage.test.tsx
 packages/inbox/guideRequest.test.tsx
 packages/inbox/pinnedThreads.test.tsx
 packages/inbox/rowStar.test.tsx
+packages/inbox/artifactPins.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
@@ -214,6 +218,7 @@ packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
 packages/inbox/floaters/floaters.test.tsx
+packages/inbox/ask/side.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
@@ -237,6 +242,7 @@ packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
+packages/inbox/sidebarCustomize.test.tsx
 packages/inbox/listGroups.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/projectSort.test.tsx
@@ -264,6 +270,7 @@ packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
+packages/inbox/linkedMessageDelete.test.tsx
 packages/inbox/messageArming.test.tsx
 packages/inbox/feedbackDialog.test.tsx
 packages/ui/components/HumanOnlySkillNotice.test.tsx
@@ -490,6 +497,7 @@ packages/ui/utils/diffFonts.test.ts
 packages/ui/components/Settings.agentTool.test.tsx
 packages/ui/components/settings/QuickLabelsTab.test.tsx
 packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+packages/ui/components/AnnotationToolbar.side.test.tsx
 packages/ui/components/AnnotationToolbar.touchPlacement.test.tsx
 packages/ui/components/touchAnchorWiring.test.tsx
 packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
@@ -642,6 +650,8 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/inbox/attachmentDownload.test.tsx
+packages/inbox/listFilterButton.test.tsx
 packages/inbox/prototypeWindow.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx

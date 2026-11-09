@@ -1,5 +1,7 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
+import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
+import { fileSideSource } from '../ask/sideSource';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -63,6 +65,7 @@ import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotato
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
@@ -151,6 +154,11 @@ const paneEscapes = new WeakSet<Event>();
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
+  /**
+   * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
+   * image both shown and attached). Pin / Unpin sits in the viewer's bar and the pane's header. Absent (the tour): none.
+   */
+  pin?: { threadId: string; key: string } | null;
   /** The file is in the person's own message (an image their reply shows): the header and the changed line say "You", not the agent. */
   fromPerson?: boolean;
   /** Every attachment of the thread, for the panel's files and the strip. */
@@ -281,8 +289,11 @@ export interface AttachmentPaneProps {
    * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
    */
   openIn?: OpenInSurface;
-  /** Ask AI's icon, for the full-screen bar (the thread's top bar is covered there). */
-  ask?: React.ReactNode;
+  /**
+   * Ask AI's Side in the file's selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat.
+   * Absent while this thread cannot ask: no Side. The full-screen bar has no Ask icon (approval "inbox-ask-ai-flow").
+   */
+  onSide?: (words: string, source?: string) => void;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
   onToast?: Notice;
 }
@@ -1467,6 +1478,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
+  const sideFrom = props.onSide
+    ? (text: string, context: SelectionActionContext) =>
+        props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
+    : undefined;
   // A Markdown file with 4 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
@@ -1623,6 +1639,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
   const phoneHtml = full && phone && isHtml;
+  /** A phone's HTML page: Pin / Unpin lives in full screen's ⋯, not in the bar (no room for it at 320 px). */
+  const pinInMenu = phoneHtml;
   const threadId = props.composer?.threadId ?? null;
   // Part B, "Fit the page" (pageSize.ts): Desktop size lays the page out at a laptop's width and scales it to the
   // phone's. A press is remembered per file; until then a page wider than the phone opens on Desktop size by itself.
@@ -2364,7 +2382,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <FullViewBar
           ref={barRef}
           phone={phone}
-          reuse={phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
+          reuse={
+            <>
+              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). A phone's HTML
+                  page has it in the ⋯ menu instead (`pinInMenu`): its bar, the widest, must fit at 320 px with the reply's
+                  pill on its row or its card open. */}
+              {props.pin && !pinInMenu && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
+              {phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
+            </>
+          }
           state={shownToolbar}
           onState={(next) => {
             // Each control flies from where it rests: measured before the state changes.
@@ -2438,9 +2464,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 setMoreOpen(open);
               }}
               versionAction={versionAction}
+              pin={pinInMenu && props.pin ? { threadId: props.pin.threadId, key: props.pin.key, name: attachment.name } : null}
             />
           }
-          ask={props.ask}
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
           // × does what Escape's last step does, never a pick (Side by side is the pick): back where full screen
@@ -2467,6 +2493,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </span>
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
+          {props.pin && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" />}
           <ReuseButton file={attachment} surface="pane" version={effectiveVersion} />
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
           {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
@@ -2592,6 +2619,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // The floating comments panel covers the page's right side: a comment picked there scrolls its mark clear of it.
               scrollClear={panelOverFrame}
               mentionSource={props.mentionSource}
+              onSide={sideFrom}
               mode="selection"
               inputMethod="pinpoint"
               annotateModeActive={armed}
@@ -2871,6 +2899,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 copyLabel="Copy file"
                 allowImages={false}
                 quickLabels={false}
+                onSide={sideFrom}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}

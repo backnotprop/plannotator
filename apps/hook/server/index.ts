@@ -252,6 +252,7 @@ import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { writeWholeToStdout } from "./write-whole-stdout";
@@ -456,6 +457,21 @@ if (isReviewDrawCommand(rawArgs, () => {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "pulls") {
+    const pullsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxPullsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(pullsDataDir),
       }),
     );
   }

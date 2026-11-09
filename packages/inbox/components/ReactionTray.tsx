@@ -12,7 +12,8 @@
  * the arrow keys reach at the tray's end, edits it (its name, another emoji, Remove).
  *
  * No words on the tray (a name is a tooltip) and no toast: the picked emoji flies from where it was pressed
- * to the line under the message. Reduced motion: no flight, the line just appears. The reaction is the 👍's
+ * to the line under the message, or, when that line is out of sight, lifts a little at the button; the thread
+ * never scrolls to chase it (`flyReaction`). Reduced motion: no flight, the line just appears. The reaction is the 👍's
  * ack (POST /api/inbox/messages/:id/ack, its Undo window); the agent gets the emoji it ends on, with its name,
  * and the emoji is shown on the message (the ack's `reaction`). Once sent the tray leaves the message (Thread.tsx
  * `ackSent`); the emoji stays shown under it.
@@ -29,6 +30,7 @@ import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { EmojiPicker, emojiRow } from './EmojiPicker';
 import type { EmojiRow } from './emojiData';
+import { atEnd } from '../seenOnSight';
 import { addSavedReaction, changeSavedReaction, freeSlots, nameSavedReaction, rememberEmoji, removeSavedReaction, savedReactions, useSavedReactions } from '../reactions';
 
 const LOOKS_GOOD_LABEL = 'Looks good';
@@ -58,15 +60,94 @@ const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)'
 let flight: { el: HTMLElement; raf: number } | null = null;
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 4); // close to cubic-bezier(0.23, 1, 0.32, 1)
 const easeInOut = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - Math.pow(-2 * t + 2, 4) / 2); // close to cubic-bezier(0.77, 0, 0.175, 1)
+/** 0 to 1 from `start`; a frame stamped before the flight began (rAF's stamp is the frame's start) counts as 0. */
+const progress = (now: number, start: number, ms: number) => Math.min(1, Math.max(0, (now - start) / ms));
+
+/** The sent moment's timings (ms). */
+export const FLIGHT_LAND_MS = 520;
+/** The emoji's spot under the message is out of sight: a short lift at the button, no travel. */
+export const FLIGHT_STAY_MS = 260;
+/** The thread keeping its end in view as the line under the last message draws (only when it was at its end). */
+export const KEEP_END_MS = 240;
+/** How long the thread waits for the line to draw before it stops keeping its end. */
+const KEEP_END_WAIT_MS = 600;
+/** The band of the thread an emoji may land in: never at its very edge, under its header or the foot. */
+const LAND_MARGIN = 12;
+
+let keeping: { stop: () => void } | null = null;
+
+/**
+ * The person was at the thread's end when they reacted: the line drawn under the message grows the thread, and
+ * the thread stays at its end, eased there once (KEEP_END_MS, the strong ease-out). Read against the end every
+ * frame, so the read line arriving above (the browser holds what is in view through it) moves nothing. The
+ * person's own wheel, touch, pointer or key stops it. Reduced motion: the end at once.
+ */
+function keepEnd(body: HTMLElement): void {
+  keeping?.stop();
+  if (typeof requestAnimationFrame !== 'function') return;
+  const startedAt = performance.now();
+  const gapAt = (b: HTMLElement) => b.scrollHeight - b.clientHeight - b.scrollTop;
+  // A thread a few px short of its end (atEnd allows AT_END_PX) keeps that much: only the growth is followed.
+  const before = Math.max(0, gapAt(body));
+  let begun = -1;
+  let from = 0;
+  let last = 0;
+  let raf = 0;
+  const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    for (const type of events) body.removeEventListener(type, stop);
+    if (keeping === mine) keeping = null;
+  };
+  const mine = { stop };
+  keeping = mine;
+  for (const type of events) body.addEventListener(type, stop, { passive: true });
+  const frame = (now: number) => {
+    if (!body.isConnected) return stop();
+    const end = body.scrollHeight - body.clientHeight;
+    const gap = gapAt(body) - before;
+    if (begun < 0 || gap > last + 1) {
+      // The line drew (or grew again, a wrap): ease the rest of the way from here.
+      if (gap <= 1) {
+        if (now - startedAt > KEEP_END_WAIT_MS) return stop();
+        raf = requestAnimationFrame(frame);
+        return;
+      }
+      if (reduced()) {
+        body.scrollTop = end - before;
+        return stop();
+      }
+      begun = now;
+      from = gap;
+    }
+    const p = progress(now, begun, KEEP_END_MS);
+    const left = from * (1 - easeOut(p));
+    body.scrollTop = end - before - left;
+    last = left;
+    if (p < 1) raf = requestAnimationFrame(frame);
+    else stop();
+  };
+  raf = requestAnimationFrame(frame);
+}
 
 /**
  * The sent moment: the emoji leaves where it was pressed and lands on the line under the message it answers,
- * so the person sees where the reaction went. 520 ms, pointer-events none, never blocks. The landing spot is
- * read again every frame (the line, once drawn, else where it will be: the line itself moves the message).
- * When the message is off screen, the emoji only rises a little and fades where it was pressed. A new flight
- * cancels the one in the air. Reduced motion: no flight at all.
+ * so the person sees where the reaction went. 520 ms, pointer-events none, never blocks.
+ *
+ * The thread never scrolls to chase it. The emoji lands only where the person can see: the line, read again
+ * every frame, held inside the thread's visible band, so a line drawn lower than expected, or pushed under the
+ * foot, is never followed past the bar. When the person was at the thread's end, the thread stays at its end
+ * (keepEnd) and the emoji lands on the line as it settles. When the line's spot is out of sight (a long message
+ * that runs past the foot, read from higher up), there is no travel: the emoji lifts a little at the button and
+ * fades (260 ms), and the line under the message is simply there. A new flight cancels the one in the air.
+ * Reduced motion: no flight at all; the thread still keeps its end, at once.
  */
 export function flyReaction(from: Element | null, emoji: string, messageId: string): void {
+  const message = document.querySelector<HTMLElement>(`.ib-pbody [data-message-id="${CSS.escape(messageId)}"]`);
+  const scroller = message?.closest<HTMLElement>('.ib-pbody') ?? null;
+  // Read before the line is drawn: the person's place, not the one the line makes.
+  const wasAtEnd = !!scroller && scroller.scrollHeight > 0 && atEnd(scroller);
+  if (scroller && wasAtEnd) keepEnd(scroller);
   if (reduced() || typeof requestAnimationFrame !== 'function') return;
   let a = from?.getBoundingClientRect();
   // A picker still moving can report a stray box: start from the 👍 in the foot instead.
@@ -76,10 +157,13 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
   if (!a) return;
   const x0 = a.left + a.width / 2;
   const y0 = a.top + a.height / 2;
-  const target = (): { x: number; y: number; visible: boolean } | null => {
+  const band = () => {
+    const pane = scroller?.getBoundingClientRect();
+    return pane ? { top: pane.top + LAND_MARGIN, bottom: pane.bottom - LAND_MARGIN } : null;
+  };
+  const target = (): { x: number; y: number; inView: boolean } | null => {
     const chip = document.querySelector<HTMLElement>(`[data-ack-for="${CSS.escape(messageId)}"] .ib-ackemoji`);
-    const body = document.querySelector<HTMLElement>(`.ib-pbody [data-message-id="${CSS.escape(messageId)}"]`);
-    const pane = body?.closest('.ib-pbody')?.getBoundingClientRect();
+    const body = message?.isConnected ? message : document.querySelector<HTMLElement>(`.ib-pbody [data-message-id="${CSS.escape(messageId)}"]`);
     let x: number;
     let y: number;
     if (chip) {
@@ -92,10 +176,12 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
       x = b.left + 18;
       y = b.bottom + 25;
     } else return null;
-    return { x, y, visible: !!pane && y > pane.top + 8 && y < pane.bottom - 4 };
+    const view = band();
+    return { x, y, inView: !!view && y >= view.top && y <= view.bottom };
   };
   const first = target();
-  const land = !!first?.visible;
+  // The thread keeping its end brings the line into view as the emoji travels; otherwise it must be in view now.
+  const land = !!first && (wasAtEnd || first.inView);
   if (flight) {
     cancelAnimationFrame(flight.raf);
     flight.el.remove();
@@ -103,32 +189,38 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
   const el = document.createElement('span');
   el.className = 'ib-react-flight';
   el.setAttribute('aria-hidden', 'true');
-  el.dataset.reactionFlight = '';
+  el.dataset.reactionFlight = land ? 'land' : 'stay';
   const inner = document.createElement('span');
   inner.textContent = emoji;
   el.appendChild(inner);
   document.body.appendChild(el);
-  const duration = land ? 520 : 480;
+  const duration = land ? FLIGHT_LAND_MS : FLIGHT_STAY_MS;
   const start = performance.now();
   const mine = { el, raf: 0 };
   flight = mine;
+  let landed = false;
   const frame = (now: number) => {
-    const t = Math.min(1, (now - start) / duration);
+    const t = progress(now, start, duration);
     let x = x0;
     let y = y0;
     let scale: number;
     let opacity = 1;
     if (land) {
       const to = target() ?? first!;
+      // Never past the thread's visible band: a line below the bar (or under the foot) is not chased there.
+      const view = band();
+      const toY = view ? Math.min(view.bottom, Math.max(view.top, to.y)) : to.y;
+      landed = to.inView;
       // x eases in and out, y decelerates: it lifts first, then drifts over to the line.
       x = x0 + (to.x - x0) * easeInOut(t);
-      y = y0 + (to.y - y0) * easeOut(t);
+      y = y0 + (toY - y0) * easeOut(t);
       scale = t < 0.55 ? 1 + 0.45 * easeOut(t / 0.55) : 1.45 - 0.6 * easeOut((t - 0.55) / 0.45);
       opacity = t > 0.92 ? 1 - (t - 0.92) / 0.08 : 1;
     } else {
-      y = y0 - 36 * easeOut(t);
-      scale = 1 + 0.35 * easeOut(t);
-      opacity = 1 - easeOut(t);
+      // A short lift where it was pressed: it rises, grows a little and is gone. Never downward.
+      y = y0 - 20 * easeOut(t);
+      scale = 1 + 0.3 * easeOut(t);
+      opacity = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
     }
     el.style.transform = `translate(${x}px, ${y}px)`;
     inner.style.transform = `translate(-50%, -50%) scale(${scale})`;
@@ -139,8 +231,8 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
     }
     el.remove();
     if (flight === mine) flight = null;
-    // The landing: the line's emoji takes the hit.
-    if (land) {
+    // The landing: the line's emoji takes the hit, only where the person can see it.
+    if (land && landed) {
       document
         .querySelector<HTMLElement>(`[data-ack-for="${CSS.escape(messageId)}"] .ib-ackemoji`)
         ?.animate?.([{ transform: 'scale(0.7)' }, { transform: 'scale(1.2)', offset: 0.5 }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });

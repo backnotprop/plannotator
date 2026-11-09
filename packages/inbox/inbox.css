@@ -755,33 +755,158 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-acts-row .ib-left { margin-right: auto; }
 
 /* What's new: the release notes in the main pane, read-only (design of record
-   .product/approved/inbox-whats-new-header/, variant Toolbar): a sticky bar with
-   the way back and the actions, then the release, aligned to the notes. */
-.ib-wn { flex: 1; min-width: 0; overflow-y: auto; padding: 0 0 48px; outline: none; }
-/* Its own stacking context: the notes' Viewer lifts a layer (z-index 50) that must stay under the sticky bar. */
-.ib-wn-in { max-width: 760px; margin: 0 auto; padding: 0 40px; box-sizing: content-box; position: relative; z-index: 0; }
-.ib-wn-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 16px 0 max(12px, var(--ib-controls-left, 0px)); background: color-mix(in oklch, var(--card) 92%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+   .product/approved/inbox-whats-new-tldr/, round 2; the bar from inbox-whats-new-header, variant Toolbar):
+   a sticky bar with the way back and the actions; the reading column ("Plannotator 0.28.53" with its date and
+   standing on one baseline, the TL;DR ledger, the notes) and, from 1100 px, the releases panel, an inspector
+   column with its own scroll. Hairlines, a 4 px grid, mono tabular versions and dates, sentence case, one dot
+   language (New accent, Changed grey, Fixed green, Removed red, Off by default a ring, yours green). */
+.ib-wn {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 0; outline: none;
+  --ib-wn-bar-h: 52px;
+  --ib-wn-t1: var(--foreground);
+  --ib-wn-t2: color-mix(in oklab, var(--foreground) 72%, var(--card));
+  --ib-wn-t3: var(--muted-foreground);
+  --ib-wn-hair: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --ib-wn-step: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --ib-wn-sel: color-mix(in oklab, var(--primary) 10%, var(--card));
+  --ib-wn-ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ib-wn-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; height: var(--ib-wn-bar-h); box-sizing: border-box; padding: 0 16px 0 max(12px, var(--ib-controls-left, 0px)); background: color-mix(in oklch, var(--card) 92%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--ib-wn-hair); }
 .ib-wn-bar .ib-pback { max-width: none; flex: none; }
-.ib-wn-div { width: 1px; height: 18px; background: var(--border); margin: 0 6px; flex: none; }
-.ib-wn-title { font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.ib-wn-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
-.pn-inbox .ib-wn-gh { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 7px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; color: var(--muted-foreground); text-decoration: none; }
-.pn-inbox .ib-wn-gh:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 55%, transparent); }
-.pn-inbox .ib-wn-acts .ib-btn { height: 30px; gap: 4px; }
-.ib-wn-hero { padding: 40px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 22px; }
-.ib-wn-pre { margin: 0 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; color: var(--muted-foreground); }
-.ib-wn-hero h1 { margin: 0; font-size: var(--ib-fs-34, 34px); font-weight: 680; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; overflow-wrap: anywhere; }
-.ib-wn-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 12px 0 0; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
-.pn-inbox .ib-wn-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 9px; border-radius: 999px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; border: 1px solid var(--border); color: var(--foreground); background: var(--background); max-width: 100%; text-align: left; }
-.pn-inbox .ib-wn-chip.ib-good { border-color: color-mix(in oklch, var(--success) 35%, var(--border)); color: var(--success); background: color-mix(in oklch, var(--success) 8%, var(--card)); }
-.pn-inbox .ib-wn-chip.ib-lk { cursor: pointer; }
-.pn-inbox .ib-wn-chip.ib-lk:hover { border-color: var(--muted-foreground); }
-.ib-wn-chip .ib-ic { width: 13px; height: 13px; stroke-width: 2.2; flex: none; }
-.ib-wn-skipped { margin: 14px 0 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); scroll-margin-top: 68px; }
-.ib-wn-skipped h2 { font-size: var(--ib-fs-12, 12px); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground); margin: 0 0 6px; }
-.ib-wn-skipped ul { margin: 0; padding-left: 18px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; }
+.ib-wn-div { width: 1px; height: 16px; background: var(--ib-wn-hair); flex: none; }
+.ib-wn-title { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-wn-acts { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: none; }
+.pn-inbox .ib-wn-gh { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; color: var(--ib-wn-t3); text-decoration: none; transition: background-color 150ms var(--ib-wn-ease), color 150ms var(--ib-wn-ease); }
+.pn-inbox .ib-wn-gh:hover { color: var(--ib-wn-t1); background: var(--ib-wn-step); }
+.pn-inbox .ib-wn-acts .ib-btn { height: 28px; gap: 4px; }
+.ib-wn-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-feature-settings: normal; }
+/* The version picker: shown where the panel does not fit (below). */
+.pn-inbox .ib-wn-picker { display: none; align-items: center; gap: 4px; height: 28px; padding: 0 8px 0 12px; border: 0; border-radius: 8px; background: none; box-shadow: inset 0 0 0 1px var(--ib-wn-hair); color: var(--ib-wn-t1); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; }
+.pn-inbox .ib-wn-picker:hover { background: var(--ib-wn-step); }
+.ib-wn-picker .ib-ic { width: 14px; height: 14px; color: var(--ib-wn-t3); }
+
+/* One grid: the reading area and the releases panel. */
+.ib-wn-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.ib-wn-grid.ib-wn-has-panel { grid-template-columns: minmax(0, 1fr) 304px; }
+.ib-wn-read { padding: 40px 48px 64px; min-width: 0; }
+/* Its own stacking context: the notes' Viewer lifts a layer (z-index 50) that must stay under the sticky bar. */
+.ib-wn-in { max-width: 640px; margin: 0 auto; position: relative; z-index: 0; }
+
+/* The heading row: the version and its meta share one baseline (and so does the panel's heading). */
+.ib-wn-hero { padding: 0; margin: 0; }
+.ib-wn-hrow { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 24px; }
+.ib-wn-hrow > * { margin: 0; }
+.ib-wn-hero h1 { font-size: var(--ib-fs-30, 30px); line-height: 36px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; outline: none; }
+.ib-wn-prod { color: var(--ib-wn-t3); font-weight: 500; }
+.ib-wn-v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-feature-settings: normal; font-weight: 500; letter-spacing: -0.03em; }
+.ib-wn-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: var(--ib-fs-13, 13px); color: var(--ib-wn-t3); }
+.ib-wn-meta .ib-wn-mono { font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-wn-t2); }
+.pn-inbox .ib-wn-st { display: inline-flex; align-items: baseline; gap: 8px; color: var(--ib-wn-t2); font: inherit; background: none; border: 0; padding: 0; text-align: left; }
+.ib-wn-st .ib-wn-dot { transform: translateY(-1px); }
+.pn-inbox .ib-wn-st.ib-wn-lk { color: var(--primary); cursor: pointer; text-underline-offset: 4px; position: relative; }
+.pn-inbox .ib-wn-st.ib-wn-lk .ib-wn-mono { color: inherit; }
+.pn-inbox .ib-wn-st.ib-wn-lk:hover { text-decoration: underline; }
+
+/* Status dots: the page's one colour system. */
+.ib-wn-dot { display: inline-block; width: 6px; height: 6px; border-radius: 3px; flex: none; background: var(--ib-wn-t3); }
+.ib-wn-d-new { background: var(--primary); }
+.ib-wn-d-changed { background: color-mix(in oklab, var(--foreground) 45%, var(--card)); }
+.ib-wn-d-fixed, .ib-wn-d-yours { background: var(--success); }
+.ib-wn-d-removed { background: var(--destructive); }
+.ib-wn-d-off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ib-wn-t3); }
+
+/* TL;DR: a ledger between two hairlines; the labels in a fixed column, every line on one edge. */
+.ib-wn-tldr { margin: 32px 0; padding: 16px 0 12px; border-top: 1px solid var(--ib-wn-hair); border-bottom: 1px solid var(--ib-wn-hair); }
+.ib-wn-tldr h2 { margin: 0 0 8px; font-size: var(--ib-fs-13, 13px); line-height: 20px; font-weight: 600; color: var(--ib-wn-t1); }
+.ib-wn-tldr ul { list-style: none; margin: 0; padding: 0; }
+.ib-wn-tldr li { display: grid; grid-template-columns: 128px minmax(0, 1fr); padding: 4px 0; }
+.ib-wn-tl { display: flex; align-items: center; gap: 8px; height: 24px; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--ib-wn-t3); white-space: nowrap; }
+.ib-wn-tt, .ib-wn-known { font-size: var(--ib-fs-15, 15px); line-height: 24px; color: var(--ib-wn-t1); overflow-wrap: anywhere; }
+.ib-wn-known { margin: 0; }
+.ib-wn-from { margin: 4px 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 20px; color: var(--ib-wn-t3); }
+.ib-wn-tldr code, .ib-wn-rel code { font-family: var(--font-mono); font-size: 0.9em; }
+/* No TL;DR: the notes start a ledger's margin under the heading. */
+.ib-wn-gap { height: 32px; }
+.ib-wn-tldr-empty { padding: 0; border-bottom: 0; }
+.ib-wn-body { max-width: none; }
+
+/* Loading: the known line at once, then "Getting the notes from GitHub" and placeholder bars (after 200 ms, so a
+   saved release opens without a flash). */
+.ib-wn-sk { display: block; height: 8px; border-radius: 4px; background: var(--ib-wn-step); margin: 8px 0; }
+.ib-wn-sk-gap { display: block; height: 16px; }
+.ib-wn-loading { animation: ib-wn-show 0s linear 200ms both; }
+@keyframes ib-wn-show { from { visibility: hidden; } to { visibility: visible; } }
+.ib-wn-wait { display: flex; align-items: center; gap: 8px; margin: 0 0 24px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--ib-wn-t3); }
+.ib-wn-spin { width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid color-mix(in oklab, var(--foreground) 15%, transparent); border-top-color: var(--ib-wn-t2); animation: ib-wn-spin 0.9s linear infinite; flex: none; }
+@keyframes ib-wn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-wn-spin { animation: none; } }
+/* Not saved: the ledger's columns, under the known line. */
+.ib-wn-off { display: grid; grid-template-columns: 128px minmax(0, 1fr); padding: 16px 0 20px; border-bottom: 1px solid var(--ib-wn-hair); margin: -32px 0 32px; }
+.ib-wn-off .ib-wn-tl { color: var(--ib-wn-t2); }
+.ib-wn-off h2 { margin: 0; font-size: var(--ib-fs-15, 15px); line-height: 24px; font-weight: 600; }
+.ib-wn-off p { margin: 4px 0 16px; font-size: var(--ib-fs-14, 14px); line-height: 20px; color: var(--ib-wn-t2); }
+.ib-wn-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.pn-inbox .ib-wn-btns .ib-btn { height: 32px; gap: 8px; text-decoration: none; }
+.ib-wn-btns .ib-ic { width: 14px; height: 14px; color: var(--ib-wn-t3); }
+
+/* The releases panel: sticky under the bar, as tall as the pane (--ib-wn-h, the page measures it), its list
+   scrolling on its own. */
+.ib-wn-panel { position: sticky; top: var(--ib-wn-bar-h); align-self: start; height: calc(var(--ib-wn-h, calc(100vh - 16px)) - var(--ib-wn-bar-h)); box-sizing: border-box; border-left: 1px solid var(--ib-wn-hair); padding: 40px 16px 0; display: flex; flex-direction: column; min-height: 0; }
+/* The heading sits on the version's baseline: a zero-width strut in the h1's size and line height. */
+.ib-wn-phead { display: flex; align-items: baseline; padding: 0 12px; margin: 0 0 12px; }
+.ib-wn-phead::before { content: "\200b"; font-size: var(--ib-fs-30, 30px); line-height: 36px; width: 0; }
+.ib-wn-phead > * { margin: 0; }
+.ib-wn-phead h2 { font-size: var(--ib-fs-15, 15px); font-weight: 600; line-height: 20px; }
+.ib-wn-n { margin-left: auto; font-size: var(--ib-fs-12, 12px); font-weight: 400; color: var(--ib-wn-t3); line-height: 20px; }
+.ib-wn-pscroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; margin: 0 -16px; padding: 0 16px 16px; scrollbar-width: thin; }
+/* The card and the rows share one grid: the dot column, the content, the dates flush right. The card's 1 px
+   hairline comes out of its padding, so both start on the same x. */
+.pn-inbox .ib-wn-rel { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: baseline; padding: 8px 12px; border-radius: 8px; color: inherit; text-decoration: none; transition: background-color 150ms var(--ib-wn-ease); }
+.pn-inbox .ib-wn-rel:hover { background: var(--ib-wn-step); }
+.pn-inbox .ib-wn-rel[aria-current="page"] { background: var(--ib-wn-sel); }
+.ib-wn-rel > .ib-wn-dot { align-self: center; grid-row: 1; grid-column: 1; }
+.ib-wn-rv { grid-row: 1; grid-column: 2; font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); font-weight: 500; font-variant-numeric: tabular-nums; font-feature-settings: normal; display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--ib-wn-t1); }
+.ib-wn-rv small { font-family: var(--font-sans, inherit); font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--ib-wn-t3); white-space: nowrap; }
+.ib-wn-rv .ib-wn-yours { color: var(--success); }
+.ib-wn-rd { grid-row: 1; grid-column: 3; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); color: var(--ib-wn-t3); font-variant-numeric: tabular-nums; font-feature-settings: normal; text-align: right; padding-left: 12px; white-space: nowrap; }
+.ib-wn-rl { grid-column: 2 / 4; list-style: none; margin: 4px 0 0; padding: 0; min-width: 0; }
+.ib-wn-rl li { font-size: var(--ib-fs-12-5, 12.5px); line-height: 20px; color: var(--ib-wn-t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-wn-rp { grid-column: 2 / 4; margin: 4px 0 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 20px; color: var(--ib-wn-t3); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-wn-rel[aria-current="page"] :is(.ib-wn-rl li, .ib-wn-rp) { color: var(--ib-wn-t2); }
+.pn-inbox .ib-wn-card { border: 1px solid var(--ib-wn-hair); border-radius: 12px; padding: 11px; }
+.ib-wn-card .ib-wn-rv { font-size: var(--ib-fs-15, 15px); }
+/* The full card (another release is open): each line keeps its label's dot in the dot column. */
+.ib-wn-cl { grid-column: 1 / 4; list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr); row-gap: 4px; }
+.ib-wn-cl li { display: contents; }
+.ib-wn-cl .ib-wn-dot { align-self: start; margin-top: 7px; }
+.ib-wn-cl span { font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--ib-wn-t2); }
+.ib-wn-sub { display: flex; justify-content: space-between; align-items: baseline; padding: 0 12px; margin: 24px 0 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--ib-wn-t3); }
+.ib-wn-sub-first { margin-top: 0; }
+.ib-wn-rlist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.pn-inbox .ib-wn-more { display: inline-flex; align-items: center; gap: 8px; margin: 12px 12px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-wn-t3); text-decoration: none; }
+.pn-inbox .ib-wn-more:hover { color: var(--ib-wn-t1); }
+.ib-wn-more .ib-ic { width: 12px; height: 12px; }
+
+/* The sheet (a phone, and windows too narrow for the panel): the same list from the bottom edge. */
+.pn-inbox dialog.ib-dlg.ib-wn-sheet, dialog.ib-dlg.ib-wn-sheet { inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; max-height: 84dvh; height: auto; border: 0; border-radius: var(--ib-sheet-corner, 16px) var(--ib-sheet-corner, 16px) 0 0; overflow: hidden; background: var(--card); padding: 0; }
+.ib-wn-sheet .ib-dlg-in { padding: 0; height: 100%; }
+.ib-wn-sheet-in { display: flex; flex-direction: column; max-height: 84dvh; box-sizing: border-box; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); outline: none; --ib-wn-t1: var(--foreground); --ib-wn-t2: color-mix(in oklab, var(--foreground) 72%, var(--card)); --ib-wn-t3: var(--muted-foreground); --ib-wn-hair: color-mix(in oklab, var(--foreground) 10%, transparent); --ib-wn-step: color-mix(in oklab, var(--foreground) 5%, transparent); --ib-wn-sel: color-mix(in oklab, var(--primary) 10%, var(--card)); --ib-wn-ease: cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-wn-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--ib-wn-hair); margin: 0 auto 4px; flex: none; }
+.ib-wn-sheet .ib-wn-phead { height: 44px; align-items: center; margin: 0 0 8px; padding-right: 0; flex: none; }
+.ib-wn-sheet .ib-wn-phead::before { display: none; }
+.ib-wn-sheet .ib-wn-phead h2 { font-size: var(--ib-fs-17, 17px); }
+.pn-inbox .ib-wn-sheet-x { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 8px; border: 0; background: none; color: var(--ib-wn-t3); cursor: pointer; }
+.ib-wn-sheet-x .ib-ic { width: 20px; height: 20px; }
+.pn-inbox .ib-wn-sheet .ib-wn-rel { padding: 12px; min-height: 44px; box-sizing: border-box; }
+.pn-inbox .ib-wn-sheet .ib-wn-card { padding: 11px; }
+
+@media (max-width: 1099px) {
+  .ib-wn-grid.ib-wn-has-panel { grid-template-columns: minmax(0, 1fr); }
+  .ib-wn-panel { display: none; }
+  .pn-inbox .ib-wn-picker { display: inline-flex; }
+}
 @media (max-width: 720px) {
-  .ib-wn-in { padding: 0 18px; }
+  .ib-wn-read { padding: 32px 18px 48px; }
 }
 
 /* main list */
@@ -900,15 +1025,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
-/* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
-   edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
-   to the left, never into the time; past the gap they slide under the badge, which paints above them on an opaque
-   ground, so the alert is always whole (the exact counts are in the row's name and the tooltips). */
+/* The words, the badge column and the open counts, each right-aligned in its column, so every title starts on one
+   left edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run
+   out to the left, never into the time; past the gap they slide under the badge column, whose words (a blocked row
+   in full-width mode, `WaitWords`) paint above them on an opaque ground (the exact counts are in the row's name and
+   the tooltips). The badge column holds nothing else since the one question mark (approval "inbox-question-mark"). */
 .ib-row :is(.ib-cw, .ib-bcol, .ib-cq) { display: inline-flex; justify-content: flex-end; align-items: center; min-width: 0; }
 .ib-row .ib-cq { gap: 8px; }
 .ib-row .ib-bcol { position: relative; z-index: 1; }
-/* The badge's ground: its tint over what the row shows under it (the card, the hover or the selected fill), so it
-   reads exactly as before while hiding whatever runs under it. */
+/* The words' ground (`WaitWords`): what the row shows under them (the card, the hover or the selected fill), so they
+   read exactly as before while hiding whatever runs under them. */
 .ib-row { --ib-row-fill: transparent; }
 .ib-row:hover, .ib-rw[data-menu] .ib-row { --ib-row-fill: var(--ib-hover); }
 .ib-row.ib-sel { --ib-row-fill: var(--ib-sel); }
@@ -916,8 +1042,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    `data-archived`): its words faded, its fill and its place as they were; the same under reduced motion. */
 .ib-rw[data-archived] :is(.ib-row, .ib-nrow, .ib-mrow) > * { opacity: 0.55; }
 .ib-row.ib-sel:hover, .ib-rw[data-menu] .ib-row.ib-sel { --ib-row-fill: var(--ib-sel-hover); }
-.ib-row .ib-bcol .ib-badge.ib-b-stop { background: linear-gradient(var(--ib-badge-stop-bg), var(--ib-badge-stop-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
-.ib-row .ib-bcol .ib-badge.ib-b-hold { background: linear-gradient(var(--ib-badge-hold-bg), var(--ib-badge-hold-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
+.ib-row .ib-bcol .ib-bwords { padding-left: 4px; background: linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-c.ib-qn { justify-content: flex-end; }
 /* The project cell (the owner, 2026-10-31): the agents' tiles, never cut, then 6px (the three-line row's gap,
    approval "inbox-list-row-v2", v2-r3), then the project hugging them, cut with "…". No slot reserves width: each
@@ -979,10 +1104,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 @keyframes ib-dots { 0%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ib-dots i { animation: none; opacity: 0.85; } }
 .ib-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; border: 1px solid color-mix(in oklch, var(--foreground) 35%, transparent); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; justify-self: start; flex: none; }
-/* The list rows' Stopped and Holds up badges (approval "inbox-row-badges"): a triangle (Heroicons
-   exclamation-triangle, outline) in the badge's tint, Holds up with its count; the words stay for a screen reader. */
+/* A badge with an icon and a number (the list rows' marks, `RowBadge.tsx`). */
 .ib-badge.ib-bicon { padding: 0 6px; gap: 4px; font-variant-numeric: tabular-nums; }
-.ib-tri { display: block; flex: none; }
 /* The three-line row beside a thread (approval "list-rows-mail-icons", 2026-10-30). Line 1 sits 2px further from
    the title than the lines below part, so the hover action (no taller than line 1, below) never reaches the title. */
 .ib-nrow { padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; }
@@ -1025,18 +1148,24 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    past the slot end in "…" inside the pill. */
 .ib-cs > .ib-badge.ib-b-wait { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .ib-b-wait > .ib-bwt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A wide row's badge says its words (the owner, 2026-10-29): the triangle, then "Stopped" or "Holds up 3". */
-.ib-badge.ib-bicon.ib-bwords { gap: 5px; padding: 0 8px 0 7px; }
-/* The open questions (`QuestionCount`; approval "inbox-row-action-icon", Q3, 2026-10-29): a speech bubble with a "?"
-   right next to its number, in quiet text with no pill; its words are for a screen reader. */
+/* A wide row's words for a blocked row in full-width mode (`WaitWords`, the owner, 2026-10-29; `WIDE_ROW_WAIT_WORDS`):
+   "Stopped" or "Holds up 3", in the badge's text colour, beside the marks. */
+.ib-bwords { font-size: var(--ib-fs-12-5, 12.5px); font-weight: var(--ib-badge-weight); white-space: nowrap; }
+.ib-bwords.ib-bw-stop { color: var(--ib-badge-stop-fg, currentcolor); }
+.ib-bwords.ib-bw-hold { color: var(--ib-badge-hold-fg, currentcolor); }
+/* The open questions (`QuestionMark`; approvals "inbox-row-action-icon", Q3, 2026-10-29, and "inbox-question-mark",
+   Take 3, 2026-11-08): a speech bubble with a "?" right next to its number. Open, quiet text with no pill; holding up
+   work or stopped, the same face in today's amber or red tint pill (`.ib-badge.ib-b-hold`, `.ib-b-stop`), so the
+   steps read as no fill, then a fill, in greyscale too. Its words are for a screen reader. */
 .ib-c.ib-qn { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-qn svg.ib-qbub { stroke-width: 1.8; }
+.ib-badge.ib-bicon.ib-qn, .ib-badge.ib-bicon.ib-b-actstep { padding: 0 7px 0 6px; }
 /* The open action items (`ActionBadge`; approval "inbox-row-action-icon", A2, 2026-10-29): the checklist card's box
    with its tick taken out and the number, in the alert badge's pill with a neutral fill and the text colour, so it
    reads one step under the red and amber badge and one over the question count. Today's badges (Soft off) are
    outlined, and so is this one. */
 .ib-badge.ib-bicon.ib-b-act { padding: 0 7px 0 6px; background: var(--ib-badge-act-bg); color: var(--foreground); }
-.pn-inbox .ib-b-act svg.ib-ic { stroke-width: 2; }
+.pn-inbox :is(.ib-b-act, .ib-b-actstep) svg.ib-ic { stroke-width: 2; }
 /* A wide row's agents before the project (approval "list-rows-mail-icons", `RowAgents`; the owner, 2026-10-31): the
    list's overlapping grey tiles (`.ib-atile`, below), one per host, at most three, then "+N" as plain small text 3px
    after them. They take the line's quiet colour (OpenCode's mark is `currentColor`). */
@@ -3586,23 +3715,38 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-sframe .ib-lnk { min-height: 0; }
   .ib-ctab, .ib-connect.ib-compact .ib-ctab { height: 44px; }
   .pn-inbox .ib-copy { height: 36px; }
-  /* What's new on a phone: the bar is one row of 44 px targets (no title, the GitHub mark alone). */
-  .ib-wn { padding: 0 0 calc(40px + env(safe-area-inset-bottom)); }
-  .ib-wn-in { padding: 0 16px; }
-  .ib-wn-bar { height: calc(60px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 max(2px, var(--ib-controls-left, 0px)); gap: 0; }
+  /* What's new on a phone: the bar is one row of 44 px targets (no title, the version picker, the GitHub mark alone). */
+  .ib-wn { --ib-wn-bar-h: calc(60px + env(safe-area-inset-top)); }
+  .ib-wn-read { padding: 28px 16px calc(40px + env(safe-area-inset-bottom)); }
+  .ib-wn-bar { padding: env(safe-area-inset-top) 12px 0 max(2px, var(--ib-controls-left, 0px)); gap: 0; }
   .ib-wn-div, .ib-wn-title { display: none; }
+  .pn-inbox .ib-wn-picker { height: 36px; font-size: var(--ib-fs-14, 14px); position: relative; margin-right: 4px; }
+  .pn-inbox .ib-wn-picker::after { content: ""; position: absolute; inset: -4px 0; }
   .pn-inbox .ib-wn-gh { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .ib-wn-gh .ib-ic { width: 20px; height: 20px; }
   .ib-wn-gh-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .pn-inbox .ib-wn-acts .ib-btn { height: 44px; padding: 0 13px; }
-  .ib-wn-hero { padding: 24px 0 20px; }
-  /* The jump to the skipped releases lands below the phone's taller bar and the safe area above it. */
-  .ib-wn-skipped { scroll-margin-top: calc(68px + env(safe-area-inset-top)); }
-  .ib-wn-hero h1 { font-size: var(--ib-fs-32, 32px); }
-  .ib-wn-line { font-size: var(--ib-fs-14-5, 14.5px); }
-  /* The chip keeps its look (one line at 320 px) and takes a 44 px tall hit area. */
-  .pn-inbox .ib-wn-chip { position: relative; min-height: 28px; }
-  .pn-inbox .ib-wn-chip.ib-lk::after { content: ""; position: absolute; inset: -8px 0; }
+  /* Behind, the bar holds back, picker, GitHub and Update: "Inbox" never shrinks, and Update drops its
+     "to X" (the picker beside it names the version; the button's name keeps it). */
+  .pn-inbox .ib-wn-bar .ib-pback { flex: none; max-width: none; }
+  .ib-wn-acts:has(.ib-wn-picker) .ib-wn-to { display: none; }
+  .ib-wn-hrow { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .ib-wn-hero h1 { font-size: calc(26px * var(--ib-type, 14) / 14); line-height: 32px; }
+  .ib-wn-meta { font-size: var(--ib-fs-14, 14px); }
+  .ib-wn-meta .ib-wn-mono { font-size: var(--ib-fs-13, 13px); }
+  /* The meta link keeps its look and takes a 44 px tall hit area. */
+  .pn-inbox .ib-wn-st.ib-wn-lk::after { content: ""; position: absolute; inset: -12px 0; }
+  .ib-wn-tldr { margin: 24px 0 28px; }
+  .ib-wn-tldr li { grid-template-columns: 112px minmax(0, 1fr); }
+  .ib-wn-tt, .ib-wn-known { font-size: var(--ib-fs-15-5, 15.5px); }
+  .ib-wn-off { grid-template-columns: minmax(0, 1fr); margin-top: -28px; }
+  .ib-wn-off .ib-wn-tl { margin-bottom: 4px; }
+  .pn-inbox .ib-wn-btns .ib-btn { height: 44px; padding: 0 16px; font-size: var(--ib-fs-15, 15px); }
+  .ib-wn-rv { font-size: var(--ib-fs-15, 15px); }
+  .ib-wn-card .ib-wn-rv { font-size: var(--ib-fs-16, 16px); }
+  .ib-wn-rd { font-size: var(--ib-fs-13, 13px); }
+  .ib-wn-rl li, .ib-wn-rp { font-size: var(--ib-fs-14, 14px); line-height: 22px; }
+  .ib-wn-sub { font-size: var(--ib-fs-13-5, 13.5px); }
   .ib-empty { --ib-rhythm: 20px; padding: 0 16px calc(32px + env(safe-area-inset-bottom)); max-width: none; }
   .ib-hcards { grid-template-columns: minmax(0, 1fr); }
 
@@ -3993,13 +4137,8 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-logins { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
 .ib-logins > span { overflow-wrap: anywhere; }
 
-/* The skipped releases on What's new, folded under their heading when there are many. */
+/* What's new's Update on the narrowest phones: the button's name keeps the version. */
 @media (max-width: 379px) { .ib-wn-to { display: none; } }
-details.ib-wn-skipped { margin-top: 18px; }
-details.ib-wn-skipped > summary { cursor: pointer; list-style-position: inside; }
-details.ib-wn-skipped > summary h2 { display: inline; }
-details.ib-wn-skipped[open] > summary { margin-bottom: 6px; }
-.ib-wn-body + .ib-wn-skipped, .ib-sum + .ib-wn-skipped { margin-top: 18px; }
 
 /* A tall screenshot in a message shows its top at its own width (images.ts markTallImage), as the gallery does. */
 .ib-body img[data-ib-tall]:not([data-question-picture]) { width: min(100%, var(--ib-nw, 100%)); max-height: min(480px, 60vh); object-fit: cover; object-position: top center; }
@@ -4726,6 +4865,11 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-att-w:hover .ib-att-more, .ib-att-w:focus-within .ib-att-more, .pn-inbox .ib-att-more[data-popup-open] { opacity: 1; }
 .pn-inbox .ib-att-more:hover, .pn-inbox .ib-att-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
 @media (hover: none) { .pn-inbox .ib-att-more { opacity: 1; } }
+/* A right-click's menu is open on a tile, a gallery picture or an Artifacts card (TileMenu): it keeps its hover look, and its ⋯ shows. */
+.pn-inbox .ib-att-w[data-popup-open] > .ib-att-t, .pn-inbox .ib-att-t[data-popup-open] { background: var(--ib-sf-tile-hover-s, color-mix(in oklch, var(--primary) 4%, var(--card))); }
+.pn-inbox .ib-att-w[data-popup-open] .ib-att-more, .pn-inbox .ib-art-w[data-popup-open] .ib-att-more { opacity: 1; }
+.pn-inbox .ib-art-w[data-popup-open] > .ib-art-tile { background: color-mix(in oklch, var(--foreground) 6%, var(--ib-raise)); }
+.ib-gal-w[data-popup-open] .ib-gal-frame { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent); }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-att-more { transition: none; } }
 
 /* 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15): beside Reply in the
@@ -5258,11 +5402,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-draft { border-bottom-color: var(--ib-sep-s, var(--ib-hair)); }
 .pn-inbox .ib-draft-open:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 30%, transparent)); }
 
-/* What's new: its bar shares the panes' hairline; the release card is raised. */
-.ib-wn-bar { border-bottom-color: var(--ib-sep-s, var(--border)); }
-.ib-wn-hero { border-bottom-color: var(--ib-sep-s, var(--border)); }
-.ib-wn-skipped { border-color: var(--ib-gr-line-s, var(--border)); border-radius: var(--ib-gr-r-s, 8px); background: var(--ib-gr-bg-s, var(--card)); }
-.pn-inbox .ib-wn-gh { border-radius: var(--ib-r10-s, 7px); }
+/* What's new: its bar shares the panes' hairline. */
+.ib-wn-bar { border-bottom-color: var(--ib-sep-s, var(--ib-wn-hair)); }
 
 /* A file's chrome: the panes' hairline, the bar under the file on the card. */
 .ib-vhead, .ib-vfoot, .ib-fold .ib-sheet-h { border-color: var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
@@ -6640,6 +6781,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
 .ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
 @media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
+/* A count over an icon's corner (components/CountBadge.tsx): the PRs button's count, 13 px across, 9.5 px bold, the quiet
+   text colour on the page's ground. --cnt-x / --cnt-y: how far its centre sits past the icon's top-right corner, half
+   pixels so its edges land on whole ones (13 across). The digits sit in the middle both ways: tabular figures, a line
+   as tall as the badge, no baseline shift, and edges on whole pixels ("9+" a fixed 17 px, not its text's 16.28). */
+.ib-cnt-host { position: relative; --cnt-s: 13px; --cnt-f: 9.5px; --cnt-x: 1.5px; --cnt-y: 2.5px; }
+.ib-cnt { position: absolute; top: calc(var(--cnt-y) - var(--cnt-s) / 2); right: calc(0px - var(--cnt-x) - var(--cnt-s) / 2); min-width: var(--cnt-s); height: var(--cnt-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: var(--cnt-f); font-weight: 700; line-height: var(--cnt-s); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center; vertical-align: top; background: var(--muted-foreground); color: var(--background); pointer-events: none; }
+.ib-cnt-host:has(> .ib-cnt) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); }
+.ib-cnt[data-wide] { width: calc(var(--cnt-s) + 4px); padding: 0; }
+/* A wide count's cut: a second circle 4 px to the left, kept where both leave the glyph (the pill and its gap). */
+.ib-cnt-host:has(> .ib-cnt[data-wide]) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); -webkit-mask-composite: source-in; mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); mask-composite: intersect; }
+@media (forced-colors: active) { .ib-cnt { background: CanvasText; color: Canvas; forced-color-adjust: none; } }
 /* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Done's. */
 .ib-pmi .ib-lane-dot { margin: 0 3.5px; }
 
@@ -10027,6 +10179,8 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 @container style(--pn-window-controls-height) {
   /* The heads come up to the thread toolbar's height: one line, gutter + 23, whatever the sidebar does. */
   .ib-lhead, .ib-bhead, .ib-wn-bar, .ib-dh { height: 46px; }
+  /* What's new's panel sits under its bar. */
+  .ib-wn { --ib-wn-bar-h: 46px; }
   .ib-dpage { padding-top: 0; }
   /* The tour's bar is at the window's top, with no gutter: twice the line, and its 1 px rule, put its content on it. */
   .pn-inbox[data-tour] { --ib-tour-bar-h: calc(2 * var(--pn-window-controls-center-y, 31px) + 1px); }
@@ -10237,6 +10391,10 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 /* A failed Send (D3): the plain line, its own words behind Details, wrapping anywhere (a path has no spaces). */
 .ib-pfoot .ib-error { overflow-wrap: anywhere; }
 .ib-errd { display: inline; margin-left: 6px; }
+/* A machine that needs an update (a Delete it refused): its Update, a link in the error's own colour. */
+.ib-errup { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.ib-errup:hover { color: var(--foreground); }
+.ib-errup:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
 .ib-errd > summary { display: inline; list-style: none; cursor: pointer; color: var(--muted-foreground); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 .ib-errd > summary::-webkit-details-marker { display: none; }
 .ib-errd > summary:hover { color: var(--foreground); }
@@ -10844,3 +11002,325 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (prefers-reduced-motion: reduce) {
   .ib-ctxn-chev { transition: none; }
 }
+
+/* The list's filter (components/ListFilter.tsx, listFilter.ts): the funnel alone in the list header, at every width.
+   With picks it takes the accent colour and a count in its corner (the icon cut round it, as the PR badge's count
+   is); the menu is the Pull requests filter's (`.ib-pc-menu`). */
+.pn-inbox .ib-lflt { position: relative; flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: auto; padding: 0; border: 0; border-radius: var(--ib-r10-s, 7px); background: none; color: var(--muted-foreground); cursor: pointer; transition: var(--ib-fade2-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-lflt:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-lflt[data-set], .pn-inbox .ib-lflt[data-set]:hover { color: var(--primary); }
+.pn-inbox .ib-lhead .ib-lflt ~ :is(.ib-lhead-search, .ib-lhead-compose, .ib-lhead-more) { margin-left: 0; }
+.ib-lflt-g { position: relative; display: inline-grid; place-items: center; }
+.ib-lflt-g > svg.ib-ic { stroke-width: 1.8; }
+.ib-pm.ib-lflt-menu { max-height: min(calc(100vh - 96px), 640px); overflow-y: auto; }
+.ib-lflt-menu .ib-pmi[data-checked] { box-shadow: none; }
+.ib-lflt-host { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.ib-lflt-host > * { transform: scale(0.85); }
+.ib-tidy.ib-lflt-range { width: 300px; padding: 14px; }
+.ib-lflt-range-h { margin-bottom: 10px; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); }
+.ib-lflt-range-days { display: flex; gap: 10px; }
+.ib-lflt-range-days label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-lflt-range-days input { width: 100%; height: 32px; padding: 0 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); color-scheme: light dark; }
+.pn-inbox .ib-lflt-range-days input:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-lflt-range-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.ib-lflt-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.ib-lflt-empty b { margin-bottom: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-lflt { width: 44px; height: 44px; border-radius: 8px; color: var(--foreground); }
+  .pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: none; }
+  .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu { max-height: 72vh; }
+  .ib-tidy-pos[data-phone] .ib-tidy.ib-lflt-range { width: auto; padding: 16px; }
+  .pn-inbox .ib-lflt-range-days input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-lflt-range-act .ib-btn { height: 44px; padding: 0 18px; }
+}
+/* ---- The sidebar's layout (approval "inbox-sidebar-customize"; Sidebar.tsx, SidebarMenu.tsx, SidebarCustomizer.tsx). */
+/* Each item's slot names it for the right-click menu and draws nothing of its own. */
+.ib-side-item { display: contents; }
+.ib-side > .ib-side-item > * { flex-shrink: 0; }
+/* The Settings row with one or none of its buttons. */
+.ib-setrow:not([data-theme]) > .ib-nav { padding-right: 40px; }
+.ib-setrow:not([data-theme]):not([data-keys]) > .ib-nav { padding-right: 9px; }
+.pn-inbox .ib-setrow:not([data-theme]) .ib-keys-tg { right: 3px; }
+.ib-side-menu { min-width: 212px; }
+
+/* Customize sidebar: a panel beside the sidebar; a bottom sheet on a phone. */
+.ib-sbc { position: fixed; top: 12px; z-index: 70; width: 300px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; border-radius: var(--ib-rl-lg-s, 10px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 18px 40px -16px oklch(0 0 0 / 0.45)); transform-origin: top left; animation: ib-pm-in 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-sbc-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 4px 16px; }
+.ib-sbc-head h2 { margin: 0; flex: 1; font-size: var(--ib-fs-14, 14px); font-weight: 600; outline: none; }
+.pn-inbox .ib-sbc-x { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: var(--ib-r8-s, 6px); color: var(--muted-foreground); }
+.pn-inbox .ib-sbc-x:hover { background: var(--muted); color: var(--foreground); }
+.ib-sbc-x .ib-ic { width: 16px; height: 16px; }
+.ib-sbc-start { display: flex; align-items: center; gap: 8px; padding: 6px 16px 8px; }
+.ib-sbc-custom { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-sbc-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
+.ib-sbc-glabel { padding: 10px 8px 4px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--muted-foreground); }
+.ib-sbc-zone { display: flex; flex-direction: column; }
+.ib-sbc-row { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 8px 0 2px; border-radius: var(--ib-rl-sm-s, 7px); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-sbc-row > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
+@media (hover: hover) { .ib-sbc-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
+.ib-sbc-row[data-off] > .ib-ic, .ib-sbc-row[data-off] .ib-sbc-l { opacity: 0.45; }
+.ib-sbc-row[data-lifted] { display: none; }
+.ib-sbc-fixed { padding-left: 33px; }
+.ib-sbc-sub { padding-left: 33px; height: 30px; font-size: var(--ib-fs-13, 13px); }
+.ib-sbc-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-sbc-grip { width: 22px; height: 26px; flex: none; display: inline-grid; place-items: center; border-radius: var(--ib-r8-s, 5px); color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); cursor: grab; touch-action: none; }
+.pn-inbox .ib-sbc-grip:hover, .pn-inbox .ib-sbc-grip[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
+.ib-sbc-grip-ic { fill: currentColor; }
+.ib-sbc[data-dragging], .ib-sbc[data-dragging] * { cursor: grabbing; user-select: none; }
+.ib-sbc-lock { width: 34px; flex: none; display: inline-grid; place-items: center; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); }
+.ib-sbc-lock .ib-ic { width: 13px; height: 13px; }
+.ib-sbc-middle { display: flex; align-items: center; gap: 6px; height: 34px; margin: 8px 0 0; padding: 0 10px; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--muted) 50%, transparent); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-sbc-middle .ib-ic { width: 13px; height: 13px; }
+/* Where a dragged row lands: a gap the size of a row, tinted. */
+.ib-sbc-gap { height: 34px; flex: none; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-sbc-empty { height: 34px; display: flex; align-items: center; padding: 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-sbc-ghost { position: fixed; z-index: 90; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 10px 0 6px; border-radius: var(--ib-rl-sm-s, 7px); background: var(--popover); color: var(--popover-foreground); font-size: var(--ib-fs-13-5, 13.5px); box-shadow: 0 0 0 1px var(--border), 0 10px 24px -8px oklch(0 0 0 / 0.35); pointer-events: none; }
+.ib-sbc-ghost .ib-ic { width: 16px; height: 16px; color: var(--muted-foreground); }
+.ib-sbc-ghost .ib-sbc-grip-ic { color: var(--muted-foreground); }
+.ib-sbc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--border); }
+.ib-sbc-scrim { position: fixed; inset: 0; z-index: 69; background: oklch(0 0 0 / 0.35); }
+.ib-sbc[data-phone] { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 82vh; max-height: 82dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); transform-origin: bottom center; animation-name: ib-sbc-up; }
+@keyframes ib-sbc-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.ib-sbc[data-phone] .ib-sbc-row { height: 44px; font-size: var(--ib-fs-15, 15px); }
+.ib-sbc[data-phone] .ib-sbc-sub { height: 40px; }
+.ib-sbc[data-phone] .ib-sbc-grip { width: 36px; height: 40px; }
+.ib-sbc[data-phone] .ib-sbc-fixed, .ib-sbc[data-phone] .ib-sbc-sub { padding-left: 47px; }
+@media (prefers-reduced-motion: reduce) { .ib-sbc { animation: none; } }
+/* ───────── Artifact pins and the Artifacts wall (approval "inbox-artifact-stars"; the word is Pin) ───────── */
+/* The pin (ArtifactPinButton.tsx): the icon set's pin, outlined, filled once pinned, in a quiet colour (never the
+   thread stars' amber). Its look is picked in one place (ARTIFACT_PIN_LOOK, `data-look`): tilted, upright or chip. */
+.pn-inbox .ib-apin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 7px; color: var(--muted-foreground); transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease; }
+.pn-inbox .ib-apin:hover { color: var(--foreground); background: var(--muted); }
+.pn-inbox .ib-apin:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; opacity: 1; }
+.pn-inbox .ib-apin.ib-apin-on svg.ib-ic, .pn-inbox .ib-art-gh > svg.ib-ic { fill: currentColor; }
+.pn-inbox .ib-apin.ib-apin-on, .pn-inbox .ib-art-gh > svg.ib-ic { color: var(--muted-foreground); }
+/* B, tilted: turned 45° as a pin pushed into a board; pinned in ink. */
+.pn-inbox :is(.ib-apin, .ib-art-gh)[data-look='tilted'] svg.ib-ic { rotate: 45deg; }
+.pn-inbox .ib-apin.ib-apin-on[data-look='tilted'], .pn-inbox .ib-art-gh[data-look='tilted'] > svg.ib-ic { color: color-mix(in oklch, var(--foreground) 70%, transparent); }
+/* C, chip: pinned sits on a small muted chip. */
+.pn-inbox .ib-apin.ib-apin-on[data-look='chip'] { background: var(--muted); color: color-mix(in oklch, var(--foreground) 62%, var(--muted)); }
+.pn-inbox .ib-apin[data-pop] svg.ib-ic { animation: ib-apin-pop 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes ib-apin-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-apin[data-pop] svg.ib-ic { animation: none; }
+  .pn-inbox .ib-apin { transition: none; }
+}
+
+/* On an Artifacts card: top left, on the card's colour like its ⋯; on hover or focus, and always once pinned. */
+.pn-inbox .ib-apin-card, .pn-inbox .ib-apin-wall { position: absolute; z-index: 2; opacity: 0; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent); }
+.pn-inbox .ib-apin-card:hover, .pn-inbox .ib-apin-wall:hover { background: var(--card); }
+.pn-inbox .ib-apin-card { top: 12px; left: 12px; }
+.ib-art-w:is(:hover, :focus-within) .ib-apin-card, .pn-inbox .ib-apin-card.ib-apin-on { opacity: 1; }
+/* A changed file's pill makes room for the pin. */
+.ib-art-w:is(:hover, :focus-within, :has(.ib-apin-on)) .ib-art-chg { left: 40px; max-width: calc(100% - 48px); }
+/* The viewer's bar and the pane's header. */
+.pn-inbox .ib-apin-bar { width: 30px; height: 30px; }
+.pn-inbox .ib-apin-bar.ib-apin-big { width: 44px; height: 44px; }
+
+/* The thread's Artifacts grid: "Pinned N" first, small cards (name only), then "Everything else". */
+.ib-art-part + .ib-art-part { margin-top: 26px; }
+.ib-art-gh { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
+.ib-art-gh > svg.ib-ic { width: 13px; height: 13px; }
+.ib-art-gh-n { color: var(--muted-foreground); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ib-art .ib-art-grid.ib-art-pinned { grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; }
+.ib-art-pinned :is(.ib-art-kd, .ib-art-from) { display: none; }
+.ib-art-pinned .ib-art-cap { padding-top: 7px; }
+.ib-art-pinned .ib-art-nm { font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-art-pinned .ib-apin-card { top: 10px; left: 10px; width: 26px; height: 26px; }
+.pn-inbox .ib-art-pinned :is(.ib-reuse-card, .ib-att-more) { top: 10px; right: 10px; width: 26px; height: 26px; }
+.pn-inbox .ib-art-pinned .ib-art-w-more .ib-reuse-card { right: 40px; }
+/* Every card of the Pinned group is pinned: its pin shows on hover or focus (to unpin). */
+.pn-inbox .ib-art-pinned .ib-apin-card.ib-apin-on { opacity: 0; }
+.pn-inbox .ib-art-pinned .ib-art-w:is(:hover, :focus-within) .ib-apin-card { opacity: 1; }
+
+/* The Artifacts wall: a dense wall by day, the name on hover. */
+.ib-wall { padding-bottom: 120px; }
+.ib-wall-h { margin-bottom: 14px; }
+.ib-wall-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 20px; }
+.ib-wall-n { margin-left: 2px; color: var(--muted-foreground); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ib-wall-types { display: flex; gap: 4px; }
+.pn-inbox .ib-wall-type { height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-wall-type:hover { color: var(--foreground); background: var(--ib-hover, var(--muted)); }
+.pn-inbox .ib-wall-type[data-on] { color: var(--foreground); background: var(--muted); font-weight: 550; }
+.pn-inbox .ib-wall-type:focus-visible, .pn-inbox .ib-wall-sizeb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-wall-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ib-wall-size { display: flex; gap: 2px; }
+.pn-inbox .ib-wall-sizeb { width: 30px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted-foreground); }
+.pn-inbox .ib-wall-sizeb:hover { color: var(--foreground); }
+.pn-inbox .ib-wall-sizeb[data-on] { color: var(--foreground); background: var(--muted); }
+.pn-inbox .ib-wall-fbtn[data-on] { color: var(--foreground); background: var(--muted); }
+.ib-wall-load { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-wall-day + .ib-wall-day { margin-top: 22px; }
+.ib-wall-day-h { margin: 0 0 10px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; color: var(--foreground); }
+.ib-wall-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 18px 12px; }
+.ib-wall[data-size='large'] .ib-wall-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px 16px; }
+.ib-wall-cell { position: relative; min-width: 0; }
+.pn-inbox .ib-wall-tile { position: relative; display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 0; text-align: left; color: inherit; border-radius: 10px; }
+.pn-inbox .ib-wall-tile:focus-visible { outline: none; }
+.pn-inbox .ib-wall-tile:focus-visible .ib-wall-stage { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* The stage: one 4:3 window for every kind, on a quiet backdrop. What it draws is fitted whole and centred.
+ * Sizes inside are in container units, so a face reads the same at Smaller and Larger. */
+.ib-wall-stage { --ib-wall-bd: color-mix(in oklch, var(--muted) 72%, var(--background)); --ib-wall-paper: var(--card); --ib-wall-edge: oklch(0 0 0 / 0.07); position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 10px; background: var(--ib-wall-bd); container-type: size; transition: background-color 120ms ease; }
+.ib-wall-cell:hover .ib-wall-stage { background: var(--muted); }
+/* Dark: the stage lifts off the page and the paper off the stage. */
+:root:not(.light) .ib-wall-stage { --ib-wall-bd: color-mix(in oklch, var(--foreground) 5%, var(--card)); --ib-wall-paper: color-mix(in oklch, var(--foreground) 10%, var(--card)); --ib-wall-edge: oklch(1 0 0 / 0.06); }
+:root:not(.light) .ib-wall-cell:hover .ib-wall-stage { background: color-mix(in oklch, var(--foreground) 8%, var(--card)); }
+.ib-wall-stage > * { position: absolute; inset: 0; }
+
+/* A picture or a video: the whole frame, centred, with a hairline so a white screenshot keeps its edge. */
+.ib-wf-fit { display: flex; align-items: center; justify-content: center; padding: 7cqh; }
+.ib-wf-fit :is(img, video) { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 3px; box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); background: var(--card); }
+.ib-wf-play { position: absolute; left: 8px; bottom: 8px; inset-block-start: auto; inset-inline-end: auto; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: oklch(0 0 0 / 0.55); color: #fff; font-size: var(--ib-fs-11, 11px); font-variant-numeric: tabular-nums; }
+
+/* A sheet: a landscape card centred with an even margin (a page, a diagram, a table, a guide). */
+.ib-wf-sheet { inset: 7cqh 8cqh; overflow: hidden; border-radius: 4px; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); }
+.ib-wf-page .ib-art-frame { inset: 0; }
+.ib-wf-diagram > * { position: absolute; inset: 0; }
+.ib-wf-guide > * { position: absolute; inset: 0; }
+
+/* A document: a portrait page centred on the stage, with its words set small. */
+.ib-wf-paper { inset: 7cqh auto 0; left: 50%; width: 70cqh; height: auto; bottom: 0; transform: translateX(-50%); overflow: hidden; border-radius: 3px 3px 0 0; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); }
+.ib-wf-paper-in { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 2.2cqh; padding: 7cqh 7cqh 0; color: var(--foreground); }
+.ib-wf-paper-in > * { display: block; flex: none; min-width: 0; overflow: hidden; }
+/* The page runs on past the stage: its words fade out rather than stop mid-line. */
+.ib-wf-paper-in, .ib-wf-code code, .ib-wf-grid { -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent); mask-image: linear-gradient(to bottom, #000 72%, transparent); }
+.ib-wf-h1 { font-size: 6.4cqh; line-height: 1.18; font-weight: 650; letter-spacing: -0.01em; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin-bottom: 1cqh; }
+.ib-wf-h2 { font-size: 4.4cqh; line-height: 1.25; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; margin-top: 1.2cqh; }
+.ib-wf-p, .ib-wf-li { font-size: 3.6cqh; line-height: 1.4; color: color-mix(in oklch, var(--foreground) 62%, transparent); display: -webkit-box !important; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.ib-wf-li { padding-left: 3.4cqh; position: relative; -webkit-line-clamp: 2; }
+.ib-wf-li::before { content: ''; position: absolute; left: 0.8cqh; top: 1.9cqh; width: 1.2cqh; height: 1.2cqh; border-radius: 50%; background: currentColor; opacity: 0.7; }
+.ib-wf-plain { font-family: var(--font-mono, ui-monospace, monospace); font-size: 3.2cqh; -webkit-line-clamp: 1; white-space: pre; }
+
+/* A PDF: a page card with its name and page count (the Inbox draws no PDF). */
+.ib-wf-pdf .ib-wf-paper-in { gap: 3cqh; padding-top: 10cqh; }
+.ib-wf-pdf-mark { display: inline-flex !important; align-items: center; gap: 1.6cqh; align-self: flex-start; font-size: 3.8cqh; font-weight: 600; color: color-mix(in oklch, var(--destructive, #d33) 78%, var(--foreground)); }
+.ib-wf-pdf-mark svg { width: 5cqh !important; height: 5cqh !important; }
+.ib-wf-pdf-name { font-size: 6cqh; line-height: 1.2; font-weight: 650; display: -webkit-box !important; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.ib-wf-pdf-pages { font-size: 3.8cqh; color: var(--muted-foreground); }
+.ib-wf-pdf .ib-wf-paper-in::after { content: ''; display: block; margin-top: 2cqh; height: 26cqh; background: repeating-linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 9%, transparent) 0 1.6cqh, transparent 1.6cqh 4.6cqh); border-radius: 1px; }
+
+/* Code: its first lines, highlighted, on the code background. */
+.ib-wf-code { inset: 7cqh 8cqh; overflow: hidden; border-radius: 6px; background: var(--code-bg, var(--muted)); box-shadow: 0 0 0 1px var(--ib-wall-edge); }
+.ib-wf-code code { position: absolute; inset: 6cqh 6cqh 0; display: block; overflow: hidden; font-family: var(--font-mono, ui-monospace, monospace); font-size: 4.1cqh; line-height: 1.55; white-space: pre; color: var(--foreground); background: none; padding: 0; }
+
+/* A table: its first rows, the header set apart, numbers to the right. */
+.ib-wf-grid { position: absolute; inset: 5cqh 5cqh 0; display: grid; align-content: start; column-gap: 3cqh; overflow: hidden; }
+.ib-wf-cell { font-size: 3.8cqh; line-height: 1; padding: 2.6cqh 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--foreground) 75%, transparent); font-variant-numeric: tabular-nums; }
+.ib-wf-th { font-weight: 600; color: var(--foreground); }
+.ib-wf-num { text-align: right; }
+
+/* Any other file: its icon and type, centred on the stage. */
+.ib-wf-file { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4cqh; color: var(--muted-foreground); }
+.ib-wf-file-ic { display: grid; place-items: center; width: 26cqh; height: 26cqh; border-radius: 6cqh; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.07); color: var(--foreground); }
+.ib-wf-file-ic svg { width: 12cqh !important; height: 12cqh !important; }
+.ib-wf-file-ext { font-size: 4.4cqh; font-weight: 600; letter-spacing: 0.02em; }
+
+/* Under the stage: the name, then the type and the thread, the same for every kind. */
+.ib-wall-cap { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0 2px; }
+.ib-wall-cap-nm { font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-wall-cap-sub { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-wall[data-size='small'] .ib-wall-cap-th { display: none; }
+.pn-inbox .ib-apin-wall { top: 7px; left: 7px; width: 26px; height: 26px; }
+.ib-wall-cell:is(:hover, :focus-within) .ib-apin-wall, .pn-inbox .ib-apin-wall.ib-apin-on { opacity: 1; }
+.ib-wall-more { display: flex; justify-content: center; padding: 20px 0; }
+.pn-inbox .ib-wall-linkbtn { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); text-decoration: underline; text-underline-offset: 3px; }
+.pn-inbox .ib-wall-linkbtn:hover { color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .ib-wall-stage { transition: none; } }
+
+/* Nothing hovers: a pinned card shows its pin; to pin one, open it (the pin is in the viewer's bar). */
+@media (hover: none) {
+  .pn-inbox :is(.ib-apin-card, .ib-apin-wall):not(.ib-apin-on) { display: none; }
+  .pn-inbox .ib-art-pinned .ib-apin-card.ib-apin-on { opacity: 1; }
+  .ib-art-w:has(.ib-apin-on) .ib-art-chg { left: 40px; max-width: calc(100% - 48px); }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-art .ib-art-grid.ib-art-pinned { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .ib-wall { padding: 0 0 120px; }
+  .ib-wall-h { margin-bottom: 6px; }
+  .ib-wall-bar { padding: 0 12px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; margin-bottom: 12px; }
+  .ib-wall-bar::-webkit-scrollbar { display: none; }
+  .ib-wall-bar > * { flex: none; }
+  .pn-inbox .ib-wall-type { height: 36px; }
+  .ib-wall-day { padding: 0 12px; }
+  .ib-wall-grid, .ib-wall[data-size='large'] .ib-wall-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 10px; }
+  .ib-wall[data-size='small'] .ib-wall-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 6px; }
+  .ib-wall-stage { border-radius: 8px; }
+  .pn-inbox .ib-wall-tile { gap: 6px; }
+  .ib-wall-cap-nm { font-size: var(--ib-fs-12, 12px); }
+  .ib-wall-cap-sub { font-size: var(--ib-fs-11, 11px); }
+  .pn-inbox .ib-apin-wall.ib-apin-on { width: 22px; height: 22px; top: 4px; left: 4px; }
+}
+@media print { .pn-inbox .ib-apin { display: none; } }
+/* A thread's PRs (approval "inbox-pr-binding", 2026-11-08; ThreadPulls.tsx). The mark: the state icon of the PR in
+   play, in the forge's colours; several put a grey count over its top-right corner (CountBadge, `.ib-cnt`). */
+.ib-prc { display: inline-flex; flex: none; }
+/* The count is the shared CountBadge (.ib-cnt, below), at its own size on the row and on the button: at 11 px a row's
+   8.5 px digits sat half a pixel high (measured at 1x and 2x); at 13 px they are centred both ways. */
+.ib-prc .ib-refmark { display: block; }
+.ib-prc[data-state="draft"] .ib-refmark { color: var(--ib-ref-neutral); }
+/* The row's mark: room for the count past the icon's edge, and line 3 must not clip it. */
+.ib-prmark { display: inline-flex; align-items: center; flex: none; position: relative; cursor: default; }
+.ib-prmark[data-pr-n]:not([data-pr-n="1"]) .ib-prc { margin-right: 6px; }
+.ib-row .ib-cw .ib-prmark { margin-left: 8px; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) { overflow: visible; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) > .ib-pv { overflow: hidden; }
+@media (pointer: coarse) { .ib-prmark::before { content: ''; position: absolute; inset: -14px -10px; } }
+/* The thread's button, left of Artifacts, at its icon's size. */
+.pn-inbox .ib-iconbtn.ib-prbtn { flex: none; }
+.ib-prbtn .ib-prc:has(.ib-cnt) { margin-right: 3px; }
+.pn-inbox .ib-iconbtn.ib-prbtn[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+/* The card: the hover card's surface; a phone's bottom sheet. */
+.ib-prpop-sheet { left: 0; right: 0; bottom: 0; top: auto; border-radius: 12px 12px 0 0; max-height: 78dvh; padding-bottom: env(safe-area-inset-bottom); }
+.ib-prpop-scrim { position: fixed; inset: 0; z-index: 119; background: rgb(0 0 0 / 0.3); }
+.ib-prpop-grab { margin: 8px auto 0; width: 36px; height: 4px; flex: none; border-radius: 999px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+.ib-prpop-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 6px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
+.ib-prpop-repo { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prpop-n { flex: none; }
+.ib-prpop-group + .ib-prpop-group { border-top: 1px solid var(--border); }
+.ib-prpop-gh { padding: 8px 14px 0; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
+.ib-prpop-rows { list-style: none; margin: 0; padding: 0 0 6px; }
+.ib-prpop-row { display: flex; align-items: flex-start; position: relative; }
+.ib-prpop-row + .ib-prpop-row { border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-prpop-stack .ib-prpop-row + .ib-prpop-row { border-top: 0; }
+.ib-prpop-link { display: flex; flex: 1; min-width: 0; gap: 10px; padding: 9px 4px 9px 14px; color: inherit; text-decoration: none; border-radius: 6px; }
+.ib-prpop-link:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-prpop-link:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -2px; }
+.ib-prpop-ic { flex: none; padding-top: 2px; position: relative; align-self: stretch; }
+/* A stack: a hairline joins the layers' icons, base first. */
+.ib-prpop-stack .ib-prpop-row:not(:last-child) .ib-prpop-ic::after { content: ''; position: absolute; left: 7.5px; top: 21px; bottom: -19px; width: 1px; background: var(--border); }
+.ib-prpop-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ib-prpop-t { font-size: var(--ib-fs-13, 13px); font-weight: 600; line-height: 1.35; color: var(--foreground); overflow-wrap: anywhere; }
+.ib-prpop-num { font-weight: 400; color: var(--muted-foreground); }
+.ib-prpop-sub { font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
+.ib-prpop-st-open { color: var(--ib-ref-open); }
+.ib-prpop-st-merged { color: var(--ib-ref-merged); }
+.ib-prpop-st-closed { color: var(--ib-ref-closed); }
+.ib-prpop-bad { color: var(--ib-ref-closed); }
+.ib-prpop-foot { padding: 0 14px 8px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+/* Remove: quiet until the row is hovered or the button has focus (always there on a touch screen). */
+.ib-prpop-rm { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 7px 8px 0 0; border-radius: 6px; color: var(--muted-foreground); opacity: 0; }
+.ib-prpop-row:hover .ib-prpop-rm, .ib-prpop-rm:focus-visible { opacity: 1; }
+.ib-prpop-rm:hover { background: var(--muted); color: var(--foreground); }
+@media (pointer: coarse) { .ib-prpop-rm { opacity: 1; width: 44px; height: 44px; margin: 0 4px 0 0; } }
+.ib-prpop-empty { padding: 14px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* The person's edit: add a PR by its ref or link; Undo after a removal. */
+.ib-prpop-edit { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid var(--border); }
+.ib-prpop-add { display: flex; gap: 6px; }
+.ib-prpop-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-prpop-input:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -1px; }
+.ib-prpop-input[aria-invalid] { border-color: var(--ib-ref-closed); }
+.ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); background: var(--muted); }
+.ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
+.ib-prpop-tbtn:disabled { opacity: 0.5; }
+.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+.ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
+.ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
+.ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); align-self: flex-end; }
+@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } }

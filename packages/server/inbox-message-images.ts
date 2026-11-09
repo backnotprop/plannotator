@@ -20,6 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
@@ -68,6 +69,13 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   return inboxImageResponse(req, result, inboxImageWidth(url));
 }
 
+/** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
+export function contentDisposition(type: "inline" | "attachment", name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * Safe image bytes and cache validators shared by message bodies and Markdown attachments. `to`: the width the
  * window draws it at (`?w=`), served as a smaller copy when the picture is wider (inbox-image-scale.ts).
@@ -83,6 +91,8 @@ export async function inboxImageResponse(req: Request, result: InboxMessageImage
     ...GUARD_HEADERS,
     "Content-Type": result.contentType,
     "Cache-Control": "private, no-cache",
+    // Shown in place, under the name the body gave it: a browser's Save Image As saves "empty-cart.png", not "image.png".
+    "Content-Disposition": contentDisposition("inline", basename(result.named)),
     ETag: etag,
     // As code review's image route: the header's size, when it parses.
     ...(result.width !== undefined && result.height !== undefined

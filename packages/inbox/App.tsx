@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
@@ -52,6 +53,7 @@ import {
   type SettingsModel,
   type UpdateDetails,
   type WhatsNewModel,
+  type WhatsNewReleasesModel,
 } from './api';
 import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
 import { createOwnSaves } from './ownSaves';
@@ -63,6 +65,8 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
+import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
@@ -146,8 +150,11 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
+import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark } from './sidebarLayout';
+import { SidebarCustomizer } from './components/SidebarCustomizer';
+import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
-import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
+import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage, type WhatsNewError } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
@@ -182,6 +189,8 @@ import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSectio
 import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
+import { ArtifactsWall } from './components/ArtifactsWall';
+import { readArtifactPins } from './artifactPins';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -335,6 +344,9 @@ const SEEN_RETRY_MS = 1000;
 /** The What's new page asks again this often while the server fetches the notes (its request gives up after 10 s). */
 const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
+/** The releases panel asks again this often while the server fetches the release list (once a day at most). */
+const WHATS_NEW_RELEASES_RETRIES = 6;
+const WHATS_NEW_RELEASES_RETRY_MS = 1500;
 /**
  * Opening a thread whose read failed (a dropped connection, a 5xx; not a 404): read it again after
  * these waits, then every last one, while it stays open. Before this the pane stayed blank until some
@@ -367,7 +379,7 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
   /**
    * Pull requests (`#prs`, Code review on; approval "inbox-pr-dashboard"): Open or Merged (`&state=merged`), a stack's
    * page (`&stack=`, a layer's key), a PR opened from it (`&layer=`, `&scope=stack`), and `&from=sheet` when the PR was
@@ -377,6 +389,8 @@ interface Route {
    */
   prsView?: SheetView;
   prsFrom?: 'sheet' | 'stack' | 'reviews';
+  /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
+  pinned?: boolean;
   /**
    * Reviews (`#reviews`, Code review on; `#pulls` is its permanent alias): the stack open beside the list (`&stack=`, its top layer's key),
    * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
@@ -481,6 +495,8 @@ function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
+  if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   if (params.has('prs')) {
     const stack = params.get('stack') || null;
@@ -552,6 +568,7 @@ function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
   else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
@@ -1117,7 +1134,12 @@ function Inbox() {
   /** The person pressed Update now in this tab: once the new binary is in, the Inbox restarts itself. */
   const restartWhenReady = useRef(false);
   const [whatsNew, setWhatsNew] = useState<WhatsNewModel | null>(null);
-  const [whatsNewError, setWhatsNewError] = useState<string | null>(null);
+  const [whatsNewError, setWhatsNewError] = useState<WhatsNewError | null>(null);
+  /** What's new's releases panel: loaded once per visit to the page, kept across switches between releases (no flash). */
+  const [whatsNewReleases, setWhatsNewReleases] = useState<WhatsNewReleasesModel | null>(null);
+  /** The person's Try again on What's new (each press asks GitHub once more, for the release it was pressed on). */
+  const [whatsNewRetry, setWhatsNewRetry] = useState(0);
+  const whatsNewRetryFor = useRef<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** The one-time sound dialog: open on this load, or shown on it (then the notification ask line waits for another load). */
   const [soundDialog, setSoundDialog] = useState<'none' | 'open' | 'shown'>('none');
@@ -1759,12 +1781,14 @@ function Inbox() {
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
+      const sidebarMark = sidebarLayoutReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedFavicon(next.favicon);
       adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
+      adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
@@ -2197,6 +2221,13 @@ function Inbox() {
             stepsBus.emit(event.thread_id);
             return;
           }
+          // A thread's PRs (approval "inbox-pr-binding"): silent, like steps. The thread's button and an open card
+          // read them again, and the list (its rows' marks).
+          if (event?.kind === 'thread_pull') {
+            threadPullsBus.emit(event.thread_id);
+            listAfterEvents(120);
+            return;
+          }
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`
           // preview reads the cards again, whatever the 5 s guard says.
           cardsReadAt.current = 0;
@@ -2245,6 +2276,8 @@ function Inbox() {
         onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
+        // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
+        onArtifactPins: () => void readArtifactPins(),
         // A snooze changed (another window, a phone, a linked machine) or ran out: read the list. It is the person's
         // own act, so with no thread open the row goes to its place, as it does in the window they did it in; a return
         // waits behind "N new" (held.ts). A return may ask something: notifications read this list too.
@@ -2255,6 +2288,7 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -2298,6 +2332,7 @@ function Inbox() {
           reportWindow();
           emitAskChange(null);
           stepsBus.emit('*');
+          threadPullsBus.emit('*');
           // The Inbox may have restarted onto a newer release while this page stayed open.
           stalePageRef.current.recheck();
         },
@@ -2312,6 +2347,7 @@ function Inbox() {
           void refreshDrafts();
           // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
           stepsBus.emit('*');
+          threadPullsBus.emit('*');
           // A card record reads the Board: while it is open, it is read again too.
           if (routeRef.current.page === 'board') void refreshCards();
           // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
@@ -4440,25 +4476,62 @@ function Inbox() {
   };
 
   const whatsNewVersion = route.page === 'whats-new' ? (route.version ?? null) : null;
+  const onWhatsNewPage = route.page === 'whats-new';
+  // The releases panel: once per visit (switching releases keeps it), asked again while the server fetches the list.
+  const [whatsNewReleasesNonce, setWhatsNewReleasesNonce] = useState(0);
+  useEffect(() => {
+    if (!onWhatsNewPage) {
+      setWhatsNewReleases(null);
+      return;
+    }
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = (attempt: number) => {
+      inboxApi
+        .whatsNewReleases()
+        .then((model) => {
+          if (cancelled) return;
+          setWhatsNewReleases(model);
+          if (model.refreshing && attempt < WHATS_NEW_RELEASES_RETRIES) retry = setTimeout(() => load(attempt + 1), WHATS_NEW_RELEASES_RETRY_MS);
+        })
+        // No panel: the notes still read on their own.
+        .catch(() => {});
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+  }, [onWhatsNewPage, whatsNewReleasesNonce]);
+  const whatsNewReleasesRef = useRef(whatsNewReleases);
+  whatsNewReleasesRef.current = whatsNewReleases;
   useEffect(() => {
     if (!whatsNewVersion) return;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     setWhatsNew(null);
     setWhatsNewError(null);
+    const retried = whatsNewRetryFor.current === whatsNewVersion;
+    whatsNewRetryFor.current = null;
     // Notes this machine never saved are fetched from GitHub by the server,
     // which answers `notes_loading` while that takes longer than it waits.
     const load = (attempt: number) => {
       inboxApi
-        .whatsNew(whatsNewVersion)
-        .then((model) => !cancelled && setWhatsNew(model))
+        .whatsNew(whatsNewVersion, attempt === 0 && retried)
+        .then((model) => {
+          if (cancelled) return;
+          setWhatsNew(model);
+          // Notes the panel did not have yet (fetched just now): its row gets their TL;DR.
+          const row = whatsNewReleasesRef.current?.releases.find((r) => r.version === model.version);
+          if (row && !row.saved) setWhatsNewReleasesNonce((n) => n + 1);
+        })
         .catch((cause) => {
           if (cancelled) return;
           if (cause instanceof InboxApiError && cause.code === 'notes_loading' && attempt < WHATS_NEW_RETRIES) {
             retry = setTimeout(() => load(attempt + 1), WHATS_NEW_RETRY_MS);
             return;
           }
-          setWhatsNewError(cause instanceof Error ? cause.message : String(cause));
+          setWhatsNewError({ message: cause instanceof Error ? cause.message : String(cause), code: cause instanceof InboxApiError ? cause.code : null });
         });
     };
     load(0);
@@ -4466,7 +4539,7 @@ function Inbox() {
       cancelled = true;
       if (retry) clearTimeout(retry);
     };
-  }, [whatsNewVersion]);
+  }, [whatsNewVersion, whatsNewRetry]);
 
   const toggleTool = async (host: AgentToolHost, next: boolean) => {
     setSettingsError(null);
@@ -4776,16 +4849,39 @@ function Inbox() {
     (sections: readonly InboxListSection[]) => filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway),
     [route.project, machines, filterMachine, hideAway],
   );
+  // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
+  // day is in the keys so Today and the last N days move on at midnight.
+  const [listFilterPicks, setListFilter] = useListFilter();
+  const listFilterScoped = route.project !== null;
+  const listFilterDay = localDay(Date.now());
+  const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
+  /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
+  const filterShown = useCallback(
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
+    [filterList, listFilterApplied, listFilterDay],
+  );
+  /** The rows before the filter: its menu's counts and choices. */
+  const listFilterRows = useMemo(() => {
+    const drawn = listShown ?? shown;
+    return drawn ? filterList(drawn).flatMap((section) => section.threads) : [];
+  }, [listShown, shown, filterList]);
   /** The list's sections as drawn, kept between renders that change none of it (InboxList's List memo reads them). */
   const listSections = useMemo(() => {
     const drawn = listShown ?? shown;
-    return drawn ? filterList(drawn) : null;
-  }, [listShown, shown, filterList]);
+    return drawn ? filterShown(drawn) : null;
+  }, [listShown, shown, filterShown]);
+  /** The filter left no row where the list holds some (the Snoozed band aside): "No threads match". */
+  const listFilterEmpty =
+    pickCount(listFilterApplied) > 0 &&
+    listSections !== null &&
+    listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
+    listFilterRows.some((row) => !row.snoozed);
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
-  const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
-  const notice = heldNews?.text && shown ? { count: heldNews.count, project: heldNews.project ?? null, lands: showLandsIn(filterList(shown), filterList(latestGroups)) } : null;
+  const notice = heldNews?.text && shown ? { count: heldNews.count, project: heldNews.project ?? null, lands: showLandsIn(filterShown(shown), filterShown(latestGroups)) } : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
   const staleNotice = stalePage.inbox && !restarting ? (
     <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />
@@ -6353,11 +6449,18 @@ function Inbox() {
   } else if (route.page === 'whats-new') {
     main = (
       <WhatsNewPage
+        version={whatsNewVersion}
         model={whatsNew}
         error={whatsNewError}
+        releases={whatsNewReleases}
         update={pageUpdate}
         onBack={() => pageBackRef.current()}
         onUpdate={pressUpdate}
+        onOpenRelease={(version) => go({ page: 'whats-new', project: null, thread: null, version })}
+        onRetry={() => {
+          whatsNewRetryFor.current = whatsNewVersion;
+          setWhatsNewRetry((n) => n + 1);
+        }}
         onTakeTour={
           settings?.tour && !tourUnavailable && settings.tour.seen_at === null && settings.tour.skipped_at === null && settings.tour.finished_at === null ? startTour : undefined
         }
@@ -6519,6 +6622,22 @@ function Inbox() {
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
+  } else if (route.page === 'artifacts') {
+    // The Artifacts wall (approval "inbox-artifact-stars"): a tile opens its file or guided review in its thread; Back comes here.
+    main = (
+      <ArtifactsWall
+        pinned={route.pinned === true}
+        onPinned={(pinned) => writeRoute({ page: 'artifacts', project: null, thread: null, pinned }, { replace: true })}
+        onOpen={(row) =>
+          go(
+            row.attachment
+              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
+              : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id },
+          )
+        }
+        phone={phone}
+      />
+    );
   } else if (route.page === 'drafts') {
     main = (
       <DraftsPage
@@ -6580,7 +6699,8 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={listSections ?? filterList(listShown ?? shown)}
+          sections={listSections ?? filterShown(listShown ?? shown)}
+          listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter }}
           sort={listSort}
           filtered={filterProject !== null}
           projectNames={projectNames}
@@ -6657,7 +6777,9 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            projectAllArchived(filterProject) ? (
+            listFilterEmpty ? (
+              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped))} />
+            ) : projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">
                 <b dir="auto">Everything in {listTitle} is archived.</b>
                 It leaves the sidebar when you go elsewhere, and comes back when an agent writes there.{' '}
@@ -6758,6 +6880,8 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
+            onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
             replyRequest={replyFor}
@@ -6771,7 +6895,7 @@ function Inbox() {
               const open = !!route.shape;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
-            askFileButton={ask.fileButton}
+            onSide={ask.side}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
             replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}
@@ -6929,6 +7053,16 @@ function Inbox() {
       data-thread-full={full ? '' : undefined}
       data-tour={tourOn ? String(tourState.step) : undefined}
     >
+      {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
+      {!tourOn && (
+        <SidebarCustomizer
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
+          onOpen={() => {
+            if (!phone && routeRef.current.page === 'settings') setSettingsSidebar(true);
+          }}
+        />
+      )}
       {tourOn && (
         <TourBar
           step={tourFixture ? tourState.step : (route.step ?? 1)}
@@ -7024,6 +7158,7 @@ function Inbox() {
             onPinAction={(row, action) => void pinAction(row, action)}
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
+            onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
