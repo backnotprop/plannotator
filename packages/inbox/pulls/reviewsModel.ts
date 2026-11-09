@@ -15,7 +15,7 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedWords, type PullFilter } from './model';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
 
@@ -98,7 +98,7 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
     case 'approved':
       return { status: `You approved${checks ? ` · ${lower(checks)}` : ''}`, tone: 'ok' };
     case 'requested':
-      return { status: pull?.author ? `${pull.author} asked for your review` : 'Your review was asked for', tone: null };
+      return { status: requestedWords(pull?.author), tone: null };
     case 'assigned':
       return { status: 'assigned to you', tone: null };
     case 'changes':

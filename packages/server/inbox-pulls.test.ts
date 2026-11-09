@@ -442,6 +442,48 @@ describe("off", () => {
   });
 });
 
+describe("merge (the Pull requests page)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const SHA = "412".padStart(40, "a");
+  const merge = (base: string, fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/merge`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const puts = (w: { forge: Forge }) => w.forge.calls.filter((c) => c.args.includes("PUT"));
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const res = await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("never merges without the second click, from another site, or for a PR the list does not name", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect((await w.pulls()).status).toBe(200);
+    const unconfirmed = await merge(w.base, { key: KEY, head_sha: SHA });
+    expect(unconfirmed.status).toBe(409);
+    expect(((await unconfirmed.json()) as { code: string }).code).toBe("merge_unconfirmed");
+    expect((await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await merge(w.base, { key: KEY, head_sha: "nope", confirmed: true })).status).toBe(422);
+    expect((await merge(w.base, { key: "github.com/northwind/billing-svc#999", head_sha: SHA, confirmed: true })).status).toBe(404);
+    expect(puts(w)).toEqual([]);
+  });
+
+  test("the forge is asked again first: an answer that doesn't say it can merge merges nothing", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect((await w.pulls()).status).toBe(200);
+    // This fake answers the merge check with a patch, not GitHub's PR: no verdict, so no merge.
+    const res = await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
+    expect(w.forge.calls.some((c) => c.args.includes("repos/northwind/billing-svc/pulls/412"))).toBe(true);
+    expect(puts(w)).toEqual([]);
+  });
+});
+
 describe("on", () => {
   test("one query to the signed-in host, with --hostname; only the projects' repositories; links by URL", async () => {
     const w = await world({ codeReview: true });

@@ -68,6 +68,7 @@ import type { PullsState } from './usePulls';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { SystemButton } from '../system/SystemButton';
 import { SystemPane } from '../system/SystemPane';
+import type { ReactNode } from 'react';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -111,6 +112,14 @@ export interface PullsPageProps {
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
   /** System's button and drawing; absent while System does not show. */
   system?: PullsSystem | null;
+  /**
+   * Pull requests in Reviews (approval "inbox-pr-dashboard", the owner's pick, take C): the board drawn in the right
+   * pane while no review, stack or drawing is open there. A phone has no pane: a row at the top of the list opens the
+   * board's own page (`onPullRequests`), with its counts (`prsSummary`) once read.
+   */
+  prBoard?: ReactNode;
+  onPullRequests?: () => void;
+  prsSummary?: { open: number; needYou: number } | null;
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -214,6 +223,19 @@ export function PullsPage(given: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
+        {phone && props.onPullRequests && (
+          <button type="button" className="ib-prs-entry" onClick={props.onPullRequests} data-prs-entry="">
+            <Icon name="pullRequest" size={16} />
+            <span className="ib-prs-entry-t">Pull requests</span>
+            {props.prsSummary && (
+              <span className="ib-prs-entry-n">
+                {props.prsSummary.open} open
+                {props.prsSummary.needYou > 0 && <span className="ib-prs-you"> · {props.prsSummary.needYou} need you</span>}
+              </span>
+            )}
+            <Icon name="chevR" size={14} />
+          </button>
+        )}
         {model && answer && ranked && (
           <ReviewsList
             answer={answer}
@@ -279,9 +301,13 @@ export function PullsPage(given: PullsPageProps) {
         ) : drawing ? (
           drawing
         ) : (
-          <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
-            {rows && rows.length > 0 ? 'Pick a review to open it.' : null}
-          </div>
+          props.prBoard ? (
+            props.prBoard
+          ) : (
+            <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
+              {rows && rows.length > 0 ? 'Pick a review to open it.' : null}
+            </div>
+          )
         ))}
     </>
   );
