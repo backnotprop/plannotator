@@ -18,8 +18,8 @@
  *    so the server counts daily users without an ID.
  *  - `favicon`: the favicon set in Settings, read from config.json `favicon`
  *    in the data dir when the ping is sent: glass, face (the `totman` setting),
- *    p (the `classic` setting), or none when it was never picked (or holds
- *    anything else). Every tool's ping carries it; the server counts it only
+ *    p (the `classic` setting), yellow, or none when it was never picked (or
+ *    holds anything else). Every tool's ping carries it; the server counts it only
  *    on the `first: 1` ping, on its own, never next to version, age or tool.
  * At most five pings a computer a day. No ID, no OS, nothing else. The server
  * adds 1 to that day's totals and keeps nothing else (apps/telemetry). It
@@ -77,7 +77,7 @@ export const DAILY_PING_TOOLS = ["inbox", "plan", "review", "annotate", "last"] 
 export type DailyPingTool = (typeof DAILY_PING_TOOLS)[number];
 
 /** The `favicon` values a ping carries: config.json's setting, or none when it was never picked. */
-export const DAILY_PING_FAVICONS = ["glass", "face", "p", "none"] as const;
+export const DAILY_PING_FAVICONS = ["glass", "face", "p", "yellow", "none"] as const;
 export type DailyPingFavicon = (typeof DAILY_PING_FAVICONS)[number];
 
 const DAY_MS = 86_400_000;
@@ -149,11 +149,12 @@ export function dailyPingBody(version: string, ageWeek: 1 | 2 | 3 | 4, tool: Dai
   return JSON.stringify({ version, age_week: ageWeek, tool, first: first ? 1 : 0, favicon });
 }
 
-/** config.json's `favicon` as the ping names it: glass, totman is face, classic is p, anything else none. */
+/** config.json's `favicon` as the ping names it: glass, totman is face, classic is p, yellow, anything else none. */
 export function dailyPingFavicon(setting: unknown): DailyPingFavicon {
   if (setting === "glass") return "glass";
   if (setting === "totman") return "face";
   if (setting === "classic") return "p";
+  if (setting === "yellow") return "yellow";
   return "none";
 }
 

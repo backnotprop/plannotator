@@ -120,6 +120,8 @@ describe("POST /ping", () => {
       withFavicon("0.28.57", 1, "inbox", 1, "face"),
       withFavicon("0.28.57", 4, "last", 1, "p"),
       withFavicon("0.28.57", 3, "plan", 1, "none"),
+      withFavicon("0.28.57", 2, "plan", 1, "yellow"),
+      withFavicon("0.28.57", 2, "review", 0, "yellow"),
       withFavicon("0.28.57", 3, "inbox", 1, "glass"),
       // Key order does not matter.
       '{"favicon":"face","first":1,"tool":"review","age_week":2,"version":"0.28.57"}',
@@ -132,22 +134,24 @@ describe("POST /ping", () => {
       { day: "2026-11-03", favicon: "face", n: 2 },
       { day: "2026-11-03", favicon: "p", n: 1 },
       { day: "2026-11-03", favicon: "none", n: 1 },
+      { day: "2026-11-03", favicon: "yellow", n: 1 },
     ]);
-    expect([...total.values()].reduce((n, r) => n + r.n, 0)).toBe(7);
-    expect([...daily.values()].reduce((n, r) => n + r.n, 0)).toBe(9);
+    expect([...total.values()].reduce((n, r) => n + r.n, 0)).toBe(8);
+    expect([...daily.values()].reduce((n, r) => n + r.n, 0)).toBe(11);
     // The favicon row is written with the day alone: never the version, age bucket or tool.
     expect(calls.filter((c) => c.sql === FAVICON_UPSERT_SQL).map((c) => c.values)).toEqual([
       ["2026-11-03", "glass"],
       ["2026-11-03", "face"],
       ["2026-11-03", "p"],
       ["2026-11-03", "none"],
+      ["2026-11-03", "yellow"],
       ["2026-11-03", "glass"],
       ["2026-11-03", "face"],
     ]);
   });
 
   test("the longest five-key body a release can send fits under the byte cap", () => {
-    const longest = withFavicon("9999.9999.9999", 4, "annotate", 1, "glass");
+    const longest = withFavicon("9999.9999.9999", 4, "annotate", 1, "yellow");
     expect(new TextEncoder().encode(longest).byteLength).toBeLessThanOrEqual(MAX_BODY_BYTES);
   });
 
@@ -180,6 +184,7 @@ describe("POST /ping", () => {
       withFavicon("0.28.46", 2, "plan", 1, "totman"),
       withFavicon("0.28.46", 2, "plan", 1, "classic"),
       withFavicon("0.28.46", 2, "plan", 1, "Glass"),
+      withFavicon("0.28.46", 2, "plan", 1, "Yellow"),
       withFavicon("0.28.46", 2, "plan", 1, ""),
       '{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":null}',
       '{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":1}',

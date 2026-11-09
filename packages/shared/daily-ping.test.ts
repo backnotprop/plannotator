@@ -122,7 +122,7 @@ describe("the request", () => {
     expect(dailyPingAge(monday, "2027-04-19")).toBe(4);
   });
 
-  test("favicon is config.json's setting, read when the ping is sent: glass, totman is face, classic is p, anything else none", async () => {
+  test("favicon is config.json's setting, read when the ping is sent: glass, totman is face, classic is p, yellow, anything else none", async () => {
     // Weeks 5-24 (age_week 3) on every day this test sends.
     writeState({ firstWeek: "2026-09-07" });
     const config = (value: string) => writeFileSync(join(dataDir, "config.json"), value);
@@ -131,6 +131,8 @@ describe("the request", () => {
       ['{"favicon":"glass"}', "glass"],
       ['{"favicon":"totman","displayName":"x"}', "face"],
       ['{"favicon":"classic"}', "p"],
+      ['{"favicon":"yellow"}', "yellow"],
+      ['{"favicon":"Yellow"}', "none"],
       ['{"favicon":"face"}', "none"],
       ['{"favicon":"p"}', "none"],
       ['{"favicon":true}', "none"],
