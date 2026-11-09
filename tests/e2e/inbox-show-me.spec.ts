@@ -1185,7 +1185,10 @@ test('a Change it while the session answers another thread: no storm of requests
     const readsBefore = reads.length;
     await second.waitForTimeout(7_000);
     expect(posts.length).toBeLessThanOrEqual(3);
-    expect(reads.length - readsBefore).toBeLessThanOrEqual(6);
+    // The window's readers share one read of the thread's Ask per event (ask/askReads.ts): each try is one read (its
+    // look, whose answer the wake reuses), and the three posts allow two tries here; two more for news that comes
+    // while a try is on its way (the other readers read once then). CI measures 2.
+    expect(reads.length - readsBefore).toBeLessThanOrEqual(4);
     expect(wakes()).toBe(0);
 
     // That turn ends: the person's Change it goes through, once.

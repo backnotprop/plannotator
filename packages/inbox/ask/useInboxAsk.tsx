@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
-import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel } from '../api';
+import type { InboxAskChat, InboxAskConversationWire, InboxAskModel } from '../api';
 import { useOpenInCodeRegion } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
+import { readAsk } from './askReads';
 import { askUnseen } from './askModel';
 import { sideQuote } from './askWords';
 
@@ -112,7 +113,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     const reading = onScreen.current;
     if (!reading) return;
     const seq = ++readSeq.current;
-    inboxApi.askRead(reading).then(
+    readAsk(reading).then(
       (model) => {
         if (seq === readSeq.current) setRead({ threadId: reading, model });
       },

@@ -217,6 +217,7 @@ packages/inbox/archived.test.tsx
 packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
+packages/inbox/ask/askReadsOnce.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/pullToRefresh.test.tsx
