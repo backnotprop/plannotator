@@ -279,6 +279,8 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await page.locator('[data-fcomp-pill]').click();
       const card = page.locator('[data-fcomp]');
       await expect(card).toBeVisible();
+      // The card opens on Comment unless a reply draft waits, as an image's does.
+      await card.locator('[data-fcomp-mode="reply"]').click();
       const reply = card.locator('[data-fcomp-field] textarea');
       await reply.focus();
       await keyboardUp(page);

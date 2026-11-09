@@ -254,7 +254,8 @@ for (const phone of PHONES) {
               await page.locator('[data-fcomp-pill]').tap();
             }
             await card(page).waitFor();
-            if (file === 'shot.png') await page.locator('[data-fcomp-mode="reply"]').tap();
+            // The card opens on Comment (no reply draft waits), an HTML page's as an image's: the foot is the Reply tab's.
+            await page.locator('[data-fcomp-mode="reply"]').tap();
             const where = `${width} px, ${file}, ${t === seeded.two ? 2 : 12} comments`;
             await expect(card(page).locator('[data-fcomp-questions]'), where).toBeVisible();
             await expect(card(page).locator('[data-voice-mic]'), where).toBeVisible();
@@ -389,6 +390,7 @@ for (const phone of PHONES) {
       await page.locator('.ib-htmlframe iframe').waitFor();
       await page.locator('[data-fcomp-pill]').tap();
       await card(page).waitFor();
+      await page.locator('[data-fcomp-mode="reply"]').tap();
       /** The text's lines: the middles of its words' boxes, apart by more than a line's slack, count as another line. */
       const lines = (selector: string) =>
         card(page).locator(selector).evaluate((el) => {
@@ -401,10 +403,11 @@ for (const phone of PHONES) {
           }
           return 1 + Math.round((Math.max(...middles) - Math.min(...middles)) / 16);
         });
-      expect(await lines('.ib-fcomp-solo')).toBe(1);
-      const solo = (await card(page).locator('.ib-fcomp-solo').boundingBox())!;
+      // The page's card has Comment and Reply, as an image's (a phone's tabs read the words alone): one line, inside the card.
+      expect(await lines('.ib-fcomp-tabs')).toBe(1);
+      const tabs = (await card(page).locator('.ib-fcomp-tabs').boundingBox())!;
       const box = (await card(page).boundingBox())!;
-      expect(solo.x + solo.width).toBeLessThanOrEqual(box.x + box.width);
+      expect(tabs.x + tabs.width).toBeLessThanOrEqual(box.x + box.width);
       await card(page).locator('[data-fcomp-field] textarea').fill('Going left.');
       await card(page).locator('[data-fcomp-send]').tap();
       await expect(card(page).locator('[data-fcomp-sent]')).toBeVisible();
@@ -436,6 +439,7 @@ for (const phone of PHONES) {
       for (const width of [320, 360, 375, 390, 430]) await clear(`${width} px, no draft`, 390, width);
       await page.setViewportSize({ width: 390, height: 700 });
       await page.locator('[data-fcomp-pill]').tap();
+      await page.locator('[data-fcomp-mode="reply"]').tap();
       await card(page).locator('[data-fcomp-field] textarea').fill('Words wait here.');
       await card(page).locator('[data-fcomp-minimize]').tap();
       await page.locator('[data-full-view-handle]').tap();
@@ -476,8 +480,8 @@ for (const phone of PHONES) {
         if (words !== null) await page.locator('[data-fcomp-pill]').tap();
       } else {
         await card(page).waitFor();
-        if (words !== null) await page.locator('[data-fcomp-mode="reply"]').tap();
       }
+      if (words !== null) await page.locator('[data-fcomp-mode="reply"]').tap();
       if (words !== null) await card(page).locator('[data-fcomp-field] textarea').fill(words);
       await page.locator('[data-full-view-bar] .ib-fvcount').tap();
       await page.locator('[data-full-view-foot]').waitFor();

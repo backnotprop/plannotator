@@ -260,6 +260,7 @@
   --ib-fs-20: max(11px, calc(20px * var(--ib-type) / 14));
   --ib-fs-22: max(11px, calc(22px * var(--ib-type) / 14));
   --ib-fs-24: max(11px, calc(24px * var(--ib-type) / 14));
+  --ib-fs-29: max(11px, calc(29px * var(--ib-type) / 14));
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
@@ -5902,15 +5903,16 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-stg-spin { transform-origin: 50% 50%; }
 .ib-stg-spin .tr { stroke: var(--ib-st-track); }
 .ib-stg-spin .arc { stroke: var(--primary); }
-.ib-st-working .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
+/* In progress means turning, whether or not the session is busy this moment (owner, 2026-11-09); only an ended
+   session's list rests, grey. */
+.ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
 @keyframes ib-st-turn { to { transform: rotate(360deg); } }
-.ib-st-idle .ib-stg-spin .arc { stroke: color-mix(in oklab, var(--primary) 70%, var(--card)); }
 .ib-st-ended .ib-stg-spin .arc { stroke: var(--ib-st-ring); }
 .ib-st-ended .ib-stg-spin .tr { stroke: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
 /* Reduced motion: the arc rests from 12 o'clock to about 4, a partial ring (never the todo ring's full one). */
 @media (prefers-reduced-motion: reduce) {
   .ib-stp { animation: none; }
-  .ib-st-working .ib-stg-spin { animation: none; }
+  .ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: none; }
 }
 
 /* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
@@ -7042,6 +7044,44 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
+/* GRILL-ME-TIP-START The grill-me tip (packages/inbox/components/GrillMeTip.tsx): Bro mode's card (navy, dot grid,
+   orange button; no Experimental chip), with a title line in place of the poster name and a small picture of one
+   question card in the light palette's colours, drawn from the real card's parts: picture tiles (the picked one a soft
+   tint, no outline), ui's Recommended tag (primary/15), the `Why <choice>:` line and the note field. */
+dialog.ib-dlg.ib-bro.ib-gm h2 { position: relative; margin: 0; padding: 24px 26px 0; font-size: var(--ib-fs-34, 34px); font-weight: 800; line-height: 1.04; letter-spacing: -0.035em; color: #fbfaf5; text-wrap: balance; }
+dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0.86em; font-weight: 600; letter-spacing: -0.04em; color: #f69d25; }
+.ib-gm .ib-gm-art { --gm-fg: oklch(0.18 0.02 260); --gm-muted: oklch(0.40 0.02 260); --gm-primary: oklch(0.50 0.25 280); --gm-line: oklch(0.88 0.01 260); position: relative; margin: 20px 26px 0; padding: 14px 14px 12px; border-radius: 12px; background: #fff; color: var(--gm-fg); box-shadow: 0 12px 28px -14px #000a; transform: rotate(-1deg); }
+.ib-gm .ib-gm-art .q { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 650; letter-spacing: -0.01em; }
+.ib-gm .ib-gm-art .ctx { margin: 2px 0 10px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--gm-muted); }
+.ib-gm .ib-gm-art .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ib-gm .ib-gm-art .tile { border-radius: 9px; overflow: hidden; background: color-mix(in oklch, var(--gm-line) 45%, #fff); }
+.ib-gm .ib-gm-art .tile.on { background: color-mix(in oklch, var(--gm-primary) 11%, #fff); }
+.ib-gm .ib-gm-art .pic { display: grid; align-content: start; gap: 5px; aspect-ratio: 16 / 8; padding: 9px 10px; margin: 5px 5px 0; border-radius: 6px; }
+.ib-gm .ib-gm-art .pic i { display: block; height: 5px; border-radius: 3px; background: currentColor; opacity: 0.55; }
+.ib-gm .ib-gm-art .pic i:first-child { width: 42%; height: 6px; opacity: 0.95; color: #4493f8; }
+.ib-gm .ib-gm-art .pic i:nth-child(2) { width: 88%; }
+.ib-gm .ib-gm-art .pic i:nth-child(3) { width: 70%; }
+.ib-gm .ib-gm-art .pic.dim { background: #2d333b; color: #adbac7; }
+.ib-gm .ib-gm-art .pic.night { background: #0d1117; color: #c9d1d9; }
+.ib-gm .ib-gm-art .cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 7px 8px 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; }
+.ib-gm .ib-gm-art .dot { width: 12px; height: 12px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--gm-muted) 55%, transparent); }
+.ib-gm .ib-gm-art .on .dot { box-shadow: inset 0 0 0 1.5px var(--gm-primary); background: radial-gradient(circle, var(--gm-primary) 0 3px, transparent 3.5px); }
+.ib-gm .ib-gm-art .tag { margin-left: auto; display: inline-flex; align-items: center; height: 17px; padding: 0 5px; border-radius: 4px; background: color-mix(in oklch, var(--gm-primary) 15%, transparent); color: var(--gm-primary); font-size: var(--ib-fs-10, 10px); font-weight: 650; letter-spacing: 0.03em; white-space: nowrap; }
+.ib-gm .ib-gm-art .why { margin: 9px 0 0; font-size: var(--ib-fs-11-5, 11.5px); line-height: 1.45; color: var(--gm-muted); }
+.ib-gm .ib-gm-art .why b { font-weight: 650; color: color-mix(in oklch, var(--gm-fg) 85%, transparent); }
+.ib-gm .ib-gm-art .note { display: flex; align-items: center; margin-top: 8px; padding: 6px 9px; border-radius: 7px; background: color-mix(in oklch, var(--gm-line) 35%, #fff); box-shadow: inset 0 0 0 1px var(--gm-line); font-size: var(--ib-fs-12, 12px); }
+.ib-gm .ib-gm-art .caret { display: inline-block; width: 1.5px; height: 13px; margin-left: 1px; background: var(--gm-primary); animation: ib-gm-caret 1.1s steps(1) infinite; }
+@keyframes ib-gm-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-gm .ib-gm-art .caret { animation: none; }
+}
+.ib-gm .ib-bi-text p + p { margin-top: 8px; }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-bro.ib-gm h2 { font-size: var(--ib-fs-29, 29px); padding: 22px 22px 0; }
+  .ib-gm .ib-gm-art { margin: 16px 20px 0; }
+  .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
+}
+/* GRILL-ME-TIP-END */
 /* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
    small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
    name and tags, one line, and its button (Smart groups' the primary one). */
@@ -7572,7 +7612,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   padding: 0 8px 8px;
 }
 .ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
-.ib-fcomp .ib-fcomp-slot[hidden] { display: none; }
+.ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment)[hidden] { display: none; }
 .ib-fcomp .ib-ccard > :is(.ib-kept, .ib-tipwrap:has(> :is(.ib-markup, .ib-vframe))) { grid-area: thumbs; justify-self: start; margin: 10px 0 0 4px; }
 .ib-fcomp .ib-ccard > :is(.ib-vtime, .ib-tipwrap:has(> .ib-vtime)) { grid-area: mid; justify-self: start; margin-left: 6px; }
 .pn-inbox .ib-fcomp .ib-ccard > .ib-ta { grid-area: field; width: 100%; min-width: 0; box-sizing: border-box; min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: var(--ib-fs-14, 14px); line-height: 1.5; outline: none; field-sizing: content; }

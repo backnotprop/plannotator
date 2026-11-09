@@ -1581,8 +1581,8 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
       const onB = await mcp(b.port);
       const project = scratch("plannotator-snooze-agent-restart-project-");
-      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
-      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news", reply_to: asked.structuredContent.message_id } })) as { structuredContent: { thread_id: string; message_id: string } };
       const thread = asked.structuredContent.thread_id;
       expect(reply.structuredContent.thread_id).toBe(thread);
       await onB.close();
