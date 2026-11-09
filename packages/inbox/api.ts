@@ -9,6 +9,7 @@ import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { InboxDraftingFrame } from '@plannotator/core/inbox-drafting';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
 import type { SystemModel } from '@plannotator/system';
@@ -2277,6 +2278,8 @@ export interface InboxEventHandlers {
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
    */
   onDrafts?: (threadId: string | null) => void;
+  /** An agent is writing a message with a drawing in it (`event: drafting`): the body so far; never called by an older Inbox. */
+  onDrafting?: (frame: InboxDraftingFrame) => void;
   /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
@@ -2330,7 +2333,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'drafting', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2385,6 +2388,16 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
         if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
         else if (data.compose === true) handlers.onDrafts?.(null);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'drafting':
+      try {
+        const data = JSON.parse(frame.data) as Partial<InboxDraftingFrame>;
+        if (typeof data.call === 'string' && typeof data.thread_id === 'string' && typeof data.body === 'string') {
+          handlers.onDrafting?.({ call: data.call, session: typeof data.session === 'string' ? data.session : '', thread_id: data.thread_id, body: data.body, done: data.done === true });
+        }
       } catch {
         // A malformed frame changes nothing.
       }

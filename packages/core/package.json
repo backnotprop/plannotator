@@ -61,6 +61,7 @@
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
     "./inbox-snooze": "./inbox-snooze.ts",
+    "./inbox-drafting": "./inbox-drafting.ts",
     "./inbox-sidebar": "./inbox-sidebar.ts",
     "./inbox-artifact-pins": "./inbox-artifact-pins.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",

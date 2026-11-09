@@ -56,6 +56,7 @@
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
+import { DRAFTING_EVENT_TYPE, DraftingFeed } from './drafting'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import { isAbsolutePath } from './paths'
 import { shellArgv } from './shell'
@@ -1185,6 +1186,17 @@ export class InboxLink {
   onMainTurnStart(): void {
     this.heldForInput = false
   }
+
+  /**
+   * The Inbox message the model is writing, as far as it is written (drafting.ts):
+   * told to the Inbox, never waited for. An Inbox that predates it refuses the type, which changes nothing.
+   */
+  readonly drafting = new DraftingFeed(
+    () => Date.now(),
+    (post) => {
+      if (!this.disposed) void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: DRAFTING_EVENT_TYPE, ...post })
+    },
+  )
 
   /** A main-loop model request of `turnId` is going out: the replies put into that turn are in it. */
   onMainStep(turnId: string): void {

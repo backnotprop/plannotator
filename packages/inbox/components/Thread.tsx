@@ -10,6 +10,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { messageSideSource } from '../ask/sideSource';
+import { LiveDrawings } from './LiveDrawings';
 import { useSideButton } from '../ask/sideButton';
 import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
@@ -7026,6 +7027,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
+        {/* A message being written here with a drawing in it: the drawing so far (LiveDrawings.tsx). */}
+        <LiveDrawings threadId={thread.thread_id} messages={thread.messages.length} />
         {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />

@@ -1153,22 +1153,45 @@ export function register(on: On) {
     const instance = allowed ? mod : null
     // A main-loop model request is going out: a reply Send now put into the turn is in it (inbox.ts).
     if (instance && !instance.isDisposed && !e.agentId && typeof e.turnId === 'string') instance.onMainStep(e.turnId)
-    if (!instance || !instance.turns.ownsTurn(e.turnId)) return yield* next(e)
-    // A question's turn that someone else's prompt entered settles here: this
-    // request carries their prompt, so nothing it says is the question's answer.
-    instance.onTurnStep(e.turnId)
-    if (!instance.turns.ownsTurn(e.turnId)) return yield* next(e)
-    const stream = next(e)
-    let step = await stream.next()
-    while (!step.done) {
-      const chunk = step.value
-      if (chunk && chunk.kind === 'text' && typeof chunk.text === 'string') instance.turns.onText(e.turnId, chunk.text)
-      else if (chunk && chunk.kind === 'tool' && typeof chunk.name === 'string') instance.turns.onTool(e.turnId, chunk.name)
-      else if (chunk && chunk.kind === 'stop') instance.onTurnStepStop(e.turnId, typeof chunk.stopReason === 'string' ? chunk.stopReason : null)
-      yield chunk
-      step = await stream.next()
+    // The main loop's Inbox message, told to the Inbox as the model writes it (drafting.ts). Its own feed per
+    // request would be needed for subagents, whose requests overlap: theirs land whole, as before.
+    const drafting = instance && !instance.isDisposed && !e.agentId ? instance.drafting : null
+    let owned = !!instance && instance.turns.ownsTurn(e.turnId)
+    if (instance && owned) {
+      // A question's turn that someone else's prompt entered settles here: this
+      // request carries their prompt, so nothing it says is the question's answer.
+      instance.onTurnStep(e.turnId)
+      owned = instance.turns.ownsTurn(e.turnId)
     }
-    return step.value
+    if (!instance || (!owned && !drafting)) return yield* next(e)
+    const stream = next(e)
+    try {
+      let step = await stream.next()
+      while (!step.done) {
+        const chunk = step.value
+        if (drafting) {
+          try {
+            drafting.onChunk(chunk)
+          } catch {
+            // The live drawing is an extra: it never costs the response.
+          }
+        }
+        if (owned) {
+          if (chunk && chunk.kind === 'text' && typeof chunk.text === 'string') instance.turns.onText(e.turnId, chunk.text)
+          else if (chunk && chunk.kind === 'tool' && typeof chunk.name === 'string') instance.turns.onTool(e.turnId, chunk.name)
+          else if (chunk && chunk.kind === 'stop') instance.onTurnStepStop(e.turnId, typeof chunk.stopReason === 'string' ? chunk.stopReason : null)
+        }
+        yield chunk
+        step = await stream.next()
+      }
+      return step.value
+    } finally {
+      try {
+        drafting?.end()
+      } catch {
+        // As above.
+      }
+    }
   })
 
   on('turn.complete', async ($: Engine, e: any, next: Next) => {

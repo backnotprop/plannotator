@@ -234,6 +234,7 @@ import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
+import { noteDrafting } from './drafting';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
@@ -2282,6 +2283,8 @@ function Inbox() {
         },
         // An Ask AI chat changed; the window reads it, and nothing else on the page depends on it.
         onAsk: emitAskChange,
+        // An agent is writing a message with a drawing in it: the open thread draws it as it grows (drafting.ts).
+        onDrafting: noteDrafting,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
