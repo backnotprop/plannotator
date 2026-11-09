@@ -307,6 +307,30 @@ Write-Line ('end:' + $offset + ':' + $last)
 exit 0`,
 
   /**
+   * Prints the first `"forkedFrom":{"sessionId":"<id>"` in the first `argv[1]`
+   * bytes of the transcript `argv[0]`, or nothing (no such row, no file).
+   */
+  'transcript-forked-from': String.raw`$path = $argv[0]
+$length = [int]$argv[1]
+try {
+  $file = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
+  $buffer = New-Object byte[] $length
+  $got = 0
+  while ($got -lt $length) {
+    $read = $file.Read($buffer, $got, $length - $got)
+    if ($read -le 0) { break }
+    $got += $read
+  }
+  $file.Close()
+} catch {
+  exit 0
+}
+$text = [Text.Encoding]::UTF8.GetString($buffer, 0, $got)
+$found = [regex]::Match($text, '"forkedFrom":\{"sessionId":"[A-Za-z0-9._-]*"')
+if ($found.Success) { Write-Line $found.Value }
+exit 0`,
+
+  /**
    * Claims the Inbox message directory `argv[0]` for claimant `argv[1]`, with
    * the same exit codes and the same CreateNew claim on its `by` file as
    * `claim` above.

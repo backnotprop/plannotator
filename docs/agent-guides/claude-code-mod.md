@@ -749,6 +749,19 @@ detached servers) inherits it; `registerCliSession` records it as
 as this session (the `plannotator_inbox` tool's author, so the reply wakes it).
 The tag follows `/clear` and an in-process resume: `currentMod` sets it again
 for the new id, at the latest on the next `turn.start`.
+A branched conversation has a new session id, and the Inbox routes a reply by
+session id, so the branch's link says which session it continues on every poll
+(`continues`, `INBOX_CONTINUES_POLL_FIELD`): `TranscriptForkedFrom` reads it
+once per session in a process from the branch's own transcript, where Claude
+Code writes `"forkedFrom":{"sessionId":…,"messageUuid":…}` on every row it
+copies (read in the 2.1.321 binary's branch code; one `/bin/sh` or PowerShell
+call over the file's first 8 MB, the transcript found as the title's is, looked
+for again after 2 s doubling to 60 s while it is not there). The Inbox then
+hands the branch what waits for the old id once that id no longer polls
+("A conversation that goes on under a new session id" in
+`inbox-notifications-and-agents.md`). A `--resume` or `--continue` that keeps
+its id, and `/clear` (a new conversation), name nothing. Not checked on a live
+Claude Code: whether `--fork-session` writes the same rows.
 Beside it, `exportSessionProject` (`controller.ts`) sets
 `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the folder
 the session's `plannotator_inbox` tool files under (`InboxLink.projectFolder()`,

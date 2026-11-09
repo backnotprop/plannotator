@@ -62,6 +62,7 @@ import { shellArgv } from './shell'
 import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
+  INBOX_CONTINUES_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -509,6 +510,75 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
   return { title, next: start + length - cut }
 }
 
+/**
+ * The session this conversation was branched from, as Claude Code records it:
+ * a branch (`/branch`; the new conversation gets a new session id) copies the
+ * conversation's rows into the new transcript, each with
+ * `"forkedFrom":{"sessionId":"<the session it came from>","messageUuid":…}`
+ * (read in the 2.1.321 binary). The Inbox routes a person's reply by session
+ * id, so the branch says which id it continues on every poll
+ * (INBOX_CONTINUES_POLL_FIELD) and is handed what waits for that id once it no
+ * longer polls. A transcript without such a row (a conversation that started
+ * here, a `--resume` or `--continue` that kept its id) names nothing.
+ *
+ * `$1` the file, `$2` how many of its first bytes to look in: the copied rows
+ * open a branch's transcript. Bare quotes are structure only, as for the
+ * title: inside a message's text they are escaped.
+ */
+export const TRANSCRIPT_FORKED_FROM_READ_BYTES = 8 * 1024 * 1024
+export const TRANSCRIPT_FORKED_FROM_SCRIPT = `head -c "$2" -- "$1" 2>/dev/null | LC_ALL=C grep -a -o -m 1 '"forkedFrom":{"sessionId":"[A-Za-z0-9._-]*"' | head -n 1; exit 0`
+/** While the transcript is not there yet (or a read failed), the first wait before the next look; it doubles up to the most. */
+export const TRANSCRIPT_FORKED_FROM_RETRY_MS = 2_000
+export const TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS = 60_000
+/** Failed reads before the transcript is taken to name nothing. */
+export const TRANSCRIPT_FORKED_FROM_FAILURES_MAX = 3
+
+/** The session id in TRANSCRIPT_FORKED_FROM_SCRIPT's output, or null: none, not an id, or `sessionId` itself. */
+export function transcriptForkedFromOf(output: string, sessionId: string): string | null {
+  const id = /^"forkedFrom":\{"sessionId":"([A-Za-z0-9][A-Za-z0-9._-]{0,127})"$/m.exec(output)?.[1] ?? null
+  return id !== null && id !== sessionId ? id : null
+}
+
+/** Reads, once per session in this process, which session its transcript says it was branched from. */
+export class TranscriptForkedFrom {
+  private settled: string[] | null = null
+  private retryAt = Number.NEGATIVE_INFINITY
+  private looks = 0
+  private failures = 0
+
+  constructor(
+    private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where the transcript may be (`claudeTranscriptPaths`). */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The session ids this conversation continues (INBOX_CONTINUES_POLL_FIELD): one, or none while unknown and when there is none. */
+  async read(): Promise<string[]> {
+    if (this.settled) return this.settled
+    const now = await this.host.now()
+    if (now < this.retryAt) return []
+    this.looks += 1
+    this.retryAt = now + Math.min(TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS, TRANSCRIPT_FORKED_FROM_RETRY_MS * 2 ** Math.min(30, this.looks - 1))
+    for (const path of await this.candidates().catch(() => [] as readonly string[])) {
+      const size = await this.host.fileSize(path).catch(() => null)
+      if (size === null || size === 0) continue
+      const result = await this.host
+        .run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [path, String(TRANSCRIPT_FORKED_FROM_READ_BYTES)]), { timeoutMs: 5_000 })
+        .catch(() => null)
+      if (!result || result.exitCode !== 0) {
+        this.failures += 1
+        if (this.failures >= TRANSCRIPT_FORKED_FROM_FAILURES_MAX) this.settled = []
+        return []
+      }
+      const from = transcriptForkedFromOf(result.stdout, this.sessionId)
+      this.settled = from ? [from] : []
+      return this.settled
+    }
+    return []
+  }
+}
+
 export class TranscriptTitle {
   private path: string | null = null
   private lookedAt = Number.NEGATIVE_INFINITY
@@ -775,6 +845,12 @@ export interface InboxLinkOptions {
    * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
   label?: () => string | Promise<string>
+  /**
+   * The session ids this conversation continues (`TranscriptForkedFrom`), read
+   * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
+   * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
+   */
+  continues?: () => Promise<readonly string[]>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
@@ -1264,8 +1340,11 @@ export class InboxLink {
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
     const label = await this.labelNow()
+    const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
+      // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
+      ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),

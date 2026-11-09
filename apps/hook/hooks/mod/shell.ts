@@ -22,6 +22,7 @@ export type ShellScriptId =
   | 'stop'
   | 'rm'
   | 'transcript-title'
+  | 'transcript-forked-from'
   | 'inbox-claim'
   | 'inbox-release'
   | 'inbox-project'

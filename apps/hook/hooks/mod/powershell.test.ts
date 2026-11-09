@@ -2,7 +2,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inboxClaimArgv, inboxProjectDirArgv, inboxReleaseArgv, TRANSCRIPT_TITLE_SCRIPT, transcriptTitleOf } from './inbox'
+import { inboxClaimArgv, inboxProjectDirArgv, inboxReleaseArgv, TRANSCRIPT_FORKED_FROM_SCRIPT, TRANSCRIPT_TITLE_SCRIPT, transcriptForkedFromOf, transcriptTitleOf } from './inbox'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -301,6 +301,19 @@ describe.skipIf(!POWERSHELL || !existsSync(POWERSHELL))('the PowerShell twins of
     expect(found?.title).toBe('Windows ✓')
     // The last line had no newline yet: the next read starts at it.
     expect(found?.next).toBe(length - Buffer.byteLength('{"type":"assistant","partial":'))
+  })
+
+  test("transcript forked-from: a branch's source session reads as the POSIX script's", () => {
+    ps()
+    const branch = join(scratch(), 'branch.jsonl')
+    writeFileSync(branch, `${JSON.stringify({ type: 'user', sessionId: 's2', forkedFrom: { sessionId: 's1', messageUuid: 'u1' } })}\n`)
+    const result = run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [branch, '4096']))
+    expect(result.code).toBe(0)
+    expect(transcriptForkedFromOf(result.out, 's2')).toBe('s1')
+    const plain = join(scratch(), 'plain.jsonl')
+    writeFileSync(plain, '{"type":"user","sessionId":"s2"}\n')
+    expect(run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [plain, '4096']))).toMatchObject({ code: 0, out: '' })
+    expect(run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [join(scratch(), 'missing.jsonl'), '4096']))).toMatchObject({ code: 0, out: '' })
   })
 
   test('the project folder: absolute, relative or missing, as a path Windows opens', () => {

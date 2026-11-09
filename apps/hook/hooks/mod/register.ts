@@ -105,6 +105,7 @@ import {
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  TranscriptForkedFrom,
   TranscriptTitle,
   withReminderSession,
 } from './inbox'
@@ -516,15 +517,20 @@ async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
  * the label to the `/rename` store.
  */
 function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTitle {
+  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId))
+}
+
+/** Where `sessionId`'s transcript may be, asked when needed: the folder it started in (its first root), its root now, its working folder. */
+function transcriptCandidatesOf($: Engine, sessionId: string): () => Promise<string[]> {
   let firstRoot: string | null = null
   const folder = (read: () => unknown) => Promise.resolve().then(read).then(String, () => '')
-  return new TranscriptTitle(host, sessionId, async () => {
+  return async () => {
     const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeOf($)) ?? ''}/.claude`
     const root = await folder(() => $.session.root())
     if (firstRoot === null && isAbsolutePath(root)) firstRoot = root
     const cwd = await folder(() => $.session.cwd())
     return isAbsolutePath(configDir) ? claudeTranscriptPaths(configDir, [firstRoot ?? '', root, cwd], sessionId) : []
-  })
+  }
 }
 
 /**
@@ -547,6 +553,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
     const host = hostOf($, settings.debugPath)
     const title = sessionTitleOf($, host, String(sessionId))
+    // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
+    const forkedFrom = new TranscriptForkedFrom(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
     const instance = new PlannotatorMod(host, {
       sessionId,
       dataDir: settings.dataDir,
@@ -558,6 +566,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
+      continues: () => forkedFrom.read(),
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),
     })
