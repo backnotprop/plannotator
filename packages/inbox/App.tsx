@@ -19,6 +19,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
+import { shareUnchanged } from './shareUnchanged';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
@@ -1590,11 +1591,18 @@ function Inbox() {
       if (unlistedSince.current?.threadId === threadId) unlistedSince.current = null;
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
-        threadLoaded.current = next.thread;
+        // A re-read of the thread on screen keeps what did not change as the same objects (shareUnchanged.ts):
+        // a window left open on a busy thread no longer holds a full copy of it per message that came in.
+        const reread = threadLoaded.current?.thread_id === threadId;
+        const read = reread ? shareUnchanged(threadLoaded.current, next.thread) : next.thread;
+        // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
+        // objects being new): a read that brought nothing new keeps the thread object, so it says so here.
+        if (reread) setFilesChanged((n) => n + 1);
+        threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
-        setThread(next.thread);
+        setThread(read);
         setThreadRow(next.row ?? null);
         setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
         setThreadLoad(null);

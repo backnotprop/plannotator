@@ -94,7 +94,22 @@ interface TooltipProps {
   forceOpen?: boolean;
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({
+/**
+ * Opt-in, for a host that draws many tooltips far from view (the Inbox's long threads, where every open message's
+ * tooltips cost about 120 Base UI hooks each): false draws each Tooltip below as its bare trigger, with no tooltip
+ * machinery, until the host sets it true again (when the trigger comes near the view or is reached). The trigger
+ * element is the same either way, so layout, text and accessible names do not change; arming mounts a new copy of it.
+ * A `forceOpen` tooltip is always drawn. Unset (true): as before.
+ */
+export const TooltipArmed = React.createContext(true);
+
+export const Tooltip: React.FC<TooltipProps> = (props) => {
+  const armed = React.useContext(TooltipArmed);
+  if (!armed && !props.forceOpen) return props.children;
+  return <ArmedTooltip {...props} />;
+};
+
+const ArmedTooltip: React.FC<TooltipProps> = ({
   content,
   children,
   side = 'top',
