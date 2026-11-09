@@ -393,8 +393,9 @@ export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
   return [
     '- **sections[].diagram** (optional): one diagram at the top of a chapter, only when a',
     '  picture explains that chapter better than words (a flow across steps, how parts',
-    '  connect). Most chapters need none. It sits in the chapter\'s narrow text column (the',
-    '  person can expand it), so keep it small.',
+    '  connect). Most chapters need none. It sits above the chapter\'s code, full width and',
+    '  at most about 320px tall (the person can expand it), so prefer a left-to-right flow',
+    '  (`flowchart LR`) and keep it to a handful of boxes.',
     shapeOn ? '  Mermaid, preferred: { "kind": "mermaid", "source" }.' : '  Mermaid: { "kind": "mermaid", "source" }.',
     ...(shapeOn
       ? ['  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a', '  drawing by the rules in `plannotator shape --help`.']

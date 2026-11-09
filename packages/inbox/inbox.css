@@ -9568,6 +9568,17 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-ov-fig-b { padding: 10px 18px 6px; }
 .ib-ov-fig-b .shp-diagram { height: auto; }
 .ib-ov-fig-f { padding: 0 14px 10px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* A chapter's picture (ChapterFigure): its box keeps the drawing's aspect up to 320px tall and the canvas fits inside
+   it; the tall layout (flowing HTML, a narrow pane) keeps its own height. The popout fits it to the window. */
+.ib-ch-fig { margin: 0; }
+.ib-ch-fig-box { width: 100%; }
+.ib-ov-fig-b .ib-ch-fig-box > .shp-diagram { height: 100%; }
+.ib-ch-fig-box:has(.shp-drawn.tall) { aspect-ratio: auto !important; max-height: none !important; }
+.ib-ch-fig-box:has(.shp-drawn.tall) > .shp-diagram { height: auto; }
+.ib-ch-fig-pop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: color-mix(in oklab, var(--foreground) 35%, transparent); }
+.ib-ch-fig-pop-in { display: flex; flex-direction: column; width: min(1400px, 100%); height: min(900px, 100%); border-radius: 12px; background: var(--shp-paper, var(--background)); box-shadow: 0 0 0 1px var(--ib-line), 0 24px 60px rgb(0 0 0 / 0.25); overflow: hidden; }
+.ib-ch-fig-pop-in .ib-ov-fig-h { padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-ch-fig-pop-b { flex: 1; min-height: 0; padding: 16px; overflow: auto; }
 @media (prefers-reduced-motion: reduce) { .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }

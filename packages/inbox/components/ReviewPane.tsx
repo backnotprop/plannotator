@@ -65,7 +65,7 @@ import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost, ShapeReviewNarrow } from '@plannotator/ui/components/shape';
-import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
+import { ChapterFigure, OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { showMeFromShape, useShowMe } from '../review-drawing/useShowMe';
@@ -740,12 +740,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isReview, overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
-  // A chapter's drawn html picture (format version 5) is drawn as the Overview's is, at the top of its chapter;
+  // A chapter's drawn html picture (format version 5): ChapterFigure, capped as a chapter's Mermaid diagram is;
   // anything else (Mermaid) is left to GuideReader, and a guide or a review with Code review off draws none.
   const renderChapterDiagram = useCallback(
     (diagram: GuideOverviewDiagram): ReactNode | null =>
       isReview && overviewPicture(diagram) ? (
-        <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={`drawn by ${author} with the guide`} onCode={(target) => void openCode(target)} />
+        <ChapterFigure drawn={inboxDrawnViewOf(diagram)} meta={`drawn by ${author} with the guide`} onCode={(target) => void openCode(target)} />
       ) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isReview, author, files, chapters, mode],
