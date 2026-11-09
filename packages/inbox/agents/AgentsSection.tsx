@@ -11,8 +11,9 @@ import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './mode
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09), in place of Machines:
- * an inset rounded panel, its heading "Agents" with the Plannotator goggles in the heading grey and two buttons always
- * shown, + (Add agent) and laptop-plus (Add machine). Under it each machine's agents: the machine's name a small quiet
+ * open, an inset rounded panel, its heading "Agents" with the Plannotator goggles in the heading grey and two buttons
+ * always shown, + (Add agent) and laptop-plus (Add machine); closed, a section like Projects: the heading alone, with
+ * no panel and no buttons. Under it each machine's agents: the machine's name a small quiet
  * grey caption flush left (still the machine's filter, as its Machines row was), its agents a small step in, each a
  * 24 px animated mark (motion.ts) and its name. No counts and no state marks; no lines; roomier gaps between machines.
  * No machine linked: one flat list. A click on an agent opens its thread; its hover card says where and when it
@@ -157,15 +158,19 @@ export function AgentsSection(props: AgentsSectionProps) {
   openNow.current = open;
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
   return (
-    <div className="ib-sbagents" data-agents-surface="">
+    // Closed, it is a section like Projects: its heading only (and the row on show), no panel and no buttons (the
+    // owner, 2026-11-09). Open, the inset panel wraps it and its heading carries Add agent and Add machine.
+    <div className={props.closed ? 'ib-agents' : 'ib-agents ib-sbagents'} data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />)}
-        <Tip content="Add agent">
-          <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
-            <Icon name="plus" />
-          </button>
-        </Tip>
-        {props.onAddMachine && (
+        {!props.closed && (
+          <Tip content="Add agent">
+            <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
+              <Icon name="plus" />
+            </button>
+          </Tip>
+        )}
+        {!props.closed && props.onAddMachine && (
           <Tip content="Add machine">
             <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add machine" data-agents-add="machine" onClick={props.pick(() => props.onAddMachine?.())}>
               <LaptopPlus />

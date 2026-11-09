@@ -1,7 +1,9 @@
 /* The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09; AgentsSection.tsx) and
    the animated agent marks (approval "inbox-agent-icon-motion"; motion.ts). Theme tokens only. */
 
-/* ---------- the panel: an inset rounded panel in the sidebar's menu fill, in place of Machines ---------- */
+/* ---------- the panel: an inset rounded panel in the sidebar's menu fill, in place of Machines. Only while the
+   section is open (`.ib-sbagents`): closed, it is `.ib-agents` alone, a heading like Projects' with no panel, no
+   padding and no buttons (the owner, 2026-11-09). ---------- */
 .pn-inbox .ib-sbagents { margin: 12px -2px 0; padding: 6px 2px 8px; border-radius: 12px; background: var(--ib-side-menu); }
 .pn-inbox .ib-sbagents > .ib-secrow { margin-top: 0; }
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
@@ -32,7 +34,9 @@
 /* The one spacing rule of the sidebar's sections, for the panel as one block: 2 px under a closed section with no row
    left, and the next header 2 px under the panel while it is closed with no row left. */
 .pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-sbagents { margin-top: 2px; }
-.pn-inbox .ib-sidescroll > .ib-sbagents:has(> .ib-agents-body[data-closed]:empty) + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
+/* Closed, the section is no block of its own: its heading and the next one keep the sections' 2 px rule themselves. */
+.pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agents[data-closed] > .ib-secrow { margin-top: 2px; }
+.pn-inbox .ib-sidescroll > .ib-agents:has(> .ib-agents-body[data-closed]:empty) + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
 .pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
 
 /* The hover card: who, where and when, calm. */

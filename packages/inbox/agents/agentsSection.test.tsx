@@ -279,6 +279,43 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
+test.skipIf(!hasDom)('closed, Agents is a heading like any other section: no panel, no Add buttons, only the row on show; opening brings the panel and the buttons back', async () => {
+  // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
+  const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+  const stored = new Map<string, string>();
+  setStorageBackend({ getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => void stored.set(key, value), removeItem: (key) => void stored.delete(key) });
+  try {
+    await closedAgents();
+  } finally {
+    resetStorageBackend();
+  }
+});
+
+async function closedAgents() {
+  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
+  const props = sidebarProps({ machines: three(), agentRows: [threadRow('thr_1', 'ses_s1', 'Invoice retries')], openThreadId: 'thr_1', onAddAgent: noop, onAddMachine: noop });
+  mount(<Sidebar {...props} />);
+  const header = () => document.querySelector<HTMLButtonElement>('[data-sidebar-section="agents"]')!;
+  const state = () => ({
+    panel: surface()!.classList.contains('ib-sbagents'),
+    closed: surface()!.hasAttribute('data-closed'),
+    buttons: [...surface()!.querySelectorAll('[data-agents-add]')].map((b) => b.getAttribute('data-agents-add')),
+    rows: [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')),
+  });
+  expect(state()).toEqual({ panel: true, closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+  act(() => header().click());
+  expect(header().getAttribute('aria-expanded')).toBe('false');
+  // The heading stays, with its goggles; the thread on show keeps its row, as a closed Projects keeps its project.
+  expect(state()).toEqual({ panel: false, closed: true, buttons: [], rows: ['ses_s1'] });
+  expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
+  // A new draw (a reload's) is still closed, with no panel.
+  unmountAll();
+  mount(<Sidebar {...props} />);
+  expect(state()).toEqual({ panel: false, closed: true, buttons: [], rows: ['ses_s1'] });
+  act(() => header().click());
+  expect(state()).toEqual({ panel: true, closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+}
+
 const HERE: InboxComposeLaunch = {
   agents: [
     { agent: 'claude-code', name: 'Claude Code' },
