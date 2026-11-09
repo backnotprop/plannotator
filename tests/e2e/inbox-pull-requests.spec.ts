@@ -3973,7 +3973,8 @@ test('Reviews: an open question from before the review never stays out of the vi
   // A review read long ago, with messages after it: the view still opens with the card open.
   await claude.send({ project_path: world.projects.web, thread: 'asking', body: 'One more thing after the review.' });
   await page.goto(`${world.url}#thread=${first.thread_id}`);
-  await expect(page.getByText('One more thing after the review.')).toBeVisible();
+  // The thread's own message (the list row's grey line says the same words: approval "inbox-row-latest-preview").
+  await expect(page.locator('section.ib-pane').getByText('One more thing after the review.')).toBeVisible();
   await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
   await page.reload();
   await expect(page.locator('[data-review-card] [data-review-start]')).toBeVisible();
