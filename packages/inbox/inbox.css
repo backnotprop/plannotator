@@ -2935,6 +2935,42 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-vidphone .ib-imgcompose { padding-top: 10px; background: var(--card); border-top: 1px solid var(--ib-hair); }
 .ib-vbar { padding: 10px 12px; border-top: 1px solid var(--ib-hair); background: var(--card); }
 .pn-inbox .ib-vbar .ib-vbig { width: 100%; height: 44px; justify-content: center; font-size: var(--ib-fs-15, 15px); font-weight: 600; border-radius: 11px; }
+/* a recording (the owner's ask, 2026-11-09): the video view with a calm player card in place of the film: its name,
+   play / pause, the waveform to scrub (the part played in the primary colour), the time, and the comments' rail */
+.ib-audbox { width: min(100%, 760px); display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 12px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent), 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 28px rgba(0, 0, 0, 0.07); }
+.ib-audtop { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ib-audic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.ib-audnm { min-width: 0; overflow: hidden; font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--foreground); }
+.ib-audmeta { flex: none; margin-left: auto; padding-left: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-audrow { display: flex; align-items: flex-start; gap: 14px; }
+.pn-inbox .ib-audplay { flex: none; display: grid; place-items: center; width: 40px; height: 40px; margin-top: 8px; padding: 0; border: 0; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); cursor: pointer; }
+.pn-inbox .ib-audplay:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.pn-inbox .ib-audplay:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-audplay[data-audio-play="paused"] svg.ib-ic { fill: currentColor; margin-left: 2px; }
+.ib-audplay[data-audio-play="playing"] svg.ib-ic { stroke-width: 2.6; }
+.ib-audtrack { position: relative; flex: 1; min-width: 0; }
+.ib-audwave { position: relative; height: 56px; cursor: pointer; touch-action: pan-y; border-radius: 6px; -webkit-tap-highlight-color: transparent; }
+.ib-audwave:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-audbars { position: absolute; inset: 0; display: block; width: 100%; height: 100%; fill: color-mix(in oklch, var(--muted-foreground) 42%, transparent); }
+.ib-audplayed { position: absolute; inset: 0; pointer-events: none; }
+.ib-audplayed .ib-audbars { fill: var(--primary); }
+.ib-audline { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: color-mix(in oklch, var(--border) 90%, transparent); }
+.ib-audplayed .ib-audline { background: var(--primary); }
+.ib-audwave .ib-vplay { top: 0; height: 56px; opacity: 0.7; }
+.ib-audtrack .ib-vrail { margin-top: 0; }
+.ib-audtrack .ib-vrail::before { display: none; }
+.ib-audbox .ib-vdot:not(.ib-draft) { border-color: var(--card); }
+.ib-audtime { flex: none; min-width: 84px; margin-top: 19px; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); color: var(--foreground); font-variant-numeric: tabular-nums; text-align: right; }
+.ib-audtime .ib-mut { color: var(--muted-foreground); }
+/* a recording on a phone: the card under the header, 44 px targets (the play button, each comment's dot) */
+.ib-vidphone .ib-audstage { background: var(--card); }
+.ib-vidphone .ib-audbox { width: auto; margin: 0; padding: 20px 16px 4px; gap: 10px; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--ib-hair); }
+.ib-vidphone .ib-audrow { gap: 12px; }
+.ib-vidphone .ib-audplay { width: 44px; height: 44px; margin-top: 6px; }
+.ib-vidphone .ib-audtime { min-width: 0; margin-top: 20px; font-size: var(--ib-fs-12, 12px); }
+.ib-vidphone .ib-audtrack .ib-vrail { margin: 0; }
+.ib-vidphone .ib-audbox .ib-vdot::after { inset: -14px; }
+.ib-vidphone .ib-audbox .ib-vmeta { padding: 6px 0 8px; }
 
 /* the code pane: Pierre's File on the page's own background */
 .ib-codeview { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -6119,6 +6155,10 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-art-svg:not([data-drawn]) { display: none; }
 .ib-art-svg > svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
 .ib-art-f-page { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+/* a recording: its note and type in the middle, the play mark at the bottom left, its length at the right */
+.ib-art-f-audio { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+.ib-art-f-audio .ib-art-play { left: 6px; top: auto; bottom: 6px; translate: none; width: 26px; height: 26px; }
+.ib-art-f-audio .ib-art-play svg.ib-ic { width: 12px; height: 12px; }
 .ib-art-frame { position: absolute; inset: 0; overflow: hidden; pointer-events: none; background: #fff; }
 .ib-art-frame iframe { position: absolute; left: 0; top: 0; width: 1024px; height: 768px; border: 0; transform-origin: 0 0; pointer-events: none; background: #fff; }
 .ib-art-f-guide { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 14px 16px; background: color-mix(in oklch, var(--primary) 7%, var(--card)); }

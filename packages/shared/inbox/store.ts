@@ -143,6 +143,7 @@ import {
   isInboxAnnotationId,
   isInboxAnnotationVersion,
   isInboxAnnotatableKind,
+  isInboxTimedKind,
   INBOX_VIDEO_BLOCK_ID,
   readInboxAttachmentKind,
   readInboxVideoTime,
@@ -5466,10 +5467,11 @@ export class InboxStore {
     }
     const id = (annotation as Record<string, unknown>).id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
-    // A comment on a video is at a moment: `blockId: "video"` and `inboxVideo.time` in seconds (contract 4).
-    if (readInboxAttachmentKind(hit.attachment.kind) === "video") {
+    // A comment on a video or a recording is at a moment: `blockId: "video"` and `inboxVideo.time` in seconds (contract 4).
+    if (isInboxTimedKind(hit.attachment.kind)) {
       if ((annotation as Record<string, unknown>).blockId !== INBOX_VIDEO_BLOCK_ID) {
-        throw new InboxError("validation_error", `annotation.blockId: "${INBOX_VIDEO_BLOCK_ID}" on a video.`, { field: "annotation.blockId" });
+        const noun = readInboxAttachmentKind(hit.attachment.kind) === "audio" ? "a recording" : "a video";
+        throw new InboxError("validation_error", `annotation.blockId: "${INBOX_VIDEO_BLOCK_ID}" on ${noun}.`, { field: "annotation.blockId" });
       }
       if (readInboxVideoTime(annotation) === null) {
         throw new InboxError("validation_error", "annotation.inboxVideo.time: the moment in seconds from the start (a number, 0 or more).", { field: "annotation.inboxVideo" });
