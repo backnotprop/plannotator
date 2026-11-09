@@ -30,6 +30,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
+import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -123,6 +124,7 @@ const row = (page: Page) => page.locator('[data-attachment-pane] [data-code-row]
 
 async function open(page: Page, name: string, view: 'full' | 'side' | null) {
   await page.goto(`${world.url}#thread=${world.threadId}&file=${world.ids[name]}${view ? `&view=${view}` : ''}`);
+  await clearSidebarPeek(page);
   await expect(page.locator(`[data-attachment-pane="${world.ids[name]}"]`)).toBeVisible();
 }
 
@@ -264,6 +266,7 @@ test('a wide window: Copy file leads the row side by side and in full screen; a 
       await open(page, 'manifest.yaml', 'full');
       // The same file was open a moment ago; a reload reads it again (a hash change alone does not).
       await page.reload();
+      await clearSidebarPeek(page);
       const note = page.locator('[data-full-view-changed]');
       await expect(note).toBeVisible();
       await expectClear(page, [note, page.locator('[data-full-view-bar]')]);
@@ -325,6 +328,7 @@ test('on a phone: Copy file is a 44 px target at the top left, clear of the tool
     writeFileSync(join(world.project, 'slack', 'manifest.yaml'), CHANGED);
     try {
       await page.reload();
+      await clearSidebarPeek(page);
       const note = page.locator('[data-full-view-changed]');
       await expect(note).toBeVisible();
       await expectClear(page, [note, page.locator('[data-full-view-bar]')]);

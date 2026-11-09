@@ -149,7 +149,8 @@ describe("a thread that came back from the archive", () => {
     expect(row.resolved_at).toBeNull();
     expect(row.read_at ?? null).toBeNull();
     expect(store.questionsOf(root.id)[0]!.state).toBe("open");
-    expect(row).toMatchObject({ section: "waiting", unread: true });
+    // In Waiting, and not bold: the person has seen every agent message there (the owner, 2026-11-08).
+    expect(row).toMatchObject({ section: "waiting", unseen: 0, unread: false });
     expect(InboxStore.open(dir).listRow(root.id)).toEqual(row);
   });
 

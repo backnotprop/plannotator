@@ -59,9 +59,9 @@ async function setup(extra: Partial<Parameters<typeof startInboxServer>[0]> = {}
   mkdirSync(other, { recursive: true });
   const dataDir = join(root, "data");
   const { server, client } = await start(dataDir, extra);
-  const send = async (body: string, session: string, path = project) =>
+  const send = async (body: string, session: string, path = project, replyTo?: string) =>
     (
-      (await client.callTool({ name: "send_message", arguments: { project_path: path, agent_session: session, agent_name: "Claude Code", body } })) as {
+      (await client.callTool({ name: "send_message", arguments: { project_path: path, agent_session: session, agent_name: "Claude Code", body, ...(replyTo ? { reply_to: replyTo } : {}) } })) as {
         structuredContent: { thread_id: string; message_id: string };
       }
     ).structuredContent;
@@ -124,7 +124,7 @@ describe("pinned threads", () => {
   });
 
   test("pins change no row, section, count, cursor or routing; agents never see them", async () => {
-    const { server, client, send } = await setup();
+    const { server, client, project, send } = await setup();
     const a = await send(["Which index?", "", ":::question", "Which search index?", "", "- [ ] Pagefind", "- [ ] Orama", ":::"].join("\n"), "ses_a");
     const before = await list(server);
     const cursor = server.store.cursor();
@@ -134,8 +134,8 @@ describe("pinned threads", () => {
     const after = await list(server);
     const strip = (sections: InboxListSection[]) => sections.map((s) => ({ ...s, threads: s.threads.map(({ pinned_at: _p, ...rest }) => rest) }));
     expect(strip(after.sections)).toEqual(strip(before.sections));
-    // The agent's next message still lands in its own thread.
-    const next = await send("And the totals?", "ses_a");
+    // The agent's reply still lands in its thread.
+    const next = await send("And the totals?", "ses_a", project, a.message_id);
     expect(next.thread_id).toBe(a.thread_id);
     // Nothing an agent reads names a pin.
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } });
@@ -207,7 +207,7 @@ describe("pinned threads", () => {
   });
 
   test("guards: another site is refused, a stale tab is refused, an unknown thread is 404, a bad body is 422", async () => {
-    const { server, send } = await setup();
+    const { server, project, send } = await setup();
     const a = await send("Pin me", "ses_a");
     const path = `/api/inbox/threads/${a.thread_id}/pin`;
     expect(((await (await post(server, path, { pinned: true }, { Origin: "https://evil.example" })).json()) as Json).code).toBe("cross_origin");
@@ -218,7 +218,7 @@ describe("pinned threads", () => {
     expect(((await stale.json()) as Json).code).toBe("session_mismatch");
     expect((await pin(server, "msg_01K70000000000000000000099", true)).status).toBe(404);
     // A message that is not a thread's root is not a thread.
-    const reply = await send("A second message", "ses_a");
+    const reply = await send("A second message", "ses_a", project, a.message_id);
     expect(reply.thread_id).toBe(a.thread_id);
     expect((await pin(server, reply.message_id, true)).status).toBe(404);
     expect((await post(server, path, { pinned: "yes" })).status).toBe(422);

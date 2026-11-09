@@ -6,14 +6,15 @@
  *
  *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
  *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
 
 import { join } from "node:path";
-import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
@@ -22,8 +23,11 @@ import { INBOX_UPLOADS_DIR } from "@plannotator/shared/inbox/uploads";
 import type { AgentEnvironment } from "./inbox-agents";
 import type { LaunchEnv } from "./inbox-launch-env";
 
-/** Whether To may offer the agent: `missing` when its CLI is not there at all (the run line's screen 15). */
-export type LaunchAvailability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string };
+/**
+ * Whether To may offer the agent: `missing` when its CLI is not there at all (the run line's screen 15). `code`: why,
+ * for a linked machine's window to say it with this machine's name (remote launch); absent from a host that has none.
+ */
+export type LaunchAvailability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string; code?: InboxLaunchNotReady };
 
 /** What one host call did, for the launch's start.log: its exit code and what it printed. */
 export interface LaunchHostResult {
@@ -184,8 +188,12 @@ export interface LaunchHost {
   readonly agent: InboxLaunchAgent;
   /** "Claude Code": To's row, a refusal, the questions' author. */
   readonly name: string;
+  /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
+  readonly connector?: string;
   /** The login-shell names it keeps from each read (the rest of the env is never held). */
   readonly shellNames: readonly string[];
+  /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
+  readonly shellFlags?: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
   available(): Promise<LaunchAvailability>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
@@ -216,6 +224,14 @@ export interface LaunchHost {
   attach(launch: InboxLaunchRecord): string | null;
   /** What Open in Terminal runs: the attach command, else (no session, or `untrusted`) what lets the person trust the folder. */
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
+  /** That command never reached Terminal (osascript failed): undo what `terminal` did for it. */
+  terminalFailed?(launch: InboxLaunchRecord, command: string): void;
+  /**
+   * A host that owns its session's process: true when no process of its own runs this session now (it ended,
+   * or this Inbox never ran one). A reply then starts it again even if it never connected. No member: a
+   * session that never connected is never started again by a reply.
+   */
+  processEnded?(ref: string): boolean;
   /** Its permission transport, made once. */
   permissions(context: LaunchPermissionContext): LaunchHostPermissions;
   /**

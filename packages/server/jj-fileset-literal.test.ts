@@ -19,6 +19,9 @@ import { join } from "node:path";
 import { getJjFileBytesForDiff, getJjFileContentsForDiff, jjRootFileFileset } from "@plannotator/shared/jj-core";
 import { runtime as bunJjRuntime } from "./jj";
 import { jjRuntime as piJjRuntime } from "../../apps/pi-extension/server/vcs.ts";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 const hasJj = (() => {
   try {
@@ -48,7 +51,7 @@ function initRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-jj-fileset-"));
   tempDirs.push(dir);
   const jj = (args: string[]) => {
-    const result = spawnSync("jj", args, { cwd: dir, encoding: "utf-8" });
+    const result = spawnSync("jj", args, { cwd: dir, encoding: "utf-8", env: jjConfig.env() });
     if (result.status !== 0) throw new Error(result.stderr || `jj ${args.join(" ")} failed`);
   };
   jj(["git", "init", "."]);

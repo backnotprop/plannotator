@@ -228,12 +228,10 @@ async function expectEscapeClosesPickerFirst(page: Page): Promise<void> {
   await page.keyboard.press('Escape');
   await expect(dialog.locator('[data-skill-menu]')).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-compose-question]')).toHaveCount(0);
-  // The next Escape is the dialog's: the message asks to be kept as a draft.
+  // The next Escape is the dialog's: it keeps the message as a draft and leaves, with no question.
   await page.keyboard.press('Escape');
-  await expect(dialog.locator('[data-compose-question]')).toBeVisible();
-  await dialog.locator('[data-compose-discard]').click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Draft saved');
 }
 
 for (const size of [
@@ -275,8 +273,8 @@ for (const size of [
       await dialog.locator('[data-skill-item="anatomy"]').dispatchEvent('pointerdown');
       await expect(dialog.getByRole('textbox', { name: 'Message' })).toHaveValue(/\/anatomy /);
       await expect(dialog.locator('[data-skill-menu]')).toHaveCount(0);
+      // Escape keeps it as a draft and closes.
       await page.keyboard.press('Escape');
-      await dialog.locator('[data-compose-discard]').click();
       await expect(dialog).toHaveCount(0);
     } finally {
       await context.close();

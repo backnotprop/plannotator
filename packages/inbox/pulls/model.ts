@@ -109,7 +109,7 @@ function isTree(open: readonly InboxPull[]): boolean {
 }
 
 /** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
-function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
+export function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
   const chain: InboxPull[] = [];
   for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
   return chain;
@@ -391,12 +391,15 @@ function stackAuthors(layers: readonly InboxPull[]): string {
 
 const possessive = (name: string) => (name.endsWith('s') ? `${name}'` : `${name}'s`);
 
-/** Why a PR is where it is, in words ("Tomas asked for your review"). */
+/** A PR the person's review was asked for (the owner's words): "Review requested · tomas's PR", or "Review requested" with no author. */
+export const requestedWords = (author: string | null | undefined): string => (author ? `Review requested · ${author}'s PR` : 'Review requested');
+
+/** Why a PR is where it is, in words ("Review requested · tomas's PR"). */
 export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link: InboxPullLink | null): string {
   const pull = item.focus;
   switch (item.reason) {
     case 'requested':
-      return pull.author ? `${pull.author} asked for your review` : 'Your review was asked for';
+      return requestedWords(pull.author);
     case 'assigned':
       return 'Assigned to you';
     case 'agent_ready': {

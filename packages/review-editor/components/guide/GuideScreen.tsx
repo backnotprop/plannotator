@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import { jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
@@ -16,6 +17,7 @@ import { ReviewGuideHost } from './ReviewGuideHost';
 import { GuideGlobalCommentPopover } from './GuideGlobalCommentPopover';
 import type { GuideGlobalComments } from '@plannotator/guide-viewer/host';
 import { GuideExportButton } from './GuideExportButton';
+import { GuideDiffControls, nextGuideCollapseAll, type GuideCollapseAll } from './GuideDiffControls';
 import { filesViewedByTickingSection } from '../../utils/guideReviewedViewed';
 
 interface GuideScreenProps {
@@ -45,6 +47,10 @@ interface GuideScreenProps {
   onAddGlobalComment?: (text: string) => boolean | void;
   /** A global comment chosen in the guide's list: the sidebar shows it. */
   onShowGlobalComment?: (id: string) => void;
+  /** Where the top bar holds the guide's diff controls (GuideDiffControls).
+   *  The guide hides the dock, and with it the dock strip's controls; an open
+   *  guide draws Split/Unified, Collapse all and the gear here instead. */
+  barSlot?: HTMLElement | null;
 }
 
 /**
@@ -69,6 +75,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   onMarkFilesViewed,
   onAddGlobalComment,
   onShowGlobalComment,
+  barSlot,
 }) => {
   const [cancelling, setCancelling] = useState(false);
   // GuideScreen renders inside ReviewStateProvider (ActiveGuide below already
@@ -180,6 +187,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
         onMarkFilesViewed={onMarkFilesViewed}
         onAddGlobalComment={onAddGlobalComment}
         onShowGlobalComment={onShowGlobalComment}
+        barSlot={barSlot}
       />
     );
   }
@@ -228,6 +236,7 @@ function ActiveGuide({
   onMarkFilesViewed,
   onAddGlobalComment,
   onShowGlobalComment,
+  barSlot,
 }: {
   jobId: string;
   jobs: AgentJobInfo[];
@@ -242,9 +251,12 @@ function ActiveGuide({
   onMarkFilesViewed?: (paths: string[]) => void;
   onAddGlobalComment?: (text: string) => boolean | void;
   onShowGlobalComment?: (id: string) => void;
+  barSlot?: HTMLElement | null;
 }) {
   const { guide, loading, error, reviewed, toggleReviewed, retry } = useGuideData(jobId);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  // The top bar's Collapse all: every file card of this guide, not remembered.
+  const [collapseAll, setCollapseAll] = useState<GuideCollapseAll | null>(null);
   const state = useReviewState();
   // Global comments: the review's `scope: 'general'` comments, the same ones
   // the sidebar lists under "Global comments" and the export sends first.
@@ -428,7 +440,8 @@ function ActiveGuide({
   return (
     <div className="w-full">
       {failureStrip}
-      <ReviewGuideHost globalComments={globalComments}>
+      {barSlot && createPortal(<GuideDiffControls collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextGuideCollapseAll)} />, barSlot)}
+      <ReviewGuideHost globalComments={globalComments} collapseAll={collapseAll ?? undefined}>
         <GuideView
           guide={guide}
           reviewed={reviewed}

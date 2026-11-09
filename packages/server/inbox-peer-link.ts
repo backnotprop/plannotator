@@ -21,9 +21,10 @@
  *   reached the machine (rule 15).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxAgentsGroup, InboxListRow } from "@plannotator/core/inbox-types";
+import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import type { InboxLinkRecord } from "./inbox-links";
-import type { InboxOutbox, OutboxAnswer, OutboxEntry } from "./inbox-outbox";
+import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
 
 /** The oldest link protocol this Inbox links to: health's `machine_links`. */
@@ -61,6 +62,28 @@ export interface PeerList {
   projects: Record<string, unknown>[];
   /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
   snoozes: boolean;
+  /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
+  agents: InboxAgentsGroup | null;
+}
+
+/** A linked machine's update, picked by name: a version that reads as one, and nothing it could point at (no URL, no command). */
+export interface FarUpdate {
+  state: "available" | "updating" | "ready" | "failed";
+  version: string;
+  action: "script" | "copy";
+}
+
+const FAR_VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
+
+export const farVersion = (value: unknown): string | null => (typeof value === "string" && FAR_VERSION.test(value) ? value : null);
+
+export function parseFarUpdate(value: unknown): FarUpdate | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Json;
+  if (v.state !== "available" && v.state !== "updating" && v.state !== "ready" && v.state !== "failed") return null;
+  const version = farVersion(v.version);
+  if (!version) return null;
+  return { state: v.state, version, action: v.action === "script" ? "script" : "copy" };
 }
 
 export interface PeerLinkOptions {
@@ -72,8 +95,11 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** That machine's snoozes changed and its list was read again: the windows read theirs. */
   onSnoozes?: () => void;
-  /** That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows read theirs. `sessions`: a session ended or came back there. */
-  onDeliveries?: (change: { sessions: boolean }) => void;
+  /**
+   * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
+   * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved.
+   */
+  onDeliveries?: (change: { sessions: boolean; agents: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -118,7 +144,27 @@ export class PeerLink {
   since = Date.now();
   reason: string | null = null;
   version: string | null = null;
+  /** Its health's `launch_from_machines` (remote launch): agents can start there (true), launch is off (false), or its Inbox is too old to say (null). */
+  launch: boolean | null = null;
+  /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
+  messageDeletions = false;
   list: PeerList | null = null;
+  /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
+  farUpdate: FarUpdate | null = null;
+  canUpdate = false;
+  selfUpdate = true;
+  /** The version an Update there was for, when it ended with no error and no new binary. */
+  noChange: string | null = null;
+  /** This Inbox pressed Update there and is waiting for it to come back on a new version. In memory: that machine's own state is the truth. */
+  asked: { from: string | null; at: number } | null = null;
+  /** That machine asked GitHub on a press and answered up to date: the newest version this Inbox knew of then. In memory, like `asked`. */
+  saidUpToDate: string | null = null;
+  updated: { from: string; to: string; at: number } | null = null;
+  /**
+   * The person asked an agent on that machine to update it (an older door takes no `update`): the thread it went to
+   * (null while the outbox holds it) and the agent's name. In memory, like `asked`; a new version clears it into `updated`.
+   */
+  agentAsked: { from: string | null; at: number; thread: string | null; agent: string } | null = null;
   private cursor: number | null = null;
   private running = false;
   private stream: AbortController | null = null;
@@ -128,6 +174,7 @@ export class PeerLink {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesSessions = false;
+  private deliveriesAgents = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
 
@@ -169,14 +216,16 @@ export class PeerLink {
   }
 
   /** That machine's live sessions moved: one read of its list for all that moved in `deliveriesMs`, at its end. */
-  private deliveriesMoved(sessions: boolean): void {
+  private deliveriesMoved(sessions: boolean, agents: boolean): void {
     this.deliveriesSessions ||= sessions;
+    this.deliveriesAgents ||= agents;
     if (this.deliveriesTimer) return;
     this.deliveriesTimer = setTimeout(() => {
       this.deliveriesTimer = null;
-      const moved = this.deliveriesSessions;
+      const moved = { sessions: this.deliveriesSessions, agents: this.deliveriesAgents };
       this.deliveriesSessions = false;
-      void this.refreshList().then(() => this.options.onDeliveries?.({ sessions: moved }));
+      this.deliveriesAgents = false;
+      void this.refreshList().then(() => this.options.onDeliveries?.(moved));
     }, this.t.deliveriesMs);
     (this.deliveriesTimer as { unref?: () => void }).unref?.();
   }
@@ -228,7 +277,27 @@ export class PeerLink {
     const body = (await health.json().catch(() => ({}))) as Json;
     if (health.status === 401 && (body.code === "device_revoked" || body.code === "device_token_invalid")) return "revoked";
     if (!health.ok) return `health answered ${health.status}`;
-    this.version = typeof body.version === "string" ? body.version : null;
+    const nextVersion = typeof body.version === "string" ? body.version : null;
+    this.version = nextVersion;
+    this.farUpdate = parseFarUpdate(body.update);
+    this.canUpdate = body.machine_update === 1;
+    this.selfUpdate = body.self_update !== false;
+    this.noChange = farVersion(body.update_no_change);
+    if (this.asked && nextVersion) {
+      if (this.asked.from && nextVersion !== this.asked.from) {
+        this.updated = { from: this.asked.from, to: nextVersion, at: Date.now() };
+        this.asked = null;
+      } else if (this.farUpdate?.state !== "updating" && this.farUpdate?.state !== "ready") {
+        // It came back on the same version with nothing running: this press is over, and its own state says the rest.
+        this.asked = null;
+      }
+    }
+    if (this.agentAsked && nextVersion && this.agentAsked.from && nextVersion !== this.agentAsked.from) {
+      this.updated = { from: this.agentAsked.from, to: nextVersion, at: Date.now() };
+      this.agentAsked = null;
+    }
+    this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
+    this.messageDeletions = typeof body.message_deletions === "number" && body.message_deletions >= 1;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);
@@ -296,11 +365,21 @@ export class PeerLink {
             this.cursor = Math.max(this.cursor ?? 0, seq);
             this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
             this.refreshList();
+          } else if (parsed.event === "status") {
+            // Its update's state, as its own windows hear it. An ending that needs no restart ends this press here.
+            const status = JSON.parse(parsed.data) as Json;
+            if ("update" in status) {
+              this.farUpdate = parseFarUpdate(status.update);
+              this.noChange = farVersion(status.update_no_change);
+              if (this.asked && (this.farUpdate?.state === "failed" || this.noChange)) this.asked = null;
+              this.options.onChange();
+            }
           } else if (parsed.event === "snoozes") {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
           } else if (parsed.event === "deliveries") {
-            this.deliveriesMoved((JSON.parse(parsed.data) as Json).sessions === true);
+            const change = JSON.parse(parsed.data) as Json;
+            this.deliveriesMoved(change.sessions === true, change.agents === true);
           }
         }
       }
@@ -350,6 +429,7 @@ export class PeerLink {
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
       snoozes: list.snoozes === true,
+      agents: inboxPeerAgentsGroup(list.agents, this.id),
     };
     this.options.onChange();
     return true;
@@ -396,7 +476,8 @@ export class PeerLink {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
-        headers: this.auth({ "Content-Type": "application/json" }),
+        // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
         body: JSON.stringify(entry.body),
         signal: AbortSignal.timeout(this.t.sendMs),
       });

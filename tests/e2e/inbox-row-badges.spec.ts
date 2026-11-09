@@ -1,28 +1,31 @@
 /**
- * The list rows' badges and their hover card (approval "inbox-row-badges",
- * card A), proved in a real browser against the compiled binary. Nothing is
- * mocked: the binary runs `plannotator inbox --background` under a temp
- * PLANNOTATOR_DATA_DIR and HOME, and agents write through `plannotator inbox
- * mcp` (scripts/inbox-sim.ts).
+ * The list rows' marks and their hover card (approvals "inbox-row-badges",
+ * card A, and "inbox-question-mark", Take 3 "Fill steps"), proved in a real
+ * browser against the compiled binary. Nothing is mocked: the binary runs
+ * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and HOME,
+ * and agents write through `plannotator inbox mcp` (scripts/inbox-sim.ts).
  *
- *  - Stopped is a red triangle alone, Holds up an amber triangle and its count;
- *    their accessible text stays "Stopped" and "Holds up 3".
+ *  - One question mark, `?N`: the red tint pill when the agent is stopped, the
+ *    amber tint pill when it holds up work, unfilled otherwise; its words
+ *    "Stopped on you: 2 questions", "Holding up work: 1 question". A wide row
+ *    in full-width mode also draws "Stopped" / "Holds up 3" in words
+ *    (`WIDE_ROW_WAIT_WORDS`, on).
  *  - The one-line row (approvals "inbox-row-byline" and "list-rows-mail-icons"):
  *    the agents' marks, then the project hugging them 6px later (the owner,
  *    2026-10-31: no width reserved, so each row's project starts after its
- *    own marks), the title cell, then the badge, the count and the time,
+ *    own marks), the title cell, then the words, the marks and the time,
  *    each in its own column: every column's right edge lines up down the
  *    list, and every title cell starts on one left edge.
- *  - Card A opens on the badge after the tooltip delay, and while the row has
- *    keyboard focus; a click's focus opens nothing.
+ *  - Card A opens on a filled mark (and a wide row's words) after the tooltip
+ *    delay, and while the row has keyboard focus; a click's focus opens nothing.
  *  - Beside an open thread the three-line rows keep the card (approval
  *    "inbox-list-row-v2", 2026-10-30). Line 1 is the agents' tiles, the
  *    project and the time; line 2 is the thread's title, never cut (it wraps);
- *    line 3 is the grey preview, then at its right end the badge and the open
- *    count `?N` last. The preview is cut first: the badge and the count are
- *    never cut and end on the line's edge. A long project stays on one line
+ *    line 3 is the grey preview, then at its right end the open counts, `?N`
+ *    last. The preview is cut first: the marks are never cut and end on the
+ *    line's edge. A long project stays on one line
  *    and ends in "…", after its tiles, never dropped.
- *  - An iPhone (WebKit): icons only, no card, the same three lines. On a 320
+ *  - An iPhone (WebKit): the marks only, no card, the same three lines. On a 320
  *    or 360 px phone the preview is still cut first, the title is whole, and a
  *    long project is cut on its one line, after its tiles.
  *
@@ -78,11 +81,18 @@ async function shot(page: Page, name: string, before?: () => Promise<void>): Pro
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Rest the pointer on a row's badge and wait for its card. */
+/** A row's filled mark: its question mark or action box when it stops or holds up work. */
+const filled = (page: Page, threadId: string, shape = '') => page.locator(`${shape}[data-thread-id="${threadId}"] [data-wait-step]:not([data-wait-step="open"])`).first();
+
+/**
+ * Rest the pointer on what opens a row's card, and wait for it. A wide row's hover action covers its open counts, so
+ * there the words (full-width mode) are what the pointer reaches; beside a thread, the filled mark.
+ */
 async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
-  await page.locator(`[data-thread-id="${threadId}"] [data-row-badge]`).hover();
+  const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
+  await ((await words.count()) ? words : filled(page, threadId)).hover();
   await expect(card(page)).toBeVisible();
 }
 
@@ -106,8 +116,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const holding = await opencode.send({ project_path: docs, body: DEMO_MESSAGES.holding, thread: 'install-page' });
-  await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
-  // Its own thread (pi's next message joins the one above): no badge, no thread name, no question.
+  const fcm = await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
+  // Its own thread (pi's next relay message replies in the one above): no badge, no thread name, no question.
   const news = await opencode.send({ project_path: relay, subject: 'Release notes are up', body: DEMO_MESSAGES.news });
   const long = await opencode.send({
     project_path: northwind,
@@ -122,6 +132,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await pi.send({ project_path: billing, reply_to: named.message_id ?? named.thread_id, body: 'Pi here: the webhook is signed, so trusting it is safe.' });
   await pi.send({
     project_path: relay,
+    reply_to: fcm.message_id,
     subject: 'Push payload over 4 KB',
     body: [':::question', 'Drop the question context from the push, or send ids only?', 'Stopped: the relay cannot deliver without this.', '', '- [ ] Drop the context', '- [ ] Ids only', ':::'].join('\n'),
   });
@@ -153,21 +164,35 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: the triangles with their words, the marks before the project, the badge and count in their own columns', async () => {
+test('desktop: one question mark in its fill step, the words in full-width mode, the marks before the project, each column on one edge', async () => {
   const { page } = world;
   await page.goto(world.url);
-  const stop = page.locator(`.ib-row[data-thread-id="${world.stopped}"] [data-row-badge]`);
-  const hold = page.locator(`.ib-row[data-thread-id="${world.holding}"] [data-row-badge]`);
-  await expect(stop).toHaveText('Stopped');
-  await expect(hold).toHaveText('Holds up 3');
-  await expect(stop.locator('svg.ib-tri')).toBeVisible();
-  // Full width (the owner, 2026-10-29): the triangle, then the badge's words drawn, as before approval
-  // "inbox-row-badges" ("Stopped", "Holds up 3"); whole, inside the 110 px badge column.
-  for (const [badge, words] of [[stop, 'Stopped'], [hold, 'Holds up 3']] as const) {
-    await expect(badge.locator('.ib-bw')).toHaveText(words);
-    await expect(badge.locator('.ib-bw')).toBeVisible();
-    await expect(badge.locator('.ib-sr')).toHaveCount(0);
-    const fit = await badge.evaluate((b) => ({ width: b.getBoundingClientRect().width, whole: b.scrollWidth <= b.clientWidth + 0.5 }));
+  // The question mark, in the open counts' column: the red tint pill (stopped), the amber tint pill (holds up work),
+  // unfilled otherwise; its number the open questions, its words the section's label and the count. No triangle.
+  const stop = page.locator(`.ib-row[data-thread-id="${world.stopped}"] .ib-cq > .ib-qn`);
+  const hold = page.locator(`.ib-row[data-thread-id="${world.holding}"] .ib-cq > .ib-qn`);
+  const open = page.locator(`.ib-row[data-thread-id="${world.pair}"] .ib-cq > .ib-qn`);
+  await expect(stop).toHaveAttribute('data-wait-step', 'stop');
+  await expect(stop).toHaveClass(/\bib-b-stop\b/);
+  await expect(stop.locator('.ib-sr')).toHaveText('Stopped on you: 2 questions');
+  await expect(hold).toHaveAttribute('data-wait-step', 'hold');
+  await expect(hold).toHaveClass(/\bib-b-hold\b/);
+  await expect(hold.locator('.ib-sr')).toHaveText('Holding up work: 1 question');
+  await expect(open).toHaveAttribute('data-wait-step', 'open');
+  await expect(open.locator('.ib-sr')).toHaveText('1 question');
+  // The fill is today's badge tint: a background on the filled marks, none on the open one.
+  const fills = await Promise.all([stop, hold, open].map((m) => m.evaluate((el) => getComputedStyle(el).backgroundColor)));
+  expect(fills[0]).not.toBe('rgba(0, 0, 0, 0)');
+  expect(fills[1]).not.toBe('rgba(0, 0, 0, 0)');
+  expect(fills[2]).toBe('rgba(0, 0, 0, 0)');
+  await expect(page.locator('.ib-row :is([data-row-badge], svg.ib-tri)')).toHaveCount(0);
+  // Full width (the owner, 2026-10-29; `WIDE_ROW_WAIT_WORDS`): the words, "Stopped" and "Holds up 3", whole, inside
+  // the 110 px badge column.
+  for (const [id, words] of [[world.stopped, 'Stopped'], [world.holding, 'Holds up 3']] as const) {
+    const cell = page.locator(`.ib-row[data-thread-id="${id}"] .ib-bcol > [data-wait-words]`);
+    await expect(cell).toHaveText(words);
+    await expect(cell).toBeVisible();
+    const fit = await cell.evaluate((b) => ({ width: b.getBoundingClientRect().width, whole: b.scrollWidth <= b.clientWidth + 0.5 }));
     expect(fit.whole, words).toBe(true);
     expect(fit.width, words).toBeLessThanOrEqual(110);
   }
@@ -184,7 +209,7 @@ test('desktop: the triangles with their words, the marks before the project, the
   const geometry = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.ib-row')].map((r) => {
       const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
-      const badge = r.querySelector('.ib-bcol > [data-row-badge]');
+      const badge = r.querySelector('.ib-bcol > [data-wait-words]');
       return {
         id: r.dataset.threadId,
         cells: [...r.children].map((c) => c.className.split(' ')[0]),
@@ -197,9 +222,9 @@ test('desktop: the triangles with their words, the marks before the project, the
         marks: box('.ib-ags').toJSON() as DOMRect,
         subjRight: box('.ib-subj').right,
         subj: box('.ib-subj').left,
-        // A badge ends on its column's right edge.
+        // The words end on their column's right edge.
         badgeEnd: badge ? Math.abs(badge.getBoundingClientRect().right - box('.ib-bcol').right) : 0,
-        inSubject: r.querySelector('.ib-subj :is(.ib-mk, .ib-ags, [data-row-badge])') !== null,
+        inSubject: r.querySelector('.ib-subj :is(.ib-mk, .ib-ags, [data-wait-words], [data-wait-step])') !== null,
       };
     }),
   );
@@ -231,6 +256,9 @@ test('card A on hover: Stopped, then Holds up', async () => {
   await page.goto(world.url);
   await hoverBadge(page, world.stopped);
   const stop = card(page);
+  // The header's glyph is the question mark's bubble now, no triangle.
+  await expect(stop.locator('.ib-wc-tri')).toHaveAttribute('data-wait-card-glyph', 'question');
+  await expect(stop.locator('svg.ib-tri')).toHaveCount(0);
   await expect(stop.locator('.ib-wc-h')).toHaveText('Stopped');
   await expect(stop.locator('.ib-wc-chip')).toHaveText('retry-worker');
   await expect(stop.locator('.ib-wc-row')).toHaveText(['Q1The retry worker cannot ship without this', 'Q2The retry worker', 'Q2The admin retry view']);
@@ -280,11 +308,12 @@ test("keyboard focus on the row opens the card; a click's focus does not", async
 function lineThree(line: Element) {
   const kids = [...line.children];
   const named = (c: Element) =>
-    c.matches('[data-row-badge]') ? 'badge' : c.classList.contains('ib-qn') ? 'count' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-c') ? 'words' : c.classList.contains('ib-pv') ? 'preview' : c.matches('[data-guide-mark]') ? 'guide' : c.matches('[data-pin-mark]') ? 'pin' : c.className.split(' ')[0]!;
+    c.classList.contains('ib-qn') ? 'count' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-c') ? 'words' : c.classList.contains('ib-pv') ? 'preview' : c.matches('[data-guide-mark]') ? 'guide' : c.matches('[data-pin-mark]') ? 'pin' : c.className.split(' ')[0]!;
   const box = (c: Element | null | undefined) => (c ? c.getBoundingClientRect() : null);
   const lr = line.getBoundingClientRect();
   const preview = line.querySelector<HTMLElement>(':scope > .ib-pv');
-  const badge = line.querySelector(':scope > [data-row-badge]');
+  // What sits before the question mark: the action box (the slot the badge had).
+  const badge = line.querySelector(':scope > [data-action-count]');
   const count = line.querySelector(':scope > :is(.ib-qn, .ib-c)');
   // Each right-hand part shows whole: nothing in it is cut, and it sits inside the line.
   const whole = [badge, count].filter((c): c is Element => c !== null).every((c) => {
@@ -314,7 +343,7 @@ function expectLineThree(l: ReturnType<typeof lineThree>, id: string) {
     return;
   }
   expect(l.shown, `row ${id}`).toBe(true);
-  // The preview, when there is one, starts the line; then the book, the pin; the badge before the count, last.
+  // The preview, when there is one, starts the line; then the book, the pin; the action box before the count, last.
   const parts = l.order.filter((p) => p !== 'preview');
   if (l.order.includes('preview')) {
     expect(l.order[0], `row ${id}`).toBe('preview');
@@ -327,7 +356,7 @@ function expectLineThree(l: ReturnType<typeof lineThree>, id: string) {
   if (l.badge && l.preview) expect(l.badge.left, `row ${id}`).toBeGreaterThanOrEqual(l.preview.right - 0.5);
   if (l.count && l.badge) expect(l.count.left, `row ${id}`).toBeGreaterThanOrEqual(l.badge.right - 0.5);
   if (parts.length) expect(Math.abs(l.lastRight! - l.lineRight), `row ${id}`).toBeLessThanOrEqual(0.5);
-  expect(l.whole, `row ${id}: a badge or count is cut`).toBe(true);
+  expect(l.whole, `row ${id}: a mark is cut`).toBe(true);
 }
 
 /** Lines 1 and 2 of a three-line or phone row, read in the page: the agents' tiles, the project, the time and the title. */
@@ -360,14 +389,14 @@ function topLines(row: Element) {
   };
 }
 
-test('beside an open thread: the agents\' tiles, the project and the time on line 1; the title on line 2, never cut; the preview, the badge and ?N on line 3; the card on keyboard focus', async () => {
+test('beside an open thread: the agents\' tiles, the project and the time on line 1; the title on line 2, never cut; the preview and ?N on line 3; the card on keyboard focus', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.stopped}`);
   const narrow = page.locator(`.ib-nrow[data-thread-id="${world.holding}"]`);
   await expect(narrow).toBeVisible();
-  // Line 1: the agents' tiles and the project, the time; no count and no badge.
+  // Line 1: the agents' tiles and the project, the time; no mark.
   expect(await narrow.locator('.ib-l1 > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]))).toEqual(['ib-from', 'ib-t']);
-  await expect(narrow.locator('.ib-l1 :is(.ib-c, [data-row-badge])')).toHaveCount(0);
+  await expect(narrow.locator('.ib-l1 :is(.ib-c, .ib-badge, [data-wait-step])')).toHaveCount(0);
   // The hover's Mark read sits on line 1 and stops above line 2, and the row keeps its height.
   const before = await narrow.evaluate((r) => r.getBoundingClientRect().height);
   await narrow.locator('.ib-l1 .ib-p').hover();
@@ -392,9 +421,13 @@ test('beside an open thread: the agents\' tiles, the project and the time on lin
     expect(r.top.titleCut, `row ${r.id}: the title is cut`).toBe(false);
     expect(r.top.titleInside, `row ${r.id}: the title leaves the row`).toBe(true);
   }
-  // A badge and a count: the preview, the badge, then ?N at the far right.
-  expect(rows.find((r) => r.id === world.stopped)!.l3.order).toEqual(['preview', 'badge', 'count']);
-  // No name, no badge, nothing to count: the subject is the title, and there is no line 3.
+  // The preview, then ?N, filled, at the far right.
+  expect(rows.find((r) => r.id === world.stopped)!.l3.order).toEqual(['preview', 'count']);
+  await expect(page.locator(`.ib-nrow[data-thread-id="${world.stopped}"] .ib-l3 > .ib-qn`)).toHaveAttribute('data-wait-step', 'stop');
+  // The card opens on the filled mark, which the hover action (on line 1) never covers.
+  await hoverBadge(page, world.holding);
+  await page.mouse.move(5, 5);
+  // No name, nothing to count: the subject is the title, and there is no line 3.
   expect(rows.find((r) => r.id === world.news)!.l3.order).toEqual([]);
   // Two agents: two 20 px tiles before the project, the second over the first by 5 px, one name for both.
   const pair = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l1 .ib-atiles > .ib-atile`).evaluateAll((marks) => marks.map((m) => m.getBoundingClientRect().toJSON() as DOMRect));
@@ -451,7 +484,7 @@ test('beside an open thread: the agents\' tiles, the project and the time on lin
   await expect(page).not.toHaveURL(new RegExp(`thread=${world.stopped}`));
 });
 
-test('an iPhone (WebKit): icons only, no card; three lines, the agents\' tiles and the project, the title, then the preview, the badge and ?N', async () => {
+test('an iPhone (WebKit): the marks only, no card; three lines, the agents\' tiles and the project, the title, then the preview and ?N', async () => {
   let own: Browser | null = null;
   try {
     own = await webkit.launch({ args: [] });
@@ -460,7 +493,7 @@ test('an iPhone (WebKit): icons only, no card; three lines, the agents\' tiles a
       const page = await context.newPage();
       await page.goto(world.url);
       const row = page.locator(`.ib-mrow[data-thread-id="${world.holding}"]`);
-      await expect(row.locator('[data-row-badge]')).toHaveText('Holds up 3');
+      await expect(row.locator('.ib-qn[data-wait-step="hold"] .ib-sr')).toHaveText('Holding up work: 1 question');
       // The rows skip paint until laid out (content-visibility): give WebKit a frame or two.
       await page.waitForTimeout(600);
       const rows = await page.evaluate(`[...document.querySelectorAll('.ib-mrow')].map((r) => ({ id: r.getAttribute('data-thread-id'), lines: [...r.children].filter((c) => !c.classList.contains('ib-sr')).map((c) => c.className), top: (${topLines.toString()})(r), l3: (${lineThree.toString()})(r.querySelector(':scope > .ib-m3')) }))`) as { id: string; lines: string[]; top: ReturnType<typeof topLines>; l3: ReturnType<typeof lineThree> }[];
@@ -479,11 +512,11 @@ test('an iPhone (WebKit): icons only, no card; three lines, the agents\' tiles a
       expect(long.l3.previewCut).toBe(true);
       expect(long.top.projectCut).toBe(true);
       expect(long.top.marksDrawn).toBe(2);
-      await row.locator('[data-row-badge]').tap();
+      await row.locator('.ib-qn').tap();
       await page.waitForTimeout(400);
       await expect(card(page)).toHaveCount(0);
       await page.goto(world.url);
-      await expect(page.locator(`.ib-mrow[data-thread-id="${world.stopped}"] [data-row-badge]`)).toHaveText('Stopped');
+      await expect(page.locator(`.ib-mrow[data-thread-id="${world.stopped}"] .ib-qn`)).toHaveAttribute('data-wait-step', 'stop');
       await expect(page.locator(`.ib-mrow[data-thread-id="${world.stopped}"]`)).toBeVisible();
       // The rows skip paint until laid out (content-visibility): give WebKit a frame or two.
       await page.waitForTimeout(600);
@@ -495,7 +528,7 @@ test('an iPhone (WebKit): icons only, no card; three lines, the agents\' tiles a
   }
 });
 
-test('a small phone (320, 360): the preview gives way first; the badge and ?N stay whole; the title is never cut; a long project is cut on one line after its tiles, never dropped', async () => {
+test('a small phone (320, 360): the preview gives way first; ?N stays whole; the title is never cut; a long project is cut on one line after its tiles, never dropped', async () => {
   const own = await webkit.launch({ args: [] });
   try {
     for (const width of [320, 360]) {
@@ -505,7 +538,7 @@ test('a small phone (320, 360): the preview gives way first; the badge and ?N st
       const row = page.locator(`.ib-mrow[data-thread-id="${world.guided}"]`);
       await row.scrollIntoViewIfNeeded();
       await expect(row.locator('.ib-m3 > [data-guide-mark]')).toBeVisible();
-      await expect(row.locator('[data-row-badge]')).toHaveText('Holds up 3');
+      await expect(row.locator('.ib-qn')).toHaveAttribute('data-wait-step', 'hold');
       // The rows skip paint until laid out (content-visibility): give WebKit a frame or two.
       await page.waitForTimeout(600);
       const l3 = (await page.evaluate(`(${lineThree.toString()})(document.querySelector('.ib-mrow[data-thread-id="${world.guided}"] .ib-m3'))`)) as ReturnType<typeof lineThree>;
@@ -563,8 +596,9 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
   // Open action items are no words (approval "inbox-row-action-icon", 2026-10-29): the box pill, beside `?N`, in the
   // open counts' column before the time. [row, its pill's number, its `?N` (0: none), the row's name]
   const counted: [string, number, number, RegExp][] = [
-    [one.thread_id as string, 1, 0, /1 action to do/],
-    [both.thread_id as string, 1, 1, /1 action to do 1 question/],
+    // Their action item says `Stopped:`: the box is the red tint pill and says so (approval "inbox-question-mark").
+    [one.thread_id as string, 1, 0, /Stopped on you: 1 action item/],
+    [both.thread_id as string, 1, 1, /Stopped on you: 1 action item 1 question/],
   ];
   // [row, the two-line row's short form, the wide row's full words (also the row's name)]
   const expected: [string, RegExp, RegExp][] = [
@@ -573,9 +607,9 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
     [world.long, /^Undelivered 1d$/, /^Undelivered 1 day$/],
   ];
   try {
-    // A list of 1150 px or more (1440, a 1192 px list; the owner, 2026-10-29): the full words and the badge's words,
-    // drawn and read as they are. A wide list under that (1000 and 900 px) keeps option A: the short forms in their
-    // 124 px column, the bare triangle, the full words in the row's name. Every column lines up at each width, and
+    // A list of 1150 px or more (1440, a 1192 px list; the owner, 2026-10-29): the full words and a blocked row's
+    // words (`WIDE_ROW_WAIT_WORDS`), drawn and read as they are. A wide list under that (1000 and 900 px) keeps
+    // option A: the short forms in their 124 px column, the marks alone, the full words in the row's name. Every column lines up at each width, and
     // the subject has the widest column.
     for (const viewport of [1440, 1248, 1148]) {
       const full = viewport === 1440;
@@ -594,6 +628,7 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
         const row = page.locator(`.ib-row[data-thread-id="${id}"]`);
         await expect(row.locator('.ib-cw')).toHaveText('');
         await expect(row.locator('.ib-cq > [data-action-count]')).toHaveAttribute('data-action-count', String(actions));
+        await expect(row.locator('.ib-cq > [data-action-count]')).toHaveAttribute('data-wait-step', 'stop');
         await expect(row.locator('.ib-cq > .ib-qn')).toHaveCount(questions);
         await expect(row).toHaveAccessibleName(name);
       }
@@ -610,7 +645,7 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
             subj: Math.round(box('.ib-subj').left),
             subjWidth: box('.ib-subj').width,
             others: Math.max(...['.ib-from', '.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).width)),
-            // The Undelivered pill itself, not just its slot (review D1): inside its column, clear of the badge.
+            // The Undelivered pill itself, not just its slot (review D1): inside its column, clear of the badge column.
             pill: pill ? pill.left >= box('.ib-cw').left - 0.5 && pill.right <= box('.ib-cw').right + 0.5 && pill.right <= box('.ib-bcol').left : null,
           };
         }),
@@ -626,7 +661,7 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
         if (g.pill !== null) expect(g.pill, `${g.id}: the pill stays in its column ${where}`).toBe(true);
       }
     }
-    // Hover: the action covers the time and ?N; the project with its marks and the badge stay.
+    // Hover: the action covers the time and the marks; the project with its agents' marks and the words stay.
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(world.url);
     const stopped = page.locator(`.ib-row[data-thread-id="${world.stopped}"]`);

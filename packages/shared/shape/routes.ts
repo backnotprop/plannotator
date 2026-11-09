@@ -72,6 +72,10 @@ const IMAGE_TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  // Served with `sandbox` and nosniff (both runtimes), so an SVG opened directly runs no script.
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
 };
 
 const AGENT_NAMES: Record<string, string> = {
@@ -88,7 +92,8 @@ export function shapeAgentName(session: ShapeSession | null): string {
   return AGENT_NAMES[session.host] ?? session.host;
 }
 
-async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
+/** The store's lock (and this shape's) is free, waited for without blocking; false after `waitMs`. */
+export async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   while (store.locked(id)) {
     if (Date.now() > until) return false;

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
-import type { PRReviewFileComment, PRRuntime } from "./pr-types";
+import type { CommandResult, PRReviewFileComment, PRRuntime } from "./pr-types";
 
 describe("fetchGlMR", () => {
   test("uses GitLab raw diffs so binary markers and collapsed files are preserved", async () => {
@@ -345,6 +345,19 @@ describe("fetchGlMR raw_diffs fallback", () => {
 });
 
 describe("fetchGlMRContext", () => {
+  test("names who is asked to review, its picture absolute, a bot as a bot", async () => {
+    const runtime: PRRuntime = {
+      async runCommand(_command, args) {
+        if (args[1] === "projects/g%2Fp/merge_requests/1") {
+          return { stdout: JSON.stringify({ state: "opened", reviewers: [{ username: "ana", avatar_url: "/uploads/a.png" }, { username: "project_1_bot" }, { username: "" }] }), stderr: "", exitCode: 0 };
+        }
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      },
+    };
+    const context = await fetchGlMRContext(runtime, REF);
+    expect(context.requestedReviewers).toEqual([{ login: "ana", avatarUrl: `https://${REF.host}/uploads/a.png` }, { login: "project_1_bot", isBot: true }]);
+  });
+
   test("throws when the primary MR details request fails", async () => {
     const runtime: PRRuntime = {
       async runCommand(_command, args) {
@@ -747,5 +760,85 @@ describe("submitGlMRReview", () => {
     };
     expect(first).toEqual(expected);
     expect(retry).toEqual(expected);
+  });
+});
+
+describe("submitGlMRReview positions", () => {
+  // src/keep.ts: line 1 unchanged, old 2 deleted, new 2 added, then an unchanged line (old 3 = new 3).
+  // src/new-name.ts: renamed from src/old-name.ts, with an unchanged line (old 10 = new 11) after an added one.
+  const RAW_DIFF = [
+    "diff --git a/src/keep.ts b/src/keep.ts",
+    "--- a/src/keep.ts",
+    "+++ b/src/keep.ts",
+    "@@ -1,3 +1,3 @@",
+    " one",
+    "-two",
+    "+2",
+    " three",
+    "diff --git a/src/old-name.ts b/src/new-name.ts",
+    "similarity index 90%",
+    "rename from src/old-name.ts",
+    "rename to src/new-name.ts",
+    "--- a/src/old-name.ts",
+    "+++ b/src/new-name.ts",
+    "@@ -9,2 +9,3 @@",
+    " nine",
+    "+inserted",
+    " ten",
+    "",
+  ].join("\n");
+
+  function positionsRuntime(rawDiff: CommandResult): { runtime: PRRuntime; positions: Record<string, unknown>[] } {
+    const positions: Record<string, unknown>[] = [];
+    return {
+      positions,
+      runtime: {
+        async runCommand(_command, args) {
+          const endpoint = args[1] ?? "";
+          if (endpoint === "projects/g%2Fp/merge_requests/1") {
+            return { stdout: JSON.stringify({ diff_refs: { base_sha: "base", start_sha: "start", head_sha: "head" } }), stderr: "", exitCode: 0 };
+          }
+          if (endpoint === "projects/g%2Fp/merge_requests/1/raw_diffs") return rawDiff;
+          return { stdout: "", stderr: `unexpected endpoint: ${endpoint}`, exitCode: 1 };
+        },
+        async runCommandWithInput(_command, args, input) {
+          const payload = JSON.parse(input) as { position?: Record<string, unknown> };
+          if ((args[1] ?? "").endsWith("/discussions")) positions.push(payload.position!);
+          return { stdout: "{}", stderr: "", exitCode: 0 };
+        },
+      },
+    };
+  }
+
+  test("an unchanged line carries both line numbers; a renamed file its old path; a changed line only its own", async () => {
+    const { runtime, positions } = positionsRuntime({ stdout: RAW_DIFF, stderr: "", exitCode: 0 });
+    const result = await submitGlMRReview(runtime, REF, "head", "comment", "", [
+      { path: "src/keep.ts", line: 3, side: "RIGHT", body: "context, new side" },
+      { path: "src/keep.ts", line: 1, side: "LEFT", body: "context, old side" },
+      { path: "src/keep.ts", line: 2, side: "RIGHT", body: "added" },
+      { path: "src/keep.ts", line: 2, side: "LEFT", body: "deleted" },
+      { path: "src/new-name.ts", line: 11, side: "RIGHT", body: "renamed, context" },
+      { path: "src/keep.ts", line: 3, side: "RIGHT", start_line: 1, start_side: "RIGHT", body: "range over context" },
+    ]);
+    expect(result).toEqual({ status: "complete" });
+    const lines = positions.map(({ old_path, new_path, old_line, new_line }) => ({ old_path, new_path, old_line, new_line }));
+    expect(lines).toEqual([
+      { old_path: "src/keep.ts", new_path: "src/keep.ts", old_line: 3, new_line: 3 },
+      { old_path: "src/keep.ts", new_path: "src/keep.ts", old_line: 1, new_line: 1 },
+      { old_path: "src/keep.ts", new_path: "src/keep.ts", old_line: undefined, new_line: 2 },
+      { old_path: "src/keep.ts", new_path: "src/keep.ts", old_line: 2, new_line: undefined },
+      { old_path: "src/old-name.ts", new_path: "src/new-name.ts", old_line: 10, new_line: 11 },
+      { old_path: "src/keep.ts", new_path: "src/keep.ts", old_line: 3, new_line: 3 },
+    ]);
+    expect(positions[5]!.line_range).toEqual({ start: { type: "old", old_line: 1, new_line: 1 }, end: { type: "old", old_line: 3, new_line: 3 } });
+  });
+
+  test("the MR's diff not read: each comment still goes, placed by its own side as before", async () => {
+    const { runtime, positions } = positionsRuntime({ stdout: "", stderr: "boom", exitCode: 1 });
+    const result = await submitGlMRReview(runtime, REF, "head", "comment", "", [{ path: "src/keep.ts", line: 3, side: "RIGHT", body: "context" }]);
+    expect(result).toEqual({ status: "complete" });
+    expect(positions).toEqual([
+      { position_type: "text", base_sha: "base", head_sha: "head", start_sha: "start", new_path: "src/keep.ts", old_path: "src/keep.ts", new_line: 3 },
+    ]);
   });
 });

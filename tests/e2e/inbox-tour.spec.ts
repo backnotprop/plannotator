@@ -57,6 +57,7 @@ function startWorld(name: string): World {
     // The test sandbox: no agent CLI is looked up at all, not even the ChatGPT or Codex app's own on macOS.
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: home,
+    NO_ANON_PING: '1',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -344,7 +345,7 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('4-box');
   await keep('[data-comment-popover] textarea');
   await shot('04-comment');
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await at('5');
   await shot('05-file-tile');
   if (to === 5) return;
@@ -356,7 +357,7 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('5-box');
   await keep('[data-comment-popover] textarea');
   await shot('05-comment');
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await at('6');
   await shot('06-reply');
   if (to === 6) return;
@@ -885,7 +886,7 @@ test('reduced motion: no pulse, a shorter replay; a stacked window: the thread c
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '4');
   await selectWords(page, '[data-tour-message="ask"] .ib-body', PHRASE);
   await page.locator(toolbarComment).first().click();
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '5');
   await page.locator('[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="EVALUATION.md"]').click();
   // Stacked: the file covers the thread.
@@ -893,7 +894,7 @@ test('reduced motion: no pulse, a shorter replay; a stacked window: the thread c
   await shoot(page, 'stacked-05-file', ['light']);
   await selectWords(page, '[data-attachment-pane] .ib-docscroll', EV_LINE);
   await page.locator(toolbarComment).first().click();
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '6');
   await page.locator('[data-tour-reply]').filter({ visible: true }).first().click();
   const sent = Date.now();

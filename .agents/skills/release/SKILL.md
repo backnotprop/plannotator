@@ -65,9 +65,27 @@ Write the file to the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 2. **"Missed recent releases?"** collapsible table — copy from the previous release's notes, then:
    - Add the previous release (the one you're succeeding) as the newest row
    - Keep roughly 10-12 rows; drop the oldest if needed
-   - Each row: version link + comma-separated feature highlights (short phrases)
+   - Each row: version link + comma-separated feature highlights (short phrases). For the previous release's row, use the words of its TL;DR lines (below), joined by commas, without the labels
 
 3. **"What's New in vX.Y.Z"** — the heart of the notes
+   - **TL;DR first.** Directly under the `## What's New in vX.Y.Z` heading, put a `### TL;DR` heading and a list of 3 to 5 lines. The Inbox's What's new page reads this block: it shows it at the top of the release and in its list of releases. GitHub shows it too.
+     ```markdown
+     ## What's New in v0.28.53
+
+     ### TL;DR
+
+     - **New:** Start an agent in a new folder, or from a git URL
+     - **New:** "+" on each project row starts a session there
+     - **Changed:** New message offers the open thread's files
+     - **Off by default:** Bro mode: agents write to you in plain words
+
+     Starting an agent from New message now covers a new folder, …
+     ```
+     - Write each line as `- **Label:** text`. Use only these labels, spelled exactly so: New, Changed, Fixed, Removed, Off by default.
+     - Keep each line extremely terse: 10 words or fewer, no full stop at the end. Say what the user sees, in the user's words, not in code terms.
+     - Put no links, PR numbers or names in the lines. Use `code` only for a setting or a variable that the user types.
+     - Put the biggest change first. Use Removed for something that is gone, and Off by default for a feature the user must turn on.
+     - Put nothing between the `### TL;DR` heading and its list. The opening sentences come after the list.
    - Open with 1-3 sentences summarizing the release theme and scope. Mention how many PRs, how many from external contributors, any first-timers.
    - Each major feature/fix gets its own `###` subsection with:
      - A descriptive heading (not the PR title verbatim — rephrase for clarity)
@@ -117,13 +135,14 @@ Write the draft to `RELEASE_NOTES_v<VERSION>.md` in the repo root and tell the u
 
 ## Phase 2: Version Bump
 
-Bump the version string in these **9 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
+Bump the version string in these **10 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
 
 | File | Field |
 |------|-------|
 | `package.json` (root) | `"version"` |
 | `apps/opencode-plugin/package.json` | `"version"` |
 | `apps/dsh-plugin/package.json` | `"version"` |
+| `apps/cline-plugin/package.json` | `"version"` |
 | `apps/pi-extension/package.json` | `"version"` |
 | `apps/hook/.claude-plugin/plugin.json` | `"version"` |
 | `apps/copilot/plugin.json` | `"version"` |
@@ -131,9 +150,9 @@ Bump the version string in these **9 files** (and only these — other package.j
 | `openpackage.yml` (root) | `version:` |
 | `packages/server/package.json` | `"version"` |
 
-Read each file, confirm the current version matches expectations, then update all 9 atomically.
+Read each file, confirm the current version matches expectations, then update all 10 atomically.
 
-`node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 9 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`) is one of them.
+`node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 10 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`) and `apps/cline-plugin/package.json` (`@plannotator/cline`) are among them.
 
 The DeepSeek Harness plugin is checked like the other packages: the release workflow's `test` job runs `bun run typecheck` (which includes `apps/dsh-plugin/tsconfig.json`) and `bun test` (which includes `apps/dsh-plugin` and `apps/hook/server/dsh-*.test.ts`).
 
@@ -147,7 +166,7 @@ After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 bun scripts/feedback-search-index.ts
 ```
 
-It reads public release notes, open issue titles and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
+It reads public release notes, open issue titles, fixed closed issue titles (with the release whose notes link their fix) and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
 
 ---
 
@@ -160,7 +179,8 @@ bun run build:review    # 1. Code review editor (standalone Vite build)
 bun run build:hook      # 2. Plan review + hook server (copies review's built HTML into hook dist)
 bun run build:opencode  # 3. OpenCode plugin (copies built HTML from hook + review)
 bun run build:dsh       # 4. DeepSeek Harness plugin (Node bundle; no HTML)
-bun run build:pi        # 5. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
+bun run build:cline     # 5. Cline plugin (Node bundle; no HTML)
+bun run build:pi        # 6. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
 ```
 
 `build:pi` chains review and hook internally, so after steps 1-2 it only runs the pi-specific build.
@@ -192,9 +212,9 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    chore: bump version to X.Y.Z
    ```
-   Stage only the 9 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
+   Stage only the 10 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
-2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security). The browser tests (Inbox window e2e) and the Windows, Inbox Pi, Inbox Claude Code and relay suites run on main only nightly, so start them on the bump commit by hand:
+2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security). The full browser tests (Inbox window e2e) run on main only every two hours, and the Windows, Inbox Pi, Inbox Claude Code and relay suites only nightly, so start them on the bump commit by hand:
    ```bash
    git push origin main
    for wf in inbox-e2e.yml windows.yml inbox-pi.yml inbox-claude-code.yml relay.yml; do gh workflow run "$wf" --ref main; done
@@ -217,15 +237,15 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    - Runs tests
    - Cross-compiles binaries for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
    - Compiles paste service binaries (same 6 platforms)
-   - Packs the npm packages (`@plannotator/opencode`, `@plannotator/pi-extension`, `@plannotator/dsh`) in a credential-free job, into the one artifact the security gate scans (`NPM_SUBJECTS` in `scripts/release-security/release-evidence.mjs`; `tests/release-gate-subjects.test.ts` fails when release.yml packs or publishes a tarball outside it)
+   - Packs the npm packages (`@plannotator/opencode`, `@plannotator/pi-extension`, `@plannotator/dsh`, `@plannotator/cline`) in a credential-free job, into the one artifact the security gate scans (`NPM_SUBJECTS` in `scripts/release-security/release-evidence.mjs`; `tests/release-gate-subjects.test.ts` fails when release.yml packs or publishes a tarball outside it)
    - Downloads pinned, checksum-verified Syft and Grype binaries; generates and schema-validates the release-wide CycloneDX SBOM after all shipped subjects exist
    - Forces the repository-owned, suppression-free Grype configuration, retries the official database update up to three times, requires a valid/active schema-v6 database no more than 120 hours old with no pending update, and preserves the machine-readable scan/database/policy evidence as a workflow artifact
    - Rejects every scanner-side ignored match, then blocks before any attestation or publication on CISA KEV or fixable Critical findings classified as shipped/runtime or unknown-applicability. High, development-only, and no-fix Critical findings are report-only but remain in the evidence
    - `viewer-pin-live`: requires guides.show (deployed for the same tag by `guides-show-deploy.yml`) to serve the guide viewer JS and CSS that the `build` and `npm-package` jobs pinned, retrying for about 5 minutes; `attest`, `release` and `npm-publish` wait for it, so a failure attests, releases and publishes nothing. Recovery: deploy guides.show on the tag (`gh workflow run guides-show-deploy.yml --ref vX.Y.Z`), then "Re-run failed jobs" on the release run
    - Generates SLSA build provenance attestations for all 12 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
-   - Uses the separate official `actions/attest` SBOM path to bind the CycloneDX predicate to all 12 binaries and the `@plannotator/opencode`, `@plannotator/pi-extension` and `@plannotator/dsh` tarballs through the same GitHub OIDC/Sigstore service. This is an inventory attestation, not a replacement for SLSA or npm provenance
+   - Uses the separate official `actions/attest` SBOM path to bind the CycloneDX predicate to all 12 binaries and the `@plannotator/opencode`, `@plannotator/pi-extension`, `@plannotator/dsh` and `@plannotator/cline` tarballs through the same GitHub OIDC/Sigstore service. This is an inventory attestation, not a replacement for SLSA or npm provenance
    - Creates the GitHub Release with all binaries, SHA256 sidecars, the versioned CycloneDX SBOM, and its SHA256 sidecar attached
-   - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance, then the gated `@plannotator/dsh` tarball last, in a step allowed to fail until its trusted publishing is set up (a failure there shows as a warning; check it with `npm view`)
+   - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance, then the gated `@plannotator/dsh` and `@plannotator/cline` tarballs last, each in a step allowed to fail until its trusted publishing is set up (a failure there shows as a warning; check it with `npm view`)
 
    **SBOM scope:** the public document is a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is deliberately not described as exact binary runtime contents. Coverage testing found that Bun standalone executables hide bundled JavaScript dependency metadata from Syft. The OpenCode tarball is similarly opaque; the Pi tarball exposes only a partial view through nested package-lock files. The scope and limitations are also embedded in the CycloneDX metadata.
 
@@ -243,7 +263,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    - All jobs pass, including `release-security`, `viewer-pin-live`, `attest`, `release`, and `npm-publish`
    - `release-security-evidence` records the Syft/Grype versions, active database schema/build/checksum/update status, all Grype matches, and an `ACCEPT` policy decision
    - The GitHub Release was created with all binary artifacts, SHA256 sidecars, the versioned `plannotator-X.Y.Z-release-sbom.cdx.json`, and its `.sha256` sidecar
-   - npm packages published successfully (check with `npm view @plannotator/opencode version`, `npm view @plannotator/dsh version` and `npm view @plannotator/pi-extension version`)
+   - npm packages published successfully (check with `npm view @plannotator/opencode version`, `npm view @plannotator/dsh version`, `npm view @plannotator/cline version` and `npm view @plannotator/pi-extension version`)
 
    A pull request proves generation, schema/sentinel validation, database policy, Grype evaluation, least-privilege job wiring, and all report artifacts. GitHub OIDC issuance, publication to the artifact-attestation service, and final release-asset publication only run for a real eligible `v*` tag. For the first release after this control lands, complete this bounded tag-only verification before calling the rollout complete:
 
@@ -284,17 +304,19 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 ## Checklist
 
 Before tagging, verify:
-- [ ] All 9 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
+- [ ] All 10 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
 - [ ] `bun scripts/feedback-search-index.ts` run, and `packages/inbox/feedbackSearch.data.json` in the release commit
 - [ ] The published-package floor guard is green (`bun test tests/published-package-floors.test.ts`), and no `engines.node`/`npm`/`opencode`/`vscode`/`bun`, `os`, `cpu`, `libc` or host peer was added or changed on a published package without an `ALLOWED` entry the owner signed off (`engines.vscode` is pinned at `^1.85.0`: a raise stops updates for Cursor, Windsurf and older VS Code). npm silently installs an older version for anyone whose runtime misses such a field: 0.28.32's Pi Node floor kept older-Node users on 0.28.31
 - [ ] Sibling dependencies resolve: `bun run check:sibling-deps @plannotator/opencode @plannotator/pi-extension` passes (it reads npm). When `@plannotator/core` and `@plannotator/ui` ship, publish core before ui, and run it with every package going out (`bun run check:sibling-deps @plannotator/core @plannotator/ui`): ui pins an exact core, and a ui published first fails to install with ETARGET
 - [ ] Never `npm deprecate` the current `latest`: npm then picks the newest non-deprecated version for bare and range installs, so everyone silently stays behind. Ship a new version instead
 - [ ] Never reuse a version number once its bump commit is on `main`, even if the tag or publish failed: Claude Code caches plugins by version string, so a second build under the same number never reaches users who fetched the first. Bump again
 - [ ] Release notes drafted and reviewed
+- [ ] The notes start with a `### TL;DR` of 3 to 5 labelled lines, directly under "What's New in vX.Y.Z"
 - [ ] `bun run build:review` succeeded
 - [ ] `bun run build:hook` succeeded
 - [ ] `bun run build:opencode` succeeded
 - [ ] `bun run build:dsh` succeeded
+- [ ] `bun run build:cline` succeeded
 - [ ] `bun run build:pi` succeeded (or pi-specific build step)
 - [ ] Version bump committed
 - [ ] Inbox window e2e, Windows, Inbox Pi, Inbox Claude Code and relay dispatched on main (`gh workflow run`) and green on the bump commit

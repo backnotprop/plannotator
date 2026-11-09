@@ -539,15 +539,15 @@ export function AgentsSettings({
   model: InboxAgentsModel;
   onModel: (next: InboxAgentsModel) => void;
   context: ConnectContext | null;
-  /** Starting agents from New message (`SettingsModel.launch`, only while `inboxLaunch.enabled`). Absent: no row. */
+  /** Starting agents from New message (`SettingsModel.launch`): its switch, and while on the launch rows. Absent: no launch rows. */
   launch?: InboxLaunchSettings | null;
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
   useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
-  // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
+  // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
-    if (!launch?.enabled) return;
+    if (!launch) return;
     let live = true;
     inboxApi
       .launchSettingsRead()
@@ -557,6 +557,39 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
+  // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
+  const toggleEnabled = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      const next = (await inboxApi.launchEnabled(!launchState.enabled)).launch;
+      setLaunchState(next);
+      // Turned on: the full-permissions row as a launch would start now (the login shell, read once it was on).
+      if (next.enabled) {
+        void inboxApi
+          .launchSettingsRead()
+          .then((read) => setLaunchState((was) => (was?.enabled ? read.launch : was)))
+          .catch(() => {});
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  // Windows (`unsupported`): no switch; launch there is config.json only.
+  const enabledRow = launchState && !launchState.unsupported ? (
+    <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
+      <Row
+        k="Start agents from New message"
+        v="Claude Code and Pi"
+        sub="New message can start Claude Code or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
+        r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
+      />
+    </div>
+  ) : null;
   const toggleFull = async () => {
     if (!launchState || launchBusy) return;
     setLaunchBusy(true);
@@ -578,7 +611,7 @@ export function AgentsSettings({
           Start new sessions with full permissions: Claude Code you start from New message runs without asking (bypass mode); only a safety check, such as deleting files, still comes to you here. Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
           {launchState.follows && (
             <span className="block" data-launch-follows={launchState.follows}>
-              {launchState.follows === 'shell' ? "Follows your shell's setting until you change it." : 'Follows your Claude Code settings until you change it.'}
+              {launchState.follows === 'shell' ? "Uses your shell's setting until you change it." : 'Uses your Claude Code settings until you change it.'}
             </span>
           )}
           {launchState.full_permissions && launchState.bypass_off && (
@@ -726,6 +759,7 @@ export function AgentsSettings({
         </p>
       )}
       <div className="ib-agents">
+        {enabledRow}
         {shown.map((row) => (
           <AgentGroup
             key={row.id}

@@ -148,6 +148,8 @@ interface ClaudeSDKQueryOptions {
   model?: string;
   maxTurns: number;
   allowedTools: string[];
+  /** The built-in tools on offer; `[]` turns them all off. */
+  tools?: string[];
   cwd: string;
   abortController: AbortController;
   includePartialMessages: boolean;
@@ -160,6 +162,7 @@ interface ClaudeSDKQueryOptions {
   allowDangerouslySkipPermissions?: boolean;
   pathToClaudeCodeExecutable?: string;
   settingSources?: string[];
+  settings?: { disableAllHooks?: boolean };
   effort?: string;
   strictMcpConfig?: boolean;
   /** The whole env of the `claude` process (the SDK does not merge it with process.env). */
@@ -204,10 +207,11 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   async createSession(options: CreateSessionOptions): Promise<AISession> {
     return new ClaudeAgentSDKSession({
       ...this.baseConfig(options),
-      systemPrompt: buildSystemPrompt(options.context),
+      systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
       cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: null,
       forkFromSession: null,
+      oneShot: !!options.oneShot,
     });
   }
 
@@ -379,6 +383,8 @@ interface SessionConfig {
   resumeSessionId?: string;
   claudeExecutablePath?: string;
   settingSources?: string[];
+  /** A single judgment (`CreateSessionOptions.oneShot`). */
+  oneShot?: boolean;
 }
 
 class ClaudeAgentSDKSession extends BaseSession {
@@ -494,6 +500,22 @@ class ClaudeAgentSDKSession extends BaseSession {
 
     if (this.config.maxBudgetUsd) {
       opts.maxBudgetUsd = this.config.maxBudgetUsd;
+    }
+
+    // A single judgment: only this prompt, no tools, no MCP servers, no hooks and
+    // no session left behind. Settings load as they do for Ask AI: they can say
+    // where this person's Claude sends code (Bedrock, Vertex), and leaving them
+    // out would send a diff to whatever login it has instead.
+    if (this.config.oneShot) {
+      return {
+        ...opts,
+        systemPrompt: this.config.systemPrompt ?? "",
+        tools: [],
+        allowedTools: [],
+        settings: { disableAllHooks: true },
+        strictMcpConfig: true,
+        persistSession: false,
+      };
     }
 
     // After the first query resolves a real session ID, all subsequent

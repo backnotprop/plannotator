@@ -207,7 +207,7 @@ async function send(el: HTMLElement) {
   await settle();
 }
 
-test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; Draft and Saved sit under it in Send\'s row', async () => {
+test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; a computer saves silently, and the bin sits in Send\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)));
   const text = await write(el, 'Ship it.');
   await settle(1100);
@@ -215,14 +215,14 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
-  const stamp = el.querySelector('[data-draft-stamp]');
-  expect(stamp).not.toBeNull();
-  expect(el.querySelector('[data-reply-row]')?.contains(stamp)).toBe(true);
+  // The draft saved (below), and nothing says so in the box; Discard is the bin in the box's row (approval "inbox-reply-box", T6).
+  expect(el.querySelector('[data-draft-stamp]')).toBeNull();
+  expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside Send\'s row', async () => {
+test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside the box\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
   await settle();
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save
   expect(el.querySelector('[data-draft-stamp]')).toBeNull();
   await write(el, 'Ship it.');
   await settle(1100);
-  // One line, above the box: none in Send's row.
+  // One line, above the box: none in the box's row.
   expect(el.querySelectorAll('[data-draft-stamp]').length).toBe(1);
   expect(el.querySelector('[data-reply-row] [data-draft-stamp]')).toBeNull();
   expect(above!.querySelector('[data-draft-stamp] [data-draft-discard]')).not.toBeNull();
@@ -526,4 +526,19 @@ test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typ
   const tags = (replies()[0]!.body.tags as { session: string }[]).map((t) => t.session);
   expect(tags.length).toBe(8);
   expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
+});
+
+// inbox.css's phone rule `.pn-inbox:has(.ib-rpick) .ib-rbox` (no ring around the box under the list) runs in the window
+// keyed on a page mark (pageMarks.ts, build/inbox-page-marks.ts): it must stand exactly while the list is open.
+test.skipIf(!hasDom)('the open list marks its .pn-inbox (data-ib-rpick), and the mark goes with the list', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)), true);
+  await write(el, 'Use the old totals.');
+  const inbox = el.querySelector('.pn-inbox')!;
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+  await openList(el);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(true);
+  await only(el, 'ses_claude');
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
 });

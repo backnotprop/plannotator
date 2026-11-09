@@ -26,6 +26,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
+import { isShapeId, SHAPE_LIMITS } from "@plannotator/core/shape";
 import type { InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_DRAFT_BODY_MAX } from "./drafts";
 import { InboxError } from "./schema";
@@ -53,6 +54,12 @@ export interface InboxAskTurn {
   question: string;
   /** The text the person selected, when the question is about a passage. */
   passage?: string;
+  /**
+   * Where the words a Side quoted came from (packages/inbox/ask/sideSource.ts), one bracketed line per quote:
+   * the window sends it as the question's `contextPreamble` (useAIChat), which leads the message the agent gets.
+   * The transcript shows only `question`.
+   */
+  source?: string;
   answer?: string;
   answered_at?: string;
   /** The person stopped the answer. */
@@ -61,15 +68,15 @@ export interface InboxAskTurn {
   failure?: "gone" | "taken_over" | "failed";
   /**
    * Show me (code review in the Inbox, while Code review is on): the question
-   * asks the agent to draw (`question` is `inboxShowMeRequest`'s words), about
+   * asks the agent for a Shape (`question` is `inboxShowMeRequest`'s words), about
    * `show_me`'s review, file and lines. Absent: a plain Ask, words only.
    */
   kind?: "show_me";
   show_me?: InboxShowMeTarget;
-  /** Show me again: the round of the picture it asks to redraw (its request says so). A retry sends it again. */
-  again_of_round?: number;
-  /** The drawing the agent sent for this Show me (`plannotator review draw`): its id in the review's drawings. */
-  drawing?: string;
+  /** The board this Show me made. Never stored: the Inbox reads it from the boards when the window reads the conversation (`showMeShapes`). */
+  shape?: string;
+  /** Show me again: the board it asks to bring up to date (its request says so). A retry sends it again. */
+  again_shape?: string;
 }
 
 export interface InboxAskConversation {
@@ -224,28 +231,92 @@ export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: st
   );
 }
 
-/** A Show me's input, as the window sends it: `{ kind: "show_me", show_me, again_of_round? }`. */
-export interface InboxShowMeInput {
-  target: InboxShowMeTarget;
-  againOfRound?: number;
+/** One stored version of a board, as `showMeShapes` reads it. */
+export interface ShowMeBoardVersion {
+  n: number;
+  at: string;
+  through: string | null;
 }
 
-const SHOW_ME_KEYS = ["review", "file", "lines", "round", "words"];
+/**
+ * The board each Show me made, read from the boards themselves, so an agent
+ * stores a board the one way it always does and nothing here can disagree with
+ * the store. A turn looks at versions written between its asking and its end
+ * (its answer, or the next Show me), so other work on the thread's boards is
+ * never taken for it:
+ *  - Show me again: only the board it asked to bring up to date.
+ *  - A Show me: a new board through its review. Only when the turn has ended
+ *    with none does it take another board moved through that review (the agent
+ *    chose to update one), or a new one stored with no `--through`.
+ *  - A Show me from a board with no review behind it (`review` null): the first
+ *    new board of the thread written in the turn, whatever its `--through` (an
+ *    agent following `shape --help` adds one); once ended with none, a board it
+ *    moved with no `--through`.
+ *  - No end kept and not the turn running now (`running`): nothing. A session
+ *    that goes away with no words writes nothing at all, so the turn alone can't
+ *    say it is over.
+ * By turn id; a Show me with no board yet is absent.
+ */
+export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly ShowMeBoardVersion[] }[], running: string | null): Map<string, string> {
+  const out = new Map<string, string>();
+  const asked = turns.filter((turn) => turn.kind === "show_me");
+  asked.forEach((turn, at) => {
+    const from = Date.parse(turn.at);
+    const ended = Date.parse(turn.answered_at ?? "");
+    const hasEnd = Number.isFinite(ended);
+    const cut = turn.stopped === true || turn.failure !== undefined;
+    if (!hasEnd && (cut || turn.id !== running)) return;
+    const next = asked[at + 1];
+    const until = Math.min(hasEnd ? ended : Infinity, next ? Date.parse(next.at) : Infinity);
+    const firstOf = (fits: (board: string, version: ShowMeBoardVersion) => boolean): string | undefined => {
+      let first: { id: string; when: number } | null = null;
+      for (const board of boards) {
+        for (const version of board.versions) {
+          const when = Date.parse(version.at);
+          if (when >= from && when <= until && fits(board.id, version) && (!first || when < first.when)) first = { id: board.id, when };
+        }
+      }
+      return first?.id;
+    };
+    const review = turn.show_me?.review ?? null;
+    const made =
+      turn.again_shape !== undefined
+        ? firstOf((board) => board === turn.again_shape)
+        : review === null
+          ? // No review behind the board: the thread's first new board in the turn, whatever its `--through` (agents
+            // follow `shape --help` and add one); once ended with none, a board moved with no `--through`.
+            (firstOf((_, version) => version.n === 1) ?? (hasEnd && !cut ? firstOf((_, version) => version.through === null) : undefined))
+          : (firstOf((_, version) => version.n === 1 && version.through === review) ??
+            (hasEnd && !cut ? firstOf((_, version) => version.through === review || (version.n === 1 && version.through === null)) : undefined));
+    if (made) out.set(turn.id, made);
+  });
+  return out;
+}
+
+/** A Show me's input, as the window sends it: `{ kind: "show_me", show_me, again_shape? }`. */
+export interface InboxShowMeInput {
+  target: InboxShowMeTarget;
+  againShape?: string;
+}
+
+const SHOW_ME_KEYS = ["review", "file", "lines", "round", "words", "part"];
+const SHOW_ME_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
 
 /**
- * The shape of a Show me's input (`kind`, `show_me`, `again_of_round`); null
+ * The shape of a Show me's input (`kind`, `show_me`, `again_shape`); null
  * for a plain Ask. What it points at is checked by the route, which knows the
  * thread: here only that each field is the right kind of value.
  */
-export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown; again_of_round?: unknown }): InboxShowMeInput | null {
-  if (input.kind === undefined && input.show_me === undefined && input.again_of_round === undefined) return null;
+export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown; again_shape?: unknown }): InboxShowMeInput | null {
+  if (input.kind === undefined && input.show_me === undefined && input.again_shape === undefined) return null;
   const bad = (message: string, field: string) => new InboxError("validation_error", message, { field });
   if (input.kind !== "show_me") throw bad('kind: "show_me", or none for a plain question.', "kind");
   const raw = input.show_me;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw bad("show_me: { review, file, lines, round, words? }.", "show_me");
   const s = raw as Record<string, unknown>;
-  for (const key of Object.keys(s)) if (!SHOW_ME_KEYS.includes(key)) throw bad(`show_me.${key}: not a field (review, file, lines, round, words).`, "show_me");
-  if (!isInboxId("msg", s.review)) throw bad("show_me.review: the review's message id.", "show_me");
+  for (const key of Object.keys(s)) if (!SHOW_ME_KEYS.includes(key)) throw bad(`show_me.${key}: not a field (review, file, lines, round, words, part).`, "show_me");
+  const fromBoard = s.part !== undefined;
+  if (!isInboxId("msg", s.review) && !(fromBoard && (s.review === null || s.review === undefined))) throw bad("show_me.review: the review's message id.", "show_me");
   const file = s.file === null || s.file === undefined ? null : s.file;
   if (file !== null && (typeof file !== "string" || file.trim() === "" || file.length > 1000)) throw bad("show_me.file: a file of the review, or null for the Overview.", "show_me");
   const lines = s.lines === null || s.lines === undefined ? null : s.lines;
@@ -255,18 +326,49 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   }
   if ((file === null) !== (lines === null)) throw bad("show_me.file and show_me.lines go together (both null: the Overview).", "show_me");
   if (s.words !== undefined && (typeof s.words !== "string" || s.words.length > INBOX_ASK_TEXT_MAX)) throw bad(`show_me.words: at most ${INBOX_ASK_TEXT_MAX} characters.`, "show_me");
-  const again = input.again_of_round;
-  if (again !== undefined && (typeof again !== "number" || !Number.isSafeInteger(again) || again < 1)) throw bad("again_of_round: the round the drawing was asked in.", "again_of_round");
+  const rawPart = s.part as Record<string, unknown> | undefined;
+  if (rawPart !== undefined) {
+    // Counted in characters (code points), as the window cuts a part's name: an emoji is one, not two.
+    const text = (value: unknown, max: number) => typeof value === "string" && value.trim() !== "" && Array.from(value).length <= max;
+    if (!rawPart || typeof rawPart !== "object" || !isShapeId(rawPart.board) || !text(rawPart.name, 600) || (rawPart.code !== undefined && !text(rawPart.code, 1100)) || file !== null) {
+      throw bad("show_me.part: { board, name, code? }, with file and lines null.", "show_me");
+    }
+    if (rawPart.parts !== undefined && (!Array.isArray(rawPart.parts) || rawPart.parts.length < 2 || rawPart.parts.length > 40 || !rawPart.parts.every((name) => text(name, 600)))) {
+      throw bad("show_me.part.parts: the names of the 2 to 40 parts a box covered.", "show_me");
+    }
+    if (rawPart.picture !== undefined && (typeof rawPart.picture !== "string" || rawPart.picture.length > SHAPE_LIMITS.notePicture || !SHOW_ME_PICTURE_RE.test(rawPart.picture))) {
+      throw bad("show_me.part.picture: the box's picture, a PNG data: URL within the limit.", "show_me");
+    }
+  }
+  const again = input.again_shape;
+  if (again !== undefined && (typeof again !== "string" || !isShapeId(again))) throw bad("again_shape: the id of the board to bring up to date.", "again_shape");
   const words = typeof s.words === "string" && s.words.trim() ? s.words : undefined;
   return {
-    target: { review: s.review as string, file: file as string | null, lines: lines as [number, number] | null, round: typeof s.round === "number" ? s.round : 1, ...(words ? { words } : {}) },
-    ...(again !== undefined ? { againOfRound: again as number } : {}),
+    target: {
+      review: isInboxId("msg", s.review) ? s.review : null,
+      file: file as string | null,
+      lines: lines as [number, number] | null,
+      round: typeof s.round === "number" ? s.round : 1,
+      ...(words ? { words } : {}),
+      ...(rawPart
+        ? {
+            part: {
+              board: rawPart.board as string,
+              name: rawPart.name as string,
+              ...(rawPart.code !== undefined ? { code: rawPart.code as string } : {}),
+              ...(rawPart.parts !== undefined ? { parts: rawPart.parts as string[] } : {}),
+              ...(rawPart.picture !== undefined ? { picture: rawPart.picture as string } : {}),
+            },
+          }
+        : {}),
+    },
+    ...(again !== undefined ? { againShape: again as string } : {}),
   };
 }
 
 /** The checks on an ask's input, before anything is written. */
-export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknown; passage?: unknown }): { id: string; question: string; passage?: string } {
-  const { turn_id: id, question, passage } = input;
+export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknown; passage?: unknown; source?: unknown }): { id: string; question: string; passage?: string; source?: string } {
+  const { turn_id: id, question, passage, source } = input;
   if (typeof id !== "string" || !TURN_ID.test(id)) {
     throw new InboxError("validation_error", "turn_id: 8 to 80 letters, digits, dashes or underscores, made by the window.", { field: "turn_id" });
   }
@@ -276,7 +378,10 @@ export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknow
   if (passage !== undefined && (typeof passage !== "string" || passage.length > INBOX_ASK_TEXT_MAX)) {
     throw new InboxError("validation_error", `passage: at most ${INBOX_ASK_TEXT_MAX} characters.`, { field: "passage" });
   }
-  return { id, question, ...(passage ? { passage } : {}) };
+  if (source !== undefined && (typeof source !== "string" || source.length > INBOX_ASK_TEXT_MAX)) {
+    throw new InboxError("validation_error", `source: at most ${INBOX_ASK_TEXT_MAX} characters.`, { field: "source" });
+  }
+  return { id, question, ...(passage ? { passage } : {}), ...(source ? { source } : {}) };
 }
 
 /** The saved turn with this id, when there is one: what a retried POST answers. */
@@ -318,7 +423,7 @@ function cutToFit(answer: string, room: number): string {
  * answer takes only the room the file has left, and says so when that cuts it.
  * A file that cannot be read throws, as every read here does.
  */
-export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
+export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage" | "source">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
   const conversation = readInboxAsk(inboxDirPath, threadId);
   const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
   if (!conversation || !turn) return null;

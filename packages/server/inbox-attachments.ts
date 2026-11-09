@@ -37,14 +37,15 @@ import { htmlAssetPathRefused, isWithinDirectory } from "@plannotator/shared/htm
 import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, htmlAssetHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
-  checkCurrent,
+  checkCurrentAsync,
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
 import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAsync } from "@plannotator/shared/inbox/message-images";
-import { inboxImageResponse } from "./inbox-message-images";
+import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
+import { contentDisposition, inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
@@ -70,19 +71,24 @@ const BYTE_GUARD_HEADERS = {
   "Cross-Origin-Resource-Policy": "same-origin",
 };
 
-/** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
-export function contentDisposition(type: "inline" | "attachment", name: string): string {
-  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
-  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
-}
-
 /**
  * A file handle as a response body, read in 1 MiB chunks: the Range routes'
  * stream (inbox-byte-range.ts), so the handle is closed at the end, on a
  * cancel (after any read in flight), and by the idle watchdog when a reader
  * vanishes.
  */
+/** A file's bytes from its start, by position (the head read already moved nothing), at most `size`. */
+async function readWhole(handle: FileHandle, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = new Uint8Array(size);
+  let total = 0;
+  while (total < size) {
+    const { bytesRead } = await handle.read(buffer, total, size - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total === size ? buffer : buffer.subarray(0, total);
+}
+
 function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8Array> {
   return handleRangeStream(handle, 0, undefined, { idleMs });
 }
@@ -376,7 +382,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       }
       const version = versionOf(url);
       if (version === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
         // The file at its own folder's asset URL: relative assets, #anchors and frames
         // resolve natively, with the document CSP. A name the asset route refuses
@@ -480,7 +486,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (route === "image" && kind !== "image") throw new InboxError("attachment_not_image", `${attachment.name} is not an image; download it instead.`);
       // An image a message shows: refused by its size before the image route hashes it whole.
       if ("ref" in attachment && versionOf(url) === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (check.ok && check.stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
           return json({ error: `${attachment.name} is larger than 10 MB; open the version it sent.`, code: "image_too_large" }, 413);
         }
@@ -535,6 +541,28 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (req.method === "HEAD") {
         await opened.handle.close().catch(() => {});
         return new Response(null, { headers: { ...headers, "Content-Length": String(opened.size) } });
+      }
+      // Drawn small (a tile's icon, the gallery): a smaller copy of a wide picture (inbox-image-scale.ts).
+      const to = route === "image" ? inboxImageWidth(url) : null;
+      const width = Number(extra["X-Image-Width"]) || undefined;
+      if (etag && inboxImageScales(contentType, width, to, opened.size)) {
+        const scaledTag = scaledEtag(etag, to);
+        if (req.headers.get("if-none-match") === scaledTag) {
+          await opened.handle.close().catch(() => {});
+          return new Response(null, { status: 304, headers: { ...headers, ETag: scaledTag } });
+        }
+        let bytes: Uint8Array<ArrayBuffer>;
+        try {
+          bytes = await readWhole(opened.handle, opened.size);
+        } finally {
+          await opened.handle.close().catch(() => {});
+        }
+        const scaled = await scaleInboxImage(bytes, contentType, to, etag);
+        const sized = scaled
+          ? { ...headers, ETag: scaledTag, "Content-Type": scaled.contentType, "X-Image-Width": String(scaled.width), "X-Image-Height": String(scaled.height) }
+          : headers;
+        const body = scaled ? scaled.bytes : bytes;
+        return new Response(body, { headers: { ...sized, "Content-Length": String(body.byteLength) } });
       }
       if (route === "image" && etag && req.headers.get("if-none-match") === etag) {
         await opened.handle.close().catch(() => {});

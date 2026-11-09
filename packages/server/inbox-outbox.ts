@@ -44,6 +44,8 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
+/** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
+export const MACHINE_WINDOW_HEADER = "X-Plannotator-Window";
 /** A write the owner answered 5xx this many times in a row is parked (not retried again). */
 export const OUTBOX_MAX_SERVER_ERRORS = 5;
 /** How long a settled entry is kept, so a retried Send under its key still answers it (rule 1). */
@@ -58,8 +60,9 @@ export const OUTBOX_MAX_BODY_BYTES = 256 * 1024;
  * (it may have been applied). `delivered`: the owner answered 2xx.
  * `refused`: the owner answered 4xx. `parked`: repeated 5xx, given up.
  * `dropped`: the link went (Unlink, or the other machine removed this one).
+ * `cancelled`: the person cancelled it before it ever left (a launch held for a machine that is asleep).
  */
-export type OutboxState = "queued" | "sending" | "delivered" | "refused" | "parked" | "dropped";
+export type OutboxState = "queued" | "sending" | "delivered" | "refused" | "parked" | "dropped" | "cancelled";
 
 export type OutboxNoticeKind = "refused" | "not_delivered" | "may_have_been_delivered";
 
@@ -92,6 +95,11 @@ export interface OutboxEntry {
   thread?: string | null;
   /** The machine's name, kept when its link went (dropMachine), so what was not sent can still say where it was going. */
   machine_name?: string | null;
+  /**
+   * A press in this Inbox's window made it (the forward checked the Origin and page session). Sent on as
+   * `X-Plannotator-Window`: the other machine answers a permission prompt, or starts, stops or trusts an agent, only for one.
+   */
+  window?: true;
 }
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
@@ -182,8 +190,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST uploads/reuse": "local",
   "POST uploads": "file",
   "POST markups": "file",
+  // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
+  // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
+  "POST launch/:id/stop": "set",
+  "POST launch/:id/retry": "set",
+  "POST launch/:id/trust": "set",
+  "POST launch/:id/delete": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
+  "POST update": "set",
 };
 
 const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
@@ -306,7 +322,7 @@ export class InboxOutbox {
    * whatever state it is in, and queues nothing. The same key on another
    * route or machine is refused, as the door refuses it.
    */
-  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null): { entry: OutboxEntry; fresh: boolean } {
+  submit(machine: string, route: string, body: Record<string, unknown>, thread: string | null = null, window = false): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -338,8 +354,19 @@ export class InboxOutbox {
       notice: null,
       dismissed: false,
       thread,
+      ...(window ? { window: true as const } : {}),
     });
     return { entry, fresh: true };
+  }
+
+  /**
+   * The person cancels a write that waits and never left (rule 10: one that left may have landed, so it stays). The
+   * sender loop sends nothing it finds cancelled. Answers the entry as it is now; null when there is no such key.
+   */
+  cancel(key: string): OutboxEntry | null {
+    const entry = this.entries.get(key);
+    if (!entry || entry.state !== "queued" || entry.left) return entry ?? null;
+    return this.save({ ...entry, state: "cancelled", settled_at: this.now().toISOString() });
   }
 
   /** Resolves when the entry settles, or after `ms`, whichever is first. */

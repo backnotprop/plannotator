@@ -439,9 +439,11 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await shot(page, '10-replied');
   expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(1);
   expect(fake.starts()).toHaveLength(1);
-  // The login shell was read off the Send's wait: ahead when the composer picked "Start Claude Code", by the start
-  // for its own env, and by the respawn for its own (either may start Claude's supervisor). Never for a status read or the stop.
-  expect(fake.logins()).toBe(3);
+  // The login shell was read off the Send's wait: once ahead the first time New message opened with launch on (the
+  // test above; since 0.29 that read replaces the one at Inbox start, warmLogin in inbox-launch.ts), again when the
+  // composer picked "Start Claude Code", by the start for its own env, and by the respawn for its own (either may
+  // start Claude's supervisor). Never for a status read or the stop.
+  expect(fake.logins()).toBe(4);
   // Delivered once: one answer to the reply, and the reply was handed over once.
   const thread = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string; author: { kind: string }; reply_to?: string | null; delivery?: unknown }[] } };
   const reply = thread.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;

@@ -32,7 +32,7 @@ import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseIn
 import { InboxStore } from '../../packages/shared/inbox/store';
 import { INBOX_TIDY_INSTRUCTION } from '../../packages/core/inbox-tidy';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -203,6 +203,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(
     join(dataDir, 'config.json'),
     JSON.stringify({
+      // Written whole: launch stays off, or the Board runs `claude --version` on the runner's PATH (tests/e2e/agent-cli-stubs.ts).
+      ...E2E_LAUNCH_OFF,
       inboxTour: { version: 2, seen_at: new Date(now).toISOString(), skipped_at: new Date(now).toISOString() },
       inboxNotifications: { dismissed: true },
       inboxSound: { dialogShownFor: 'tidy-e2e' },
@@ -210,6 +212,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       inboxBoardIntro: { shownAt: new Date(now).toISOString() },
       // Due on a used Inbox, and its check would run the `codex` on this PATH.
       inboxVoiceIntro: { shownAt: new Date(now).toISOString() },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
       inboxAgentNotes: { offered: true },
     }),
   );

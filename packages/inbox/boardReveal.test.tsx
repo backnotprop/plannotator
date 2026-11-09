@@ -11,6 +11,8 @@
  * sent again; the offer opening once the settings say the Board is on (another window turned it on, finding 6); a
  * failed save leaving the row up (App's own `turnOnFromReveal`, revealTurnOn.ts, not a copy of it: finding 3).
  * The Checklist's dialog (steps/ChecklistIntro.tsx): its two buttons and Escape doing anything but their one thing.
+ * Idle (idleClock.ts): the page going idle with a thread kept open beside the list not being the Board's moment, or
+ * the Checklist's on a long agent run; being either's with a blocker present, or the Checklist's on a short thread.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -148,6 +150,8 @@ interface State {
   clear: boolean;
   held: boolean;
   firstRun: boolean;
+  /** The page is idle (App: idleClock.ts). */
+  idle?: boolean;
 }
 
 const BASE: State = { due: true, blocked: false, rows: ROWS, toast: false, thread: null, clear: true, held: false, firstRun: false };
@@ -177,6 +181,7 @@ function Harness({ state }: { state: State }) {
     clear: state.clear,
     place: state.thread ?? '',
     heldBack: () => state.held,
+    idle: state.idle === true,
     on,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
@@ -386,9 +391,9 @@ describe.skipIf(!hasDom)('the calm moment', () => {
 describe('the load latch (App: revealArmed)', () => {
   test('only reveal.next is armed; Snooze only while it is next', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false, ahead: [] });
-    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
-    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
+    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false, ahead: [], aside: [] });
+    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [], aside: [] });
+    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
   });
 
   test('an ahead offer (List view) is latched beside next, so it can go at its own moment (approval "inbox-one-time-dialogs")', async () => {
@@ -400,9 +405,9 @@ describe('the load latch (App: revealArmed)', () => {
 
   test('an older Inbox (no reveal in settings): its Snooze rule alone, never the Board', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
-    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
-    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false, ahead: [] });
+    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [], aside: [] });
+    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
+    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
   });
 });
 
@@ -474,5 +479,129 @@ describe.skipIf(!hasDom)('the Checklist dialog (ChecklistIntro): an offer', () =
     expect(calls).toEqual(['close', 'close', 'close']);
     act(() => on.click());
     expect(calls).toEqual(['close', 'close', 'close', 'on']);
+  });
+});
+
+/** The Checklist's reveal as App wires it (`useStepsReveal`), with the page's idle. */
+function Steps({ state }: { state: State }) {
+  const r = reveal.useStepsReveal({
+    due: state.due,
+    listLoaded: true,
+    firstRun: false,
+    blocked: state.blocked,
+    rows: state.rows,
+    toast: false,
+    thread: state.thread,
+    clear: true,
+    place: state.thread ?? '',
+    heldBack: () => state.held,
+    idle: state.idle === true,
+    on: false,
+    onStepsOn: () => {},
+  });
+  return r.stage === 'open' ? <div data-steps-offer="" /> : null;
+}
+
+/** A thread as the window loads it (App's `noteRevealThread`): `count` messages from one agent session. */
+function loadedRun(threadId: string, count: number) {
+  const messages = Array.from({ length: count }, () => ({ author: { kind: 'agent', host: 'claude-code', session: 's1' }, body: 'step done' }));
+  reveal.noteRevealThread({ thread_id: threadId, messages } as unknown as Parameters<typeof reveal.noteRevealThread>[0]);
+}
+
+describe.skipIf(!hasDom)('the page idle, with a thread kept open beside the list', () => {
+  test('the Board: idle is its moment; never with a blocker present (under five rows, something open)', async () => {
+    const set = mount({ ...BASE, thread: 'msg_a' });
+    await wait(TIMES.pageAgeMs + 20);
+    set({ thread: 'msg_b' });
+    await wait(TIMES.settledMs + 120);
+    expect(claims()).toHaveLength(0);
+    set({ idle: true });
+    await until(() => dialog() !== null);
+    expect(claims()).toHaveLength(1);
+    for (const blocker of [{ rows: ROWS.slice(0, 4) }, { held: true }]) {
+      act(() => root?.unmount());
+      host?.remove();
+      posts = [];
+      stamped = false;
+      const again = mount({ ...BASE, ...blocker, thread: 'msg_a' });
+      await wait(TIMES.pageAgeMs + 20);
+      again({ idle: true });
+      await wait(TIMES.settledMs + 200);
+      expect(claims()).toHaveLength(0);
+    }
+  });
+
+  test('the Checklist: idle on a long agent run is its moment; on a short thread it is not', async () => {
+    loadedRun('msg_a', 5);
+    loadedRun('msg_b', 4);
+    for (const [thread, claimed] of [['msg_b', 0], ['msg_a', 1]] as const) {
+      posts = [];
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      let state: State = { ...BASE, thread };
+      act(() => {
+        root = createRoot(host!);
+        root.render(<Steps state={state} />);
+      });
+      await wait(TIMES.pageAgeMs + 20);
+      state = { ...state, idle: true };
+      act(() => root!.render(<Steps state={state} />));
+      if (claimed) await until(() => document.querySelector('[data-steps-offer]') !== null);
+      else await wait(TIMES.settledMs + 200);
+      expect(claims()).toHaveLength(claimed);
+      act(() => root?.unmount());
+      host.remove();
+    }
+  });
+});
+
+/**
+ * The star ask's card (approval "star-ask") in the same load as the line's reveals, as App wires them: App's
+ * `revealBlocked` reads `oneTimeDialogShownThisLoad()`, so once the star card is up, Snooze, the Board and the
+ * Checklist hold back for the rest of the load (the star ask stamps nothing of the line, so this is the only thing that
+ * keeps two one-time dialogs off one load).
+ */
+function StarThenBoard({ state }: { state: State }) {
+  const common = { listLoaded: true, firstRun: false, rows: state.rows, toast: false, thread: state.thread, clear: true, place: state.thread ?? '', heldBack: () => false };
+  const star = reveal.useStarReveal({ ...common, due: true, blocked: false });
+  const board = reveal.useBoardReveal({ ...common, due: true, blocked: reveal.oneTimeDialogShownThisLoad(), on: false, onBoardOn: () => {} });
+  return (
+    <>
+      {star.stage === 'open' && <div data-star-card="" />}
+      {board.stage === 'open' && <div data-board-offer="" />}
+    </>
+  );
+}
+
+describe.skipIf(!hasDom)('the star card holds the line’s reveals back for the load', () => {
+  test('once the star card opens, the Board reveal never claims on this load, even at its own moment', async () => {
+    expect(reveal.oneTimeDialogShownThisLoad()).toBe(false);
+    // Too few rows for the Board's moment: the first calm moment is the star ask's alone.
+    let state: State = { ...BASE, rows: ROWS.slice(0, 2) };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(<StarThenBoard state={state} />);
+    });
+    const set = (next: Partial<State>) => {
+      state = { ...state, ...next };
+      act(() => root!.render(<StarThenBoard state={state} />));
+    };
+    await wait(TIMES.pageAgeMs + 20);
+    set({ thread: 'msg_a' });
+    await wait(TIMES.readMs + 20);
+    set({ thread: null });
+    await until(() => document.querySelector('[data-star-card]') !== null);
+    expect(claims().map((c) => (c.body as { id: string }).id)).toEqual(['star']);
+    expect(reveal.oneTimeDialogShownThisLoad()).toBe(true);
+    // Later in the load the Board's moment comes (five rows in two projects, a thread read and left): no claim.
+    set({ rows: ROWS });
+    set({ thread: 'msg_b' });
+    await wait(TIMES.readMs + 20);
+    set({ thread: null });
+    await wait(TIMES.settledMs + 200);
+    expect(claims().map((c) => (c.body as { id: string }).id)).toEqual(['star']);
+    expect(document.querySelector('[data-board-offer]')).toBeNull();
   });
 });

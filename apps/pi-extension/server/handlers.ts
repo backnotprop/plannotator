@@ -10,13 +10,15 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../generated/favicon.ts";
+import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
 import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
+import { starAskRoute, starAskService, type StarAskSurface } from "../generated/star-ask.ts";
+import { piPingVersion } from "./daily-ping.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import { isSameOriginRequest } from "./request-origin-guard.ts";
 import {
@@ -272,19 +274,15 @@ export { readDraftGenerationFromUrl };
 /**
  * Serve the app favicon. Mirrors packages/server/shared-handlers.ts
  * handleFavicon() exactly: the persisted style decides the payload, the response
- * declares its real type, and it is not cached because one URL now has two
- * possible bodies. See that file for the full reasoning.
+ * declares its real type, and it is not cached because one URL has three
+ * possible bodies, for `/favicon.ico` and `/favicon.png`. See that file for
+ * the full reasoning.
  */
-export function handleFavicon(res: Res): void {
-	if (getServerConfig(null).favicon === "classic") {
-		send(res, Buffer.from(CLASSIC_FAVICON_SVG, "utf-8"), 200, {
-			"Content-Type": "image/svg+xml",
-			"Cache-Control": "no-cache",
-		});
-		return;
-	}
-	send(res, Buffer.from(FAVICON_PNG_BYTES), 200, {
-		"Content-Type": "image/png",
+export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
+	const style = getServerConfig(null).favicon;
+	const { body, contentType } = pathname === "/favicon.ico" ? faviconIcoBody(style) : faviconBody(style);
+	send(res, Buffer.from(body), 200, {
+		"Content-Type": contentType,
 		"Cache-Control": "no-cache",
 	});
 }
@@ -399,4 +397,25 @@ export async function handleSaveNotesRequest(
 		return;
 	}
 	json(res, { ok: true, results });
+}
+
+/**
+ * The "Star the repo" ask on the done screen (generated/star-ask.ts, the Bun servers' `handleStarAsk`):
+ * `POST /api/star-ask/claim`, `/shown` and `/answer`. False for any other path. A release is the published package
+ * (release CI's `release.json`, as for the daily ping). In remote mode it never shows: gh there is the server
+ * machine's login, not the person's own.
+ */
+export async function handleStarAskRequest(
+	req: IncomingMessage,
+	res: import("node:http").ServerResponse,
+	url: URL,
+	surface: StarAskSurface,
+	remote: boolean,
+): Promise<boolean> {
+	if (!url.pathname.startsWith("/api/star-ask/")) return false;
+	const body = req.method === "POST" ? await parseBody(req) : undefined;
+	const answered = await starAskRoute(starAskService(() => piPingVersion() !== undefined), surface, req.method ?? "GET", url.pathname, body, { remote });
+	if (!answered) return false;
+	json(res, answered.body, answered.status);
+	return true;
 }

@@ -68,6 +68,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -109,6 +118,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -271,6 +289,15 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       # Only for the embedded-file probe in "Embedded pages" below, compiled on
       # this runner with the Bun the release binaries are built with.
@@ -947,6 +974,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -1032,11 +1068,14 @@ jobs:
             esac
           done
 
+          # Like real curl, the .sha256 goes to the -o file when one is given
+          # (install.sh downloads it to a file since #2788).
           if [[ "$url" == *.sha256 ]]; then
+            dest="${out:-/dev/stdout}"
             if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$ARTIFACT"
+              sha256sum "$ARTIFACT" > "$dest"
             else
-              shasum -a 256 "$ARTIFACT"
+              shasum -a 256 "$ARTIFACT" > "$dest"
             fi
             exit 0
           fi
@@ -1220,6 +1259,7 @@ jobs:
             npm-packages/plannotator-opencode.tgz
             npm-packages/plannotator-pi-extension.tgz
             npm-packages/plannotator-dsh.tgz
+            npm-packages/plannotator-cline.tgz
           sbom-path: release-sbom/${{ needs.release-security.outputs.sbom-name }}
 
   # The binaries and the npm packages pin the guides.show viewer their own job
@@ -1341,6 +1381,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -1375,6 +1424,7 @@ jobs:
           bun run build:opencode
           bun run --cwd apps/pi-extension build
           bun run build:dsh
+          bun run build:cline
 
       # The daily ping counts only a build release CI marks (packages/shared/daily-ping.ts):
       # a local `bun run build:opencode` or Pi `bun pm pack` has no mark and is a dev build. The binaries get
@@ -1401,6 +1451,10 @@ jobs:
         working-directory: apps/dsh-plugin
         run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-dsh.tgz"
 
+      - name: Pack @plannotator/cline
+        working-directory: apps/cline-plugin
+        run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-cline.tgz"
+
       - name: Upload npm package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1426,6 +1480,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -1455,6 +1518,7 @@ jobs:
 
       - name: Generate SBOM and enforce Grype policy
         env:
+          GH_TOKEN: ${{ github.token }}
           PLANNOTATOR_RELEASE_SUBJECTS_DIR: ${{ github.workspace }}/release-subjects
           PLANNOTATOR_RELEASE_SECURITY_DIR: ${{ runner.temp }}/plannotator-release-security
         run: scripts/release-security/run-release-security.sh
@@ -1536,6 +1600,10 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-dsh.tgz --ignore-scripts --provenance --access public
+
+      - name: Publish @plannotator/cline
+        timeout-minutes: 10
+        run: npm publish ./npm-packages/plannotator-cline.tgz --ignore-scripts --provenance --access public
 
   # The merge script merges a PR only when every `Full CI (all green)` check on
   # its head succeeded. A skipped job counts as passed elsewhere, so this job

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo } from "react";
+import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -159,6 +159,30 @@ const CodeFileLink: React.FC<{
 };
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
+/**
+ * A code span at the start of `text`, as CommonMark reads one: a run of N
+ * backticks closed by the next run of exactly N, so a span can hold shorter
+ * runs (``use `x` here``). One space comes off each side when both sides have
+ * one and the content is not all spaces, so `` `x` `` shows `x` in backticks.
+ * Null when no run of the same length closes it.
+ */
+export function matchCodeSpan(text: string): { content: string; length: number } | null {
+  const open = /^`+/.exec(text);
+  if (!open) return null;
+  const width = open[0].length;
+  const runs = /`+/g;
+  runs.lastIndex = width;
+  for (let run = runs.exec(text); run; run = runs.exec(text)) {
+    if (run[0].length !== width) continue;
+    let content = text.slice(width, run.index);
+    if (content.length > 1 && content[0] === ' ' && content[content.length - 1] === ' ' && content.trim() !== '') {
+      content = content.slice(1, -1);
+    }
+    return content ? { content, length: run.index + width } : null;
+  }
+  return null;
+}
+
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
   return url;
@@ -381,10 +405,12 @@ function emitPlainTextWithBareUrls(
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
+  /** The original's width when `src` is a smaller copy (`ImageResolution.width`). */
+  width?: number;
   /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, writtenSrc, onImageClick }) => {
+}> = ({ src, alt, width, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = failedSrc === src;
   return (
@@ -398,12 +424,15 @@ const HostResolvedImage: React.FC<{
         key="image"
         src={src}
         alt={failed ? '' : alt}
+        width={width}
         data-image-src={writtenSrc}
         data-image-failed={failed ? '' : undefined}
         hidden={failed || undefined}
         aria-hidden={failed || undefined}
         className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
         loading="lazy"
+        // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
+        decoding={width ? 'async' : undefined}
         onError={() => setFailedSrc(src)}
         onClick={(e) => {
           e.stopPropagation();
@@ -442,6 +471,45 @@ export function getDigitHexIssueRefs(): boolean {
 }
 
 /**
+ * Whether, and on which host, an `owner/repo#123` ref links when the caller
+ * names no repo of its own (no `githubRepo`). `false` (the default): such refs
+ * stay plain text, exactly as before. `true`: they link on github.com
+ * (`forgeRefLinks`' rule for a repo with no host). `{ host }`: they link on
+ * that host by the same rule (GitLab's `/-/issues/N`; a host `forgeRefLinks`
+ * cannot form a link for leaves them plain). A caller that names its repo is
+ * unchanged either way (that repo's forge host decides). The Plannotator
+ * Inbox turns it on through `configurePlannotatorUI({ crossRepoRefsWithoutRepo })`
+ * with the host most of its projects use: a thread whose project has no git
+ * origin still links the refs agents are told to write. Changing it re-renders
+ * every mounted `InlineMarkdown`.
+ */
+export type CrossRepoRefsWithoutRepo = boolean | { host: string };
+let crossRepoDefault: { host?: string } | null = null;
+const crossRepoListeners = new Set<() => void>();
+
+export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
+  const next = on === false ? null : on === true ? {} : { host: on.host };
+  if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
+  crossRepoDefault = next;
+  for (const listener of crossRepoListeners) listener();
+}
+
+export function resetCrossRepoRefsWithoutRepo(): void {
+  setCrossRepoRefsWithoutRepo(false);
+}
+
+export function getCrossRepoRefsWithoutRepo(): CrossRepoRefsWithoutRepo {
+  if (!crossRepoDefault) return false;
+  return crossRepoDefault.host === undefined ? true : { host: crossRepoDefault.host };
+}
+
+function subscribeCrossRepoDefault(listener: () => void): () => void {
+  crossRepoListeners.add(listener);
+  return () => crossRepoListeners.delete(listener);
+}
+const crossRepoDefaultSnapshot = () => crossRepoDefault;
+
+/**
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
  * [label](url) / ![alt](src) / <autolink>, bare https:// URLs, [[wiki-links]],
@@ -476,17 +544,25 @@ export const InlineMarkdown: React.FC<{
   githubRepo?: string;
   /** Host of that repo's git remote; picks the forge refs link to. Absent means github.com. */
   repoHost?: string;
-}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
+  /**
+   * The text is a link's label: code, emphasis, strikethrough, escapes, math
+   * and images render, and nothing that is itself a link does, since a link
+   * cannot hold another.
+   */
+  linkLabel?: boolean;
+}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
-  // Cross-repo `owner/repo#123` refs: only for a caller that names its
-  // project's repo (it knows the forge); otherwise they stay plain text, never
-  // a guessed github.com link. With a code-file handler, an `owner/repo` that
-  // is a code path not known to be missing stays the file (`src/app.js#12`).
-  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  // Cross-repo `owner/repo#123` refs: for a caller that names its project's
+  // repo (it knows the forge); otherwise they stay plain text, unless the
+  // host opted in (`crossRepoRefsWithoutRepo`: the host it names, else
+  // github.com). With a code-file handler, an `owner/repo`
+  // that is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoFallback = useSyncExternalStore(subscribeCrossRepoDefault, crossRepoDefaultSnapshot, crossRepoDefaultSnapshot);
+  const crossRepoProject = githubRepo ? { host: repoHost } : crossRepoFallback;
   const crossRepoAccept = (ref: CrossRepoRef): boolean =>
     !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];
@@ -572,7 +648,7 @@ export const InlineMarkdown: React.FC<{
     // renders the period outside the link. Closing brackets are kept when
     // they balance an earlier opener inside the URL (e.g. Wikipedia's
     // https://…/Function_(mathematics) keeps its trailing paren).
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       const bareMatch = remaining.match(/^https?:\/\/[^\s<>"']+/);
       if (bareMatch) {
         const url = trimUrlTail(bareMatch[0]);
@@ -600,7 +676,7 @@ export const InlineMarkdown: React.FC<{
     // project's forge host. Read before file-path detection, so
     // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
     // file, see crossRepoAccept); `docs/guide.md#2` stays a path.
-    const crossRepoRef = crossRepoProject ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
+    const crossRepoRef = crossRepoProject && !linkLabel ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
     if (crossRepoRef && crossRepoAccept(crossRepoRef)) {
       parts.push(
         crossRepoRef.href ? (
@@ -624,7 +700,7 @@ export const InlineMarkdown: React.FC<{
 
     // Autolinks: <https://url> or <email@domain.com>
     match = remaining.match(/^<(https?:\/\/[^>]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const url = match[1];
       parts.push(
         <a
@@ -642,7 +718,7 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const email = match[1];
       parts.push(
         <a
@@ -788,9 +864,18 @@ export const InlineMarkdown: React.FC<{
     }
 
     // Inline code: `code` — when the content is a code file path, render as clickable
-    match = remaining.match(/^`([^`]+)`/);
-    if (match) {
-      const codeContent = match[1];
+    const codeSpan = remaining[0] === '`' ? matchCodeSpan(remaining) : null;
+    if (remaining[0] === '`' && !codeSpan) {
+      // A run with no closing run of the same length is literal, all of it: its
+      // tail must not open a shorter span with a later backtick.
+      const run = remaining.match(/^`+/)![0];
+      parts.push(run);
+      remaining = remaining.slice(run.length);
+      previousChar = '`';
+      continue;
+    }
+    if (codeSpan) {
+      const codeContent = codeSpan.content;
       if (isCodeFilePath(codeContent) && onOpenCodeFile) {
         const cleanPath = codeContent.replace(/#.*$/, '');
         parts.push(
@@ -811,8 +896,8 @@ export const InlineMarkdown: React.FC<{
           </CodeSpan>,
         );
       }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
+      remaining = remaining.slice(codeSpan.length);
+      previousChar = '`';
       continue;
     }
 
@@ -855,7 +940,7 @@ export const InlineMarkdown: React.FC<{
     // Issue / PR reference: #123 — only at word boundary, digits only.
     // Hex-swatch branch above already consumed #fff / #123abc etc. (and digit-only
     // #123456 / #12345678 unless the host opted in), so a bare #\d+ here is an issue ref.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^#(\d+)(?!\w)/);
       if (match) {
         const num = match[1];
@@ -883,7 +968,7 @@ export const InlineMarkdown: React.FC<{
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^@([a-zA-Z][a-zA-Z0-9_-]{0,38})(?!\w)/);
       if (match) {
         const handle = match[1];
@@ -912,7 +997,7 @@ export const InlineMarkdown: React.FC<{
 
     // Wikilinks: [[filename]] or [[filename|display text]]
     match = remaining.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
-    if (match) {
+    if (match && !linkLabel) {
       const target = match[1].trim();
       const storedLabel = match[2]?.trim();
       // Host resolution gets the RAW target (pre-`.md` normalization): host
@@ -1008,7 +1093,7 @@ export const InlineMarkdown: React.FC<{
         resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
-          <HostResolvedImage key={key++} src={imgSrc} alt={alt} writtenSrc={src} onImageClick={onImageClick} />
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} width={resolvedImage?.kind === 'src' ? resolvedImage.width : undefined} writtenSrc={src} onImageClick={onImageClick} />
         ) : (
           <img
             key={key++}
@@ -1033,7 +1118,7 @@ export const InlineMarkdown: React.FC<{
     // /Function_(mathematics)). Plain `[^)]+` would truncate at the first
     // inner close-paren, so we scan the destination manually tracking depth.
     const linkParsed = (() => {
-      if (remaining[0] !== '[') return null;
+      if (linkLabel || remaining[0] !== '[') return null;
       let i = 1;
       let depth = 1;
       while (i < remaining.length && depth > 0) {
@@ -1064,11 +1149,13 @@ export const InlineMarkdown: React.FC<{
     })();
     if (linkParsed) {
       const { linkText, linkUrl, consumed } = linkParsed;
+      // Its label is markdown too (`` [`README.md`](…) ``), drawn without links.
+      const label = <InlineMarkdown text={linkText} linkLabel imageBaseDir={imageBaseDir} githubRepo={githubRepo} repoHost={repoHost} />;
       const safeLinkUrl = sanitizeLinkUrl(linkUrl);
 
       // Dangerous protocol stripped — render as plain text, not a dead link
       if (safeLinkUrl === null) {
-        parts.push(<span key={key++}>{linkText}</span>);
+        parts.push(<span key={key++}>{label}</span>);
         remaining = remaining.slice(consumed);
         previousChar = ')';
         continue;
@@ -1108,7 +1195,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             data-local-link="open"
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1129,7 +1216,7 @@ export const InlineMarkdown: React.FC<{
       } else if (localLink?.kind === 'unavailable') {
         const inert = (
           <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-            {linkText}
+            {label}
           </span>
         );
         parts.push(
@@ -1149,7 +1236,7 @@ export const InlineMarkdown: React.FC<{
             } : undefined}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else if (isLocalDoc && onOpenLinkedDoc) {
@@ -1164,7 +1251,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`Open: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1193,7 +1280,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`View: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <CodeFileIcon />
           </a>,
         );
@@ -1205,7 +1292,7 @@ export const InlineMarkdown: React.FC<{
             href={safeLinkUrl}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else {
@@ -1217,7 +1304,7 @@ export const InlineMarkdown: React.FC<{
             rel="noopener noreferrer"
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       }
@@ -1274,18 +1361,20 @@ export const InlineMarkdown: React.FC<{
     // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
     // stop before the ref and let the cross-repo branch above take it whole.
     // A ref inside a URL never splits it: the URL starts first and wins.
-    const urlAt = bareUrlRunningPast(remaining, chunkEnd);
-    const refAt = crossRepoProject ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
+    const urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
+    const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
     const splitAt = refAt !== -1 ? refAt : urlAt;
     if (splitAt !== -1) {
       const before = remaining.slice(0, splitAt);
-      emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+      if (linkLabel) parts.push(transformPlainText(before));
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
       previousChar = before[before.length - 1] || previousChar;
       remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+    if (linkLabel) parts.push(transformPlainText(plainText));
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

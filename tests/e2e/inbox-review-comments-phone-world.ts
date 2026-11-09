@@ -16,6 +16,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -106,7 +107,9 @@ function writeForge(dir: string, patch: string): void {
     '  case "$*" in *"requested: search"*) cat "$dir/pulls.json"; exit 0;; esac',
     '  echo \'{"data":null}\'; exit 1',
     'fi',
-    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo ${PULL_HEAD}; exit 0; fi`,
+    // The PR read around its patch asks for its head and description as one JSON line (`| tojson`, inbox-pulls.ts
+    // `pullNow`); a plain `.head.sha` read (the whole diff's) is answered raw, as gh prints a string.
+    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo '{"sha":"${PULL_HEAD}","body":null}';; *) echo ${PULL_HEAD};; esac; exit 0; fi`,
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then cat "$dir/pull.patch"; exit 0; fi',
     'exit 1',
     '',
@@ -205,6 +208,7 @@ export async function seedPull(page: Page, comments: readonly Comment[]): Promis
 export async function openPull(world: PhoneWorld, page: Page): Promise<void> {
   const key = encodeURIComponent(PULL_KEY);
   await page.goto(`${world.url}#pulls&stack=${key}&layer=${key}&scope=layer`);
+  await clearSidebarPeek(page);
   await expect(page.locator(`[data-guide-file-shell="${SHORT_FILE}"]`)).toBeVisible({ timeout: 30_000 });
 }
 
@@ -218,6 +222,7 @@ export async function seedReview(world: PhoneWorld, page: Page, comments: readon
 
 export async function openReview(world: PhoneWorld, page: Page): Promise<void> {
   await page.goto(`${world.url}#thread=${world.thread}`);
+  await clearSidebarPeek(page);
   await page.locator('[data-review-card]').getByRole('button', { name: /review/i }).first().click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
   await expect(page.locator(`[data-guide-file-shell="${SHORT_FILE}"]`)).toBeVisible({ timeout: 30_000 });

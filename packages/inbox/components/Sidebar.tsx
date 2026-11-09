@@ -1,4 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
+import { useSidebarLayout } from '../sidebarLayout';
+import { drawnSidebarItems } from '../sidebarItems';
+import { SidebarMenu, useSidebarMenu } from './SidebarMenu';
 import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
@@ -10,7 +14,8 @@ import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
 import { starPopping } from '../starPop';
-import { awayLine, isAway, type MachinesModel } from '../machines';
+import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
+import { MachineSidebarWord } from './MachineUpdate';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
@@ -19,6 +24,7 @@ import { shownProjects, type ProjectAction } from '../projectMenu';
 import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
+import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
@@ -33,7 +39,12 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
+  /**
+   * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
+   * the Artifacts wall on All. No count.
+   */
+  onArtifacts?: () => void;
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
@@ -63,6 +74,8 @@ export interface SidebarProps {
   /** Rows waiting on the person, per machine id. */
   machineCounts?: ReadonlyMap<string, number>;
   onMachine?: (machineId: string) => void;
+  /** The word on a machine opens its update dialog. Absent on a page that offers no updates. */
+  onMachineUpdate?: (machineId: string) => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
@@ -86,8 +99,14 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** The project menu's Set picture… (letter marks): an image as a data: URL, or null to take it away. This machine's projects only. */
+  onProjectPicture?: (projectId: string, file: File | null) => Promise<boolean>;
   /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
+  /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
+  onProjectNewSession?: (projectId: string, machine: string | null) => void;
+  /** Whether a project's "+" can start anything there (its machine's agents, its folder, launch on there). Absent: every row's can. */
+  projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined) => boolean;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
@@ -204,6 +223,7 @@ export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
+  const composeKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'compose' });
   const phone = usePhone();
   // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
@@ -320,53 +340,82 @@ export function Sidebar(props: SidebarProps) {
     setOpenMobile(false);
     go();
   };
-  return (
-    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation">
-      <div className="ib-brand">
-        <TaterMark />
-        <b>Plannotator</b>
-        <span>Inbox</span>
-      </div>
-      {props.onSearch && (
-        <div className="ib-sp-entryrow">
-        <button
-          type="button"
-          className="ib-sp-entry"
-          data-open-search=""
-          aria-haspopup="dialog"
-          aria-keyshortcuts={searchKeys}
-          onClick={(event) => {
-            const opener = event.currentTarget;
-            // On a phone the sheet closes first; the search sheet takes the screen.
-            setOpenMobile(false);
-            props.onSearch?.(opener);
-          }}
-        >
-          <Icon name="search" />
-          Search
-          {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
-          <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
-        </button>
-        {props.onCompose && (
-          <Tip content="New message">
-            <button
-              type="button"
-              className="ib-compose-btn"
-              data-open-compose=""
-              aria-label="New message"
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                const opener = event.currentTarget;
-                setOpenMobile(false);
-                props.onCompose?.(opener);
-              }}
-            >
-              <Icon name="compose" />
-            </button>
-          </Tip>
-        )}
-        </div>
-      )}
+  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
+  // top or bottom. The onboarding tour's sidebar always draws the default.
+  const layout = useSidebarLayout(props.rememberSections !== false);
+  const drawn = drawnSidebarItems({
+    board: Boolean(props.onBoard),
+    reviews: Boolean(props.onPulls),
+    shape: Boolean(props.onShape),
+    // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
+    usage: Boolean(props.onUsage),
+    search: Boolean(props.onSearch),
+    compose: Boolean(props.onCompose),
+    feedback: Boolean(props.onFeedback),
+    drafts: Boolean(props.onDrafts),
+    artifacts: Boolean(props.onArtifacts),
+    shortcuts: Boolean(props.onShortcuts),
+    copyPrompt: props.connectPrompt !== false,
+    phone,
+  });
+  const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
+  const searchButton = (
+    <button
+      type="button"
+      className="ib-sp-entry"
+      data-open-search=""
+      aria-haspopup="dialog"
+      aria-keyshortcuts={searchKeys}
+      onClick={(event) => {
+        const opener = event.currentTarget;
+        // On a phone the sheet closes first; the search sheet takes the screen.
+        setOpenMobile(false);
+        props.onSearch?.(opener);
+      }}
+    >
+      <Icon name="search" />
+      Search
+      {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
+      <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
+    </button>
+  );
+  const compose = (event: MouseEvent<HTMLButtonElement>) => {
+    const opener = event.currentTarget;
+    setOpenMobile(false);
+    props.onCompose?.(opener);
+  };
+  const composeButton = (
+    <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
+      <button type="button" className="ib-compose-btn" data-open-compose="" aria-label="New message" aria-keyshortcuts={composeKeys} aria-haspopup="dialog" onClick={compose}>
+        <Icon name="compose" />
+      </button>
+    </Tip>
+  );
+  const keysShown = shows('shortcuts');
+  const themeShown = shows('theme');
+  /** One item's row. `list` is its stack as drawn: Search and New message share a row while side by side, as by default. */
+  const itemRow = (item: InboxSidebarItem, list: readonly InboxSidebarItem[], at: number): ReactNode => {
+    switch (item) {
+      case 'search':
+        return (
+          <div className="ib-sp-entryrow">
+            {searchButton}
+            {list[at + 1] === 'new-message' && composeButton}
+          </div>
+        );
+      case 'new-message':
+        if (list[at - 1] === 'search') return null;
+        // Apart from Search: a row of its own.
+        return (
+          <button type="button" className="ib-nav" data-open-compose="" aria-haspopup="dialog" aria-keyshortcuts={composeKeys} onClick={compose}>
+            <Icon name="compose" />
+            New message
+          </button>
+        );
+      case 'inbox':
+        return (
+          <>
       {/* On the list it shows, Inbox refreshes it: ↻ on hover with "Refresh", one turn on a click. */}
       <Tip content="Refresh" when={() => inboxRefreshes}>
         <button
@@ -391,23 +440,27 @@ export function Sidebar(props: SidebarProps) {
       <span id={refreshHintId} hidden>
         Refresh the list
       </span>
-      {props.onBoard && (
+          </>
+        );
+      case 'board':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'board' ? ' ib-on' : ''}`}
-          onClick={pick(props.onBoard)}
+          onClick={pick(() => props.onBoard?.())}
           aria-current={props.page === 'board' ? 'page' : undefined}
           data-board-nav=""
         >
           <Icon name="board" />
           Board
         </button>
-      )}
-      {props.onShape && (
+        );
+      case 'shape':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
-          onClick={pick(props.onShape)}
+          onClick={pick(() => props.onShape?.())}
           aria-current={props.page === 'shapes' ? 'page' : undefined}
           data-shape-nav=""
         >
@@ -421,13 +474,14 @@ export function Sidebar(props: SidebarProps) {
             </span>
           )}
         </button>
-      )}
-      {props.onPulls && (
+        );
+      case 'reviews':
+        return (
         <button
           type="button"
-          className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
-          onClick={pick(props.onPulls)}
-          aria-current={props.page === 'reviews' ? 'page' : undefined}
+          className={`ib-nav${props.page === 'reviews' || props.page === 'prs' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onPulls?.())}
+          aria-current={props.page === 'reviews' || props.page === 'prs' ? 'page' : undefined}
           data-pulls-nav=""
         >
           <Icon name="pullRequest" />
@@ -438,12 +492,29 @@ export function Sidebar(props: SidebarProps) {
             </span>
           )}
         </button>
-      )}
-      {(props.draftsCount ?? 0) > 0 && props.onDrafts && (
+        );
+      case 'artifacts':
+        // Artifacts (approval "inbox-artifact-stars"): the wall of every thread's artifacts, pinned ones first.
+        return (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'artifacts' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onArtifacts?.())}
+          aria-current={props.page === 'artifacts' ? 'page' : undefined}
+          data-artifacts-nav=""
+        >
+          <Icon name="artifacts" />
+          Artifacts
+        </button>
+        );
+      case 'drafts':
+        // Only while there are drafts not sent.
+        if ((props.draftsCount ?? 0) <= 0) return null;
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'drafts' ? ' ib-on' : ''}`}
-          onClick={pick(props.onDrafts)}
+          onClick={pick(() => props.onDrafts?.())}
           aria-current={props.page === 'drafts' ? 'page' : undefined}
           data-drafts-nav=""
         >
@@ -451,7 +522,65 @@ export function Sidebar(props: SidebarProps) {
           Drafts
           <span className="ib-n">{formatCount(props.draftsCount ?? 0)}</span>
         </button>
+        );
+      case 'copy-prompt':
+        return <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />;
+      case 'feedback':
+        return (
+          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(() => props.onFeedback?.())}>
+            <Icon name="comment" />
+            Feedback
+          </button>
+        );
+      case 'usage':
+        return <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />;
+      case 'settings':
+        // Two controls side by side, never one inside the other: the row opens Settings, the icons open the shortcut map and flip light and dark.
+        return (
+          <div className="ib-setrow" data-keys={keysShown ? '' : undefined} data-theme={themeShown ? '' : undefined}>
+            <button
+              type="button"
+              className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${keysShown && themeShown ? ' ib-has-keys' : ''}`}
+              onClick={pick(props.onSettings)}
+              aria-current={props.page === 'settings' ? 'page' : undefined}
+            >
+              <Icon name="settings" />
+              Settings
+            </button>
+            {keysShown && props.onShortcuts && <KeysButton onPress={props.onShortcuts} />}
+            {themeShown && <ThemeToggle />}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+  /** A stack's rows, each in a slot that names its item (the right-click menu's aim). */
+  const stack = (list: readonly InboxSidebarItem[]) => {
+    const drawnList = list.filter(shows);
+    return drawnList.map((item, at) => {
+      const row = itemRow(item, drawnList, at);
+      return row === null ? null : (
+        <div key={item} className="ib-side-item" data-sidebar-item={item}>
+          {row}
+        </div>
+      );
+    });
+  };
+  const bottom = layout.bottom.filter(shows);
+  // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
+  // Copy prompt pill when it leads it, as before.
+  const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
+  return (
+    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation" onContextMenu={menu.onContextMenu} onTouchStart={menu.onTouchStart}>
+      {shows('logo') && (
+      <div className="ib-brand" data-sidebar-item="logo">
+        <TaterMark />
+        <b>Plannotator</b>
+        <span>Inbox</span>
+      </div>
       )}
+      {stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {pins.length > 0 && (
           <>
@@ -512,21 +641,25 @@ export function Sidebar(props: SidebarProps) {
                 const on = props.page === 'inbox' && props.machineId === machine.id && props.projectId === null;
                 if (machinesClosed && !on) return null;
                 const away = isAway(machine);
+                const notice = props.onMachineUpdate ? machineNotice(machine) : null;
                 return (
-                  <Tip key={machine.id} content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
-                    <button
-                      type="button"
-                      className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
-                      onClick={pick(() => props.onMachine?.(machine.id))}
-                      aria-current={on ? 'page' : undefined}
-                      data-machine={machine.id}
-                      data-away={away ? '' : undefined}
-                    >
-                      <span className="ib-name" dir="auto">{machine.name}</span>
-                      {away && <span className="ib-sr">, {awayLine(machine)}</span>}
-                      {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
-                    </button>
-                  </Tip>
+                  <div key={machine.id} className="ib-mside" data-machine-notice={notice?.kind ?? undefined}>
+                    <Tip content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
+                      <button
+                        type="button"
+                        className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
+                        onClick={pick(() => props.onMachine?.(machine.id))}
+                        aria-current={on ? 'page' : undefined}
+                        data-machine={machine.id}
+                        data-away={away ? '' : undefined}
+                      >
+                        <span className="ib-name" dir="auto">{machine.name}</span>
+                        {away && <span className="ib-sr">, {awayLine(machine)}</span>}
+                        {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
+                      </button>
+                    </Tip>
+                    {notice && <MachineSidebarWord notice={notice} name={machine.name} onPress={pick(() => props.onMachineUpdate?.(machine.id))} />}
+                  </div>
                 );
               })}
             </div>
@@ -601,6 +734,25 @@ export function Sidebar(props: SidebarProps) {
                       ? (name) => props.onProjectRename!(project.id, name)
                       : undefined
                   }
+                  // A picture is kept by the Inbox that has the project: this machine's projects only.
+                  onPicture={props.onProjectPicture && local(project) ? (file) => props.onProjectPicture!(project.id, file) : undefined}
+                  newSession={
+                    props.onProjectNewSession
+                      ? (() => {
+                          const machine = project.machine && project.machine !== props.machines?.self ? project.machine : null;
+                          const machineView = machine ? props.machines?.linked.find((m) => m.id === machine) : undefined;
+                          if (props.projectCanStart && !props.projectCanStart(project, machine, machineView?.launch)) return undefined;
+                          const tip = newSessionTip(props.projectNames?.get(project.id) ?? project.name, machine ? (props.machines?.names.get(machine) ?? null) : null, machineView?.state === 'offline');
+                          return {
+                            tip,
+                            onPress: () => {
+                              setOpenMobile(false);
+                              props.onProjectNewSession!(project.id, machine);
+                            },
+                          };
+                        })()
+                      : undefined
+                  }
                   announce={props.announce}
                   // This machine's projects only: combining never crosses machines.
                   others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}
@@ -624,8 +776,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       </div>
       <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
-        {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
-        {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
+        {stack(bottom.slice(0, noticesAfter))}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}
@@ -637,28 +788,9 @@ export function Sidebar(props: SidebarProps) {
           <CheckFailingRow failing={props.checkFailing} onOpen={pick(props.onCheckFailing)} />
         )}
         {restartAgents.total > 0 && props.onRestartSessions && <RestartSessionsRow agents={restartAgents} onOpen={pick(props.onRestartSessions)} />}
-        {props.onFeedback && (
-          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(props.onFeedback)}>
-            <Icon name="comment" />
-            Feedback
-          </button>
-        )}
-        {props.onUsage && <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
-        {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
-        <div className="ib-setrow">
-          <button
-            type="button"
-            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${props.onShortcuts && !phone ? ' ib-has-keys' : ''}`}
-            onClick={pick(props.onSettings)}
-            aria-current={props.page === 'settings' ? 'page' : undefined}
-          >
-            <Icon name="settings" />
-            Settings
-          </button>
-          {props.onShortcuts && !phone && <KeysButton onPress={props.onShortcuts} />}
-          <ThemeToggle />
-        </div>
+        {stack(bottom.slice(noticesAfter))}
       </div>
+      <SidebarMenu menu={menu} layout={layout} drawn={props.usageInstalled ? drawn : new Set([...drawn].filter((item) => item !== 'usage'))} />
     </aside>
   );
 }

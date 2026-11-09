@@ -2,18 +2,21 @@
  * Show me (approval "shape-in-code-review") gates every word it adds to an
  * agent on the Code review switch. With Code review off, no Show me word is in
  * what an agent can read: the Inbox's MCP tool list, the guide brief,
- * `plannotator inbox --help`, the top-level help (Board off and on) and
- * `plannotator review --help`; `plannotator review draw …` and `review drawings …`
- * are the review parse's (`review <DIRECTORY>`), the drawings routes are the
- * unknown route, and a version-3 guide snapshot is refused with the release's
+ * `plannotator inbox --help`, the top-level help (Board off and on),
+ * `plannotator review --help`, and Shape's own text (`shape --help`, `/shape`),
+ * which stays byte for byte; `plannotator review draw …` and `review drawings …`
+ * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
  * own "Unsupported snapshot version" words.
  *
- * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
+ * What regresses: a Show me word (the chapter diagram's rules, the refusal of `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
- * off. These texts change for everyone on purpose, so the test names the words
- * and not the texts; a control proves each word is real, with Code review on.
+ * off, or Code review on and Shape off (approval "code-review-029-shape-off":
+ * Show me and the Overview's drawing ride Shape's own switch too). These texts
+ * change for everyone on purpose, so the test names the words and not the
+ * texts; a control proves each word is real, with Code review and Shape on.
  */
 import { afterAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,9 +24,10 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
-import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
-import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { formatSubcommandHelp, formatTopLevelHelp, SHAPE_COMMAND_USAGE } from "./cli";
+import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS, inboxReviewSkills } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -37,21 +41,32 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
  * `packages/core/inbox-review.ts`. A word holds no double quote or line break: the MCP texts are JSON, where those are escaped.
  */
 const SHOW_ME_WORDS = {
-  /** INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC */
-  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "review draw"],
-  /** INBOX_REVIEW_DRAW_HELP */
-  "review draw --help": ["review draw", "review drawings", "Show me", "data-code", "data-mark", "data-step"],
-  /** INBOX_REVIEW_CURATE_DRAWING_LINE and INBOX_REVIEW_RECHECK_DRAWING_LINE */
-  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's", "review drawings"],
+  /** inboxReviewChapterDiagramDoc(true): the html kind's words (approval "guide-chapter-diagrams"), Shape on only */
+  get_guide_brief: ["plannotator shape --help", "drawing by the rules in"],
+  /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
+  "review draw": ["review_draw_gone", "Show me makes a Shape"],
+  /** INBOX_REVIEW_CURATE_DRAWING_LINE (Shape on; with Shape off the line names Mermaid only) */
+  "the review skills": ["Mermaid preferred"],
 };
 
-/** Each text an agent reads, with Code review on or off. */
-async function agentTexts(codeReview: boolean): Promise<Record<string, string>> {
-  const dataDir = join(root, codeReview ? "data-texts-on" : "data-texts-off");
+/**
+ * A chapter's Mermaid diagram: Code review's own words (approval "guide-chapter-diagrams"), offered whatever Shape
+ * says, so they are absent only with Code review off.
+ */
+const CHAPTER_WORDS = {
+  /** inboxReviewChapterDiagramDoc */
+  get_guide_brief: ["sections[].diagram", "one diagram at the top of a chapter"],
+  /** INBOX_REVIEW_CURATE_DRAWING_LINE(_NO_SHAPE) and INBOX_REVIEW_RECHECK_DRAWING_LINE */
+  "the review skills": ["sections[].diagram", "draw it again in the chapter"],
+};
+
+/** Each text an agent reads, with Code review on or off (and Shape, off unless named). */
+async function agentTexts(codeReview: boolean, shape = false): Promise<Record<string, string>> {
+  const dataDir = join(root, `data-texts-${codeReview ? "on" : "off"}${shape ? "-shape" : ""}`);
   mkdirSync(dataDir, { recursive: true });
   const saved = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, codeReview, phones: false });
+  const server = await startInboxServer({ dataDir, codeReview, shape, phones: false });
   const client = new Client({ name: "show-me-off-test", version: "1.0.0" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -84,25 +99,49 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
   }
 }
 
-test("Code review off: no agent text holds a Show me word", async () => {
-  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
+/**
+ * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
+ * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
+ * pins the new hash here; one that names the code review belongs in the request. Last pinned for the stack paragraph
+ * ("A stack of PRs", approval "stack-show-me" q-c24e5d2c, after its clean-room test), which names no code review,
+ * re-pinned on merging main's later Shape text.
+ */
+// #2703 (approvals shape-know-removed, shape-whats-changed-removed): Shape stops asking agents for views.know and views.changed.
+// Re-pinned in merge train B for the stack paragraph and #2703's removals together.
+const SHAPE_TEXT_SHA256 = { "shape --help": "ce2ee98da4eebc163bb184abb8dc6c32f43e2d0ea5407a0a2030395faa0df196", "/shape skill": "2d311dca120c01f3e9c6dbe6d360bdde401f3b8c857b6ef3f2455748a72e39f9" };
+
+test("Code review off: Shape's own agent text is byte for byte what it was", () => {
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  expect({ "shape --help": sha(SHAPE_COMMAND_USAGE), "/shape skill": sha(JSON.stringify(SHAPE_SKILL)) }).toEqual(SHAPE_TEXT_SHA256);
+});
+
+test("Code review off: no agent text holds a Show me word or a chapter diagram's", async () => {
+  const words = [...new Set([...Object.values(SHOW_ME_WORDS).flat(), ...Object.values(CHAPTER_WORDS).flat()])];
   const texts = await agentTexts(false);
   const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
   expect(leaks).toEqual([]);
 });
 
-test("Code review on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
-  const printed: string[] = [];
-  const code = await runReviewDrawCommand(["draw", "--help"], {
-    cwd: root,
-    ensureRunning: () => Promise.reject(new Error("help reads no Inbox")),
-    stdout: (text) => printed.push(text),
-  });
-  expect(code).toBe(0);
-  const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
-    get_guide_brief: (await agentTexts(true)).get_guide_brief!,
-    "review draw --help": printed.join("\n"),
+test("Code review on and Shape off: no agent text holds a Show me word (no overview.diagram, no Shape drawing rules)", async () => {
+  // `review draw` is the review parse's here (the CLI test below), as with Code review off.
+  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
+  const texts = {
+    ...(await agentTexts(true, false)),
     "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
+  };
+  const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
+  expect(leaks).toEqual([]);
+  // Code review's own words are still there: the notes rule, and a chapter's Mermaid diagram.
+  expect(texts.get_guide_brief).toContain("diffs[].notes");
+  const missing = Object.entries(CHAPTER_WORDS).flatMap(([name, words]) => words.filter((word) => !texts[name]!.includes(word)).map((word) => `${name}: ${word}`));
+  expect(missing).toEqual([]);
+});
+
+test("Code review and Shape on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
+  const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
+    get_guide_brief: (await agentTexts(true, true)).get_guide_brief!,
+    "review draw": INBOX_REVIEW_DRAW_GONE,
+    "the review skills": inboxReviewSkills({ shape: true }).map((skill) => skill.body).join("\n"),
   };
   const missing = Object.entries(SHOW_ME_WORDS).flatMap(([name, words]) =>
     words.filter((word) => !carriers[name as keyof typeof SHOW_ME_WORDS].includes(word)).map((word) => `${name}: ${word}`),
@@ -195,22 +234,49 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   }
 }, 120_000);
 
-test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
-  const dataDir = join(root, "data-routes");
-  mkdirSync(dataDir, { recursive: true });
-  const server = await startInboxServer({ dataDir, codeReview: false, phones: false });
+test("Code review on: `shape` answers only with Shape on, and an old `review draw` is refused only then (Shape off: the review parse's, as with Code review off)", async () => {
+  const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+  const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+  const { SHAPE_OFF_TEXT } = await import("./shape-command");
+  const stubbed = stubHookDistHtml();
+  const run = async (config: Record<string, boolean>, argv: string[]) => {
+    const dataDir = join(root, `data-cli-${Object.keys(config).filter((key) => config[key]).join("-")}`);
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER: "1",
+      NO_ANON_PING: "1",
+      PLANNOTATOR_UPDATE_CHECK: "0",
+      PLANNOTATOR_INBOX_CONNECT: "0",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+    };
+    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    return { stdout, stderr, code };
+  };
+  const draw = ["review", "draw", "--file", "d.json", "--review", "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F", "--turn", "turn-0001"];
   try {
-    const base = `http://127.0.0.1:${server.port}`;
-    const path = "/api/inbox/reviews/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings";
-    for (const headers of [{ "sec-fetch-site": "same-origin" }, { authorization: "Bearer x" }]) {
-      const unknown = await fetch(`${base}/api/inbox/reviewz/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings`, { headers });
-      const read = await fetch(`${base}${path}`, { headers });
-      expect([read.status, await read.text()]).toEqual([unknown.status, await unknown.text()]);
-      expect(read.status).toBe(404);
+    const codeReviewOnly = { inboxCodeReview: true, inboxShape: false };
+    expect(await run(codeReviewOnly, ["shape", "--help"])).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+    for (const argv of [draw, ["review", "drawings", "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F"], ["review", "draw", "--help"]]) {
+      const shapeOff = await run(codeReviewOnly, argv);
+      const codeReviewOff = await run({ inboxCodeReview: false, inboxShape: false }, argv);
+      expect([argv, shapeOff]).toEqual([argv, codeReviewOff]);
+      expect(shapeOff.stderr).not.toContain("review_draw_gone");
     }
+    const both = { inboxCodeReview: true, inboxShape: true };
+    expect((await run(both, ["shape", "--help"])).code).toBe(0);
+    expect(await run(both, draw)).toEqual({ stdout: "", stderr: `${INBOX_REVIEW_DRAW_GONE}\n`, code: 1 });
   } finally {
-    server.stop();
+    removeStubbedHtml(stubbed);
   }
+}, 120_000);
+
+test("Code review off: a version-3 snapshot is an unsupported version", () => {
   // 0.28.49's parser knew versions 1 and 2: any other was "Unsupported snapshot version: <n>", at $.version.
   const snapshot = { kind: "plannotator-guided-review", version: 3, exportedAt: "2026-01-01T00:00:00Z", guide: {}, review: {}, source: {} };
   expect(checkInboxGuide({ snapshot }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });

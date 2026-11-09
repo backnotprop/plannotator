@@ -58,8 +58,8 @@
 .shp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
 .shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
-.shp-claim a, .shp-know a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
-.shp-claim code, .shp-know code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
+.shp-claim a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.shp-claim code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
 .shp-fresh-text { animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both; }
 
 /* ── the stage: views erase out and draw in ── */
@@ -78,21 +78,12 @@
 .shp-stage.reduce .shp-view.leaving { animation: shp-fade-out .16s linear forwards; -webkit-mask-image: none; mask-image: none; }
 .shp-stage.reduce .shp-view.entering [data-step], .shp-stage.reduce .shp-view.v-code.entering { animation: shp-fade-only .16s linear both; animation-delay: 0s; }
 
-/* A marked part (What to know; drawn views carry the same rules in their shadow root). */
-.shp-know .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
-.shp-stage.pinpointing .shp-know [data-mark] { cursor: pointer; }
-.shp-know .mk.noted { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, transparent); }
-.shp-know .mk.erasing { animation: shp-erase .42s cubic-bezier(.55,0,.45,1) forwards; -webkit-mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); }
-.shp-know .mk.fresh { background-image: linear-gradient(color-mix(in oklab, var(--primary) 16%, transparent), color-mix(in oklab, var(--primary) 16%, transparent)); background-repeat: no-repeat; background-size: var(--s) 100%; animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both, shp-swash 2.6s cubic-bezier(.3,.6,.2,1) both; transition: background-size 0s; }
 @keyframes shp-redraw { from { opacity: 0; transform: translateY(5px); filter: blur(2px); } }
 @keyframes shp-swash { 0% { --s: 0%; } 22% { --s: 100%; } 70% { --s: 100%; opacity: 1; } 100% { --s: 100%; background-color: transparent; } }
-.shp-stage.reduce .shp-know .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
-.shp-stage.reduce .shp-know .mk.fresh { animation: none; background-size: 100% 100%; }
 
 /* A box being dragged: a thin line and hardly any fill, like the Mac's screenshot selection. */
 @media (pointer: fine) {
   .shp-stage.boxing, .shp-stage.boxing * { cursor: crosshair; -webkit-user-select: none; user-select: none; }
-  .shp-stage.boxing .shp-know [data-mark] { cursor: crosshair; }
 }
 .shp-cross-btn { padding: 0 9px; }
 .shp-tbtn.shp-cross-btn.on { color: var(--primary); }
@@ -108,6 +99,13 @@
 /* A wide canvas on a phone, with no tall drawing: readable, and it pans. */
 .shp-drawn.canvas.pan:not(.tall) { justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; }
 .shp-drawn.canvas.pan:not(.tall) .shp-drawn-fit { overflow: clip; }
+/* Which way there is more: that side fades out (ShapeDrawn sets the widths as it scrolls), and a short track under the drawing shows where you are in it. */
+.shp-drawn.canvas.pan:not(.tall) { scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); }
+.shp-drawn.canvas.pan:not(.tall)::-webkit-scrollbar { display: none; }
+.shp-pan-track { position: absolute; left: 0; top: 0; width: 56px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--foreground) 12%, transparent); pointer-events: none; }
+.shp-pan-track > i { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: color-mix(in oklab, var(--foreground) 45%, transparent); }
+/* At the top of its view, under the claim, rather than in the middle of it. */
+.shp-drawn.canvas.top:not(.tall) { align-items: flex-start; }
 .shp-drawn.canvas:not(.tall) .shp-drawn-host { position: absolute; left: 0; top: 0; }
 
 /* ── the pill: "Board updated", "1 change waits for the agent" ── */
@@ -133,19 +131,6 @@
 .shp-tstrip { padding-left: 6px; border-left: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
-
-/* ── What to know: prose, set for reading ── */
-.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
-.shp-know p { margin: 0 0 1em; padding: 2px 0; }
-.shp-know p:last-child { margin-bottom: 0; }
-/* An old board's Requirements: plain lines under their group's name. */
-.shp-know h3 { margin: 1.4em 0 .25em; font-size: inherit; font-weight: 600; }
-.shp-know section p, .shp-know section ~ p { margin-bottom: .2em; }
-.shp-know section + p { margin-top: 1.4em; }
-.shp-to-code { appearance: none; border: 0; background: transparent; margin-left: 8px; padding: 2px 4px; border-radius: 5px; font: 500 12px/1 var(--font-mono); color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity .15s; }
-.shp-know p:hover .shp-to-code, .shp-to-code:focus-visible { opacity: 1; }
-.shp-to-code:hover { color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
-@media (hover: none) { .shp-to-code { opacity: 1; } }
 
 /* ── Code: the Guided Review, and the whole file over it ── */
 .shp-guidewrap { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 88px 32px; }
@@ -243,9 +228,6 @@
 .shp-root.phone .shp-claim { font-size: 15px; }
 .shp-root.phone .shp-view { padding: 14px 16px 90px; }
 .shp-root.phone .shp-view.v-code { padding: 0; }
-.shp-root.phone .shp-req-group { grid-template-columns: 1fr; gap: 6px; padding: 12px 0; }
-.shp-root.phone .shp-req-group li { font-size: 15.5px; }
-.shp-root.phone .shp-to-code { display: none; }
 .shp-root.phone .shp-guidewrap { padding: 0 0 80px; }
 .shp-root.phone .shp-codeview { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 0 12px 84px; gap: 10px; }
 .shp-root.phone .shp-file-bar { left: 12px; right: 12px; }
@@ -579,3 +561,83 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 @keyframes shp-ex-fade { from { opacity: 0; } }
 /* A function or file the host cannot open is named only. */
 code.shp-ex-fn, span.shp-ex-line { cursor: default; text-decoration: none; }
+
+/*
+ * Stack badges (approval "stack-show-me", addendum 2026-11-06; ShapeStack.tsx, only with `stackBadges`): the row of
+ * a stack's PRs under the claim, a tag's card by it (a bottom sheet on a phone) and the code popup's way back. The PR
+ * colour comes from its hue (`--shp-h`, one per PR however many: `shapeStackHues`), kept off the board's purple; the
+ * drawing's tags use the same colours (stackBadges.ts). The popup is drawn outside the board: its chips carry the hue.
+ */
+.shp-stk-chip, .shp-stk-pr {
+  --c: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); --c-soft: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, var(--shp-paper, var(--background)));
+}
+.shp-stk-ic { display: inline-flex; flex: none; }
+.shp-stk-ic svg { display: block; }
+.shp-stk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 2px; }
+.shp-stk-row-l { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); margin-right: 2px; }
+.shp-stk-chip { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, transform .1s ease; }
+.shp-stk-chip .shp-stk-ic { color: var(--c); }
+.shp-stk-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.shp-stk-chip-t { color: var(--muted-foreground); }
+@media (hover: hover) { .shp-stk-chip:hover { background: color-mix(in oklab, var(--foreground) 10%, transparent); } }
+.shp-stk-chip.on, .shp-stk-chip.on:hover { background: var(--c-soft); color: var(--c); }
+.shp-stk-chip.on .shp-stk-chip-t { color: var(--c); }
+.shp-stk-chip:active { transform: scale(.97); }
+.shp-root.phone .shp-stk-row { gap: 6px; margin-top: 10px; }
+
+/* A PR as a coloured chip ("#2547"), with its title beside it. */
+.shp-stk-prlink { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--foreground); text-decoration: none; }
+a.shp-stk-prlink:hover .shp-stk-prt { text-decoration: underline; text-underline-offset: 3px; }
+.shp-stk-pr { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 6px; border-radius: 6px;
+  background: var(--c-soft); color: var(--c); font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace); white-space: nowrap; }
+button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+@media (hover: hover) { button.shp-stk-pr:hover { background: var(--c); color: var(--shp-paper, var(--background)); } }
+.shp-stk-prt { font-weight: 600; font-size: var(--ib-fs-15, 15px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The card by a tag. */
+.shp-stk-card { position: absolute; z-index: 40; width: min(400px, calc(100% - 24px)); padding: 12px 14px; border-radius: 12px;
+  background: var(--popover, var(--background)); color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--border), 0 16px 40px -18px rgb(0 0 0 / .4); outline: none;
+  animation: shp-stk-in .16s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes shp-stk-in { from { opacity: 0; transform: translateY(-4px); } }
+.shp-stk-card.sheet { left: 0; right: 0; bottom: 0; width: auto; max-height: 72%; overflow: auto; padding: 8px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+  border-radius: 16px 16px 0 0; animation-name: shp-stk-up; animation-duration: .22s; }
+@keyframes shp-stk-up { from { transform: translateY(100%); } }
+.shp-stk-grip { width: 36px; height: 4px; margin: 2px auto 12px; border-radius: 2px; background: color-mix(in oklab, var(--foreground) 22%, transparent); }
+.shp-stk-card-h { display: flex; align-items: center; gap: 8px; }
+.shp-stk-card-h .shp-stk-prlink { flex: 1; }
+.shp-stk-x { flex: none; margin-right: -6px; }
+.shp-stk-card-part { margin: 10px 0 2px; font-size: var(--ib-fs-15, 15px); }
+.shp-stk-card-part b { font-weight: 600; }
+.shp-stk-card-said { margin: 0 0 8px; font-size: var(--ib-fs-15, 15px); line-height: 1.45; text-wrap: pretty; }
+.shp-stk-files { list-style: none; margin: 0; padding: 0; }
+.shp-stk-frow { appearance: none; border: 0; margin: 0; width: 100%; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 6px; border-radius: 8px;
+  background: transparent; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; transition: background-color .12s ease; }
+@media (hover: hover) { .shp-stk-frow:hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); } }
+.shp-stk-fic { flex: none; color: var(--muted-foreground); }
+.shp-stk-fname { flex: none; font: 500 var(--ib-fs-13, 13px)/1.2 var(--font-mono, ui-monospace, monospace); }
+.shp-stk-fdir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ib-fs-12, 12px)/1.2 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+.shp-stk-counts { flex: none; display: inline-flex; gap: 6px; font: 500 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+.shp-stk-counts .add { color: color-mix(in oklab, #1a7f37 64%, var(--foreground)); }
+.shp-stk-counts .del { color: color-mix(in oklab, #cf222e 64%, var(--foreground)); }
+.shp-stk-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 10px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--border); }
+.shp-stk-also { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.shp-stk-read { appearance: none; border: 0; margin: 0 0 0 auto; padding: 4px 2px; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 500; cursor: pointer; }
+@media (hover: hover) { .shp-stk-read:hover { text-decoration: underline; text-underline-offset: 3px; } }
+.shp-stk-card.sheet .shp-stk-read { margin-left: 0; }
+
+/* The code popup's way back and its files. */
+.shp-stk-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 52px; padding: 8px 52px 8px 16px; background: color-mix(in oklab, var(--foreground) 4%, var(--background)); }
+.shp-stk-back { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px 0 6px; border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 7%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .shp-stk-back:hover { background: color-mix(in oklab, var(--foreground) 11%, transparent); } }
+.shp-stk-by { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.shp-stk-pager { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.shp-stk-pg { appearance: none; border: 0; margin: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: none; color: var(--foreground); cursor: pointer; }
+.shp-stk-pg:disabled { opacity: .35; cursor: default; }
+@media (hover: hover) { .shp-stk-pg:hover:not(:disabled) { background: color-mix(in oklab, var(--foreground) 8%, transparent); } }
+.shp-stk-file-path { margin: 12px 16px; font: var(--ib-fs-13, 13px)/1.4 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+@media (pointer: coarse) { .shp-stk-chip { height: 36px; } .shp-stk-frow { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .shp-stk-card, .shp-stk-card.sheet { animation: shp-ex-fade .15s linear both; } .shp-stk-chip, .shp-stk-chip:active { transform: none; transition: background-color .15s, color .15s; } }

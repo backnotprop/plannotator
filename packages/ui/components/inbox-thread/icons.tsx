@@ -182,8 +182,13 @@ const PATHS = {
   puzzle:
     'M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 .369.128.713.349 1.003.215.283.401.604.401.959v0a.64.64 0 0 1-.657.643 48.39 48.39 0 0 1-4.163-.3c.186 1.613.293 3.25.315 4.907a.656.656 0 0 1-.658.663v0c-.355 0-.676-.186-.959-.401a1.647 1.647 0 0 0-1.003-.349c-1.036 0-1.875 1.007-1.875 2.25s.84 2.25 1.875 2.25c.369 0 .713-.128 1.003-.349.283-.215.604-.401.959-.401v0c.31 0 .555.26.532.57a48.039 48.039 0 0 1-.642 5.056c1.518.19 3.058.309 4.616.354a.64.64 0 0 0 .657-.643v0c0-.355-.186-.676-.401-.959a1.647 1.647 0 0 1-.349-1.003c0-1.035 1.008-1.875 2.25-1.875 1.243 0 2.25.84 2.25 1.875 0 .369-.128.713-.349 1.003-.215.283-.4.604-.4.959v0c0 .333.277.599.61.58a48.1 48.1 0 0 0 5.427-.63 48.05 48.05 0 0 0 .582-4.717.532.532 0 0 0-.533-.57v0c-.355 0-.676.186-.959.401-.29.221-.634.349-1.003.349-1.035 0-1.875-1.007-1.875-2.25s.84-2.25 1.875-2.25c.37 0 .713.128 1.003.349.283.215.604.401.96.401v0a.656.656 0 0 0 .658-.663 48.422 48.422 0 0 0-.37-5.36c-1.886.342-3.81.574-5.766.689a.578.578 0 0 1-.61-.58v0Z',
   // Pull requests (code review in the Inbox, phase 2): the sidebar row (Lucide git-pull-request), and Whole stack (Lucide layers).
+  // Reviews: the sidebar row, and a local review's mark (Lucide laptop).
+  reviews: 'M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M9 12l2 2 4-4M14 4h6v6',
+  laptop: 'M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM2 20h20',
   pullRequest: 'M6 9v12M13 6h3a2 2 0 0 1 2 2v7M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
   layers: 'm12 3-9 4.5 9 4.5 9-4.5L12 3ZM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
+  // Clone from a git URL (the Inbox's New message): a branch mark, the circles drawn as arcs.
+  gitBranch: 'M8.2 6a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM8.2 18a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM20.2 8a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM6 8.2v7.6M18 10.2c0 4-6 3-10.5 6.3',
   // Drafts' delete (Heroicons outline trash).
   trash:
     'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
@@ -226,6 +231,10 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   zed: 'M4 4h16v16H4Z M8 8.5h8l-8 7h8',
   // DeepSeek Harness: a plain letter D over a wave, drawn here (no brand asset in the repo).
   dsh: 'M6 4h5a7 7 0 0 1 0 14H6Z M3 21c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0',
+  // Cline: its bot head (the rounded head with a bump on top, pointed sides, two upright eyes), traced from Cline's
+  // own icon (cline/cline assets/branding/logos/cline-icon-white.svg) as an outline.
+  cline:
+    'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
 };
 
 export function TabGlyph({ harness }: { harness: string }) {
@@ -253,6 +262,7 @@ export function HostMark({ host, big }: { host: string | null | undefined; big?:
     case 'zed':
     case 'vscode':
     case 'dsh':
+    case 'cline':
       mark = (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />

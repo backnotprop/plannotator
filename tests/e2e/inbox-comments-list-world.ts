@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -36,6 +37,8 @@ export interface ListWorld {
   url: string;
   agent: SimAgent;
   project: string;
+  /** A second agent (Codex), when asked for (`second`): a thread both write in has the recipient pill. */
+  other?: SimAgent;
 }
 
 export interface ListThread {
@@ -50,8 +53,8 @@ export interface ListThread {
   count: number;
 }
 
-/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one). */
-export async function startWorld(options: { agentName?: string } = {}): Promise<ListWorld> {
+/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one); `second`: a second agent's name. */
+export async function startWorld(options: { agentName?: string; second?: string } = {}): Promise<ListWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-comments-list-');
   const dataDir = join(root, 'data');
@@ -74,12 +77,15 @@ export async function startWorld(options: { agentName?: string } = {}): Promise<
   mkdirSync(join(project, 'docs'));
   writeFileSync(join(project, 'docs', 'retry-plan.md'), PLAN);
   writeFileSync(join(project, 'docs', 'admin-view.html'), PAGE);
-  return { url: started.stdout.trim(), agent: await SimAgent.connect({ binary, env, name: options.agentName ?? 'Claude Code', host: 'claude-code' }), project };
+  const agent = await SimAgent.connect({ binary, env, name: options.agentName ?? 'Claude Code', host: 'claude-code' });
+  const other = options.second ? await SimAgent.connect({ binary, env, name: options.second, host: 'codex' }) : undefined;
+  return { url: started.stdout.trim(), agent, project, ...(other ? { other } : {}) };
 }
 
 export async function stopWorld(world: ListWorld | undefined): Promise<void> {
   try {
     await world?.agent.close().catch(() => {});
+    await world?.other?.close().catch(() => {});
   } finally {
     await removeInboxScratch();
   }
@@ -134,7 +140,21 @@ export const fileHighlight = (page: Page) => page.locator('[data-attachment-pane
 /** Goes to a thread and waits for its comment's highlight, drawn after the message. */
 export async function openThread(page: Page, world: ListWorld, t: ListThread): Promise<void> {
   await page.goto(threadUrl(world, t));
+  await clearSidebarPeek(page);
   await expect(highlight(page, t)).toBeVisible();
+}
+
+/**
+ * With a file open in a wide window the sidebar is shut, and a pointer resting on the window's left 20 px slides
+ * it in over the thread's foot, Send included (SidebarPeek). The spec's pointer starts at (0, 0), on that strip,
+ * and CI's browser has delivered a move there with no input from the spec: the panel opened and, as the pointer
+ * never entered or left it, stayed over Send. Moves the pointer across the panel and off it, so an open panel
+ * shuts and a pending one never opens.
+ */
+export async function pointerOffTheEdge(page: Page): Promise<void> {
+  await page.mouse.move(120, 4);
+  await page.mouse.move(page.viewportSize()!.width / 2, 4);
+  await expect(page.locator('[data-sidebar-peek][data-visible]')).toHaveCount(0);
 }
 
 /** Where everything behind the list is, once a phone's pane has finished pushing in. */

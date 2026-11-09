@@ -25,7 +25,7 @@
  */
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
-import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
+import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, pointerOffTheEdge, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
 
 let world: ListWorld;
 
@@ -78,7 +78,7 @@ test('the foot count opens the list without the reply box: a real button, nothin
   await link.click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
-  await expect(pane(page).locator('.ib-rfoot')).toHaveCount(0);
+  await expect(pane(page).locator('.ib-rbox')).toHaveCount(0);
   await expect(link).toHaveAttribute('aria-expanded', 'true');
   expect(await layout(page)).toBe(before);
   await expect(rowOf(page, t.onMessage)).toContainText('Is that true when the first request times out?');
@@ -220,6 +220,8 @@ test('the full-screen card count opens the list above the card; Escape takes the
   const page = await desk(browser);
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  // The card opens on Comment, as an image's does; the count is the Reply tab's (it says what rides the Send).
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   const chip = cardChip(page);
   await expect(chip).toBeVisible();
   await expect(chip).toHaveJSProperty('tagName', 'BUTTON');
@@ -266,8 +268,10 @@ test('over a tall card in a short window the list stays on screen, with its Clos
   const page = await desk(browser, 1000, 560);
   const t = await seededThread(world, 8);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   await expect(cardChip(page)).toBeVisible();
-  await page.locator('[data-fcomp] textarea').first().fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
+  // The reply's field: the page's comment row stays drawn, hidden, on the Reply tab.
+  await page.locator('[data-fcomp] [data-fcomp-field] textarea').fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
   await cardChip(page).click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
@@ -437,6 +441,8 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   await page.goto(fileUrl(world, t, t.page, 'full'));
   // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
   await page.locator('[data-fcomp-pill]').tap();
+  // It opens on Comment, as an image's card does: the count is the Reply tab's.
+  await page.locator('[data-fcomp-mode="reply"]').tap();
   await cardChip(page).tap();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).tap();
   await expect(rowOf(page, t.onMessage)).toHaveCount(0);
@@ -453,9 +459,10 @@ async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await frame.getByRole('heading', { name: 'Dead-lettered charges' }).click();
   const composer = page.locator('[data-comment-popover]');
   await composer.locator('textarea').first().fill('Say how many are waiting.');
-  await composer.getByRole('button', { name: 'Save' }).click();
+  await composer.getByRole('button', { name: 'Comment', exact: true }).click();
   const pin = frame.locator('[data-plannotator-marker]');
   await expect(pin).toHaveCount(1);
+  await pointerOffTheEdge(page);
   return pin;
 }
 
@@ -493,6 +500,7 @@ test('a highlight leaves the open file with its comment after Send', async ({ br
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' }).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   const filePane = page.locator('[data-attachment-pane]');
@@ -507,6 +515,7 @@ test('a highlight leaves the open file when the list removes its comment', async
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await countLink(page, t.count).click();
   await rowOf(page, t.onPlan).getByRole('button', { name: 'Remove' }).click();
   await expect(rowOf(page, t.onPlan)).toHaveCount(0);

@@ -38,10 +38,11 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -63,6 +64,21 @@ export interface InboxLiveSession {
   label?: string;
 }
 
+/** A session the Agents section may list (`agentSessions`): live, or ended and heard from today. Times in ms. */
+export interface InboxAgentSession {
+  session: string;
+  host: string;
+  /** The project root its `project_path` resolved to; null when it sent none. */
+  root: string | null;
+  startedAt: number;
+  /** The last poll, state change or Inbox tool call. */
+  lastSeen: number;
+  live: boolean;
+  /** A turn runs now (live only); null when the connection does not say, or it is not live. */
+  busy: boolean | null;
+  label: string | null;
+}
+
 /**
  * How the session a person's message goes to is connected now, for the
  * window's line under that message: present while the session's connection
@@ -73,6 +89,13 @@ export interface InboxRecipientConnection {
   idle_since: string | null;
   /** Send now can be offered: the connection said it can deliver into a running turn. */
   send_now: boolean;
+  /**
+   * Claude Code refused the reply its connection tried to put in, and holds
+   * this session's replies until the person types there (`held`; #2780): the
+   * line says "Stopped: goes in when you type in that session" (approval
+   * "inbox-stopped-reply"). Present only while true. Additive.
+   */
+  held?: true;
   /**
    * The session runs an older Plannotator plugin than a restart would load,
    * or one the installed plugin is itself behind (packages/server/inbox-restart.ts);
@@ -138,6 +161,8 @@ interface SeenSession {
   lastIdleSince?: number | null;
   /** Its poll said it can deliver into a running turn (`send_now`). */
   sendNow: boolean;
+  /** Its connection said Claude Code holds its replies until the person types there (`held`). Absent: no. */
+  held?: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
   /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
@@ -381,6 +406,11 @@ export function createInboxLiveSessions(options: {
     entry.busy = busy;
     entry.sendNow = sendNow;
   };
+  /** Whether Claude Code holds the session's replies until the person types (`held`): a change moves the rows' "Stopped". */
+  const setHeld = (entry: SeenSession, held: boolean) => {
+    if ((entry.held === true) !== held) deliveryChanges += 1;
+    entry.held = held;
+  };
 
   const applyState = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
     if (typeof body.busy !== "boolean") return;
@@ -496,6 +526,7 @@ export function createInboxLiveSessions(options: {
     };
     entry.host = host;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
+    setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
     // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
     const label = cleanInboxSessionLabel(body.label);
@@ -532,6 +563,7 @@ export function createInboxLiveSessions(options: {
     entry.lastSeen = at;
     applyState(entry, body, at);
     if (typeof body[INBOX_SEND_NOW_POLL_FIELD] === "boolean") setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
+    if (typeof body[INBOX_HELD_POLL_FIELD] === "boolean") setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     trackWaitsOf(session, entry, at);
   };
 
@@ -736,6 +768,41 @@ export function createInboxLiveSessions(options: {
   };
 
   /**
+   * The sessions the Agents section can list (packages/server/inbox-agents-list.ts): every live one, and every one
+   * last heard at or after `since` (the start of today) that has ended. In memory, so a restart forgets the ended.
+   * A launch's permission prompt (`perm:…`) is no session of its own.
+   */
+  const agentSessions = (since: number): InboxAgentSession[] => {
+    const out: InboxAgentSession[] = [];
+    for (const [session, entry] of sessions) {
+      const live = isLive(entry);
+      const heard = Math.max(entry.lastSeen, mcpSeen.get(session)?.lastSeen ?? 0);
+      if ((!live && heard < since) || isInboxPermissionSession(session)) continue;
+      out.push({
+        session,
+        host: entry.host,
+        root: entry.root,
+        startedAt: entry.startedAt,
+        lastSeen: heard,
+        live,
+        busy: live ? entry.busy : null,
+        label: entry.label ?? null,
+      });
+    }
+    return out;
+  };
+
+  /**
+   * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
+   * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
+   * a label's change says `labels` to the owner's windows (which read the list for it), and nothing to a guest's.
+   */
+  const agentsSignature = (since: number): string =>
+    agentSessions(since)
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}`)
+      .join("|");
+
+  /**
    * The agents that read the Inbox through MCP only, newest first: every
    * session whose latest message did not come through a waking connection,
    * and every session an MCP tool call named with its host or name, within
@@ -865,6 +932,7 @@ export function createInboxLiveSessions(options: {
       busy: entry.busy,
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
       send_now: entry.sendNow,
+      ...(entry.held === true ? { held: true as const } : {}),
       outdated: outdatedOf(entry),
       engine: entry.engine,
       restart_command: restartCommandOf(session, entry),
@@ -893,10 +961,10 @@ export function createInboxLiveSessions(options: {
   };
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
-  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean } | null => {
+  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true } | null => {
     const entry = sessions.get(session);
     if (!entry || !isLive(entry)) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
-    return { busy: entry.busy, send_now: entry.sendNow };
+    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}) };
   };
 
   /**
@@ -926,7 +994,7 @@ export function createInboxLiveSessions(options: {
       if (!recent) continue;
       const clocks = waits.get(id);
       const clocked = clocks ? `w${clocks.size}a${[...clocks.values()].filter((clock) => clock.autoSince !== null).length}` : "";
-      parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${clocked}`);
+      parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${entry.held ? "h" : ""}${clocked}`);
     }
     for (const [id, entry] of mcpSeen) {
       if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
@@ -955,7 +1023,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -979,6 +1047,30 @@ export function createInboxLiveSessions(options: {
       group.sessions.push(row);
     }
     return out;
+  };
+
+  /**
+   * The version a `/reload-plugins` loads for this Claude Code session, when
+   * the Inbox judges it outdated with a reload as the fix (`restart`): what a
+   * poll answer tells a connection that reloads itself (INBOX_RELOAD_FIELD).
+   * Null for any other session, or one that is up to date. The same judgment
+   * as Settings → Agents and the sidebar, so the two never disagree.
+   */
+  const reloadOfferFor = (session: string): { installed: string | null } | null => {
+    const entry = sessions.get(session);
+    if (!entry || entry.host !== "claude-code") return null;
+    const outdated = outdatedOf(entry);
+    return outdated?.fix === "restart" ? { installed: outdated.installed ?? null } : null;
+  };
+
+  /**
+   * What a poll answer carries about auto reload: `{ reload: offer }` only to
+   * a connection that said it reloads itself (INBOX_AUTO_RELOAD_POLL_FIELD
+   * `true` in the poll body) while reloadOfferFor has an offer; else nothing.
+   */
+  const reloadAnswerFor = (session: string, body: Record<string, unknown>): { [INBOX_RELOAD_FIELD]?: { installed: string | null } } => {
+    const offer = body[INBOX_AUTO_RELOAD_POLL_FIELD] === true ? reloadOfferFor(session) : null;
+    return offer ? { [INBOX_RELOAD_FIELD]: offer } : {};
   };
 
   /** Live Claude Code sessions a restart brings up to date: the sidebar's "Reload Claude Code N". */
@@ -1190,6 +1282,10 @@ export function createInboxLiveSessions(options: {
     seenOverMcp,
     route,
     allLive,
+    agentSessions,
+    agentsSignature,
+    /** The sessions' clock (ms): "today" for the Agents section is by it. */
+    clock: now,
     isSessionLive,
     runStateOf,
     pollsNow,
@@ -1210,6 +1306,8 @@ export function createInboxLiveSessions(options: {
     steerDone,
     hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
+    reloadOfferFor,
+    reloadAnswerFor,
     restartCount,
     restartAgents,
     mcpAgents,

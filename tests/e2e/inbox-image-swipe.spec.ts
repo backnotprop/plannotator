@@ -124,14 +124,20 @@ for (const phone of [
       const area = (await docArea(page).boundingBox())!;
       const mid = { x: area.x + area.width * 0.75, y: area.y + area.height * 0.4 };
       const bar = pane(page).locator('.ib-imgbar');
-      const composer = pane(page).locator('[data-image-composer]');
+      // Round 3 (#2846): the comment row is laid into the card's own row (`.ib-fcomp-comment` is `display: contents`,
+      // so it has no box): the comment box that stays put is the card, and its field is the row's textarea.
+      const composer = pane(page).locator('[data-fcomp]');
+      const field = pane(page).locator('[data-image-composer] textarea');
       const controlsBefore = [await bar.boundingBox(), await composer.boundingBox()];
+      expect(controlsBefore[0]).not.toBeNull();
+      expect(controlsBefore[1]).not.toBeNull();
       await touch.down(mid.x, mid.y, -area.width * 0.45, 4);
       expect(await picture(page).evaluate(transformOf)).toMatch(/^translateX\(-\d/);
       expect(await docArea(page).evaluate(transformOf)).toBe('');
       expect([await bar.boundingBox(), await composer.boundingBox()]).toEqual(controlsBefore);
       await expect(bar).toBeInViewport();
       await expect(composer).toBeInViewport();
+      await expect(field).toBeInViewport();
       const next = pane(page).locator('.ib-imgpeek[data-image-peek="next"] img');
       await expect(next).toBeVisible();
       expect(await next.getAttribute('src')).toContain('/image');

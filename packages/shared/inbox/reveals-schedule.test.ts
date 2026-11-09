@@ -5,9 +5,8 @@
  * A machine keeps what config.json keeps for the line (`inboxReveals`) and changes it only through the module's own
  * helpers, as packages/server/inbox.ts does: a page load is seen (`revealSeeLoad`), the page arms `revealNext`, the
  * agent note asks `revealLineFree("setup")`, a claim stamps (`revealStamp`), a Not now stamps (`revealStampNotNow`).
- * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are not built
- * here: they are registered in a test table the way their branches register (`heavyUse`, `minThreads`), so the line's
- * seam is what is tested.
+ * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are in the
+ * real queue, so the real table is what is tested.
  *
  * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one a day from day 2: the
  * owner, 2026-11-06, "one day apart, three after a Not now: a heavy user sees all five by about day 5"); List
@@ -15,10 +14,12 @@
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
  * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
- * back; an unanswered agent note taking another day.
+ * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going from the
+ * second day of use (the owner, 2026-11-06), or moving any other dialog's day (it stays outside the line's order).
  */
 import { describe, expect, test } from "bun:test";
 import {
+  CODE_REVIEW_OFFER,
   INBOX_REVEALS,
   REVEAL_RETIRE_MS,
   REVEAL_LOADS_KEPT,
@@ -26,6 +27,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealDay,
   revealHeavyUse,
   revealLineFree,
@@ -47,15 +49,29 @@ const DAY = 24 * HOUR;
 /** Day 0, local time: the person's first use (or the update) is that morning. */
 const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0, 0);
 
-const BRO = "bro" as RevealId;
-const LIST_VIEW = "list_view" as RevealId;
-/** The queue with Bro mode and List view registered at their places, as #2693 and #2716 add them. */
-const TABLE: readonly RevealEntry[] = [
-  ...INBOX_REVEALS.slice(0, 4),
-  { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
-  ...INBOX_REVEALS.slice(4),
-  { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true },
-];
+const BRO: RevealId = "bro";
+const LIST_VIEW: RevealId = "list_view";
+const GRILL_ME: RevealId = "grill_me_tip";
+const TABLE: readonly RevealEntry[] = INBOX_REVEALS;
+
+test("Bro mode is registered in the real queue as the approval places it: right after Snooze, an offer for heavy use, never on day 0 or 1", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true });
+});
+
+test("List view is registered in the real queue as the approval places it: last, an offer, ahead at its moment", () => {
+  expect(INBOX_REVEALS.at(-1)).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true });
+});
+
+test("the grill-me tip is registered beside the line, waiting for every other card: aside, last resort, no tenure", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "steps") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: GRILL_ME, kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true });
+});
+
+test("the tab icon dialog is registered in the real queue as its note places it: an update-day dialog right after voice, no tenure, no threads", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "voice") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true });
+});
 
 type Dialog = RevealId | "agent_note";
 
@@ -76,6 +92,10 @@ interface User {
   moment: (id: RevealId, day: number) => boolean;
   /** The dialogs this person closes with Not now. */
   notNow?: readonly RevealId[];
+  /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
+  codeReviewOff?: boolean;
+  /** The day the person's third question card is answered (grill-me-tip.ts `revealGrillMeGap`): from then the tip is open. Absent: never. */
+  grillMeGap?: number;
 }
 
 interface Shown {
@@ -94,6 +114,8 @@ function simulate(user: User, days = 30): Shown[] {
   let readCount = 0;
   let loadCount = 0;
   let loads: RevealLoads = {};
+  /** The last `aside` card shown (the star ask's `inboxReveals.star.shownAt`). */
+  let asideShownAt: string | null = null;
   for (let day = 0; day < days; day++) {
     for (const hour of user.loads(day)) {
       const now = at(day, hour);
@@ -109,8 +131,14 @@ function simulate(user: User, days = 30): Shown[] {
         afterShowLoad: revealAfterShowLoad(saved.shownLoad, loads, load),
         heavy: revealHeavyUse(reads, now),
         threads: user.threads(day),
-        open: Object.fromEntries(TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.kind === "offer" || user.update)])),
+        open: Object.fromEntries(
+          TABLE.map((entry) => [
+            entry.id,
+            !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.kind === "offer" || user.update),
+          ]),
+        ),
         waitingSince: saved.waitingSince,
+        asideShownAt: asideShownAt,
       });
       const show = (id: Dialog, spaced: boolean) => {
         saved = revealStamp(saved, now.toISOString(), { spaced, load });
@@ -128,6 +156,12 @@ function simulate(user: User, days = 30): Shown[] {
         show("sound", true);
         continue;
       }
+      // Code review's day-0 offer: at once, once the tour screen is gone and before the agent note, which waits for it
+      // (codeReviewOffer.ts `settled`).
+      if (next === CODE_REVIEW_OFFER.id && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
+        continue;
+      }
       if (!done.has("agent_note") && revealLineFree("setup", state(), now)) {
         show("agent_note", false);
         continue;
@@ -137,7 +171,17 @@ function simulate(user: User, days = 30): Shown[] {
         show(early, true);
         continue;
       }
-      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) show(next, true);
+      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
+        continue;
+      }
+      // An `aside` entry (the star ask) at a calm moment the line left free: it stamps nothing of the line.
+      const aside = revealAsideNow(state(), now, TABLE).find((id) => user.moment(id, day));
+      if (aside) {
+        done.add(aside);
+        shown.push({ id: aside, day, at: now });
+        asideShownAt = now.toISOString();
+      }
     }
   }
   return shown;
@@ -183,10 +227,11 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
+  test("setup on day 0, the star ask on day 1 (aside: it moves no one), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       ["snooze", 2],
       [BRO, 3],
       ["board", 4],
@@ -200,6 +245,7 @@ describe("30 days of a heavy user", () => {
     const shown = simulate({ ...HEAVY, moment: (id, day) => id !== "snooze" || day >= 1 });
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       [LIST_VIEW, 2],
       ["snooze", 3],
       [BRO, 4],
@@ -210,7 +256,124 @@ describe("30 days of a heavy user", () => {
 
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 1 });
+  });
+});
+
+describe("the grill-me tip (the owner: \"Sooner: after 3 answered questions, whatever the days, once\")", () => {
+  // `grillMeGap`: the day the third question card is answered. The tip never costs another card its day: every other
+  // dialog shows on the day it shows without the tip, and the tip takes the first moment the line has nothing else
+  // for (no card next within its patience, none ahead, the star ask settled and not that day).
+  const SCENARIOS: readonly (readonly [string, User, Readonly<Record<number, number>>])[] = [
+    // gap day -> tip day
+    ["a heavy user", HEAVY, { 0: 7, 3: 7, 8: 8, 12: 12 }],
+    ["a heavy user who said Not now to Bro mode", { ...HEAVY, notNow: [BRO] }, { 0: 9, 3: 9, 8: 9, 12: 12 }],
+    ["a heavy user whose list is taller than the screen from the start", { ...HEAVY, moment: (id: RevealId, day: number) => id !== "snooze" || day >= 1 }, { 0: 7, 8: 8 }],
+    ["a new user with Code review off", { ...HEAVY, codeReviewOff: true }, { 0: 8, 8: 8, 12: 12 }],
+    ["a light user (Snooze on 7, the Checklist on 25, the Board never)", LIGHT, { 0: 18, 3: 18, 8: 18 }],
+    ["someone updating on day 0", UPGRADER, { 0: 8, 3: 8, 8: 8 }],
+  ];
+  for (const [name, user, tips] of SCENARIOS) {
+    const without = days(simulate(user));
+    for (const [gap, tip] of Object.entries(tips)) {
+      test(`${name}, third answer on day ${gap}: every other dialog keeps its day, the tip on day ${tip}`, () => {
+        const shown = simulate({ ...user, grillMeGap: Number(gap) });
+        const got = days(shown);
+        expect(got[GRILL_ME]).toBe(tip);
+        const { [GRILL_ME]: _tip, ...rest } = got;
+        expect(rest).toEqual(without);
+        expect(shown.filter((s) => s.id === GRILL_ME)).toHaveLength(1);
+        expectOnePerDay(shown);
+      });
+    }
+  }
+
+  test("no tenure: the line empty from day 0 (every card seen, Code review decided, the star ask settled), the tip on the first day after the agent note", () => {
+    const user: User = { ...HEAVY, seen: ["snooze", BRO, "board", "steps", LIST_VIEW, "star"], grillMeGap: 0 };
+    expect(simulate(user).map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      [GRILL_ME, 1],
+    ]);
+  });
+
+  test("its moment never comes: never shown, and every other dialog keeps its day", () => {
+    const user: User = { ...HEAVY, grillMeGap: 0, moment: (id, day) => id !== GRILL_ME && HEAVY.moment(id, day) };
+    const shown = simulate(user, 40);
+    expect(shown.some((s) => s.id === GRILL_ME)).toBe(false);
+    expect(days(shown)).toEqual(days(simulate(HEAVY, 40)));
+  });
+
+  test("shown once: never again, whatever its moment", () => {
+    expect(simulate({ ...HEAVY, grillMeGap: 0 }, 40).filter((s) => s.id === GRILL_ME)).toHaveLength(1);
+  });
+
+  test("its claim, one moment at a time: never while a card is due, the star ask open or shown today; no Not now", () => {
+    const now = at(10, 12);
+    const free: RevealState = {
+      release: true,
+      firstUseAt: at(0, 9).toISOString(),
+      lastShownAt: at(8, 9).toISOString(),
+      dayShownAt: at(8, 9).toISOString(),
+      notNowAt: null,
+      afterShowLoad: false,
+      heavy: false,
+      threads: 1,
+      open: { [GRILL_ME]: true },
+      asideShownAt: null,
+    };
+    expect(revealMayClaim(GRILL_ME, free, now)).toBe(true);
+    expect(revealAsideNow(free, now)).toEqual([GRILL_ME]);
+    // A card next and still within its patience: due, so the tip waits; past its patience, the tip may pass it.
+    const due: RevealState = { ...free, open: { ...free.open, snooze: true }, waitingSince: { snooze: at(9, 9).toISOString() } };
+    expect(revealMayClaim(GRILL_ME, due, now)).toBe(false);
+    expect(revealMayClaim(GRILL_ME, { ...due, waitingSince: { snooze: at(6, 9).toISOString() } }, now)).toBe(true);
+    expect(revealMayClaim(GRILL_ME, { ...free, open: { ...free.open, star: true } }, now)).toBe(false);
+    expect(revealMayClaim(GRILL_ME, { ...free, asideShownAt: at(10, 9).toISOString() }, now)).toBe(false);
+    expect(revealMayClaim(GRILL_ME, { ...free, asideShownAt: at(9, 9).toISOString() }, now)).toBe(true);
+    expect(revealMayClaim(GRILL_ME, { ...free, dayShownAt: at(10, 9).toISOString() }, now)).toBe(false);
+    expect(revealMayClaim(GRILL_ME, { ...free, open: {} }, now)).toBe(false);
+    expect(revealNext(free, now)).toBeNull();
+    expect(revealNotNowAllowed(GRILL_ME)).toBe(false);
+  });
+});
+
+describe("Code review's offer (approval \"code-review-offer-card\": show up about immediately)", () => {
+  test("a new user with Code review off: the offer on day 0, before the agent note, which takes day 1; the offers keep their days", () => {
+    const shown = simulate({ ...HEAVY, codeReviewOff: true });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["code_review", 0],
+      ["agent_note", 1],
+      ["snooze", 2],
+      [BRO, 3],
+      ["board", 4],
+      [LIST_VIEW, 5],
+      ["steps", 6],
+      // The star ask (aside) waits for the first day the line leaves free, and moves no one.
+      ["star", 7],
+    ]);
+    // The first load of day 0 shows it: about immediately.
+    expect(shown[0]!.at).toEqual(at(0, HEAVY.loads(0)[0]!));
+    expectOnePerDay(shown);
+  });
+
+  test("Not now on it is final, and the next offer waits three days", () => {
+    const shown = simulate({ ...HEAVY, codeReviewOff: true, notNow: ["code_review"] });
+    expect(shown.filter((s) => s.id === "code_review")).toHaveLength(1);
+    expect(days(shown)).toMatchObject({ code_review: 0, agent_note: 1, snooze: 3 });
+  });
+
+  test("an update day with Code review off: the offer first, then the update-day dialogs one a day", () => {
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true });
+    expect(shown.slice(0, 3).map((s) => [s.id, s.day])).toEqual([
+      ["code_review", 0],
+      ["sound", 1],
+      ["agent_note", 2],
+    ]);
+    expectOnePerDay(shown);
+  });
+
+  test("Code review decided (on, or switched off by the person) or held: never offered", () => {
+    expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
   });
 });
 
@@ -220,6 +383,9 @@ describe("30 days of a light user", () => {
     const got = days(shown);
     expect(got.agent_note).toBe(0);
     expect(got.snooze).toBe(7);
+    // The star ask on day 4: their first load with the line free (day 2's load comes right after the agent note's),
+    // beside Snooze waiting for its moment, and Snooze's day unmoved.
+    expect(got.star).toBe(4);
     expect(got.steps).toBeGreaterThanOrEqual(20);
     for (const never of [BRO, "board", LIST_VIEW]) expect(got[never]).toBeUndefined();
     expectOnePerDay(shown);
@@ -232,15 +398,18 @@ describe("30 days of a light user", () => {
 });
 
 describe("an update day", () => {
-  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 3: one a day, and nothing ahead of them", () => {
+  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 3, the tab icon on day 4: one a day, and nothing ahead of them", () => {
     const shown = simulate(UPGRADER);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["sound", 0],
       ["agent_note", 1],
       ["list_intro", 2],
       ["voice", 3],
-      [BRO, 4],
+      ["tab_icon", 4],
+      // The list outgrows the screen on day 5: List view goes ahead of Bro mode.
       [LIST_VIEW, 5],
+      [BRO, 6],
+      ["star", 7],
     ]);
     expectOnePerDay(shown);
   });
@@ -317,6 +486,19 @@ describe("the line's rules", () => {
   test("an update-day dialog needs no tenure and no first use; an offer needs both", () => {
     expect(revealNext(base({ firstUseAt: null, open: { sound: true, snooze: true } }), NOW)).toBe("sound");
     expect(revealNext(base({ firstUseAt: null, open: { snooze: true } }), NOW)).toBeNull();
+  });
+
+  test("Code review's offer is next on day 0, with first use not known yet, ahead of the sound; its Not now is an offer's", () => {
+    const fresh = base({ firstUseAt: null, threads: 0, open: { code_review: true, sound: true, snooze: true } });
+    expect(revealNext(fresh, at(0, 9))).toBe("code_review");
+    expect(revealMayClaim("code_review", fresh, at(0, 9))).toBe(true);
+    // Shown: the agent note waits for the next day; the sound for the next day too.
+    const after = base({ ...fresh, lastShownAt: at(0, 9).toISOString(), dayShownAt: at(0, 9).toISOString(), open: { sound: true } });
+    expect(revealLineFree("setup", after, at(0, 20))).toBe(false);
+    expect(revealNext(after, at(1, 9))).toBe("sound");
+    expect(revealNotNowAllowed("code_review")).toBe(true);
+    // Not open (decided, or held back): nothing on day 0.
+    expect(revealNext(base({ firstUseAt: null, threads: 0, open: { snooze: true } }), at(0, 9))).toBeNull();
   });
 
   test("heavy use: 10 threads read in 7 days, on 2 days or more; reads older than 7 days do not count", () => {

@@ -274,6 +274,33 @@ describe("compose's suggested name (thread_name_auto)", () => {
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "fourth", to: claude, idempotency_key: "k4", thread_name: "relay BUDGET" }))).toBe("thread_name_taken");
   });
 
+  test("New review's suggestion (thread_name_numbered) is numbered when taken, never dropped; a freed number is reused; a long name is cut to fit", () => {
+    const { store, project } = world();
+    const send = (key: string, name: string) =>
+      store.startPersonThread({ project_id: project.id, body: `review ${key}`, to: claude, idempotency_key: key, thread_name: name, thread_name_auto: true, thread_name_numbered: true }).message;
+    const name = "Review web-app: uncommitted on main";
+    expect(send("r1", name).thread_name).toBe(name);
+    expect(send("r2", name).thread_name).toBe(`${name} (2)`);
+    const third = send("r3", "review WEB-APP: uncommitted on main");
+    expect(third.thread_name).toBe(`review WEB-APP: uncommitted on main (3)`);
+    expect(third.named_by).toMatchObject({ kind: "auto" });
+    // An archived (resolved) thread frees its number.
+    store.resolveThread(third.id, true);
+    expect(send("r4", name).thread_name).toBe(`${name} (3)`);
+    // At the 120-character limit the base is cut so the number still fits.
+    const long = `Review #869: ${"x".repeat(107)}`;
+    expect([...long].length).toBe(120);
+    expect(send("l1", long).thread_name).toBe(long);
+    const numbered = send("l2", long).thread_name!;
+    expect(numbered.endsWith(" (2)")).toBe(true);
+    expect([...numbered].length).toBe(120);
+    // A typed name is still refused, and New message's own suggestion is still dropped.
+    expect(code(() => store.startPersonThread({ project_id: project.id, body: "typed", to: claude, idempotency_key: "t", thread_name: name, thread_name_numbered: true }))).toBe("thread_name_taken");
+    expect(store.startPersonThread({ project_id: project.id, body: "plain", to: claude, idempotency_key: "p", thread_name: name, thread_name_auto: true }).message.thread_name ?? null).toBeNull();
+    // checkPersonThreadName (the trust path's check) agrees: a numbered suggestion never refuses.
+    expect(() => store.checkPersonThreadName({ project_id: project.id, thread_name: name, thread_name_auto: true, thread_name_numbered: true })).not.toThrow();
+  });
+
   test("a retried Send with a suggestion answers the first thread, even once the suggestion was dropped", () => {
     const { store, project } = world();
     store.startPersonThread({ project_id: project.id, body: "first", to: claude, idempotency_key: "k1", thread_name: "Relay budget" });
