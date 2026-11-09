@@ -1327,15 +1327,23 @@ jobs:
             echo "the build and npm-package jobs pinned different viewers: $BUILD_JS $BUILD_CSS vs $PACKAGE_JS $PACKAGE_CSS" >&2
             exit 1
           fi
+          # One wait of about 35 minutes for both files, every 30 s, ending as
+          # soon as they answer. A tag that reuses main's Test run gets here
+          # about 10 minutes after the tag, and guides-show-deploy.yml can sit
+          # in the runner queue longer than that before its ~6-minute deploy.
+          deadline=$(( $(date +%s) + 35 * 60 ))
           for f in "$BUILD_JS" "$BUILD_CSS"; do
             if ! printf '%s\n' "$f" | grep -Eq '^viewer\.[A-Za-z0-9_-]+\.(js|css)$'; then
               echo "not a viewer entry file: $f" >&2
               exit 1
             fi
             code=000
-            for attempt in $(seq 1 10); do
+            attempt=0
+            while :; do
+              attempt=$((attempt + 1))
               code=$(curl -sS --max-time 20 -o /dev/null -I -w '%{http_code}' "https://guides.show/v1/$f" || true)
               [ "$code" = 200 ] && break
+              [ "$(date +%s)" -ge "$deadline" ] && break
               echo "attempt $attempt: https://guides.show/v1/$f answered $code; retrying in 30 s"
               sleep 30
             done
