@@ -553,6 +553,7 @@ packages/inbox/snoozeIntroDialog.test.tsx
 packages/inbox/boardReveal.test.tsx
 packages/inbox/broReveal.test.tsx
 packages/inbox/broRevealApp.test.tsx
+packages/inbox/grillMeTip.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx

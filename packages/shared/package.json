@@ -158,6 +158,7 @@
     "./inbox/board-seen": "./inbox/board-seen.ts",
     "./inbox/reveals": "./inbox/reveals.ts",
     "./inbox/launch-tip": "./inbox/launch-tip.ts",
+    "./inbox/grill-me-tip": "./inbox/grill-me-tip.ts",
     "./inbox/card-refs": "./inbox/card-refs.ts",
     "./inbox/list": "./inbox/list.ts",
     "./inbox/tidy": "./inbox/tidy.ts",
