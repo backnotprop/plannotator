@@ -14,6 +14,7 @@
  */
 import { accessSync, constants, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { windowsFolderHidden, windowsTypedUnderHome } from "./inbox-launch-windows";
 
 /** At most this many names come back for one folder (alphabetical): the window filters as the person types. */
 export const HOME_FOLDERS_MAX = 500;
@@ -45,8 +46,15 @@ const realOr = (path: string): string | null => {
 
 const inside = (real: string, realHome: string) => real === realHome || real.startsWith(realHome.endsWith(sep) ? realHome : `${realHome}${sep}`);
 
-/** A real path under the real home that passes through a hidden folder (by where it really is, not how it was typed). */
-const hiddenUnder = (real: string, realHome: string) => relative(realHome, real).split(sep).some((segment) => segment.startsWith("."));
+/**
+ * A real path under the real home that passes through a hidden folder (by where it really is, not how it was typed).
+ * On Windows a folder with the Hidden or System attribute is hidden too (AppData, the `Application Data` junctions).
+ */
+const hiddenUnder = (real: string, realHome: string) => {
+  const segments = relative(realHome, real).split(sep).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return true;
+  return process.platform === "win32" && segments.some((_, n) => windowsFolderHidden(join(realHome, ...segments.slice(0, n + 1))));
+};
 
 /** A folder this process can read and enter (list and start in). */
 const canOpen = (real: string) => {
@@ -93,7 +101,13 @@ export function isHomeItself(home: string, real: string): boolean {
 
 /** Where a typed path is under `home`, by the rules above. */
 export function resolveHomeFolder(home: string, typed: string): HomeFolder {
-  const text = typed.trim();
+  let text = typed.trim();
+  if (process.platform === "win32") {
+    // `C:\Users\me\code`, `c:/users/me/code` or `~\code`: read as `~/code`. Another drive is outside home here.
+    const underHome = windowsTypedUnderHome(text, home);
+    if (underHome === null) return { ok: false, refused: "outside" };
+    text = underHome;
+  }
   const realHome = realOr(home) ?? home;
   let rest: string;
   if (text === "~" || text === "") rest = "";
@@ -139,6 +153,7 @@ function foldersIn(real: string, realHome: string): string[] | null {
   const folders: string[] = [];
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name.includes("\\")) continue;
+    if (process.platform === "win32" && windowsFolderHidden(join(real, entry.name))) continue;
     if (entry.isDirectory()) folders.push(entry.name);
     else if (entry.isSymbolicLink()) {
       const target = realOr(join(real, entry.name));
