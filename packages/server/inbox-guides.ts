@@ -562,13 +562,14 @@ export async function inboxGuideRoute(
 }
 
 /**
- * get_guide_brief's output_schema while Code review is on: the guide's, plus
+ * get_guide_brief's output_schema while Code review is on (`shapeOn`: Shape's switch, which on main is on whenever
+ * Code review is): the guide's, plus
  * an optional `overview: { text }` and a chapter's optional `diagram` (a
  * drawing: `kind: "html"` with source, css, width and height, tall; or
  * `kind: "mermaid"` with source). The overview's diagram is no longer offered
  * (approval "guide-chapter-diagrams"); submit_guide still takes one.
  */
-function guideSchemaWithOverview(): Record<string, unknown> {
+function guideSchemaWithOverview(shapeOn = true): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -584,14 +585,17 @@ function guideSchemaWithOverview(): Record<string, unknown> {
   const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
   (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
     type: "object",
-    properties: {
-      kind: { enum: ["mermaid", "html"] },
-      source: { type: "string" },
-      css: { type: "string" },
-      width: { type: "integer", minimum: 200, maximum: 4000 },
-      height: { type: "integer", minimum: 200, maximum: 4000 },
-      tall: drawnSide,
-    },
+    // The html kind (a drawing by Shape's rules) only while Shape is on; Mermaid always (see inboxReviewChapterDiagramDoc).
+    properties: shapeOn
+      ? {
+          kind: { enum: ["mermaid", "html"] },
+          source: { type: "string" },
+          css: { type: "string" },
+          width: { type: "integer", minimum: 200, maximum: 4000 },
+          height: { type: "integer", minimum: 200, maximum: 4000 },
+          tall: drawnSide,
+        }
+      : { kind: { enum: ["mermaid"] }, source: { type: "string" } },
     required: ["kind", "source"],
     additionalProperties: false,
   };

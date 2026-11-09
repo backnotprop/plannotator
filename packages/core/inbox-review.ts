@@ -384,17 +384,25 @@ export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review dra
 
 /**
  * get_guide_brief's field doc for a chapter's diagram, served only while Code review is on (it replaces the overview
- * diagram's doc: approval "guide-chapter-diagrams"). AGENT TEXT: these words await the owner's OK and a clean-room test.
+ * diagram's doc: approval "guide-chapter-diagrams"). The Mermaid kind is offered whether Shape is on or off; the html
+ * kind (a drawing by Shape's rules) only while Shape is on (ops, with #2974 "Code review: Shape stays off unless
+ * Shape is on"). On main Shape is always on while Code review is (`shapeBoardsOn`), so the brief serves both today.
+ * AGENT TEXT: these words await the owner's OK and a clean-room test.
  */
-export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = [
-  '- **sections[].diagram** (optional): one diagram at the top of a chapter, only when a',
-  '  picture explains that chapter better than words (a flow across steps, how parts',
-  '  connect). Most chapters need none. It sits in the chapter\'s narrow text column (the',
-  '  person can expand it), so keep it small.',
-  '  Mermaid, preferred: { "kind": "mermaid", "source" }.',
-  '  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
-  '  drawing by the rules in `plannotator shape --help`.',
-].join('\n');
+export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
+  return [
+    '- **sections[].diagram** (optional): one diagram at the top of a chapter, only when a',
+    '  picture explains that chapter better than words (a flow across steps, how parts',
+    '  connect). Most chapters need none. It sits in the chapter\'s narrow text column (the',
+    '  person can expand it), so keep it small.',
+    shapeOn ? '  Mermaid, preferred: { "kind": "mermaid", "source" }.' : '  Mermaid: { "kind": "mermaid", "source" }.',
+    ...(shapeOn
+      ? ['  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a', '  drawing by the rules in `plannotator shape --help`.']
+      : []),
+  ].join('\n');
+}
+/** The doc as served on main (Shape is on whenever Code review is). */
+export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = inboxReviewChapterDiagramDoc(true);
 
 /**
  * Context notes (issue #2588, approval "inbox-context-notes"): get_guide_brief's rule for a guide's notes, served only

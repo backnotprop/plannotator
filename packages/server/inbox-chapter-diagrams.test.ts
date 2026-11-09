@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL } from "@plannotator/core/guide-format-fixtures";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
-import { INBOX_REVIEW_CHAPTER_DIAGRAM_DOC } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_CHAPTER_DIAGRAM_DOC, inboxReviewChapterDiagramDoc } from "@plannotator/core/inbox-review";
 import { checkInboxGuide } from "./inbox-guides";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 
@@ -136,5 +136,13 @@ describe("get_guide_brief offers a chapter's diagram, not the overview's", () =>
     const { output_schema: schema, rules } = await brief(false);
     expect(JSON.stringify(schema)).not.toContain("diagram");
     expect(rules.join("\n")).not.toContain("diagram");
+  });
+
+  test("with Shape off the rule offers Mermaid only: no html kind, no Shape rules", () => {
+    const off = inboxReviewChapterDiagramDoc(false);
+    expect(off).toContain('{ "kind": "mermaid", "source" }');
+    expect(off).not.toContain("html");
+    expect(off).not.toContain("plannotator shape --help");
+    expect(inboxReviewChapterDiagramDoc(true)).toContain("plannotator shape --help");
   });
 });
