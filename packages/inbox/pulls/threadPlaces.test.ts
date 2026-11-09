@@ -20,7 +20,7 @@ const thread = (id: string, fields: Partial<InboxPullThread> = {}): InboxPullThr
 const where = (threads: InboxPullThread[], scope: 'layer' | 'stack' = 'layer') =>
   placeThreads(threads, files, scope).placed.map((p) => [p.thread.id, p.where, p.side, p.line]);
 const onFiles = (threads: InboxPullThread[], scope: 'layer' | 'stack' = 'layer') =>
-  placeThreads(threads, files, scope).onFiles.map((t) => [t.id, t.file]);
+  placeThreads(threads, files, scope).onFiles.map(({ thread: t, side }) => [t.id, t.file, side]);
 
 describe('placing', () => {
   test('on the line it is about, either side', () => {
@@ -53,14 +53,14 @@ describe('placing', () => {
     ];
     const { placed, onFiles: bands, open } = placeThreads(threads, files, 'layer');
     expect(placed.map((p) => p.thread.id)).toEqual(['on-line']);
-    expect(bands.map((t) => [t.id, t.file])).toEqual([['earlier', 'src/a.ts'], ['later', 'src/a.ts'], ['gone', 'src/gone.ts']]);
+    expect(bands.map(({ thread: t, side }) => [t.id, t.file, side])).toEqual([['earlier', 'src/a.ts', 'new'], ['later', 'src/a.ts', 'new'], ['gone', 'src/gone.ts', 'old']]);
     // The resolved one is drawn but not counted.
     expect(open.get('src/a.ts')).toBe(2);
     expect(open.get('src/gone.ts')).toBe(1);
     // An outdated one with no line is about lines a push moved: the top of its file, as before.
     expect(onFiles([thread('o', { line: null, outdated: true })])).toEqual([]);
     // In Whole stack too, and never for a file this diff does not change.
-    expect(onFiles([thread('s', { line: null })], 'stack')).toEqual([['s', 'src/a.ts']]);
+    expect(onFiles([thread('s', { line: null })], 'stack')).toEqual([['s', 'src/a.ts', 'new']]);
     expect(onFiles([thread('x', { file: 'src/other.ts', line: null })])).toEqual([]);
   });
 
@@ -94,7 +94,7 @@ describe('placing', () => {
     expect(lined.placed).toEqual([]);
     expect(lined.open.has('img/logo.png')).toBe(false);
     const whole = placeThreads([thread('w', { file: 'img/logo.png', line: null })], binary, 'layer');
-    expect(whole.onFiles.map((t) => t.id)).toEqual(['w']);
+    expect(whole.onFiles.map(({ thread: t, lines }) => [t.id, lines])).toEqual([['w', false]]);
     expect(whole.open.get('img/logo.png')).toBe(1);
   });
 });

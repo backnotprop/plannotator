@@ -29,7 +29,7 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
@@ -63,7 +63,7 @@ import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
-import { FileThread, LineThread, ThreadMemory } from './LineThreads';
+import { FILE_BAND_HEIGHT, FILE_BAND_HEIGHT_PHONE, FileThread, fileThreadOpen, LineThread, ThreadMemory } from './LineThreads';
 import { fileThreadKey, placeThreads, threadKey } from './threadPlaces';
 import type { GuideFileNote, GuideLineNote } from '../guide/types';
 import { RailScopeSwitch } from './RailScope';
@@ -521,33 +521,59 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const threadsHere = details.data && details.data.key === layerKey ? details.data.threads : undefined;
   const threads = useMemo(() => (threadsHere && diff ? placeThreads(threadsHere, files, scope) : null), [threadsHere, diff, files, scope]);
   const threadHead = diff?.head_sha;
-  const lineNotes = useMemo<GuideLineNote[] | undefined>(
-    () =>
-      threads && layer
-        ? threads.placed.map((placed) => ({
-            id: `forge:${placed.thread.id}`,
-            filePath: placed.thread.file,
-            line: placed.line,
-            side: placed.side,
-            key: `${layer.key}|${threadHead ?? ''}|${threadKey(placed)}`,
-            render: () => <LineThread placed={placed} layer={layer} memory={threadMemory} headSha={threadHead} />,
-          }))
-        : undefined,
-    [threads, layer, threadHead, threadMemory],
+  // Which threads on whole files are open: only a change of these moves a band (other remembered choices do not
+  // draw the page again).
+  const fileThreadIds = useMemo(() => (threads ? threads.onFiles.map(({ thread }) => thread.id) : []), [threads]);
+  const openFileThreads = useSyncExternalStore(
+    threadMemory.subscribe,
+    () => fileThreadIds.filter((id) => fileThreadOpen(threadMemory, id)).join('\n'),
   );
-  // Threads on whole files: one band each under the file's header, in the time they started.
-  const wholeFileNotes = useMemo<GuideFileNote[] | undefined>(
-    () =>
-      threads && layer
-        ? threads.onFiles.map((thread) => ({
-            id: `forge:${thread.id}`,
-            filePath: thread.file,
-            key: `${layer.key}|${threadHead ?? ''}|${fileThreadKey(thread)}`,
-            render: () => <FileThread thread={thread} layer={layer} memory={threadMemory} headSha={threadHead} />,
-          }))
-        : undefined,
-    [threads, layer, threadHead, threadMemory],
-  );
+  const lineNotes = useMemo<GuideLineNote[] | undefined>(() => {
+    if (!threads || !layer) return undefined;
+    const notes: GuideLineNote[] = threads.placed.map((placed) => ({
+      id: `forge:${placed.thread.id}`,
+      filePath: placed.thread.file,
+      line: placed.line,
+      side: placed.side,
+      key: `${layer.key}|${threadHead ?? ''}|${threadKey(placed)}`,
+      render: () => <LineThread placed={placed} layer={layer} memory={threadMemory} headSha={threadHead} />,
+    }));
+    // An open thread on a whole file: above the first hunk (Pierre's file-level annotation, line 0), so it scrolls
+    // away with the code. A file with no line keeps it in its header.
+    const open = new Set(openFileThreads ? openFileThreads.split('\n') : []);
+    for (const { thread, side, lines } of threads.onFiles) {
+      if (!lines || !open.has(thread.id)) continue;
+      notes.push({
+        id: `forge:${thread.id}`,
+        filePath: thread.file,
+        line: 0,
+        side,
+        key: `${layer.key}|${threadHead ?? ''}|open|${fileThreadKey(thread)}`,
+        render: () => <FileThread thread={thread} layer={layer} memory={threadMemory} headSha={threadHead} open />,
+      });
+    }
+    return notes;
+  }, [threads, layer, threadHead, threadMemory, openFileThreads]);
+  // Threads on whole files, folded: one band each in the file's header, in the time they started, so they stay with
+  // it. Its height is fixed, so the header is sized for it before it draws.
+  const wholeFileNotes = useMemo<GuideFileNote[] | undefined>(() => {
+    if (!threads || !layer) return undefined;
+    const open = new Set(openFileThreads ? openFileThreads.split('\n') : []);
+    const notes: GuideFileNote[] = [];
+    for (const { thread, lines } of threads.onFiles) {
+      const opened = open.has(thread.id);
+      if (opened && lines) continue;
+      notes.push({
+        id: `forge:${thread.id}`,
+        filePath: thread.file,
+        key: `${layer.key}|${threadHead ?? ''}|${opened ? 'open' : phone ? 'phone' : ''}|${fileThreadKey(thread)}`,
+        // Open in a file with no line: measured as drawn.
+        ...(opened ? {} : { height: phone ? FILE_BAND_HEIGHT_PHONE : FILE_BAND_HEIGHT }),
+        render: () => <FileThread thread={thread} layer={layer} memory={threadMemory} headSha={threadHead} open={opened} phone={phone} />,
+      });
+    }
+    return notes;
+  }, [threads, layer, threadHead, threadMemory, openFileThreads, phone]);
   const openThreads = threads?.open;
   const detailsPanel = useRef<HTMLElement>(null);
   const detailsOpener = useRef<HTMLElement | null>(null);

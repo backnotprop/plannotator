@@ -18,7 +18,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { act, useState } from 'react';
+import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
@@ -36,7 +36,7 @@ let readerComments: { onSave: (annotation: unknown) => void } | undefined;
 /** What the reader was last given to draw under lines (others' threads). */
 let readerNotes: { id: string; filePath: string; line: number; side: string }[] | undefined;
 /** What the reader was last given to draw about whole files (others' threads on a file). */
-let readerWhole: { id: string; filePath: string }[] | undefined;
+let readerWhole: { id: string; filePath: string; height?: number; render: () => ReactNode }[] | undefined;
 /** The threads the details door answers, by PR key. */
 let detailThreads: Record<string, unknown[]> = {};
 /** The reader's whole-file seam as the review last gave it. */
@@ -360,8 +360,19 @@ test.skipIf(!hasDom)("others' threads from the details go on their lines in this
     ['forge:t2', 'src/a.ts', 2, 'old'],
     ['forge:t3', 'src/a.ts', 1, 'new'],
   ]);
-  // The one on the whole file is not on a line: it is the file's band.
-  expect(readerWhole!.map((n) => [n.id, n.filePath])).toEqual([['forge:t5', 'src/a.ts']]);
+  // The one on the whole file is not on a line: it is the file's band, folded in its header, at a known height.
+  expect(readerWhole!.map((n) => [n.id, n.filePath, n.height])).toEqual([['forge:t5', 'src/a.ts', 32]]);
+  // Opened, it leaves the header for the top of the code (line 0), where it scrolls away with the code.
+  const bandBox = document.createElement('div');
+  document.body.append(bandBox);
+  const bandRoot = createRoot(bandBox);
+  await act(async () => bandRoot.render(<>{readerWhole![0]!.render()}</>));
+  await act(async () => (bandBox.querySelector('[data-pull-thread="t5"]') as HTMLElement).click());
+  await settle();
+  expect(readerWhole!.map((n) => n.id)).toEqual([]);
+  expect(readerNotes!.filter((n) => n.id === 'forge:t5').map((n) => [n.line, n.side])).toEqual([[0, 'new']]);
+  await act(async () => bandRoot.unmount());
+  bandBox.remove();
   // Open threads only: the resolved one is drawn but not counted.
   expect(el('[data-review-file="src/a.ts"] [data-pull-file-threads]').textContent).toBe('3');
   await act(async () => el('[data-pull-layer-all]').click());

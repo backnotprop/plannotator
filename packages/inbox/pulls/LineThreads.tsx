@@ -214,14 +214,23 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
   );
 }
 
+/** A folded band's height, fixed so the file's header can be sized for it before it is drawn (one line; two on a phone). */
+export const FILE_BAND_HEIGHT = 32;
+export const FILE_BAND_HEIGHT_PHONE = 52;
+
+/** Whether a whole file's thread is open, as the person left it (folded until they open it). */
+export const fileThreadOpen = (memory: ThreadMemory, threadId: string): boolean => memory.get(`open:${threadId}`) ?? false;
+
 /**
  * A thread on a whole file: a band under the file's header, above its first lines (the owner's pick B, 2026-11-09).
  * It starts folded to one line ("On this file", who, the first words, when), even unresolved, which the owner chose
- * for this band only; a click opens it in place and its top line folds it again.
+ * for this band only. Folded, the host draws it in the file's header, so it stays with the header while the file
+ * scrolls; open, above the first hunk, so it scrolls away with the code. `open` is where the host drew it: a click
+ * only records the choice (`ThreadMemory`), and the host moves the band.
  */
-export function FileThread({ thread, layer, memory, headSha }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
+export function FileThread({ thread, layer, memory, headSha, open, phone = false }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null; open: boolean; phone?: boolean }) {
   const why = foldedWhy(thread);
-  const [open, setOpen] = useRemembered(memory, `open:${thread.id}`, false);
+  const setOpen = (value: boolean) => memory.set(`open:${thread.id}`, value);
   const count = thread.comments.length;
   const common = { 'data-pull-thread': thread.id, 'data-pull-thread-where': 'file', 'data-voice': why === 'bot' ? 'bot' : 'person' };
   const on = (
@@ -233,7 +242,7 @@ export function FileThread({ thread, layer, memory, headSha }: { thread: InboxPu
   );
   if (!open) {
     return (
-      <button type="button" className="ib-lt ib-lt-fold ib-ft" aria-expanded={false} onClick={() => setOpen(true)} data-pull-thread-folded={why ?? ''} {...common}>
+      <button type="button" className={`ib-lt ib-lt-fold ib-ft${phone ? ' ib-ft-phone' : ''}`} aria-expanded={false} onClick={() => setOpen(true)} data-pull-thread-folded={why ?? ''} {...common}>
         <Icon name="chevR" size={13} />
         {on}
         <FoldedWords thread={thread} layer={layer} />

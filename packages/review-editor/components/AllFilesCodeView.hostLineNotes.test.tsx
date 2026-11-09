@@ -39,10 +39,12 @@ let items = new Map<string, Item>();
 let updates: string[] = [];
 let renderAnnotation: (annotation: Ann, item: Item) => React.ReactNode = () => null;
 let renderCustomHeader: (item: Item) => React.ReactNode = () => null;
+/** The options CodeView was last given. */
+let viewOptions: { itemMetrics?: { diffHeaderHeight?: number } } = {};
 
 mock.module('@pierre/diffs/react', () => ({
   CodeView: React.forwardRef(function MockCodeView(
-    props: { initialItems?: Item[]; containerRef?: React.Ref<HTMLDivElement>; className?: string; renderAnnotation: typeof renderAnnotation; renderCustomHeader: typeof renderCustomHeader },
+    props: { initialItems?: Item[]; containerRef?: React.Ref<HTMLDivElement>; className?: string; renderAnnotation: typeof renderAnnotation; renderCustomHeader: typeof renderCustomHeader; options?: typeof viewOptions },
     ref: React.ForwardedRef<unknown>,
   ) {
     const seeded = useRef(false);
@@ -52,6 +54,7 @@ mock.module('@pierre/diffs/react', () => ({
     }
     renderAnnotation = props.renderAnnotation;
     renderCustomHeader = props.renderCustomHeader;
+    viewOptions = props.options ?? {};
     useImperativeHandle(ref, () => ({
       addItems: () => {},
       getItem: (id: string) => items.get(id),
@@ -108,11 +111,11 @@ const files = [fileOf('a.ts'), fileOf('b.ts')];
 const mine: CodeAnnotation = { id: 'mine', type: 'comment', scope: 'line', filePath: 'a.ts', lineStart: 2, lineEnd: 2, side: 'new', text: 'my words', createdAt: 1 };
 const note = (id: string, filePath: string, key = id, line = 2): HostLineNote => ({ id, filePath, line, side: 'new', key, render: () => <i data-note={id}>{key}</i> });
 
-function draw(hostLineNotes?: readonly HostLineNote[], annotations: CodeAnnotation[] = [mine], hostFileNotes?: readonly HostFileNote[]) {
+function draw(hostLineNotes?: readonly HostLineNote[], annotations: CodeAnnotation[] = [mine], hostFileNotes?: readonly HostFileNote[], shown: DiffFile[] = files) {
   return act(async () => {
     root!.render(
       <AllFilesCodeView
-        files={files}
+        files={shown}
         diffStyle="unified"
         annotations={annotations}
         {...(hostLineNotes ? { hostLineNotes } : {})}
@@ -253,5 +256,22 @@ describe.if(hasDom)("the host's notes on whole files", () => {
     root = createRoot(host!);
     await draw(undefined, [mine], []);
     expect(await header('a.ts')).toBe(before);
+  });
+});
+
+describe.if(hasDom)("a file note's known height", () => {
+  test('a view of one file sizes its header for its notes from the start; files that differ, or a height not given, leave it measured', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const sized = (id: string, filePath: string, height?: number): HostFileNote => ({ ...fileNote(id, filePath), ...(height === undefined ? {} : { height }) });
+    await draw([], [mine], [], [files[0]!]);
+    const bare = viewOptions.itemMetrics!.diffHeaderHeight!;
+    await draw([], [mine], [sized('w1', 'a.ts', 32), sized('w2', 'a.ts', 32)], [files[0]!]);
+    expect(viewOptions.itemMetrics!.diffHeaderHeight).toBe(bare + 64);
+    await draw([], [mine], [sized('w1', 'a.ts', 32)], files);
+    expect(viewOptions.itemMetrics!.diffHeaderHeight).toBe(bare);
+    await draw([], [mine], [sized('w1', 'a.ts')], [files[0]!]);
+    expect(viewOptions.itemMetrics!.diffHeaderHeight).toBe(bare);
   });
 });

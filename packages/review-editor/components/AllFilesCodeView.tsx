@@ -218,8 +218,8 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself under lines (hostLineNotes.ts): read-only, never annotations, above them on a shared
    *  line. Absent: none, as before. */
   hostLineNotes?: readonly HostLineNote[];
-  /** What the host draws itself about a whole file (hostLineNotes.ts): under the file's header, above its first lines
-   *  and the person's own file comments; read-only, never annotations. Absent: none, as before. */
+  /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
+   *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
@@ -3539,9 +3539,24 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return Number.isFinite(px) && px > 0 ? Math.round(px * 1.5) : undefined;
   }, [fontSize]);
 
+  // The host's notes in the header, when every file here carries the same known height of them (a view of one file,
+  // as the PR page draws): the header is that much taller from the first layout, so measuring it finds nothing to fix
+  // and the file is not drawn a second time. Otherwise 0, and the measured header height covers them.
+  const hostHeaderExtra = useMemo(() => {
+    if (hostFileNotes.length === 0 || files.length === 0) return 0;
+    let shared: number | null = null;
+    for (const file of files) {
+      const notes = hostFileNotesByPath.get(file.path) ?? [];
+      if (notes.some((note) => note.height === undefined)) return 0;
+      const sum = notes.reduce((total, note) => total + note.height!, 0);
+      if (shared !== null && sum !== shared) return 0;
+      shared = sum;
+    }
+    return shared ?? 0;
+  }, [hostFileNotes, hostFileNotesByPath, files]);
   const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
     () => ({
-      diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
+      diffHeaderHeight: (compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT) + hostHeaderExtra,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
       // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
       // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
@@ -3553,7 +3568,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight],
+    [compactTouchLayout, customLineHeight, hostHeaderExtra],
   );
   itemMetricsRef.current = itemMetrics;
 

@@ -10738,10 +10738,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-prp-t { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-prp-t > svg { flex: none; }
 /* A thread on a whole file (FileThread; the owner's pick B, 2026-11-09): a full-width band under the file's header,
-   above its first lines, folded to one line ("On this file", who, the first words, when). It rides the sticky header,
-   so an open one scrolls inside a capped height rather than covering the code. */
+   above its first lines, folded to one line ("On this file", who, the first words, when). Folded it rides in the
+   sticky header at a fixed height (FILE_BAND_HEIGHT, two rows on a phone), so the header is sized for it before it
+   draws; open it sits above the first hunk and scrolls away with the code. */
 .ib-ft { margin-top: 0; border-top: 0; padding: 0 14px; background: color-mix(in oklch, var(--muted) 35%, var(--background)); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-ft.ib-lt-fold { min-height: 32px; padding-block: 4px; }
+.ib-ft.ib-lt-fold { box-sizing: border-box; height: 32px; min-height: 0; padding-block: 0; overflow: hidden; }
 .ib-ft.ib-lt-fold:hover { background: color-mix(in oklch, var(--muted) 55%, var(--background)); }
 .ib-ft .ib-ft-on, .ib-ft .ib-ft-dot, .ib-ft .ib-ft-n { flex: none; }
 .ib-ft .ib-ft-dot { opacity: 0.5; }
@@ -10750,12 +10751,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-ft .ib-ft-top { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 0; border: 0; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
 .ib-ft .ib-ft-top:hover { color: var(--foreground); }
 .ib-ft .ib-ft-top:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: -2px; border-radius: 4px; }
-.ib-ft .ib-ft-body { max-height: min(45vh, 420px); overflow-y: auto; padding: 2px 2px 10px; }
-@media (max-width: 640px) {
-  .ib-ft.ib-lt-fold { flex-wrap: wrap; row-gap: 0; padding-block: 6px; }
-  .ib-ft.ib-lt-fold .ib-lt-line { flex-basis: 100%; order: 9; padding-left: 21px; }
-  .ib-ft.ib-lt-fold .ib-lt-at { margin-left: auto; }
-}
+.ib-ft .ib-ft-body { padding: 2px 2px 10px; }
+/* A phone: the first words on a second row, the band still a fixed height. */
+.ib-ft.ib-lt-fold.ib-ft-phone { height: 52px; flex-wrap: wrap; align-content: center; row-gap: 0; }
+.ib-ft.ib-ft-phone .ib-lt-line { flex-basis: 100%; order: 9; padding-left: 21px; }
+.ib-ft.ib-ft-phone .ib-lt-at { margin-left: auto; }
 @media (pointer: coarse) { .ib-lt-fold { min-height: 44px; } }
 /* The bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07; footLine.ts). Its line, and a faint 18 px
    shadow above it, fade in only while thread text scrolls under the bar (`data-under`); with nothing under it (the

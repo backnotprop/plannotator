@@ -89,8 +89,9 @@ export interface GuideReaderProps {
    */
   lineNotes?: readonly GuideLineNote[];
   /**
-   * What the host draws itself about whole files, under each file's header and above its first lines (the PR page:
-   * other people's comments on a whole file). Never comments, as `lineNotes`. Absent: none, as before.
+   * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
+   * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
+   * should scroll away with the code is a line note on line 0. Absent: none, as before.
    */
   wholeFileNotes?: readonly GuideFileNote[];
   /**
@@ -120,6 +121,8 @@ export interface GuideFileNote {
   filePath: string;
   /** Changes whenever what `render` draws changes; the same key leaves the file's header as it is. */
   key: string;
+  /** The height it draws at, in px, when known: the header is sized for it from the start (review-editor's `height`). */
+  height?: number;
   render: () => ReactNode;
 }
 

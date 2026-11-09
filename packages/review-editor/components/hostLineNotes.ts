@@ -43,9 +43,11 @@ export function hostLineNoteSignatures(notes: readonly HostLineNote[]): Map<stri
 }
 
 /**
- * Something the host draws itself about a whole file (the Inbox's PR page: other people's comments on a whole file).
- * Drawn under the file's header, above its first lines, before the person's own comments on the file. Read-only and
- * never an annotation, as a `HostLineNote`. Absent: none, as before.
+ * Something the host draws itself about a whole file (the Inbox's PR page: a folded comment on a whole file). Drawn in
+ * the file's header, under its path and above its first lines, so it stays with the header while the file scrolls
+ * under it; before the person's own comments on the file. Read-only and never an annotation, as a `HostLineNote`.
+ * Something that should scroll away with the code instead is a `HostLineNote` on line 0 (Pierre's file-level
+ * annotation, above the first hunk). Absent: none, as before.
  */
 export interface HostFileNote {
   /** Stable for the same note across reads. */
@@ -53,6 +55,12 @@ export interface HostFileNote {
   filePath: string;
   /** Changes whenever what `render` draws changes, so the file's header is drawn again; the same key leaves it. */
   key: string;
+  /**
+   * The height it draws at, in px, when the host knows it (a fixed one-line band). A view of one file sizes its
+   * header for it from the start, so the note costs the diff no second layout; the header is still measured, so a
+   * wrong or absent height only costs that layout.
+   */
+  height?: number;
   render: () => ReactNode;
 }
 
@@ -61,6 +69,6 @@ export const NO_HOST_FILE_NOTES: readonly HostFileNote[] = [];
 /** Per file, what its file notes draw: a file whose signature moved has its header drawn again, and no other. */
 export function hostFileNoteSignatures(notes: readonly HostFileNote[]): Map<string, string> {
   const map = new Map<string, string>();
-  for (const note of notes) map.set(note.filePath, `${map.get(note.filePath) ?? ''}${JSON.stringify([note.id, note.key])}\n`);
+  for (const note of notes) map.set(note.filePath, `${map.get(note.filePath) ?? ''}${JSON.stringify([note.id, note.key, note.height ?? null])}\n`);
   return map;
 }

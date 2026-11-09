@@ -2,8 +2,9 @@
  * Where other people's threads go on the PR page's diff (approval inbox-pr-page, q-530b62e0 and q-7d0a1587): each on
  * the line it is about when this diff shows that line; one whose line this diff does not show (a push moved past it,
  * or the whole stack's diff starts lower) at the top of its file, saying why. A thread on the whole file is not on a
- * line at all: it is a band under the file's header, above its first lines (the owner's pick B, 2026-11-09). A thread
- * on a file this diff does not change is in the Details panel only. Nothing here is cut at a count: every thread is placed,
+ * line at all: it is a band under the file's header, above its first lines (the owner's pick B, 2026-11-09): folded,
+ * in the header, so it stays with it; open, above the first hunk, so it scrolls away with the code. A thread on a file
+ * this diff does not change is in the Details panel only. Nothing here is cut at a count: every thread is placed,
  * and every open one is counted on its file's row.
  */
 import type { InboxPullThread } from '@plannotator/core/inbox-types';
@@ -17,6 +18,14 @@ export interface PlacedThread {
   line: number;
   side: 'old' | 'new';
   where: ThreadWhere;
+}
+
+/** A thread on a whole file, and the side its file's top is on (a deleted file has only its old side). */
+export interface FileThreadPlace {
+  thread: InboxPullThread;
+  side: 'old' | 'new';
+  /** False for a file the diff draws no line of (a binary file): there is no code to open the thread above. */
+  lines: boolean;
 }
 
 /** The lines one file's patch draws on each side, and the first it draws (where a thread with no line here goes). */
@@ -69,12 +78,12 @@ export function placeThreads(
   threads: readonly InboxPullThread[],
   files: readonly { path: string; patch: string }[],
   scope: 'layer' | 'stack',
-): { placed: PlacedThread[]; onFiles: InboxPullThread[]; open: Map<string, number> } {
+): { placed: PlacedThread[]; onFiles: FileThreadPlace[]; open: Map<string, number> } {
   // A path changed twice is drawn once, as its last part (reviewFiles).
   const byPath = new Map(files.map((file) => [file.path, file.patch]));
   const lines = new Map<string, ReturnType<typeof patchLines>>();
   const placed: PlacedThread[] = [];
-  const onFiles: InboxPullThread[] = [];
+  const onFiles: FileThreadPlace[] = [];
   const open = new Map<string, number>();
   for (const thread of threads) {
     const patch = byPath.get(thread.file);
@@ -89,7 +98,7 @@ export function placeThreads(
     // On the whole file (no line, and not a line a push moved past): its band under the file's header, which every file
     // in the diff draws, lines or none.
     if (thread.line === null && !thread.outdated) {
-      onFiles.push(thread);
+      onFiles.push({ thread, side: drawn.first?.side ?? 'new', lines: drawn.first !== null });
       count();
       continue;
     }
@@ -106,7 +115,7 @@ export function placeThreads(
     count();
   }
   // Several on one file stack in the time they started (the first comment's), the earliest on top.
-  const started = (thread: InboxPullThread) => {
+  const started = ({ thread }: FileThreadPlace) => {
     const at = Date.parse(thread.comments[0]?.at ?? '');
     return Number.isNaN(at) ? Number.POSITIVE_INFINITY : at;
   };

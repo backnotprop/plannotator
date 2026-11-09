@@ -14,7 +14,7 @@ import type { InboxPull, InboxPullDetailComment, InboxPullThread } from '@planno
 import type { PlacedThread } from './threadPlaces';
 
 const hasDom = typeof document !== 'undefined';
-const { FileThread, LineThread, ThreadMemory } = (hasDom ? await import('./LineThreads') : {}) as typeof import('./LineThreads');
+const { FileThread, fileThreadOpen, LineThread, ThreadMemory } = (hasDom ? await import('./LineThreads') : {}) as typeof import('./LineThreads');
 
 let host: HTMLDivElement;
 let root: Root;
@@ -129,11 +129,12 @@ test.if(hasDom)('what the person opened stays open when the diff draws the line 
   expect(box().hasAttribute('data-open')).toBe(true);
 });
 
-test.if(hasDom)("a thread on a whole file: one line that says so, even unresolved; it opens in place and folds again, and stays as left", () => {
+test.if(hasDom)("a thread on a whole file: folded, one line that says so, even unresolved; a click asks to open it, and open it shows the thread and folds again", () => {
   const memory = new ThreadMemory();
   const whole = thread({ id: 'W1', line: null, comments: [said('w1', { author: 'sam', body: 'Use CREATE INDEX CONCURRENTLY here.' }), said('w2', { author: 'theo' })] });
-  const drawFile = () => act(() => root.render(<FileThread thread={whole} layer={layer} memory={memory} />));
-  drawFile();
+  const drawFile = (open: boolean) => act(() => root.render(<FileThread thread={whole} layer={layer} memory={memory} open={open} />));
+  expect(fileThreadOpen(memory, 'W1')).toBe(false);
+  drawFile(false);
   const band = box() as HTMLButtonElement;
   expect(band.tagName).toBe('BUTTON');
   expect(band.getAttribute('aria-expanded')).toBe('false');
@@ -144,14 +145,12 @@ test.if(hasDom)("a thread on a whole file: one line that says so, even unresolve
   expect(band.querySelector('.ib-lt-at')).not.toBeNull();
   expect(comments()).toEqual([]);
   act(() => band.click());
+  // The host moves it: the band only records the choice.
+  expect(fileThreadOpen(memory, 'W1')).toBe(true);
+  drawFile(true);
   expect(box().hasAttribute('data-open')).toBe(true);
   expect(comments()).toEqual(['w1', 'w2']);
   expect(host.querySelector('a[aria-label="Open this thread on GitHub"]')!.getAttribute('href')).toBe('https://github.com/acme/web/pull/7#discussion_w1');
-  // The header draws again (a read brings news): what was opened stays open.
-  act(() => root.render(<></>));
-  drawFile();
-  expect(box().hasAttribute('data-open')).toBe(true);
   act(() => (host.querySelector('[data-pull-thread-refold]') as HTMLElement).click());
-  expect(box().getAttribute('aria-expanded')).toBe('false');
-  expect(comments()).toEqual([]);
+  expect(fileThreadOpen(memory, 'W1')).toBe(false);
 });
