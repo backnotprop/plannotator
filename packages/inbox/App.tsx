@@ -11,6 +11,7 @@
  */
 
 import { inboxRefTransport } from './refTransport';
+import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
@@ -243,6 +244,10 @@ configurePlannotatorUI({
   componentTooltips: true,
   // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
   digitHexIssueRefs: true,
+  // ui marks <body data-pn-popout> while a popout is open and <html data-pn-selection-chooser> while the diff's
+  // selection chooser shows; the window's build keys theme.css's and comments.css's body:has() / html:has() on them
+  // (build/inbox-page-marks.ts: each such :has() cost a style pass over the whole page on every DOM change).
+  pageMarks: true,
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
   // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css
@@ -1342,6 +1347,8 @@ function Inbox() {
   }, []);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  // `.pn-inbox` in the page: html and body carry `data-pn-inbox` (pageMarks.ts). The root is drawn on every render.
+  useLayoutEffect(() => markInboxPage(rootRef.current), []);
   const latestRef = useRef(latest);
   latestRef.current = latest;
   /**
