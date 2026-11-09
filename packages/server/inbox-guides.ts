@@ -27,7 +27,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
 import { forgeRefKey, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
+import { GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
 import {
   GUIDE_SNAPSHOT_DRAWN_VERSION,
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
@@ -57,10 +57,12 @@ import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { readGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
 import { gitBlobId, INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
+import { composeGuideMethodology } from "./guide/guide-review";
 import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
   callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
 
@@ -557,7 +559,10 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     },
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
-        methodology: GUIDE_REVIEW_PROMPT,
+        // The person's standing instructions (Settings, `${dataDir}/guide-instructions.md`) reach a guide
+        // an agent writes exactly as they reach one the review UI launches: appended through
+        // composeGuideMethodology, so the two paths read one prompt. Without them, GUIDE_REVIEW_PROMPT byte for byte.
+        methodology: composeGuideMethodology(readGuideInstructions()),
         output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
         // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
