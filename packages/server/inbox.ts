@@ -187,7 +187,8 @@ import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewS
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createRefCards, type RefRunner } from "./ref-cards";
+import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
@@ -4447,9 +4448,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         }
         const { projectsByRepo, wanted } = await pullProjects();
-        // `others=1`: the person has the Others view open, so Others is read as often as the list.
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
-        pullRisk.assess(listed.pulls);
+        // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
+        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard").
+        const everywhere = url.searchParams.get("everywhere") === "1";
+        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1", everywhere });
+        // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
+        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
@@ -4687,6 +4691,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           return json({ error: message, code: "pull_review_failed" }, 502);
         }
+      }
+      // Merge from the Pull requests page (approval "inbox-pr-dashboard", q-f71fc8d1): the tile popover's Merge, sent after
+      // the person's second click (`confirmed`). The forge is asked again now and must say it can merge at the head the
+      // person saw (`mergePull`'s guard); the merge pins that head and uses the repository's own method. A write to the
+      // forge as the person's own gh / glab, so the same guards as Post: the owner only, same origin, Code review on.
+      if (path === "/api/inbox/pulls/merge") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const seen = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
+        if (!seen) throw new InboxError("validation_error", "head_sha: the head commit the person saw.", { field: "head_sha" });
+        // The second click: a request that does not say so never merges.
+        if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
+        const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
+        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
+        return json({ serverSession, ok: true, key, method: result.method, url: pull.url });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
