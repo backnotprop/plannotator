@@ -50,6 +50,7 @@ import {
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 type Json = Record<string, any>;
 
@@ -1393,7 +1394,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
     const was = process.env.PLANNOTATOR_DATA_DIR;
     const configDir = scratch("plannotator-snooze-agent-config-");
     process.env.PLANNOTATOR_DATA_DIR = configDir;
-    const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+    const mark = () => savedConfig(configDir).inboxSnoozeIntro?.snoozedAt;
     try {
       let answer = () => Response.json({ error: "A newer Plannotator wrote these.", code: "snoozes_newer" }, { status: 409 });
       await withDoor("plannotator-snooze-agent-refused-", "msg_01K00000000000000000000006", true, { snooze: () => answer() }, async (_inbox, client) => {

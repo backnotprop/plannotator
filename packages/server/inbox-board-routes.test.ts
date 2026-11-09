@@ -11,7 +11,7 @@
  * forever.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -20,6 +20,7 @@ import type { CardFaviconOptions } from "./inbox-card-favicons";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -342,7 +343,7 @@ describe("the Board page's routes", () => {
     const { dataDir, base, post } = await world();
     expect(await (await post("/api/inbox/board/intro")).json()).toEqual({ show: true });
     expect(await (await post("/api/inbox/board/intro")).json()).toEqual({ show: false });
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
+    expect(savedConfig(dataDir).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
     expect((await post("/api/inbox/board/intro", { serverSession: "another" })).status).toBe(409);
     expect((await fetch(`${base}/api/inbox/board/intro`)).status).toBe(405);
   });

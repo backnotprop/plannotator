@@ -17,7 +17,7 @@
  * 0.29 hold), or to someone who switched Code review off or on; its claim turning anything on or not taking the day.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -25,6 +25,7 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { savedConfig, savedFiles } from "../../tests/helpers/saved-config";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -166,7 +167,7 @@ async function world(options: Options = {}) {
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings?store=0`)).json()) as Json;
   const next = async () => (await settings()).reveal.next as string | null;
   const claim = async (id = "board", key?: string) => (await (await post("/api/inbox/reveal", { id, ...(key ? { key } : {}) })).json()) as { show: boolean; reveal: { next: string | null }; board: { on: boolean }; steps: { on: boolean } };
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
+  const saved = () => savedConfig(dataDir) as Json;
   let rpcId = 0;
   const rpc = async (method: string, params: Record<string, unknown>) => {
     const response = await fetch(`${base}/mcp`, {
@@ -218,10 +219,10 @@ describe("the Board reveal at day 4", () => {
     expect(await w.toolNames()).not.toContain("card");
     expect(await w.agentText()).toBe(today);
     // Never again: not next, and a second claim (a reload, another tab) shows nothing and writes nothing.
-    const after = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const after = savedFiles(w.dataDir);
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(after);
+    expect(savedFiles(w.dataDir)).toBe(after);
   });
 
   test("Turn it on: the dialog's switch save writes true; card from the next session; the first visit to #board shows the welcome, once", async () => {
@@ -262,24 +263,24 @@ describe("the Board reveal at day 4", () => {
   test("never over a Board the person set: on stays on, off stays off, nothing is written", async () => {
     for (const set of [true, false]) {
       const w = await world({ config: { inboxBoard: set } });
-      const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+      const before = savedFiles(w.dataDir);
       expect(await w.next()).toBeNull();
       expect((await w.claim()).show).toBe(false);
-      expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+      expect(savedFiles(w.dataDir)).toBe(before);
     }
   });
 
   test("turned on by 0.28.49's reveal (true, with its stamp): theirs now, never touched", async () => {
     const at = new Date(Date.now() - DAY).toISOString();
     const w = await world({ config: { inboxBoard: true, inboxBoardIntro: { shownAt: at }, inboxReveals: { lastShownAt: at, board: { shownAt: at } } } });
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedFiles(w.dataDir);
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
     expect((await w.settings()).board).toEqual({ on: true });
     expect(await w.toolNames()).toContain("card");
     // They saw the welcome with it: the Board's first visit never shows it again.
     expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedFiles(w.dataDir)).toBe(before);
   });
 
   test("two tabs claim at once: exactly one shows it", async () => {
@@ -297,18 +298,18 @@ describe("the Board reveal at day 4", () => {
     const w = await world({ days: 6, tailnet: "owner" });
     const KEY = "0b6f6c1e-4d0a-4c55-9d43-2b1f7a3c9e11";
     expect((await w.claim("board", KEY)).show).toBe(true);
-    const stamped = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const stamped = savedFiles(w.dataDir);
     expect(w.saved().inboxReveals.board.key).toBe(KEY);
     // The retry: shown again, nothing written again (the spacing clock and the stamp are the first claim's).
     expect(await w.claim("board", KEY)).toMatchObject({ show: true, board: { on: false } });
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    expect(savedFiles(w.dataDir)).toBe(stamped);
     // Another tab (its own key, or an older page with none) and the owner's phone: one offer per person.
     expect((await w.claim("board", "6a1d2b4c-other-tab")).show).toBe(false);
     expect((await w.claim("board")).show).toBe(false);
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board", key: "phone-key-1234" })).json()) as Json).show).toBe(false);
     // The same key never claims another reveal: the Checklist (due at day 6) waits out the day after the Board.
     expect((await w.claim("steps", KEY)).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    expect(savedFiles(w.dataDir)).toBe(stamped);
     // Turned on meanwhile (Turn it on, or Settings): the retry is not shown the offer.
     expect((await w.post("/api/inbox/settings", { board: { on: true } })).ok).toBe(true);
     expect((await w.claim("board", KEY)).show).toBe(false);
@@ -433,10 +434,10 @@ describe("the Checklist reveal at day 6", () => {
     expect(await w.toolNames()).not.toContain("steps");
     expect(await w.agentText()).toBe(today);
     // Never again: not next, and a second claim (a reload, another tab) shows nothing and writes nothing.
-    const after = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const after = savedFiles(w.dataDir);
     expect(await w.next()).toBeNull();
     expect((await w.claim("steps")).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(after);
+    expect(savedFiles(w.dataDir)).toBe(after);
 
     // Turn it on (the dialog saves the switch as Settings does): from the next session, the approved steps text.
     expect((await w.post("/api/inbox/settings", { steps: { on: true } })).ok).toBe(true);
@@ -448,20 +449,20 @@ describe("the Checklist reveal at day 6", () => {
   test("turned on by 0.28.49's reveal (true, with its stamp): theirs now, never touched", async () => {
     const at = new Date(Date.now() - DAY).toISOString();
     const w = await day6({ inboxSteps: true, inboxReveals: { lastShownAt: at, steps: { shownAt: at } } });
-    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const before = savedFiles(w.dataDir);
     expect(await w.next()).toBeNull();
     expect((await w.claim("steps")).show).toBe(false);
     expect((await w.settings()).steps).toEqual({ on: true });
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    expect(savedFiles(w.dataDir)).toBe(before);
   });
 
   test("never over a Checklist the person set: on stays on, off stays off, nothing is written", async () => {
     for (const set of [true, false]) {
       const w = await day6({ inboxSteps: set });
-      const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+      const before = savedFiles(w.dataDir);
       expect(await w.next()).toBeNull();
       expect((await w.claim("steps")).show).toBe(false);
-      expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+      expect(savedFiles(w.dataDir)).toBe(before);
       expect(w.saved().inboxSteps).toBe(set);
     }
   });
@@ -509,10 +510,10 @@ describe("the Checklist reveal at day 6", () => {
     const w = await day6();
     const KEY = "5c2e9a70-1f3b-4e8d-a6c4-7d0b9e2f1a33";
     expect((await w.claim("steps", KEY)).show).toBe(true);
-    const stamped = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const stamped = savedFiles(w.dataDir);
     expect(await w.claim("steps", KEY)).toMatchObject({ show: true, steps: { on: false } });
     expect((await w.claim("steps", "another-tab-key")).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    expect(savedFiles(w.dataDir)).toBe(stamped);
     expect(w.saved().inboxSteps).toBeUndefined();
   });
 
@@ -656,9 +657,9 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
     const read = await w.settings();
     expect(read.reveal.next).toBeNull();
     expect(read.code_review).toBeUndefined();
-    const config = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const config = savedFiles(w.dataDir);
     expect((await w.claim("code_review", KEY)).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(config);
+    expect(savedFiles(w.dataDir)).toBe(config);
   });
 
   test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {

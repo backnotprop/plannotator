@@ -38,6 +38,7 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
@@ -152,7 +153,7 @@ async function mainWorld(): Promise<World> {
   return main;
 }
 
-const saved = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
+const saved = (w: World) => savedConfig(w.dataDir) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
 
 let speech: Browser;
 let silence: Browser;

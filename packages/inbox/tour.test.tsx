@@ -21,10 +21,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { savedConfig } from '../../tests/helpers/saved-config';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -219,7 +220,7 @@ const radios = (el: ParentNode) => el.querySelectorAll<HTMLInputElement>('[data-
 /** The warm-up's plain choices (step 2, crawl). */
 const warmRadios = (el: ParentNode) => el.querySelectorAll<HTMLInputElement>('[data-tour-message="warm"] input[type="radio"]');
 const coachKey = (el: ParentNode) => $(el, '[data-tour-coach]')?.getAttribute('data-tour-coach') ?? null;
-const config = () => JSON.parse(readFileSync(join(dir!, 'data', 'config.json'), 'utf8')) as Record<string, any>;
+const config = () => savedConfig(join(dir!, 'data'));
 /** What the tour may write: the `tour` setting, and nothing else (no picks, reply, annotation or MCP route). */
 const writes = () => posts.filter((p) => !(p.path === '/api/inbox/settings' && Object.keys(p.body).every((k) => k === 'tour')) && p.path !== '/api/inbox/window');
 
