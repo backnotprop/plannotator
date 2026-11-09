@@ -172,6 +172,7 @@ import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { DraftsPage } from './compose/DraftsPage';
@@ -7126,11 +7127,16 @@ function Inbox() {
             void copied.then((ok) => showToast(feedbackCopiedToast(ok), ok ? 6000 : 4200));
           }}
           simpleListOn={listView === 'list'}
+          hiddenAnswers={hiddenKnownAnswers(settings)}
           onAction={(kind) => {
-            // Common questions (feedbackFaq.ts): the real setting, with the dialog closed so its result is in view.
+            // A known answer or a Common question (feedbackKnown.ts): the real setting, with the dialog closed so its result is in view.
             setFeedbackOpen(false);
             if (kind === 'simple-list') setListView('list');
-            else go({ page: 'settings', project: null, thread: null, section: kind === 'settings-rows' ? 'rows' : 'devices' });
+            else if (kind === 'settings-experimental') {
+              go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
+              // Lands on the Experimental group, as `#settings/experimental` does (the address never carries it).
+              setRoute((current) => (current.page === 'settings' ? { ...current, experimental: true } : current));
+            } else go({ page: 'settings', project: null, thread: null, section: kind.slice('settings-'.length) as SettingsSection });
           }}
           onClose={() => setFeedbackOpen(false)}
         />

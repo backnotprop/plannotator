@@ -54,7 +54,7 @@ test('nothing typed leaves the window', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   const before = seen.length;
   await page.keyboard.type('need a done button zebrafish', { delay: 15 });
-  await expect(lines(page).first()).toHaveText('Archive');
+  await expect(lines(page).first()).toHaveText('Archive a thread from its ⋯ menu');
   expect(seen.slice(before).filter((request) => /zebrafish|button/i.test(request.url + request.body) || request.url.includes('/api/inbox/feedback'))).toEqual([]);
 });
 
@@ -120,7 +120,7 @@ for (const height of [600, 625, 700, 768, 900]) {
   test(`at ${height} px high, Send and Cancel show with five lines, with no scrolling`, async ({ page }) => {
     await page.setViewportSize({ width: 1366, height });
     await openForm(page);
-    await page.keyboard.type('the diff view is slow', { delay: 15 });
+    await page.keyboard.type('mermaid diagram rendering', { delay: 15 });
     await expect(lines(page)).toHaveCount(5);
     const dialog = (await page.locator('dialog[open]').boundingBox())!;
     for (const button of ['[data-feedback-send]', '.ib-fbk-acts .ib-btn:not(.ib-left):not(.ib-pri)']) {
@@ -133,7 +133,7 @@ for (const height of [600, 625, 700, 768, 900]) {
 test('in a very short window, Tab brings Send into view with five lines showing', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 480 });
   await openForm(page);
-  await page.keyboard.type('the diff view is slow', { delay: 15 });
+  await page.keyboard.type('mermaid diagram rendering', { delay: 15 });
   await expect(lines(page)).toHaveCount(5);
   await page.locator('[data-feedback-contact]').focus();
   await page.keyboard.press('Tab');

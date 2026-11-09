@@ -7414,6 +7414,14 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
+/* A known answer (feedbackKnown.ts), the first line, and a fixed issue: "Fixed in 0.28.52:" with Fixed in the accent
+   color, then the words, then the action, an accent link that runs a setting (approval "inbox-feedback-faq", take B). */
+.ib-fbk-lead { color: var(--primary); font-weight: 600; }
+/* It wraps rather than cut its action off. */
+.ib-fbk-rel li.ib-fbk-known { white-space: normal; }
+.ib-fbk-known-a { color: var(--foreground); }
+.pn-inbox .ib-fbk-act { padding: 0; border: 0; background: none; font: inherit; line-height: inherit; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-fbk-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 3px; }
 .ib-fbk-tabs { margin-top: 16px; }
 .ib-fbk-form .ib-bfield { margin-top: 16px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
@@ -7470,6 +7478,9 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
+  /* A known answer wraps, so its action is never cut off; the action sits above the line's link target, a thumb high. */
+  .ib-fbk-rel li.ib-fbk-known { white-space: normal; line-height: 1.45; padding: 12px 0; }
+  .pn-inbox .ib-fbk-act { position: relative; z-index: 1; padding: 12px 4px; margin: -12px -4px; }
   /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
   :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head, :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-tabs { display: none; }
   :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-form .ib-bfield { margin-top: 0; }
@@ -7478,6 +7489,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
   :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
   :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
+  /* Over a keyboard a known answer is one line too, so Send does not move. */
+  :root[data-ib-keyboard] .ib-fbk-rel li.ib-fbk-known { white-space: nowrap; line-height: 44px; padding: 0; }
   /* Cancel beside Send, the prompt button under them. */
   :root[data-ib-keyboard] .ib-fbk-acts { flex-direction: row; }
   :root[data-ib-keyboard] .ib-fbk-acts .ib-btn { flex: 1; }
