@@ -12,9 +12,10 @@
  *
  * - Sending needs a live session. With none, Send stays visible but does
  *   nothing except say so, and Save draft is offered.
- * - Closing with words or files asks "Keep draft / Discard", every time
- *   (the owner's answer). Escape asks the same, then a second Escape goes
- *   back to writing. Nothing is saved without the person's choice.
+ * - Closing with words or files keeps them as a draft, with no question
+ *   (approval "inbox-compose-escape-keeps", 2026-11-09: one Escape always
+ *   leaves and costs nothing). Escape, Cancel and the backdrop all do it; the
+ *   toast's Reopen brings it back as it was. An empty compose keeps nothing.
  * - A reopened draft keeps the session it was for, struck through when that
  *   session has ended: it is never re-addressed on its own.
  * - Files: the paperclip, a drop or a paste (paste.ts), uploaded at once (ComposeFiles.tsx).
@@ -557,22 +558,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [target, model, chosen]);
 
   const [picker, setPicker] = useState(false);
-  const [question, setQuestion] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
-  // The draft question or a phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind
-  // it. Choosing an agent is part of writing, so To ends a take and keeps what was said; a take already on its way isn't
-  // a recording, and its words still land.
-  const footCovered = question || (picker && phone);
+  // A phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind it. Choosing an agent
+  // is part of writing, so To ends a take and keeps what was said; a take already on its way isn't a recording, and its
+  // words still land.
+  const footCovered = picker && phone;
   useEffect(() => {
     if (!footCovered) return;
-    if (!question) voice.session.stop();
+    voice.session.stop();
     if (voice.session.view().phase !== 'sending') voice.session.covered();
-  }, [footCovered, question, voice.session]);
+  }, [footCovered, voice.session]);
 
   // ── the Launch tip (launchTip.ts): once, at a plain New message whose To can start an agent ──
   const [tip, setTip] = useState<'wait' | 'shown' | 'leaving' | 'done'>(() => (props.launchTip && !transport && !box && launchTipPlainOpen(request) ? 'wait' : 'done'));
@@ -672,6 +672,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, start?.machine, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
+  // When an Escape last ended an IME composition: the native cancel that may follow it is not a close.
+  const imeEscape = useRef(-Infinity);
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
   // A Board card's Create thread starts with the card's title: left as it was, that is nothing written either.
@@ -717,15 +719,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setReviewMenu(false);
       return;
     }
-    if (question) {
-      setQuestion(false);
-      textRef.current?.focus();
-      return;
-    }
-    // Something written that was not saved: ask. An empty compose (a draft emptied too) is never kept, so it
-    // closes asking nothing; a reopened draft emptied this way stays saved as it was. No drafts (the tour): nothing to ask.
+    // Something written that was not saved: keep it as a draft and close, with no question (approval
+    // "inbox-compose-escape-keeps"). A failed save keeps compose open and says why, so the words are never lost.
+    // An empty compose (a draft emptied too) is never kept, so it just closes; a reopened draft emptied this way stays
+    // saved as it was. No drafts (the tour): nothing to keep.
     if (keepsDrafts && dirty && !empty) {
-      setQuestion(true);
+      void keepDraft();
       return;
     }
     props.onClose();
@@ -951,12 +950,30 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const keepDraft = async () => {
-    // As Send: the words of a running take are not in yet, and leaving would lose them.
-    if (voice.busy) return;
+    // Dictation running (Escape never gets here then: the voice control takes it and cancels the take; Cancel or the
+    // backdrop do). Words on their way are waited for, then it closes keeping them (`closeAfterWords`); a take still
+    // listening is let go, as the voice control's own Cancel does, and what is written is kept.
+    if (voice.busy) {
+      if (voice.view.phase === 'sending') {
+        setCloseAfterWords(true);
+        return;
+      }
+      voice.session.cancel();
+    }
+    if (busy) return;
     const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
     if (result) props.onSaved(result);
-    else setQuestion(false);
   };
+
+  // Closed while dictated words were on their way: once they land, close keeping them. A take that ended without words
+  // stays, its line saying why (with Retry when a clip is kept).
+  const [closeAfterWords, setCloseAfterWords] = useState(false);
+  useEffect(() => {
+    if (!closeAfterWords || voice.busy) return;
+    setCloseAfterWords(false);
+    if (voice.view.trouble) return;
+    requestClose();
+  }, [closeAfterWords, voice.busy]);
 
   // The stale page notice's Reload (stalePage.ts): what is written here is kept as a draft first, as Close's Save draft
   // keeps it. A draft another window changed, a file still uploading or a running take stops the reload instead.
@@ -997,7 +1014,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         if (!dialog) return null;
         const box = dialog.getBoundingClientRect();
         const bar = dialog.querySelector('.ib-cp-bar')?.getBoundingClientRect();
-        const foot = dialog.querySelector('.ib-cp-foot, .ib-cp-ask')?.getBoundingClientRect();
+        const foot = dialog.querySelector('.ib-cp-foot')?.getBoundingClientRect();
         return { top: Math.max(seen.top, bar ? bar.bottom : box.top), bottom: Math.min(foot ? foot.top : box.bottom, seen.bottom) };
       },
     }),
@@ -1007,7 +1024,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // ── keys ──
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
     // A key the skill picker took (Escape closing it, Enter on a row) is not the dialog's.
-    if (event.nativeEvent.isComposing || event.defaultPrevented) return;
+    // An Escape that ends an IME composition is the IME's (Safari sends it with isComposing false and keyCode 229).
+    const imeKey = event.nativeEvent.isComposing || (event.key === 'Escape' && event.keyCode === 229);
+    if (imeKey) {
+      if (event.key === 'Escape') imeEscape.current = event.timeStamp;
+      return;
+    }
+    if (event.defaultPrevented) return;
     if (event.key === 'Escape') {
       // Never the window's Escape (it would close the thread under the dialog).
       event.preventDefault();
@@ -1016,7 +1039,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       if (!escapeTip()) requestClose();
       return;
     }
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !question) {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       if (!event.repeat) void send();
       return;
@@ -1258,6 +1281,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
+        // The browser's own close request for an Escape the IME took (same press, so within a frame or two): not a close.
+        if (event.timeStamp - imeEscape.current < 100) return;
         if (!escapeTip()) requestClose();
       }}
       // A phone's tip covers Thread and the message: a tap into either lets it go (it was stamped when it showed).
@@ -1570,105 +1595,89 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
         </div>
       )}
-      {question ? (
-        <div className="ib-cp-ask" role="alertdialog" aria-labelledby={`${titleId}-ask`} data-compose-question="">
-          <span id={`${titleId}-ask`}>{draft ? 'Keep your changes to this draft?' : 'Keep this message as a draft?'}</span>
-          <span className="ib-sp" />
-          <button type="button" className="ib-btn ib-ghost" onClick={() => setQuestion(false)}>
-            Keep writing
-          </button>
-          <button type="button" className="ib-btn" onClick={props.onClose} data-compose-discard="">
-            Discard
-          </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-keep="" autoFocus>
-            Keep draft
-          </button>
-        </div>
-      ) : (
-        <div className="ib-cp-foot">
-          {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
-          {takesFiles ? (
-            // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
-            <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
-          ) : (
-            <Tip content="Files: not in the tour">
-              <span className="ib-cp-clip" role="img" aria-label="Files: not in the tour" aria-disabled="true" data-compose-attach-off="">
-                <Icon name="clip" size={17} />
-              </span>
-            </Tip>
-          )}
-          {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
-          {phone && attached > 0 && (
-            <span className="ib-cp-clipn" data-compose-file-count="">
-              {attached}
-              <span className="ib-sr"> attached</span>
+      <div className="ib-cp-foot">
+        {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
+        {takesFiles ? (
+          // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
+          <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
+        ) : (
+          <Tip content="Files: not in the tour">
+            <span className="ib-cp-clip" role="img" aria-label="Files: not in the tour" aria-disabled="true" data-compose-attach-off="">
+              <Icon name="clip" size={17} />
             </span>
-          )}
-          {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
-          {draft && !dirty && phone && (
-            <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
-              <Icon name="check" size={14} />
-              <span>Saved</span>
-              <span>{whenTime(draft.updated_at)}</span>
-            </span>
-          )}
-          {/* A phone deletes a draft from its row on the Drafts page. */}
-          {draft && !phone && (
-            <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
-              Delete draft
+          </Tip>
+        )}
+        {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
+        {phone && attached > 0 && (
+          <span className="ib-cp-clipn" data-compose-file-count="">
+            {attached}
+            <span className="ib-sr"> attached</span>
+          </span>
+        )}
+        {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
+        {draft && !dirty && phone && (
+          <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
+            <Icon name="check" size={14} />
+            <span>Saved</span>
+            <span>{whenTime(draft.updated_at)}</span>
+          </span>
+        )}
+        {/* A phone deletes a draft from its row on the Drafts page. */}
+        {draft && !phone && (
+          <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
+            Delete draft
+          </button>
+        )}
+        <span className="ib-sp" />
+        {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
+        {status && (
+          <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
+            {status}
+          </span>
+        )}
+        {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
+        <VoiceFoot voice={voice} phone={phone}>
+          {box && !phone && (
+            <button type="button" className="ib-btn ib-ghost" onClick={requestClose} data-compose-cancel="">
+              Cancel
             </button>
           )}
-          <span className="ib-sp" />
-          {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
-          {status && (
-            <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
-              {status}
-            </span>
-          )}
-          {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
-          <VoiceFoot voice={voice} phone={phone}>
-            {box && !phone && (
-              <button type="button" className="ib-btn ib-ghost" onClick={requestClose} data-compose-cancel="">
-                Cancel
-              </button>
-            )}
-            {saveOffered && !phone && (
-              <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
-                Save draft
-              </button>
-            )}
-          </VoiceFoot>
-          {trustFacts.length > 0 && (
-            <button
-              type="button"
-              ref={trustCircleRef}
-              className="ib-iconbtn ib-cp-trustcircle"
-              aria-label="What trusting this folder means"
-              aria-haspopup="dialog"
-              aria-expanded={trustInfoOpen}
-              aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
-              onClick={() => setTrustInfo((open) => !open)}
-              data-compose-trust-circle=""
-              data-warning={trust?.warns ? '' : undefined}
-            >
-              <Icon name="question" size={18} />
+          {saveOffered && !phone && (
+            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+              Save draft
             </button>
           )}
+        </VoiceFoot>
+        {trustFacts.length > 0 && (
           <button
             type="button"
-            className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
-            aria-disabled={!sendable || undefined}
-            aria-keyshortcuts={sendKeys}
-            onClick={() => void send()}
-            disabled={busy !== null || voice.busy}
-            data-compose-send=""
+            ref={trustCircleRef}
+            className="ib-iconbtn ib-cp-trustcircle"
+            aria-label="What trusting this folder means"
+            aria-haspopup="dialog"
+            aria-expanded={trustInfoOpen}
+            aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
+            onClick={() => setTrustInfo((open) => !open)}
+            data-compose-trust-circle=""
+            data-warning={trust?.warns ? '' : undefined}
           >
-            <Icon name="send" size={15} />
-            {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
-            <ShortcutHint scope={inboxThreadShortcuts} action="send" />
+            <Icon name="question" size={18} />
           </button>
-        </div>
-      )}
+        )}
+        <button
+          type="button"
+          className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+          aria-disabled={!sendable || undefined}
+          aria-keyshortcuts={sendKeys}
+          onClick={() => void send()}
+          disabled={busy !== null || voice.busy}
+          data-compose-send=""
+        >
+          <Icon name="send" size={15} />
+          {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
+          <ShortcutHint scope={inboxThreadShortcuts} action="send" />
+        </button>
+      </div>
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">
         {pasteSaid}
       </div>
