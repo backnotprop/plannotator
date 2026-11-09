@@ -23,7 +23,7 @@ const teamSizes = [
 ---
 <Base
   title="Plannotator Workspaces · Get notified"
-  description="Plannotator Workspaces is the coordination layer for agent planning and review: shared documents, decisions and Git history. Join the private beta."
+  description="Plannotator Workspaces is where your team decides and stays aligned: shared documents and files, comments on the exact words, share links, approvals and Git history. Join the private beta."
 >
   <Fragment slot="head">
     <!-- Page-scoped theme tokens. The page is now system-responsive: it
@@ -110,12 +110,13 @@ const teamSizes = [
       <div class="ws-col-left">
         <header class="ws-hero">
           <p class="ws-eyebrow">Plannotator Workspaces · Private beta</p>
-          <h1 class="ws-page-title">The coordination layer for agent planning and review.</h1>
+          <h1 class="ws-page-title">Where your team decides and stays aligned.</h1>
           <p class="ws-hero-copy">
-            In the agentic software factory era, agents do more of the
-            building. Workspaces is the shared place where your team plans
-            the work, reviews it, shapes it and decides, so people stay in
-            the loop.
+            Workspaces is one shared place for the plan and everything that
+            goes with it. Engineers, product, design and the people who sign
+            off read the same documents, comment on the exact words, answer
+            the open questions and approve one version. Your agents work in
+            the same place and build from the version you approved.
           </p>
           <div class="ws-link-row" aria-label="Related Plannotator surfaces">
             <a href="/" class="ws-text-link">Plan review</a>
@@ -123,33 +124,67 @@ const teamSizes = [
           </div>
         </header>
 
-        <section class="ws-info">
-        <ul class="ws-points">
-          <li>
-            <strong>Plan in shared documents.</strong>
-            Plans, specs and notes live as Markdown and HTML files in a
-            workspace. People and agents write them together, live.
-          </li>
-          <li>
-            <strong>Review before it becomes code.</strong>
-            Comment on the exact passage and discuss it where the plan lives.
-            Agents read the comments and reply in the same thread.
-          </li>
-          <li>
-            <strong>Shape the work.</strong>
-            Record each decision beside the plan and move the workspace from
-            planning to implementation to review. Scope stays written down.
-          </li>
-          <li>
-            <strong>Keep people in the loop.</strong>
-            Agents do more of the work, but people set the direction and sign
-            off. The agent gets the approved plan, not a pile of chat threads.
-          </li>
-          <li>
-            <strong>Built on Git, open to agents.</strong>
-            Every change is a save point you can link to, compare and restore.
-            Agents connect through the API, the CLI and MCP.
-          </li>
+        <section class="ws-info" aria-label="What a workspace gives your team">
+          <ul class="ws-points">
+            <li>
+              <h2 class="ws-point-title">Every document in one folder</h2>
+              <p>
+                Plans, specs and notes are Markdown you edit together, live.
+                Prototypes, diagrams and reports are HTML and Mermaid that open
+                as pages. Screenshots, videos, PDFs and data files sit next to
+                them.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">Comments on the exact words</h2>
+              <p>
+                Select a passage to comment on it. Tag a person and reply in
+                the thread. Ask a question with choices and a recommended
+                answer, and people answer it where it sits.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">Share a link or the whole folder</h2>
+              <p>
+                One setting covers every file in the workspace. Keep it to
+                yourself, open it to your organization, or share a link that
+                lets people view or edit. No one outside your organization
+                opens it until you share it.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">Decide and sign off</h2>
+              <p>
+                Ask for approval when the plan is ready. The person who decides
+                approves it, and the team builds that version. Each workspace
+                shows where it stands: Planning, Implementation, Review or Done.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">A plain read for the people who decide</h2>
+              <p>
+                An agent writes a guided plan for the people who will not read
+                the whole plan. It walks the plan in plain words and opens with
+                what they are asked to decide.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">Your agents in the same loop</h2>
+              <p>
+                Claude, Codex and other agents connect through MCP, the API and
+                the CLI. They edit the same documents and ask their questions
+                as comments, under the name of the person who runs them. They
+                build from the approved version, not a pile of chat threads.
+              </p>
+            </li>
+            <li>
+              <h2 class="ws-point-title">Every save is a version</h2>
+              <p>
+                Open, compare or restore any save. Copy a link that keeps
+                pointing at one exact version. Clone the workspace with Git to
+                read the same history on your computer.
+              </p>
+            </li>
           </ul>
         </section>
       </div>
@@ -721,9 +756,9 @@ const teamSizes = [
     }
     .ws-points li {
       position: relative;
-      padding: 14px 0 14px 20px;
+      padding: 16px 0 16px 20px;
       border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
-      font-size: 0.875rem;
+      font-size: 0.9375rem;
       line-height: 1.55;
       color: oklch(from var(--foreground) l c h / 0.78);
     }
@@ -731,20 +766,23 @@ const teamSizes = [
       content: "·";
       position: absolute;
       left: 0;
-      top: 12px;
+      top: 15px;
       color: var(--primary);
       font-size: 1.125rem;
       font-weight: 700;
       line-height: 1.2;
     }
-    .ws-points li strong {
-      display: block;
+    .ws-points .ws-point-title {
       font-family: 'Instrument Sans', system-ui, sans-serif;
       color: var(--foreground);
       font-weight: 600;
-      font-size: 0.9375rem;
+      font-size: 1rem;
+      line-height: 1.4;
       letter-spacing: 0;
-      margin-bottom: 2px;
+      margin: 0 0 4px;
+    }
+    .ws-points p {
+      margin: 0;
     }
     /* ── OSS contributors card ──
        Wears the "branded stamp" treatment (was on commit-card): primary
