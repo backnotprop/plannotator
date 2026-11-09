@@ -9,7 +9,7 @@ export interface GrillMeTipCopy {
   reach: string;
 }
 
-/** Variant A, the one shown (DRAFT: the words wait on the owner's OK). */
+/** Variant A, the one shown (approved by the owner, 2026-11-08). */
 export const GRILL_ME_TIP_COPY_A: GrillMeTipCopy = {
   title: 'Try /grill-me here',
   body: 'Plannotator gives grill-me an optimized experience: its questions come to your Inbox as cards you can answer anytime.',
@@ -56,7 +56,7 @@ function withCommand(text: string) {
 }
 
 /**
- * The grill-me tip (DRAFT; the owner, 2026-11-08: "similar to the bro mode pop-up ... have you tried /grill-me yet?
+ * The grill-me tip (approved; the owner, 2026-11-08: "similar to the bro mode pop-up ... have you tried /grill-me yet?
  * ... There's nothing to turn on"): a one-time card of the line (reveals.ts `grill_me_tip`) on Bro mode's card (navy,
  * dot grid; no Experimental chip, the owner 2026-11-08), with a small picture of one question card. Nothing to turn on, so one button:
  * "Got it". Escape and a click outside close it too; every way out is final, as the claim already stamped it. No

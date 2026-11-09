@@ -53,9 +53,9 @@ export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>([
  * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
  * `ahead`), or the list options' update-day dialog is due.
  */
-export function idleClockArmed(armed: Pick<RevealArmed, 'next' | 'ahead'> | null, listIntroDue: boolean): boolean {
+export function idleClockArmed(armed: (Pick<RevealArmed, 'next' | 'ahead'> & { aside?: readonly InboxRevealId[] }) | null, listIntroDue: boolean): boolean {
   if (armed === null) return false;
-  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || (armed.aside ?? []).some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
 }
 
 /** One visit to a thread: which, and when it opened. */
@@ -427,7 +427,7 @@ export function broRevealIdleCounts(thread: string | null): boolean {
 }
 
 /**
- * The grill-me tip's moment (DRAFT; Bro mode's two moments, keyed to answering): back on the list after
+ * The grill-me tip's moment (Bro mode's two moments, keyed to answering): back on the list after
  * `REVEAL_TIMES.readMs` (5 s) or more on a thread where the person answered a question block (the thread as this page
  * last loaded it). The Inbox decides who (shared/inbox/grill-me-tip.ts `revealGrillMeGap`).
  */

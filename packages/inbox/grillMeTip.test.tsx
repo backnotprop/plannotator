@@ -1,5 +1,5 @@
 /**
- * The grill-me tip in a DOM (DRAFT; shared/inbox/grill-me-tip.ts): the line's hook (reveal.ts `useLineReveal`) with the
+ * The grill-me tip in a DOM (shared/inbox/grill-me-tip.ts): the line's hook (reveal.ts `useLineReveal`) with the
  * tip's moment (`grillMeTipLeaveCounts`, `grillMeTipIdleCounts`) driving `GrillMeTip`, as App wires them.
  *
  * What regresses: the card showing on load, or after a thread where the person answered nothing (a skip is not an

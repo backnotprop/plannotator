@@ -74,6 +74,14 @@ export interface RevealEntry {
    * line. It may be claimed at a calm moment while the line is free (`revealMayClaim`), so no other entry's day moves.
    */
   aside?: boolean;
+  /**
+   * An `aside` entry that waits for every other card (the grill-me tip; the owner, 2026-11-08: "Sooner: after 3
+   * answered questions, whatever the days, once"): claimed only at a moment the line has nothing else for: no card
+   * next and still within its patience (one that waited 3 days without its moment is passed, as the line's cards
+   * pass it), none ahead, no other `aside` entry still open, and no `aside` entry shown today (`asideShownAt`). Its
+   * claim stamps only its own record, so no other dialog's day can move.
+   */
+  lastResort?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -111,13 +119,12 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
-  // The grill-me tip (DRAFT, waiting on the owner's OK; the owner, 2026-11-08: "if we have any gap in like consistent
-  // use, we should say, hey, have you tried /grill-me yet?"): a tip never costs an offer its showing, so it comes after
-  // them, after the Checklist, from day 10 (a shorter tenure let it take a light user's Snooze, whose 3 days' patience
-  // had run out: reveals-schedule.test.ts). Its need is its own (`open`): the person answers question cards but never
-  // ran grill-me (grill-me-tip.ts `revealGrillMeGap`). Nothing to turn on: the claim stamps it, `GrillMeTip` says it
-  // once, and "Got it" closes it.
-  { id: "grill_me_tip", kind: "offer", tenureMs: 10 * DAY_MS, minThreads: 0, enabled: true },
+  // The grill-me tip (the owner, 2026-11-08: "if we have any gap in like consistent use, we should say, hey, have you
+  // tried /grill-me yet?"; its cadence, the owner: "Sooner: after 3 answered questions, whatever the days, once"). No
+  // tenure, but it never costs another card its day (`lastResort`): it waits until the line has nothing else for the
+  // moment, and its claim stamps only its own record. Its need is its own (`open`): 3 answered question cards and no
+  // sign of grill-me (grill-me-tip.ts `revealGrillMeGap`). Nothing to turn on: `GrillMeTip` says it once.
+  { id: "grill_me_tip", kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true },
   // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
   // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
   // minimum), once across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the
@@ -166,6 +173,8 @@ export interface RevealState {
   open: Partial<Record<RevealId, boolean>>;
   /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
+  /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`), for a `lastResort` entry. */
+  asideShownAt?: string | null;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -278,13 +287,36 @@ export function revealAsideNow(state: RevealState, now: Date, table: readonly Re
 /** A claim for `id` may be spent now: it is still next, or an `ahead` offer at its moment. Anything else gets no. */
 export function revealMayClaim(id: RevealId, state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): boolean {
   const entry = table.find((e) => e.id === id);
-  if (entry?.aside) return revealQualifies(entry, state, now) && revealLineFree("spaced", state, now);
+  if (entry?.aside) {
+    if (!revealQualifies(entry, state, now) || !revealLineFree("spaced", state, now)) return false;
+    if (!entry.lastResort) return true;
+    const asideToday = time(state.asideShownAt);
+    return (
+      (asideToday === null || revealDay(asideToday) !== revealDay(now.getTime())) &&
+      !table.some((other) => other.aside && other.id !== entry.id && other.enabled && state.open[other.id] === true) &&
+      !revealFresh(state, now, table) &&
+      revealAhead(state, now, table).length === 0
+    );
+  }
   return revealNext(state, now, table) === id || revealAhead(state, now, table).includes(id);
+}
+
+/**
+ * Some card of the line is next and still within its patience: due, its moment still awaited. A card that has waited
+ * out its patience (3 days without its moment) is passed by the line's other cards, and by a `lastResort` one.
+ */
+function revealFresh(state: RevealState, now: Date, table: readonly RevealEntry[]): boolean {
+  if (!revealLineFree("spaced", state, now)) return false;
+  return table.some((entry) => {
+    if (entry.aside || !revealQualifies(entry, state, now)) return false;
+    const since = time(state.waitingSince?.[entry.id]);
+    return since === null || now.getTime() - since < REVEAL_PATIENCE_MS;
+  });
 }
 
 /** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual day. */
 export function revealNotNowAllowed(id: unknown, table: readonly RevealEntry[] = INBOX_REVEALS): id is RevealId {
-  return table.some((entry) => entry.id === id && entry.kind === "offer");
+  return table.some((entry) => entry.id === id && entry.kind === "offer" && !entry.lastResort);
 }
 
 /**

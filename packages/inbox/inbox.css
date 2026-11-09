@@ -7043,7 +7043,7 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
-/* GRILL-ME-TIP-START The grill-me tip (DRAFT; packages/inbox/components/GrillMeTip.tsx): Bro mode's card (navy, dot grid,
+/* GRILL-ME-TIP-START The grill-me tip (packages/inbox/components/GrillMeTip.tsx): Bro mode's card (navy, dot grid,
    orange button; no Experimental chip), with a title line in place of the poster name and a small picture of one
    question card in the light palette's colours, drawn from the real card's parts: picture tiles (the picked one a soft
    tint, no outline), ui's Recommended tag (primary/15), the `Why <choice>:` line and the note field. */

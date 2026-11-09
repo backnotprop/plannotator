@@ -2647,17 +2647,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * What the grill-me tip's gap reads (shared/inbox/grill-me-tip.ts `revealGrillMeGap`), lazily, in its order: every
-   * question block with its thread, then the skills the person's own messages named, then thread subjects and names
+   * question block, then the skills the person's own messages named, then thread subjects and names
    * and agent messages. The rule stops reading as soon as it knows (fewer than three answers: no message is read).
    */
   const grillMeUse = () => ({
     questions: (function* (): Generator<GrillMeTipQuestion> {
-      for (const question of store.allQuestionRecords()) {
-        const message = store.message(question.message_id);
-        if (!message) continue;
-        const sent = question.sent_reply_id ? (store.message(question.sent_reply_id)?.created_at ?? null) : null;
-        yield { ...question, threadId: message.thread_id, at: question.picked_at ?? sent };
-      }
+      for (const question of store.allQuestionRecords()) if (store.message(question.message_id)) yield question;
     })(),
     skills: (function* (): Generator<string> {
       for (const threadId of store.threadIds())
@@ -2716,20 +2711,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       threads: store.threadIds().length,
       open,
       waitingSince: reveals?.waitingSince,
+      // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
+      asideShownAt: reveals?.star?.shownAt ?? null,
     };
-    // The grill-me tip's gap (a walk of the store): read only while the tip is unshown, in a release build, past its
-    // tenure and with the line free today; otherwise it could not be next or claimed anyway.
-    const grillMe = INBOX_REVEALS.find((entry) => entry.id === "grill_me_tip");
-    if (open.grill_me_tip) {
-      const first = snooze?.firstUseAt ? Date.parse(snooze.firstUseAt) : Number.NaN;
-      open.grill_me_tip =
-        !!grillMe?.enabled &&
-        snoozeIntroRelease &&
-        !Number.isNaN(first) &&
-        now.getTime() - first >= grillMe.tenureMs &&
-        revealLineFree("spaced", state, now) &&
-        revealGrillMeGap(grillMeUse());
-    }
+    // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
+    // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
+    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
     return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
@@ -2785,7 +2772,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const now = new Date();
     if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
     const at = now.toISOString();
-    saveConfig({ inboxReveals: { ...revealStamp(loadConfig().inboxReveals, at, { spaced: true, load }), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
+    // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
+    const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
+    const saved = loadConfig().inboxReveals;
+    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return lineOfferSaved(id)?.shownAt === at;
   };

@@ -4883,13 +4883,14 @@ function Inbox() {
     // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
-  // The grill-me tip (DRAFT; shared/inbox/grill-me-tip.ts), registered with the line: the Inbox gives it to someone who
-  // answers question cards but never ran grill-me. Its moment, Bro mode's two keyed to answering: back on the list from
+  // The grill-me tip (shared/inbox/grill-me-tip.ts), beside the line (settings `reveal.aside`; reveals.ts `lastResort`:
+  // only when the line has nothing else, so it moves no one): the Inbox gives it to someone who answered 3 question
+  // cards but never ran grill-me. Its moment, Bro mode's two keyed to answering: back on the list from
   // a thread where the person answered a question block (`grillMeTipLeaveCounts`), or the page idle on one. Nothing to
   // turn on: the claim stamps it and GrillMeTip says it once.
   const grillMeTipReveal = useLineReveal({
     id: 'grill_me_tip',
-    due: snoozeIntroLatch.current?.next === 'grill_me_tip',
+    due: snoozeIntroLatch.current?.aside.includes('grill_me_tip') === true,
     blocked: revealBlocked,
     rows: snoozeIntroRows,
     toast: toast !== null,
