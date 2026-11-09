@@ -291,14 +291,14 @@ async function select(scope: HTMLElement, phrase: string) {
 
 const popoverBox = () => document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
 
-/** Select words, press the toolbar's Comment, keep the suggestion the box opens with, Save. Returns the suggestion. */
+/** Select words, press the toolbar's Comment, keep the suggestion the box opens with, Comment. Returns the suggestion. */
 async function commentOn(scope: HTMLElement, phrase: string): Promise<string> {
   await select(scope, phrase);
   await until(() => document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]') !== null, 'the selection toolbar');
   await click(document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]'));
   await until(() => popoverBox() !== null, 'the composer');
   const suggested = popoverBox()!.value;
-  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((x) => x.textContent?.trim() === 'Save');
+  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((x) => x.textContent?.trim() === 'Comment');
   await click(save);
   return suggested;
 }
@@ -409,16 +409,17 @@ test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the re
 }, 90_000);
 
 test.skipIf(!hasDom)('the agent note never opens over the tour: it waits for the entry screen to go, then opens (approval "inbox-one-time-dialogs")', async () => {
-  // This computer has Codex connected with no note, never asked: the note dialog has someone to ask about.
+  // This computer has Qwen Code connected with no note, never asked: the note dialog has someone to ask about
+  // (Codex's note is written by itself, inbox-agent-note-auto).
   const agents = {
     agents: [
       {
-        id: 'codex',
-        label: 'Codex',
+        id: 'qwen',
+        label: 'Qwen Code',
         detected: true,
         reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
         reminder: null,
-        note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
+        note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
       },
     ],
     last_report: null,

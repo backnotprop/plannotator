@@ -14,6 +14,8 @@
  *   On you, Ready to land, or waiting on others.
  */
 
+import { forgeRefKey } from "./forge-ref-card";
+
 export type InboxPullPlatform = "github" | "gitlab";
 export type InboxPullState = "open" | "draft" | "merged" | "closed";
 export type InboxPullChecks = "success" | "failure" | "pending";
@@ -151,6 +153,55 @@ export interface InboxPullsAnswer {
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
+/** Where a reviewer stands: their last review that counts, or asked and not yet. */
+export type InboxPullReviewState = 'approved' | 'changes' | 'commented' | 'waiting';
+export type InboxPullCheckState = 'pass' | 'fail' | 'pending';
+
+export interface InboxPullReviewer {
+  /** A person's or an app's login; a team as `org/team`. */
+  login: string;
+  state: InboxPullReviewState;
+  bot?: boolean;
+  team?: boolean;
+}
+
+export interface InboxPullCheck {
+  name: string;
+  /** The workflow it belongs to, when the forge names one. */
+  workflow?: string;
+  state: InboxPullCheckState;
+  /** Set when it passed by not running: "Skipped", "Neutral". */
+  note?: string;
+  /** Its page on the forge: https only. */
+  url?: string;
+}
+
+export interface InboxPullDetailComment {
+  id: string;
+  /** Empty when the account is gone. */
+  author: string;
+  bot?: boolean;
+  /** When: ISO 8601, or empty when the forge did not say. */
+  at: string;
+  body: string;
+  url: string;
+  /** A comment on a line of a file. */
+  file?: string;
+  line?: number;
+}
+
+/** `GET /api/inbox/pulls/details`: what the forge has about a PR beside its diff. */
+export interface InboxPullDetailsAnswer {
+  key: string;
+  description: string | null;
+  labels: string[];
+  reviewers: InboxPullReviewer[];
+  checks: InboxPullCheck[];
+  comments: InboxPullDetailComment[];
+  /** The comments on lines could not all be read: the forge failed partway. Not kept; the next opening asks again. */
+  threads_incomplete?: boolean;
+}
+
 export interface InboxPullDiffAnswer {
   key: string;
   scope: InboxPullDiffScope;
@@ -163,6 +214,8 @@ export interface InboxPullDiffAnswer {
    * or the forge did not say). The window keeps comments per this head; a review posted from the patch is pinned to it.
    */
   head_sha?: string | null;
+  /** The PR's own description as Markdown (a stack's whole diff too: this layer's): null when it has none or the forge did not say. */
+  description?: string | null;
 }
 
 export type InboxPullDiffScope = "layer" | "stack";
@@ -509,14 +562,24 @@ export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPu
   const host = match[1]!.toLowerCase();
   const repo = match[2]!;
   const number = Number(match[4]);
-  return { key: `${host}/${repo}#${number}`, platform: match[3] === "-/merge_requests" ? "gitlab" : "github", host, repo, number };
+  const platform = match[3] === "-/merge_requests" ? "gitlab" : "github";
+  const at = repo.lastIndexOf("/");
+  // The key the list gives the same PR.
+  const key = forgeRefKey({ platform, host, owner: repo.slice(0, at), repo: repo.slice(at + 1), number, kind: "pull" });
+  return { key, platform, host, repo, number };
 }
 
-/** A pull key's parts (`host/repo#number`); null for anything else. */
-export function inboxPullRefOfKey(key: string): { host: string; repo: string; number: number } | null {
-  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)$/.exec(key);
+/** A pull key's parts (`host/repo#number`, GitLab's with `:pull`); null for anything else. */
+export function inboxPullRefOfKey(key: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
+  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
-  return { host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
+  return { key, platform: match[4] ? "gitlab" : "github", host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
+}
+
+/** A pull key's web address, for reading one PR that isn't on the list. */
+export function inboxPullUrlOfKey(key: string): string | null {
+  const ref = inboxPullRefOfKey(key);
+  return ref && `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`;
 }
 
 /**

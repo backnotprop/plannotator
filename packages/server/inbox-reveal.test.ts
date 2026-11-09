@@ -87,6 +87,8 @@ interface Options {
   config?: Record<string, unknown>;
   /** Published over the tailnet: the owner's phone and a guest can reach it; `tagged`: a machine with no owner. */
   tailnet?: "owner" | "tagged";
+  /** An agent was already started from this Inbox: one launched thread root in the store. */
+  launched?: boolean;
 }
 
 type Json = Record<string, any>;
@@ -105,7 +107,7 @@ async function world(options: Options = {}) {
     // The update-day dialogs (sound, list options, voice) are first in the line (approval "inbox-one-time-dialogs"):
     // already settled here (a fresh install's marks), so the offers are what these cases see.
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
-    inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
+    inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString(), version: 2 },
     inboxVoiceIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
     ...options.config,
   };
@@ -116,9 +118,20 @@ async function world(options: Options = {}) {
   const then = new Date(Date.now() - days * DAY);
   const store = InboxStore.open(dataDir, { now: () => then });
   const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
-  // One session's messages make one thread: a session each.
+  // Each message starts its own thread.
   for (let i = 0; i < (options.threads ?? 6); i++) {
     store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
+  }
+  let launchedThread: string | null = null;
+  if (options.launched) {
+    launchedThread = store.startPersonThread({
+      project_id: project.id,
+      body: "Fix the totals.",
+      // A launch's placeholder `to` (inbox-launch.ts): the store refuses a Send with none.
+      to: { host: "claude-code", session: "launch:lch_seeded" },
+      idempotency_key: "launched-1",
+      launch: { id: "lch_seeded", agent: "claude-code", session_ref: null, folder: join(root, "docs"), scratch: false, started_at: then.toISOString() },
+    }).message.thread_id;
   }
   const home = join(root, "home");
   mkdirSync(home);
@@ -172,7 +185,7 @@ async function world(options: Options = {}) {
     return JSON.stringify({ instructions: init.instructions, list, tool: inboxAgentTool(parseInboxToolList(list)) });
   };
   const toolNames = async () => parseInboxToolList(await rpc("tools/list", {})).map((tool) => tool.name);
-  return { server, base, post, viaTailnet, settings, next, claim, saved, agentText, toolNames, dataDir };
+  return { server, base, post, viaTailnet, settings, next, claim, saved, agentText, toolNames, dataDir, launchedThread };
 }
 
 describe("the Board reveal at day 4", () => {
@@ -348,7 +361,7 @@ describe("the Board reveal at day 4", () => {
 
   test("a fresh install's list options and voice marks (shownAt with no dueAt: never shown) do not hold it back", async () => {
     const hourAgo = new Date(Date.now() - HOUR).toISOString();
-    const w = await world({ config: { inboxListIntro: { shownAt: hourAgo }, inboxVoiceIntro: { shownAt: hourAgo } } });
+    const w = await world({ config: { inboxListIntro: { shownAt: hourAgo, version: 2 }, inboxVoiceIntro: { shownAt: hourAgo } } });
     expect(await w.next()).toBe("board");
   });
 
@@ -722,5 +735,54 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     const answer = await phone.viaTailnet(OWNER, "/api/inbox/reveal", { id: "agent_note", agents: ["pi"] });
     expect(((await answer.json()) as Json).show).toBe(false);
     expect(phone.saved().inboxReveals?.dayShownAt).toBeUndefined();
+  });
+});
+
+describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped once when shown", () => {
+  const LAUNCH_ON = { inboxLaunch: { enabled: true } };
+  const KEY = "launch-tip-key-1";
+
+  test("due for the owner while Launch is on; the claim stamps only inboxReveals.launch_tip; a second window gets no; the same key is shown it again", async () => {
+    const w = await world({ config: LAUNCH_ON });
+    expect((await w.settings()).reveal.launch_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("launch_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.launch_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // Not a dialog: the line's day, spacing and load stay as they were, and its next is untouched.
+    expect(saved.dayShownAt).toBeUndefined();
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.shownLoad).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.launch_tip).toBe(false);
+    // Another window or the phone: no. The same page's retry after a lost answer: yes, with no second write.
+    expect((await w.claim("launch_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("launch_tip")).show).toBe(false);
+    expect((await w.claim("launch_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.launch_tip.shownAt).toBe(saved.launch_tip.shownAt);
+  });
+
+  test("never once an agent was started here, even after its thread is deleted; never for a guest, or as a Not now", async () => {
+    // Launch off here: still due (a linked machine may start agents; compose claims only when To can start one).
+    const off = await world();
+    expect((await off.settings()).reveal.launch_tip).toBe(true);
+
+    const launched = await world({ config: LAUNCH_ON, launched: true });
+    expect((await launched.settings()).reveal.launch_tip).toBe(false);
+    expect(launched.saved().inboxReveals.launch_tip.launchedAt).toMatch(/^\d{4}-/);
+    expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
+    // The only launched thread deleted: the mark keeps the tip from coming back.
+    expect((await launched.post(`/api/inbox/threads/${launched.launchedThread}/delete`)).status).toBe(200);
+    expect((await launched.settings()).reveal.launch_tip).toBe(false);
+    expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
+
+    const tailnet = await world({ config: LAUNCH_ON, tailnet: "owner" });
+    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(false);
+    expect(tailnet.saved().inboxReveals?.launch_tip).toBeUndefined();
+    // The owner's phone: shown, and stamped for every window.
+    expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(true);
+    expect(tailnet.saved().inboxReveals.launch_tip.shownAt).toMatch(/^\d{4}-/);
+
+    expect((await off.post("/api/inbox/reveal", { id: "launch_tip", answer: "not_now" })).status).toBe(422);
   });
 });

@@ -18,6 +18,7 @@ import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
+import { useMessageArm } from '../messageArming';
 
 /**
  * "Open in" for an attachment (design record "inbox-open-in", approved
@@ -675,10 +676,34 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
  */
 export function OpenInTileMenu({ attachment, version, onOpenAs }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; onOpenAs?: (view: 'full' | 'side') => void }) {
   const { menu, status, launch, copyPath } = useOpenIn(attachment, version);
+  const arm = useMessageArm();
+  const [open, setOpen] = useState(false);
   if (!menu) return null;
+  if (!arm.armed) {
+    // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet. A press arms its message and opens the menu.
+    return (
+      <>
+        <button
+          type="button"
+          className="ib-att-more"
+          aria-label={`Open in…, ${attachment.name}`}
+          aria-haspopup="menu"
+          aria-expanded={false}
+          data-open-in-more={attachment.id}
+          onClick={() => {
+            setOpen(true);
+            arm.arm();
+          }}
+        >
+          <Icon name="dots" size={16} />
+        </button>
+        <Status status={status} />
+      </>
+    );
+  }
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <Tip content="Open in…">
           <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`Open in…, ${attachment.name}`} data-open-in-more={attachment.id} />}>
             <Icon name="dots" size={16} />

@@ -1,7 +1,7 @@
 /**
  * Ask AI's conversation file and routes through a running Inbox on a temp data
  * dir: the agent writes through the official MCP client, the person through
- * requests shaped as the window's. Guards the setting that hides it all, that
+ * requests shaped as the window's. Guards that it is on with no switch, that
  * words are neither lost nor saved twice, that a conversation goes with its
  * thread, and that only the owner's own window can ask or read.
  */
@@ -10,7 +10,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { resolveInboxAskAi } from "@plannotator/shared/config";
 import { INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, writeInboxAsk, type InboxAskConversation } from "@plannotator/shared/inbox/ask";
 import { SESSION_BRIDGE_POLL_PATH } from "@plannotator/ai/session-bridge-pull";
 import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH, inboxAskBridgeBase } from "@plannotator/shared/inbox/connection";
@@ -43,12 +42,12 @@ async function connect(server: InboxServer): Promise<Client> {
   return client;
 }
 
-async function setup(askAi = true) {
+async function setup() {
   const root = scratch();
   const project = join(root, "api");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, askAi, binaryPath: null, askTimes: { connectWaitMs: 0 } });
+  const server = await startInboxServer({ dataDir, binaryPath: null, askTimes: { connectWaitMs: 0 } });
   servers.push(server);
   return { server, client: await connect(server), project, dataDir, root };
 }
@@ -137,50 +136,25 @@ function listen(response: Response) {
   return { frames, stop: () => reader.cancel().then(() => done) };
 }
 
-describe("off, the default", () => {
-  test("every ask route is the unknown route, whoever asks, and nothing is written", async () => {
-    const { server, client, project, dataDir } = await setup(false);
-    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
-    const unknown = await fromWindow(server, `/api/inbox/threads/${thread_id}/no-such-route`);
-    const answer = await unknown.json();
-    expect(unknown.status).toBe(404);
-
-    for (const response of [
-      await fromWindow(server, askPath(thread_id)),
-      await fromWindow(server, askPath(thread_id), { turn_id: "turn-0001", question: "Why?" }),
-      await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: new Date().toISOString() }),
-      await fromWindow(server, askPath(thread_id, "/end"), {}),
-      // Without the window's headers too: a client cannot tell off from "refused".
-      await fetch(`http://127.0.0.1:${server.port}${askPath(thread_id)}`),
-    ]) {
-      expect(response.status).toBe(404);
-      expect(await response.json()).toEqual(answer);
-    }
-    expect(existsSync(join(inboxDir(dataDir), "ask"))).toBe(false);
-  });
-
-  test("the setting is read when the Inbox starts: unset is off, and only 1, true or on turn it on", async () => {
+describe("on for everyone", () => {
+  test("with no switch and Code review off, every ask route answers and the settings say so", async () => {
     const previous = process.env.PLANNOTATOR_INBOX_ASK_AI;
     try {
-      delete process.env.PLANNOTATOR_INBOX_ASK_AI;
-      const root = scratch();
-      const off = await startInboxServer({ dataDir: join(root, "off"), binaryPath: null });
-      servers.push(off);
-      process.env.PLANNOTATOR_INBOX_ASK_AI = "1";
-      const on = await startInboxServer({ dataDir: join(root, "on"), binaryPath: null });
-      servers.push(on);
-      const client = await connect(on);
-      const { thread_id } = await agentSends(client, join(root, "on"), "session-a", "Ship it?");
-      expect((await fromWindow(on, askPath(thread_id))).status).toBe(200);
-      // Set after the start: it changes nothing until the next start.
-      expect((await fromWindow(off, askPath("msg_anything"))).status).toBe(404);
-      expect(((await (await fromWindow(off, askPath("msg_anything"))).json()) as { code: string }).code).toBe("not_found");
+      // A leftover from when this was a switch: it no longer turns Ask off.
+      process.env.PLANNOTATOR_INBOX_ASK_AI = "0";
+      const { server, client, project } = await setup();
+      const settings = (await (await fromWindow(server, "/api/inbox/settings")).json()) as { ask_ai?: boolean; code_review?: { on?: boolean } };
+      expect(settings.code_review?.on).not.toBe(true);
+      expect(settings.ask_ai).toBe(true);
+      const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+      expect(await conversation(server, thread_id)).toBeNull();
+      expect((await fromWindow(server, "/api/inbox/ask")).status).toBe(200);
+      expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+      expect((await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: new Date().toISOString() })).status).toBe(200);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_INBOX_ASK_AI;
       else process.env.PLANNOTATOR_INBOX_ASK_AI = previous;
     }
-    for (const value of ["1", "true", "on", " ON "]) expect(resolveInboxAskAi({ PLANNOTATOR_INBOX_ASK_AI: value })).toBe(true);
-    for (const value of [undefined, "", "0", "false", "off", "yes"]) expect(resolveInboxAskAi({ PLANNOTATOR_INBOX_ASK_AI: value })).toBe(false);
   });
 });
 
@@ -200,7 +174,7 @@ describe("the conversation file", () => {
 
     server.stop();
     servers.length = 0;
-    const again = await startInboxServer({ dataDir, askAi: true, binaryPath: null });
+    const again = await startInboxServer({ dataDir, binaryPath: null });
     servers.push(again);
     expect((await conversation(again, thread_id))?.turns.map((turn) => turn.question)).toEqual(["Why this region?"]);
   });
@@ -577,7 +551,7 @@ describe("the gate", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
-      const server = await startInboxServer({ dataDir, askAi: true, askTimes: { connectWaitMs: 0 }, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
+      const server = await startInboxServer({ dataDir, askTimes: { connectWaitMs: 0 }, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
       servers.push(server);
       const client = await connect(server);
       const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");

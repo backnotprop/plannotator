@@ -1,6 +1,6 @@
 /**
  * Ask AI's window (approval "inbox-ask-ai-flow", Header 2026-11-02), proved in a
- * real browser against the compiled binary with the setting on. The agents are
+ * real browser against the compiled binary (Ask has no switch). The agents are
  * scripted (tests/helpers/inbox-ask-agent.ts: a real connection and the real
  * pull client, never a real agent CLI). Chats from other agents and days are
  * saved conversations, in the format the Inbox writes.
@@ -130,7 +130,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PLANNOTATOR_INBOX_PHONES: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_NOTES: '0',
-    PLANNOTATOR_INBOX_ASK_AI: '1',
   };
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -222,7 +221,9 @@ test('the icon opens the thread’s chat, and a question gets its answer from th
   expect({ width: rect.width, height: rect.height, right: 1440 - rect.x - rect.width, bottom: 900 - rect.y - rect.height }).toEqual({ width: 420, height: 560, right: 16, bottom: 16 });
 
   await expect(chip()).toContainText('Push retry budget');
-  await expect(chip().locator('.ib-mk svg')).toHaveCount(1);
+  // Ask's sparkle and "Ask AI · <thread>" (approval "inbox-reply-floaters"), not the agent's mark.
+  await expect(chip().locator('[data-ask-sparkle]')).toHaveCount(1);
+  await expect(chip()).toContainText('Ask AI · ');
 
   await box().fill(QUESTION);
   await box().press('Enter');

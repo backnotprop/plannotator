@@ -1,8 +1,10 @@
 /**
- * Every group in the list closes and opens by a click on its header, no
- * chevron (approval "inbox-list-groups-close"). What is proved, on the
- * window's own InboxList: each group's header is a button with aria-expanded
- * that hides and shows its rows, and no header draws a chevron; for someone
+ * Every group in the list closes and opens by a click on its header
+ * (approval "inbox-list-groups-close"). What is proved, on the window's own
+ * InboxList: each group's header is a button with aria-expanded that hides and
+ * shows its rows; its only chevron is a decorative one that shows at once
+ * while the pointer is on the header, or on keyboard focus, never on a touch
+ * (owner, 2026-11-08: no wait, as the sidebar's sections); for someone
  * who never closed one, Quiet and Snoozed start closed and every other group
  * open; the choice is this browser's (storage) and survives a remount, while
  * the tour's list ignores it; something new inside a closed group bolds its
@@ -16,7 +18,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -148,19 +150,22 @@ function focused(): string {
   if (el.classList.contains('ib-band')) return `header ${el.closest('[data-section-id]')?.getAttribute('data-section-id')}`;
   return el.tagName;
 }
-/** The header's icons but the closed group's warning triangle (a chevron would be one). */
-const otherIcons = (id: InboxListGroupId) => [...header(id).querySelectorAll('svg')].filter((svg) => !svg.closest('.ib-zband-tri'));
+/** The header's icons but the closed group's warning triangle and its decorative chevron. */
+const otherIcons = (id: InboxListGroupId) => [...header(id).querySelectorAll('svg')].filter((svg) => !svg.closest('.ib-zband-tri') && !svg.classList.contains('ib-band-chev'));
 
-test.skipIf(!hasDom)('every header is a button that closes and opens its group, with no chevron; defaults as before', () => {
+test.skipIf(!hasDom)('every header is a button that closes and opens its group; defaults as before', () => {
   if (!hasDom) return;
   draw(sections());
   for (const id of GROUPS) {
     const band = header(id);
     expect(band.tagName).toBe('BUTTON');
     expect(band.getAttribute('type')).toBe('button');
-    // No chevron, open or closed: the only icon a header may hold is the closed group's warning triangle.
+    // One chevron, hidden from a screen reader (aria-expanded says open or closed); the only other icon a header
+    // may hold is the closed group's warning triangle.
     expect(otherIcons(id)).toHaveLength(0);
-    expect(band.querySelector('[data-icon="chevD"], [data-icon="chevR"]')).toBeNull();
+    const chevs = band.querySelectorAll('svg.ib-band-chev');
+    expect(chevs).toHaveLength(1);
+    expect(chevs[0]!.getAttribute('aria-hidden')).toBe('true');
   }
   // Someone who never closed a group: Quiet and the Snoozed band closed, everything else open.
   expect(GROUPS.filter(isOpen)).toEqual(['stopped', 'holding', 'waiting', 'new', 'sent']);
@@ -175,6 +180,60 @@ test.skipIf(!hasDom)('every header is a button that closes and opens its group, 
     expect(isOpen(id)).toBe(was);
     expect(rowsIn(id)).toBe(was ? 1 : 0);
   }
+});
+
+/** The header's chevron is showing (inbox.css fades it in on `data-chev`). */
+const chevShown = (id: InboxListGroupId) => header(id).hasAttribute('data-chev');
+// React's onPointerEnter and onPointerLeave listen for pointerover and pointerout, with where the pointer came from or went.
+const pointer = (el: HTMLElement, type: 'pointerover' | 'pointerout', pointerType = 'mouse') =>
+  act(() => {
+    el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType, relatedTarget: document.body }));
+  });
+const wait = (ms: number) => act(() => jest.advanceTimersByTime(ms));
+
+test.skipIf(!hasDom)('a header shows its chevron at once while the pointer is on it, at once on keyboard focus, never on a touch', () => {
+  if (!hasDom) return;
+  jest.useFakeTimers();
+  try {
+    draw(sections());
+    const cascade = loadCascade(CSS);
+    const chev = (id: InboxListGroupId) => header(id).querySelector('svg.ib-band-chev')!;
+    // The pointer on the header: shown with no wait, and drawn (opacity 1), open or closed; gone on leave.
+    pointer(header('waiting'), 'pointerover');
+    expect(chevShown('waiting')).toBe(true);
+    expect(cascade.resolved(chev('waiting'), 'opacity')).toBe('1');
+    expect(chevShown('stopped')).toBe(false);
+    click(header('waiting'));
+    expect(isOpen('waiting')).toBe(false);
+    expect(chevShown('waiting')).toBe(true);
+    pointer(header('waiting'), 'pointerout');
+    expect(chevShown('waiting')).toBe(false);
+    pointer(header('quiet'), 'pointerover');
+    expect(isOpen('quiet')).toBe(false);
+    expect(chevShown('quiet')).toBe(true);
+    pointer(header('quiet'), 'pointerout');
+    // A touch shows nothing, however long.
+    pointer(header('new'), 'pointerover', 'touch');
+    wait(2000);
+    expect(chevShown('new')).toBe(false);
+    // Keyboard focus: at once; gone when focus leaves.
+    act(() => header('sent').focus());
+    expect(chevShown('sent')).toBe(true);
+    act(() => header('sent').blur());
+    expect(chevShown('sent')).toBe(false);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.skipIf(!hasDom)('the chevron is hidden until shown, and points right on a closed group and down on an open one', () => {
+  if (!hasDom) return;
+  draw(sections());
+  const cascade = loadCascade(CSS);
+  const chev = (id: InboxListGroupId) => header(id).querySelector('svg.ib-band-chev')!;
+  expect(cascade.resolved(chev('stopped'), 'opacity')).toBe('0');
+  expect(cascade.resolved(chev('stopped'), 'rotate')).toBe('90deg');
+  expect(cascade.resolved(chev('quiet'), 'rotate') ?? 'none').not.toBe('90deg');
 });
 
 test.skipIf(!hasDom)('the closed groups are this browser’s, kept across a remount; the tour ignores them', () => {

@@ -132,3 +132,40 @@ describe("the review skills mention the overview's drawing", () => {
     expect(recheck.indexOf(INBOX_REVIEW_RECHECK_DRAWING_LINE)).toBeGreaterThan(chapters);
   });
 });
+
+describe("the Show me request from a board", () => {
+  const review = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F";
+  const onPart = (over: Partial<InboxShowMeTarget> = {}): InboxShowMeTarget => ({ review, file: null, lines: null, round: 1, part: { board: "shp_a", name: "The next attempt", code: "src/s.ts#L3-L6" }, ...over });
+
+  test("names the part and its code, asks for a new board, and leaves the board it came from", () => {
+    const lines = inboxShowMeRequest({ target: onPart({ words: "how it adds up" }), title: "T", threadId: THREAD }).split("\n");
+    expect(lines[0]).toBe(`The reviewer pressed Show me on "The next attempt" (src/s.ts#L3-L6) in your Shape shp_a, from your review "T" (${review}): "how it adds up".`);
+    expect(lines[1]).toContain("Make a new Shape of that part");
+    expect(lines[1]).toContain("leave shp_a as it is");
+    // The rest is a review's Show me, as it was: stored through the review, opening over it, a click landing in the diff.
+    const fromLines = inboxShowMeRequest({ target: { review, file: "src/s.ts", lines: [3, 6], round: 1 }, title: "T", threadId: THREAD }).split("\n");
+    expect(lines.slice(2)).toEqual(fromLines.slice(2));
+  });
+
+  test("with no review behind the board: no --through, and no word of a review", () => {
+    const text = inboxShowMeRequest({ target: onPart({ review: null }), title: "", threadId: THREAD });
+    expect(text.split("\n")[0]).toBe('The person pressed Show me on "The next attempt" (src/s.ts#L3-L6) in your Shape shp_a.');
+    expect(text).toContain(`\`--thread ${THREAD}\`: it opens by itself`);
+    expect(text).not.toContain("--through");
+    expect(text).not.toMatch(/\breview\b/);
+    // No diff for a click to land in: no line about where code lands.
+    expect(text).not.toContain("data-code");
+  });
+
+  test("Show me again from a part's board asks for a new version of that board, not a new board", () => {
+    const text = inboxShowMeRequest({ target: onPart(), title: "T", threadId: THREAD, again: "shp_b" });
+    expect(text).toContain("Bring your Shape shp_b up to date");
+    expect(text).not.toContain("new Shape");
+  });
+
+  test("a words' quote in a part's name cannot break the request's own quotes", () => {
+    const line = inboxShowMeRequest({ target: onPart({ part: { board: "shp_a", name: 'Say "hi"\nthen go' } }), title: "T", threadId: THREAD }).split("\n");
+    expect(line[0]).not.toContain('"hi"');
+    expect(line[1]).toContain("Make a new Shape");
+  });
+});

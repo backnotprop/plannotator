@@ -343,6 +343,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
+  // Its file head is 33 px, as in every reader.
+  expect((await retry.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
 
   await retry.hover();
   await added(12).click();
@@ -528,12 +530,12 @@ async function expectBarFits(page: Page): Promise<void> {
     parts.forEach((part, i) => {
       if (part.box.right > window.innerWidth + 0.5 || part.box.left < -0.5) problems.push(`${part.name} leaves the window`);
       const next = parts[i + 1];
-      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name}`);
+      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name} (${Math.round(part.box.right)} > ${Math.round(next.box.left)})`);
     });
     if (head.scrollWidth > head.clientWidth + 1) problems.push('the bar overflows');
     return problems;
   });
-  expect(trouble).toEqual([]);
+  expect(trouble, `at ${page.viewportSize()?.width} px`).toEqual([]);
 }
 
 /** The tooltip showing now does not sit on the verdict's buttons. */
@@ -550,7 +552,8 @@ async function expectTipClearOfDecision(page: Page, words = 'Split view. Click f
 async function expectOverviewWhole(page: Page): Promise<void> {
   const name = page.locator('[data-review-message] .ib-rj-name');
   await expect(name).toHaveText('Overview');
-  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cut = await name.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${page.viewportSize()?.width} px`).toBe(true);
 }
 
 test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {
@@ -1220,6 +1223,7 @@ test('each file\'s name sits on the page above its code box: no fill at rest, un
 
 test('Code review off: the same review opens in the full-window review, with no verdict, Viewed ticks or Show me, and Write the reply back to the thread', async () => {
   const { page, claude } = world;
+  await setCodeReview(true);
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
@@ -1231,6 +1235,22 @@ test('Code review off: the same review opens in the full-window review, with no 
     // The diff controls sit in the bar (approval "diff-controls-headers"), no card has a tab.
     await expect(pane.locator('[data-guide-section-tab]')).toHaveCount(0);
     await expect(pane.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+    // The 33 px file head is every reader's, this one's too.
+    const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+
+    // A comment here reads as on main: no name line, on the card or in the comments.
+    const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
+    await shell.scrollIntoViewIfNeeded();
+    await shell.hover();
+    await added.click();
+    const composer = page.getByPlaceholder('Leave feedback...');
+    await expect(composer).toBeVisible();
+    await composer.fill('Unsigned while Code review is off.');
+    await page.getByRole('button', { name: 'Add Comment' }).click();
+    await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
+    await expect(page.getByText(/\(me\)/)).toHaveCount(0);
     // None of Code review's own parts.
     await expect(pane.locator('[data-review-decision]')).toHaveCount(0);
     await expect(pane.getByRole('button', { name: /^Approve/ })).toHaveCount(0);

@@ -262,8 +262,8 @@ test.skipIf(!hasDom)('Add: Send carries it, the added session is marked, and the
   await click(el.querySelector('[data-tag-mode-to="add"]'));
   expect(document.activeElement).toBe(box);
   expect(modeWords(el)).toBe('Adds Pi to this thread');
-  // The Send button, clicked (the line's buttons are not the Send).
-  await click(el.querySelector('section.ib-pane .ib-pfoot .ib-acts .ib-btn.ib-pri'));
+  // The box's Send button, clicked (the line's buttons are not the Send).
+  await click(el.querySelector('section.ib-pane .ib-pfoot .ib-rbox [data-reply-send]'));
   await until(async () => posted.some((p) => p.path.endsWith('/reply')), 'the Send');
   expect(posted.filter((p) => p.path.endsWith('/reply')).at(-1)!.body.tags).toEqual([{ host: 'pi', session: S.pi, label: 'Pi', mode: 'add' }]);
   expect((await serverMessages(tags.ids.t3)).at(-1)!.tags).toEqual([expect.objectContaining({ session: S.pi, joined: true })]);

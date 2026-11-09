@@ -19,12 +19,18 @@
  * never given one (MCP has no such field, and the window folds a block only
  * under the person's own messages).
  *
+ * A grill-me skill (any author's) also gets the grill-me note
+ * (`@plannotator/core/grill-me`), one PLANNOTATOR NOTE section at the end of
+ * the block: the only place Plannotator adds it (the owner, 2026-11-08: "if
+ * it's a skill ran from our UI, that's it").
+ *
  * Bounds: a body is capped at 20,000 characters by the server (and marked
  * truncated with its path); a message pastes at most 40,000 characters of
  * instructions, and a human-only skill past that is named with its folder
  * instead ("read SKILL.md in …"), the export's fallback wording.
  */
-import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillNoteSection, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
+import { GRILL_ME_NOTE_TEXT, isGrillMeSkill } from '@plannotator/core/grill-me';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { fetchSkillCatalog, normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import {
@@ -77,7 +83,10 @@ export function composeInboxSkillsBlock(
     pasted.set(ref.name, content);
     spent += content.content.length;
   }
-  return renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
+  const block = renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
+  // A grill-me skill (any author's, grill-me.ts): the note that sends the interview's questions back here as cards.
+  const grillMe = refs.find((ref) => isGrillMeSkill(ref.name));
+  return grillMe ? `${block}\n\n${inboxSkillNoteSection(grillMe.name, GRILL_ME_NOTE_TEXT)}` : block;
 }
 
 /** What `inboxSkillsBlock` reads; the window's own routes by default, a test's stand-ins otherwise. */

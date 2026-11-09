@@ -48,7 +48,7 @@ const MINI_BLOCK: InboxComposeLaunch = {
 
 /** Each machine's folders under its home, by `~/…` path. */
 const TREES: Record<string, Record<string, string[]>> = {
-  self: { '~': ['code', 'notes'], '~/code': ['notes-local', 'web-app'], '~/code/notes-local': [] },
+  self: { '~': ['code', 'Documents', 'notes'], '~/code': ['notes-local', 'web-app'], '~/code/notes-local': [], '~/code/web-app': ['src'], '~/Documents': ['Archive'], '~/Documents/Archive': ['2024'] },
   [MINI]: { '~': ['code'], '~/code': ['billing-api', 'billing-reports', 'billing-svc', 'infra'], '~/code/billing-api': [], '~/code/billing-svc': ['src'] },
 };
 
@@ -57,6 +57,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let requests: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
 let machines: MachineView[] = [SELF_VIEW];
+/** Folders a folder can't be made in (A10), by `~/…` path. */
+const UNWRITABLE = new Set(['~/Documents/Archive']);
 /** Holds a folder read until released (a slow machine). */
 let slow: { path: string; release: Promise<void> } | null = null;
 let sent: ComposeSent[] = [];
@@ -74,6 +76,7 @@ beforeEach(() => {
   setSelfMachine(SELF);
   requests = [];
   sent = [];
+  saved = [];
   slow = null;
   machines = [SELF_VIEW];
   savedFetch = globalThis.fetch;
@@ -81,6 +84,11 @@ beforeEach(() => {
     const path = String(input);
     const method = init?.method ?? 'GET';
     requests.push({ method, path, body: typeof init?.body === 'string' ? JSON.parse(init.body) : null });
+    if (method === 'POST' && path.startsWith('/api/inbox/drafts/')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      saved.push({ path, body });
+      return Response.json({ draft: { v: 1, id: 'drf_01ARZ3NDEKTSV4RRFFQ69G5FT2', created_at: 'x', updated_at: 'y', files: [], ...body, status: 'none' } });
+    }
     if (method === 'POST') {
       if (path === `/api/inbox/m/${MINI}/messages` || path === '/api/inbox/messages') return Response.json({ thread_id: 'msg_01ARZ3NDEKTSV4RRFFQ69G5FT1', launch: { id: 'lch_1', state: 'starting' } });
       return Response.json({});
@@ -91,7 +99,7 @@ beforeEach(() => {
       if (read.at.split('/').some((s) => s.startsWith('.'))) return Response.json({ error: "Hidden folders aren't listed.", code: 'folder_hidden' }, { status: 422 });
       const tree = TREES[read.machine] ?? {};
       const folders = tree[read.at];
-      if (folders) return Response.json({ path: read.at, exists: true, folders });
+      if (folders) return Response.json({ path: read.at, exists: true, state: 'folder', folders, writable: !UNWRITABLE.has(read.at) });
       // As the server: the nearest folder above a path that isn't there, and its folders.
       let up = read.at;
       while (up !== '~' && !tree[up]) up = up.slice(0, up.lastIndexOf('/')) || '~';
@@ -127,14 +135,16 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function open() {
+let saved: { path: string; body: Record<string, unknown> }[] = [];
+
+async function open(request: Record<string, unknown> = {}) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
-      <ComposeDialog request={{}} phone={false} current={null} lastSent={null} home="/Users/me" onSent={(s) => sent.push(s)} onHeld={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />,
+      <ComposeDialog request={request} phone={false} current={null} lastSent={null} home="/Users/me" onSent={(s) => sent.push(s)} onHeld={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />,
     );
   });
   await until(() => inDialog('[data-compose-to]:not([data-loading])') !== null, 'To');
@@ -159,10 +169,12 @@ function type(input: HTMLInputElement | HTMLTextAreaElement, words: string) {
 const pathField = () => inDialog('[data-home-folders-path]') as HTMLInputElement;
 const folderReads = () => requests.flatMap((r) => (r.method === 'GET' && folderRead(r.path) ? [folderRead(r.path)!] : []));
 const shownFolders = () => all('[data-home-folder-option]').map((r) => r.getAttribute('data-home-folder-option'));
-/** The folder rows drawn after the missing line, in order: what "pick a folder below" points at. */
-const belowLine = () => {
-  const line = inDialog('[data-home-folders-note="missing"]');
-  return line ? all('[data-home-folder-option]').filter((r) => line.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING).map((r) => r.getAttribute('data-home-folder-option')) : [];
+/** The browser's line (a refusal, a missing folder, a file): its words, or null. */
+const line = () => inDialog('[data-home-folders-note="line"]')?.textContent ?? null;
+/** The folder rows drawn after Create's quiet line, in order: "Or pick one that's there". */
+const belowCreate = () => {
+  const after = inDialog('[data-home-folders-after]');
+  return after ? all('[data-home-folder-option]').filter((r) => after.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING).map((r) => r.getAttribute('data-home-folder-option')) : [];
 };
 const key = (target: Element, name: string) => act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
 const machinesRead = () => requests.some((r) => r.path === `/api/inbox/m/${MINI}/sessions`);
@@ -175,7 +187,7 @@ async function twoMachinesMenu() {
   await until(() => all('[data-compose-folder-group]').length === 2, 'two groups');
 }
 
-test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, reads here, says a missing path, and Send names the folder here', async () => {
+test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, reads here, offers Create for a missing name, and Send names the folder here', async () => {
   await open();
   await startAndOpenMenu();
   // The menu as it was, then the one new row, with no machine words.
@@ -187,24 +199,30 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   expect(inDialog('[data-home-folders] .ib-hfb-head')!.textContent).toBe('A folder');
   expect(pathField().value).toBe('~/');
   expect(document.activeElement).toBe(pathField());
-  await until(() => shownFolders().length === 2, "home's folders");
-  expect(shownFolders()).toEqual(['code', 'notes']);
+  await until(() => shownFolders().length === 3, "home's folders");
+  expect(shownFolders()).toEqual(['code', 'Documents', 'notes']);
 
+  // A4: a name that isn't there leads as Create, the folders that are there under its quiet line, closest first.
   type(pathField(), '~/code/nope');
-  await until(() => inDialog('[data-home-folders-note="missing"]') !== null, 'the missing line');
-  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe("There's no folder ~/code/nope. Check the path, or pick a folder below.");
+  await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
+  expect(inDialog('[data-home-folder-create]')!.textContent).toBe('Create nope and start~/code/nope');
+  expect(inDialog('[data-home-folder-create]')!.getAttribute('aria-selected')).toBe('true');
   expect(all('[data-home-folder-start]')).toHaveLength(0);
-  // "Below" is true: the folders that are there, under the line, the closest to "nope" first.
-  expect(shownFolders()).toEqual(['notes-local', 'web-app']);
-  expect(belowLine()).toEqual(['notes-local', 'web-app']);
-  // A folder that isn't there two levels up: the nearest folder that is (home), "code" first for "cod".
+  expect(inDialog('[data-home-folders-after]')!.textContent).toBe("A new, empty folder. Or pick one that's there:");
+  expect(belowCreate()).toEqual(['notes-local', 'web-app']);
+  // A5: a typo one level up: "Go to ~/code/notes", one Enter.
   type(pathField(), '~/cod/notes');
-  await until(() => shownFolders().join() === 'code,notes', "home's folders under the line");
-  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe("There's no folder ~/cod/notes. Check the path, or pick a folder below.");
-  act(() => inDialog('[data-home-folder-option="code"]')!.click());
-  expect(pathField().value).toBe('~/code/');
+  await until(() => line() === "There's no ~/cod.", 'the typo line');
+  expect(inDialog('[data-home-folder-row="fix"]')!.textContent).toBe('Go to ~/code/notes');
+  key(pathField(), 'Enter');
+  expect(pathField().value).toBe('~/code/notes');
+  // There, "notes" still starts notes-local: the match first, Create last and quiet (A3).
+  await until(() => inDialog('[data-home-folder-create]') !== null, 'the quiet Create row');
+  expect(all('[data-home-folder-row]').map((r) => r.getAttribute('data-home-folder-row'))).toEqual(['folder', 'create']);
+  expect(inDialog('[data-home-folder-create]')!.className).toContain('ib-hfb-quiet');
+  type(pathField(), '~/code/');
   await until(() => shownFolders().join() === 'notes-local,web-app', "code's folders");
-  expect(all('[data-home-folders-note="missing"]')).toHaveLength(0);
+  expect(line()).toBeNull();
 
   type(pathField(), '~/code/NO');
   await until(() => shownFolders().join() === 'notes-local', 'the narrowed folders');
@@ -245,14 +263,14 @@ test.skipIf(!hasDom)("two machines: each group ends with its own row; Mac mini's
   expect(folderReads().some((r) => r.machine === 'self')).toBe(false);
 
   type(pathField(), '~/code/biling-svc');
-  await until(() => inDialog('[data-home-folders-note="missing"]') !== null, 'the missing line');
-  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
-  // Under the line, Mac mini's folders in ~/code, the one closest to what was typed first.
-  expect(belowLine()).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
-  // An empty folder has nothing to pick: the line doesn't point below.
+  await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
+  // Under Create, Mac mini's folders in ~/code, the one closest to what was typed first; the name was read on Mac mini.
+  expect(belowCreate()).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
+  expect(folderReads().filter((r) => r.at === '~/code/biling-svc')).toEqual([{ machine: MINI, at: '~/code/biling-svc' }]);
+  // An empty folder has nothing else to pick: Create alone, with no line pointing below.
   type(pathField(), '~/code/billing-api/x');
-  await until(() => inDialog('[data-home-folders-note="missing"]')?.textContent?.includes('billing-api/x') === true, 'the line for an empty folder');
-  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe('Mac mini has no folder ~/code/billing-api/x. Check the path.');
+  await until(() => inDialog('[data-home-folder-create="~/code/billing-api/x"]') !== null, 'Create in an empty folder');
+  expect(all('[data-home-folders-after]')).toHaveLength(0);
   expect(shownFolders()).toEqual([]);
 
   type(pathField(), '~/code/billing-a');
@@ -337,7 +355,7 @@ test.skipIf(!hasDom)('asleep: no "Another folder on Mac mini…" row; a browser 
   expect(all('[data-compose-folder-other]').map((r) => r.getAttribute('data-compose-folder-other'))).toEqual(['self']);
 });
 
-test.skipIf(!hasDom)("a slow answer for a path no longer typed is dropped; a hidden path shows the server's words", async () => {
+test.skipIf(!hasDom)('a slow answer for a path no longer typed is dropped; a hidden path is said and never read', async () => {
   await open();
   await startAndOpenMenu();
   let release!: () => void;
@@ -353,7 +371,144 @@ test.skipIf(!hasDom)("a slow answer for a path no longer typed is dropped; a hid
   });
   expect(shownFolders()).toEqual(['notes']);
 
+  // A11: a hidden folder is said in one line, and never read.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 200));
+  });
+  const reads = folderReads().length;
   type(pathField(), '~/.ssh/');
-  await until(() => inDialog('[data-home-folders-note="error"]') !== null, 'the refusal');
-  expect(inDialog('[data-home-folders-note="error"]')!.textContent).toBe("Hidden folders aren't listed.");
+  await until(() => line() === "Hidden folders aren't offered.", 'the hidden line');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 200));
+  });
+  expect(folderReads()).toHaveLength(reads);
+});
+
+/** "Another folder…" open on this computer, the path typed, and the rows read. */
+async function browseHere(path: string) {
+  await open();
+  await startAndOpenMenu();
+  act(() => inDialog('[data-compose-folder-other="self"]')!.click());
+  type(pathField(), path);
+}
+
+function paste(input: HTMLInputElement, text: string) {
+  const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: { getData: () => string } };
+  event.clipboardData = { getData: () => text };
+  act(() => {
+    input.focus();
+    input.select();
+    input.dispatchEvent(event);
+  });
+}
+
+test.skipIf(!hasDom)('Create a folder: picked, To carries the new-folder mark, and the Send asks the server to make it (A4, A13)', async () => {
+  await browseHere('~/code/pricing-page');
+  await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
+  key(pathField(), 'Enter');
+  const chip = inDialog('[data-compose-folder]')!;
+  expect(chip.hasAttribute('data-compose-folder-new')).toBe(true);
+  expect(chip.querySelector('bdi')!.textContent).toBe('pricing-page');
+  expect(chip.getAttribute('aria-label')).toBe('Start in: pricing-page, a new folder at ~/code/pricing-page, made when you send. Change');
+  type(inDialog('textarea') as HTMLTextAreaElement, 'Add a pricing page.');
+  act(() => inDialog('[data-compose-send]')!.click());
+  await until(() => sent.length === 1, 'the send');
+  expect(requests.filter((r) => r.method === 'POST')[0]!.body!.to).toEqual({ launch: { agent: AGENT, folder: '~/code/pricing-page', create: true } });
+});
+
+test.skipIf(!hasDom)('A10: a folder that can not be written offers no Create, and its folders are still there', async () => {
+  await browseHere('~/Documents/Archive/q3');
+  await until(() => line() !== null, 'the line');
+  expect(line()).toBe("Can't make a folder in ~/Documents/Archive: no permission.");
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 250));
+  });
+  expect(all('[data-home-folder-create]')).toHaveLength(0);
+  expect(shownFolders()).toEqual(['2024']);
+});
+
+test.skipIf(!hasDom)('B4: a path pasted into "Find a project" keeps the projects under it, and "Another folder…" opens there', async () => {
+  await open();
+  await startAndOpenMenu();
+  paste(inDialog('[data-compose-folders] input') as HTMLInputElement, '"/Users/me/code/web-app"');
+  expect((inDialog('[data-compose-folders] input') as HTMLInputElement).value).toBe('/Users/me/code/web-app');
+  expect(all('[data-compose-folder-option]').map((r) => r.getAttribute('data-compose-folder-option'))).toEqual(['prj_web']);
+  const other = inDialog('[data-compose-folder-other="self"]')!;
+  expect(other.getAttribute('aria-label')).toBe('Another folder, ~/code/web-app');
+  act(() => other.click());
+  expect(pathField().value).toBe('~/code/web-app');
+  await until(() => inDialog('[data-home-folder-start]') !== null, 'the Start row');
+  expect(inDialog('[data-home-folder-start]')!.getAttribute('data-home-folder-start')).toBe('~/code/web-app');
+});
+
+test.skipIf(!hasDom)('B3: a pasted path is cleaned in the window (file://, quotes, Terminal escapes), as the server refuses backslashes', async () => {
+  await browseHere('~/');
+  paste(pathField(), 'file:///Users/me/code/notes-local/');
+  expect(pathField().value).toBe('~/code/notes-local/');
+  paste(pathField(), "'/Users/me/code/Client\\ Work'");
+  expect(pathField().value).toBe('~/code/Client Work');
+});
+
+test.skipIf(!hasDom)('D2: back from the browser keeps the path typed; "Another folder…" opens on it again', async () => {
+  await browseHere('~/code/no');
+  key(pathField(), 'Escape');
+  expect(all('[data-home-folders]')).toHaveLength(0);
+  act(() => inDialog('[data-compose-folder-other="self"]')!.click());
+  expect(pathField().value).toBe('~/code/no');
+});
+
+test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it comes back, and a folder there by now loses the mark', async () => {
+  await browseHere('~/code/pricing-page');
+  await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
+  key(pathField(), 'Enter');
+  type(inDialog('textarea') as HTMLTextAreaElement, 'Add a pricing page.');
+  // One Escape keeps it (approval "inbox-compose-escape-keeps"): no question.
+  key(inDialog('textarea')!, 'Escape');
+  await until(() => saved.length === 1, 'the draft saved');
+  const start = saved[0]!.body.start;
+  expect(start).toEqual({ agent: AGENT, machine: null, folder: '~/code/pricing-page', name: 'pricing-page', create: true });
+  act(() => root?.unmount());
+  host?.remove();
+  const draft = { v: 1, id: 'drf_01ARZ3NDEKTSV4RRFFQ69G5FT2', created_at: 'x', updated_at: 'y', body: 'Add a pricing page.', to: null, project: null, files: [], status: 'none', start };
+  await open({ draft });
+  await until(() => inDialog('[data-compose-folder]') !== null, 'the folder button');
+  expect(inDialog('[data-compose-folder]')!.hasAttribute('data-compose-folder-new')).toBe(true);
+  // Made meanwhile: checked again, it is a folder that is there.
+  act(() => root?.unmount());
+  host?.remove();
+  TREES.self!['~/code/pricing-page'] = [];
+  try {
+    await open({ draft });
+    await until(() => inDialog('[data-compose-folder]') !== null && !inDialog('[data-compose-folder]')!.hasAttribute('data-compose-folder-new'), 'the mark dropped');
+    expect(inDialog('[data-compose-folder] bdi')!.textContent).toBe('pricing-page');
+  } finally {
+    delete TREES.self!['~/code/pricing-page'];
+  }
+});
+
+test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in as a shell does; with no folder highlighted, or Shift+Tab, focus moves as usual', async () => {
+  await open();
+  await startAndOpenMenu();
+  act(() => inDialog('[data-compose-folder-other="self"]')!.click());
+  await until(() => shownFolders().length === 3, "home's folders");
+  const tab = (shift = false) => {
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+    act(() => {
+      pathField().dispatchEvent(event);
+    });
+    return event;
+  };
+  // "no" suggests notes-local, highlighted: Tab fills it in, ready for the next name, and the field keeps the caret.
+  type(pathField(), '~/code/no');
+  await until(() => shownFolders().join() === 'notes-local', 'the suggestion');
+  expect(tab(true).defaultPrevented).toBe(false);
+  expect(pathField().value).toBe('~/code/no');
+  expect(tab().defaultPrevented).toBe(true);
+  expect(pathField().value).toBe('~/code/notes-local/');
+  await until(() => inDialog('[data-home-folder-start]') !== null, 'the folder filled in');
+  // No folder suggested (Create leads): Tab is the browser's, so focus moves on, and the field is as typed.
+  type(pathField(), '~/code/nope');
+  await until(() => inDialog('[data-home-folder-create]')?.getAttribute('aria-selected') === 'true', 'the Create row');
+  expect(tab().defaultPrevented).toBe(false);
+  expect(pathField().value).toBe('~/code/nope');
 });

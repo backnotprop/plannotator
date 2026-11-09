@@ -34,6 +34,16 @@
  * exposes the whole Inbox and is replaced only when the person asks.
  * Tailscale missing, stopped or signed out never stops the Inbox: the reason
  * is kept for Settings, inbox.json and stderr.
+ *
+ * The prototype relay (`openRelay`, inbox-live-relay.ts). A question's
+ * running-app prototype is proxied on a loopback port of its own, which a
+ * phone cannot reach. While published, the owner's first open of one makes a
+ * second mapping, `https://<MagicDNS name>:<R>` to a loopback listener on
+ * port R, and every request there passes the same Host and owner checks as
+ * the window's (only the machine's owner, never a login the allowlist adds)
+ * before the relay sees it. It is recorded (`relay_port`) before it is made,
+ * taken down with the window's mapping, and a run's leftover is taken down at
+ * the next start, as the window's is.
  */
 
 import {
@@ -157,6 +167,11 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   let servedHostname: string | null = null;
   let httpsPort: number | null = null;
   let warnedExposure = false;
+  /** The prototype relay's listener (port R, also its tailnet HTTPS port) and its origin while mapped. */
+  let relayListener: ReturnType<typeof Bun.serve> | null = null;
+  let relayOrigin: string | null = null;
+  /** The relay port while its mapping may exist (this run's, or one a run before left and not yet taken down). */
+  let relayKept: number | null = null;
   const state = {
     url: null as string | null,
     error: null as string | null,
@@ -191,11 +206,37 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    */
   const save = (value: InboxRegistryEntry["tailscale"] | undefined) => {
     const apply = (target: InboxRegistryEntry) => {
-      if (value) target.tailscale = { ...value };
+      // The relay's record rides every save while its mapping may exist.
+      const relay = relayKept !== null ? { relay_port: relayKept } : {};
+      if (value) target.tailscale = { ...value, ...relay };
+      else if (relayKept !== null) target.tailscale = { url: null, error: null, ...relay };
       else delete target.tailscale;
     };
     apply(context.registry());
     updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
+  };
+
+  /** Record or forget the relay's port, the rest of the record kept. */
+  const saveRelay = (port: number | null) => {
+    relayKept = port;
+    const kept = record();
+    save(kept ? { url: kept.url, error: kept.error, ...(kept.https_port ? { https_port: kept.https_port, proxy_port: kept.proxy_port } : {}) } : undefined);
+  };
+
+  /** Take the relay's mapping down (this run's, or a leftover). False when it may still exist: the record stays. */
+  const takeDownRelay = function* (): TailscaleSteps<boolean> {
+    const port = relayListener ? (relayListener.port as number) : (relayKept ?? record()?.relay_port ?? null);
+    relayOrigin = null;
+    if (relayListener) {
+      relayListener.stop(true);
+      relayListener = null;
+    }
+    if (port === null) return true;
+    relayKept = port;
+    const result = yield* takeDownOwnServeSteps(port, [`http://127.0.0.1:${port}`]);
+    if (result === "failed") return false;
+    saveRelay(null);
+    return true;
   };
 
   /** The record with its ports kept (a mapping may exist), and why. */
@@ -263,6 +304,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   // otherwise (the `--tailscale` rule, tailscale-serve.ts). While published,
   // `nohup plannotator inbox --tailscale &` therefore ends with the terminal.
   const onExit = () => {
+    if (relayKept !== null) takeDownOwnServeMapping(run, relayKept, [`http://127.0.0.1:${relayKept}`]);
     if (httpsPort !== null) takeDownOwnServeMapping(run, httpsPort, ownTargets());
   };
   const onHangup = () => {
@@ -357,6 +399,12 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * record is kept, with the reason.
    */
   const reconcile = function* (): TailscaleSteps<boolean> {
+    // A relay mapping a run before left: down first. A failure keeps its record for the next start; the window still publishes.
+    const leftRelay = record()?.relay_port;
+    if (leftRelay && !relayListener) {
+      relayKept = leftRelay;
+      yield* takeDownRelay();
+    }
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
     const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
@@ -409,6 +457,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
 
   /** Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept. */
   const unpublish = function* (later = false): TailscaleSteps<"removed" | "none" | "failed"> {
+    // The relay goes with the window's address; a failure keeps its record for the next start.
+    if (relayListener || relayKept !== null) yield* takeDownRelay();
     const port = httpsPort ?? record()?.https_port ?? null;
     const result = port === null ? "none" : yield* takeDownOwnServeSteps(port, ownTargets());
     if (result === "failed") return result;
@@ -537,10 +587,66 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       ),
     );
 
+  /**
+   * The prototype relay's origin, `https://<MagicDNS name>:<R>`, mapped on first use (inbox-live-relay.ts hands its
+   * handlers). Every request reaching `handlers.fetch` named the relay's Host and came from the machine's owner.
+   */
+  const openRelay = (handlers: InboxTailnetRelayHandlers): Promise<string> =>
+    serial(() =>
+      runTailscaleStepsAsync(
+        (function* (): TailscaleSteps<string> {
+          if (!state.url || !servedHostname) throw new InboxError("tailscale_unavailable", "The Inbox is not published over your tailnet now.");
+          if (relayListener && relayOrigin) return relayOrigin;
+          const hostname = servedHostname;
+          const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            idleTimeout: 0,
+            maxRequestBodySize: context.maxRequestBodySize,
+            fetch(req: Request, srv: unknown) {
+              const port = relayListener ? (relayListener.port as number) : -1;
+              if (!isServedTailnetHost(req.headers.get("host"), hostname, port)) {
+                return refusal("/", 403, "forbidden_host", "This address answers only its tailnet name.");
+              }
+              const identity = checkTailnetIdentity(req.headers, state.allowed);
+              if (!identity.ok) return refusal("/", identity.status, identity.code, identity.message);
+              if (!isOwner(req.headers)) return refusal("/", 403, "owner_only", "A prototype opens only for this computer's owner.");
+              return handlers.fetch(req, srv);
+            },
+            websocket: handlers.websocket,
+          } as unknown as Parameters<typeof Bun.serve>[0]);
+          relayListener = server;
+          const port = server.port as number;
+          // Recorded before it exists, as the window's mapping is.
+          saveRelay(port);
+          try {
+            yield* enableServeSteps(port, { httpsPort: port, ownTargets: [`http://127.0.0.1:${port}`], persist: true });
+          } catch (error) {
+            yield* takeDownRelay();
+            throw new InboxError("tailscale_unavailable", `Tailscale could not serve the prototype to your tailnet. ${error instanceof Error ? error.message.replace(/^--tailscale:\s*/, "") : String(error)}`);
+          }
+          relayOrigin = `https://${hostname}:${port}`;
+          return relayOrigin;
+        })(),
+        runAsync,
+      ),
+    );
+
+  const isOwner = (headers: Headers): boolean => {
+    const identity = checkTailnetIdentity(headers, state.allowed);
+    if (!identity.ok) return false;
+    return state.owner === null || normalizeTailnetLogin(identity.login) === state.owner;
+  };
+
   return {
     start,
     stop,
     set,
+    openRelay,
+    /** The window's tailnet origin while published (the relay's pages name it as their only frame ancestor). */
+    windowOrigin: (): string | null => (servedHostname && httpsPort !== null && state.url ? `https://${servedHostname}:${httpsPort}` : null),
+    /** The relay's listener port while it is up (tests). */
+    relayPort: () => (relayListener ? (relayListener.port as number) : null),
     enableForRun,
     noteServedRequest,
     state: snapshot,
@@ -557,15 +663,17 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
      * it: there every allowed login is the owner. "Ask this session" follows
      * the same rule (`readTailnetOwners` in session-tailnet.ts).
      */
-    isOwnerRequest: (headers: Headers): boolean => {
-      const identity = checkTailnetIdentity(headers, state.allowed);
-      if (!identity.ok) return false;
-      return state.owner === null || normalizeTailnetLogin(identity.login) === state.owner;
-    },
+    isOwnerRequest: isOwner,
   };
 }
 
 export type InboxTailscale = ReturnType<typeof createInboxTailscale>;
+
+/** The prototype relay's request and WebSocket handlers (inbox-live-relay.ts), behind the relay's own checks. */
+export interface InboxTailnetRelayHandlers {
+  fetch: (req: Request, server: unknown) => Response | undefined | Promise<Response | undefined>;
+  websocket: unknown;
+}
 
 /**
  * `uninstall --purge` with the Inbox stopped: take down the window's tailnet
@@ -574,6 +682,9 @@ export type InboxTailscale = ReturnType<typeof createInboxTailscale>;
  */
 export function takeDownInboxTailscale(dataDir: string, run: TailscaleRunner = runTailscale): "removed" | "none" | "failed" {
   const kept = readInboxRegistry(dataDir)?.tailscale;
-  if (!kept?.https_port || !kept.proxy_port) return "none";
-  return takeDownOwnServeMapping(run, kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
+  // The prototype relay's mapping too (its target is the loopback listener on the same port number).
+  const relay = kept?.relay_port ? takeDownOwnServeMapping(run, kept.relay_port, [`http://127.0.0.1:${kept.relay_port}`]) : "none";
+  const window = kept?.https_port && kept.proxy_port ? takeDownOwnServeMapping(run, kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]) : "none";
+  if (relay === "failed" || window === "failed") return "failed";
+  return relay === "removed" || window === "removed" ? "removed" : "none";
 }

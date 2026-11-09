@@ -51,8 +51,11 @@ import {
   MAX_PAGE_URL_LENGTH,
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
+  bridgeWindowOf,
   rejectsLiveMessage,
+  resolveFrameScale,
   useHtmlAnnotation,
+  type HtmlContentWidth,
   type HtmlLiveSession,
   type HtmlScrollClear,
 } from "./useHtmlAnnotation";
@@ -63,6 +66,7 @@ import {
   hasHostThemeOptIn,
   injectIntoHead,
   injectPrintDefaults,
+  injectSandboxShim,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -212,8 +216,19 @@ function parseVimBridgeCopy(value: unknown): string | null {
 /** The fewest milliseconds between two honored `step` messages from the page. */
 export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
 
+/** How long a restore-draft (`reopenComment`) waits for the bridge's answer before the host gets the words back. */
+const REOPEN_ANSWER_MS = 3000;
+
 export interface HtmlViewerProps {
   rawHtml: string;
+  /**
+   * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
+   * annotate's live mode has always run. A host that passes one keeps the
+   * app working with `allow-scripts allow-same-origin allow-forms` and takes
+   * away what it leaves out (`allow-top-navigation`: the app cannot navigate
+   * the host's window).
+   */
+  liveSandbox?: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
    *  rawHtml. The caller must also set `fullViewport` and `liveSession`. */
   src?: string;
@@ -386,6 +401,38 @@ export interface HtmlViewerProps {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
+   * Opt-in: how much the host scales this viewer on screen (a CSS transform
+   * on an ancestor; the Inbox's phone "Desktop size" lays the page out wide
+   * and scales it to fit). The bridge measures in the page's own pixels, so
+   * the selection anchor, the composer's yield and `revealPin`'s
+   * `clearBottom` convert through it, and with `onPageScrollUp`/`onPageTap`
+   * the bridge measures a scroll or a tap's movement on screen through it.
+   * Absent → 1, unchanged.
+   */
+  frameScale?: number;
+  /**
+   * Opt-in: how wide the page lays out against the frame's own width, in the
+   * page's pixels, reported by the bridge after it loads and whenever either
+   * changes (a page wider than its frame was made for a wider screen).
+   * Delivered in readOnly mode too. Absent → the bridge is never asked
+   * (`set-page-reports`), so it neither measures nor posts.
+   */
+  onContentWidth?: (report: HtmlContentWidth) => void;
+  /**
+   * Opt-in: the person scrolled the page (or a scroller in it) back up, at
+   * least a little, reported by the bridge. For a host control that fades over
+   * the page and comes back on a scroll up. Absent → ignored.
+   */
+  onPageScrollUp?: () => void;
+  /**
+   * Opt-in: a tap on the page (a press and a lift close together), with where
+   * it landed as a `clientY` in this window (through `frameScale`). For a host
+   * control that comes back on a tap near it. The tap still reaches the page.
+   * With neither this nor `onPageScrollUp`, the bridge is never asked and adds
+   * no listeners.
+   */
+  onPageTap?: (clientY: number) => void;
+  /**
    * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
    * a finger counts, read from `selectionchange` once it rests (a long press
    * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
@@ -424,6 +471,13 @@ export interface HtmlViewerProps {
    */
   sandbox?: string;
   /**
+   * Opt-out: `false` draws the page's comment boxes (a pin, a selection, the
+   * global comment) with no image button, for a host whose upload refuses
+   * every image (the Plannotator Inbox). Absent → `true`, the image button as
+   * always.
+   */
+  allowCommentImages?: boolean;
+  /**
    * Opt-in: frame the document from a URL the host serves instead of as a
    * srcdoc. The viewer builds the same document (the page, theme, print
    * defaults, the inline annotation bridge) and hands it here; the host keeps
@@ -451,6 +505,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      liveSandbox,
       src,
       liveSession,
       currentPageUrl,
@@ -497,9 +552,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      frameScale,
+      onContentWidth,
+      onPageScrollUp,
+      onPageTap,
       touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
+      allowCommentImages = true,
       frameUrl,
     },
     ref,
@@ -550,7 +610,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
     const postToBridge = useCallback((msg: Record<string, unknown>) => {
-      const win = iframeRef.current?.contentWindow;
+      const win = bridgeWindowOf(iframeRef.current, liveSessionRef.current);
       if (!win) return;
       const live = liveSessionRef.current;
       if (live) {
@@ -592,7 +652,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      // Inline path: history and storage are safe before the page's own head
+      // scripts run. The URL path gets the same shim from the bridge.
+      return bridgeUrl ? page : injectSandboxShim(page);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     useLayoutEffect(() => {
@@ -684,6 +747,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const composerYieldRef = useRef(composerYield);
     composerYieldRef.current = composerYield;
     const shiftHeldRef = useRef(false);
+    const frameScaleRef = useRef(resolveFrameScale(frameScale));
+    frameScaleRef.current = resolveFrameScale(frameScale);
 
     const handleYieldPointer = useCallback((clientX: number, clientY: number) => {
       if (!shiftHeldRef.current) return;
@@ -710,7 +775,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         }
         const iframeRect = iframeRef.current?.getBoundingClientRect();
         if (!iframeRect) return;
-        handleYieldPointer(iframeRect.left + x, iframeRect.top + y);
+        const s = frameScaleRef.current;
+        handleYieldPointer(iframeRect.left + x * s, iframeRect.top + y * s);
       },
       [handleYieldPointer],
     );
@@ -790,6 +856,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       scrollBehavior,
       scrollClear,
       onHostDraft: readOnly ? undefined : onHostDraft,
+      frameScale,
+      onContentWidth,
+      onPageScrollUp,
+      onPageTap,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
 
@@ -866,7 +936,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // WebKit runner, the Inbox surface's proof).
     useLayoutEffect(() => {
       function handler(e: MessageEvent<unknown>) {
-        if (e.source !== iframeRef.current?.contentWindow) return;
+        if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveSessionRef.current)) return;
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
@@ -1077,6 +1147,40 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}report-unanchored` });
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // reopenComment asked before the bridge was ready: posted once it is,
+    // after the saved annotations above are drawn.
+    const pendingReopenRef = useRef<Record<string, unknown> | null>(null);
+    // A bridge that never answers restore-draft (an older cached asset): after
+    // REOPEN_ANSWER_MS the host gets the words back through its onMissing.
+    const postReopenRef = useRef<(message: Record<string, unknown>) => void>(() => {});
+    const reopenTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
+    postReopenRef.current = (message: Record<string, unknown>) => {
+      postToBridge(message);
+      const id = typeof message.id === "string" ? message.id : null;
+      if (!id) return;
+      const timer = setTimeout(() => {
+        reopenTimersRef.current.delete(timer);
+        hook.expireReopen(id);
+      }, REOPEN_ANSWER_MS);
+      reopenTimersRef.current.add(timer);
+    };
+    // Gone before the answer: the host is not told later (it kept the words as the viewer went).
+    useEffect(() => {
+      const timers = reopenTimersRef.current;
+      return () => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
+      };
+    }, []);
+    const iframeReadyRef = useRef(iframeReadyVersion);
+    iframeReadyRef.current = iframeReadyVersion;
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !pendingReopenRef.current) return;
+      const message = pendingReopenRef.current;
+      pendingReopenRef.current = null;
+      postReopenRef.current(message);
+    }, [iframeReadyVersion, postToBridge]);
+
     // A linked document opened from a `#`-carrying link: the srcdoc document
     // has no URL, so the fragment is replayed once its bridge is ready.
     useEffect(() => {
@@ -1149,6 +1253,28 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       if (iframeReadyVersion === 0 || !hostNavigates) return;
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
+
+    // The page reports a host's own controls read (`onContentWidth`,
+    // `onPageScrollUp`, `onPageTap`), and the scale the bridge needs to measure
+    // a tap or a scroll in screen pixels. A viewer that never asked posts
+    // nothing, and the bridge then neither listens nor reports.
+    const wantsContentWidth = !!onContentWidth;
+    const wantsScrollUp = !!onPageScrollUp;
+    const wantsTap = !!onPageTap;
+    const reportScale = resolveFrameScale(frameScale);
+    const pageReportsAskedRef = useRef(false);
+    useEffect(() => {
+      const wants = wantsContentWidth || wantsScrollUp || wantsTap;
+      if (iframeReadyVersion === 0 || (!wants && !pageReportsAskedRef.current)) return;
+      pageReportsAskedRef.current = wants;
+      postToBridge({
+        type: `${PREFIX}set-page-reports`,
+        contentWidth: wantsContentWidth,
+        scrollUp: wantsScrollUp,
+        tap: wantsTap,
+        scale: reportScale,
+      });
+    }, [iframeReadyVersion, wantsContentWidth, wantsScrollUp, wantsTap, reportScale]);
 
     // Selections made with a finger (`touchSelection`). A viewer that never
     // asked posts nothing.
@@ -1283,8 +1409,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       revealPin: (options?: { clearBottom?: number }) =>
         postToBridge({
           type: `${PREFIX}reveal-pin`,
-          ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
+          // Measured in the parent; the bridge reads the page's own pixels.
+          ...(options?.clearBottom ? { clearBottom: options.clearBottom / frameScaleRef.current } : {}),
         }),
+      // A comment being written when its file closed, put back by the host:
+      // the bridge pins its element again (or selects its words again) and
+      // the composer opens holding its words. Not in live sessions.
+      reopenComment: (annotation: Annotation, onMissing?: () => void) => {
+        if (readOnly || liveMode) return false;
+        const message = hook.prepareReopen(annotation, onMissing);
+        if (!message) return false;
+        if (iframeReadyRef.current > 0) postReopenRef.current(message);
+        else pendingReopenRef.current = message;
+        return true;
+      },
+      peekComment: () => (readOnly || liveMode ? null : hook.peekComment()),
     }));
 
     const handleGlobalCommentSubmit = useCallback(
@@ -1441,13 +1580,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. A host-served frame
+                same-origin XHR) and no srcdoc, unless a host passes `liveSandbox`. A host-served frame
                 (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
                 unchanged. */}
             <iframe
               ref={iframeRef}
               {...(src
-                ? { src }
+                ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
                   ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
@@ -1509,6 +1648,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? hook.toolbarState.getRichCopy : undefined}
+              touchAnchorRect={hook.toolbarState.getAnchorRect}
               // HTML/live surfaces are comment-only: no Delete, no label
               // picker, no Alt+digit labels (commentOnly). Exactly ONE label
               // affordance is restored: the hardcoded 👍 "Looks good". The
@@ -1539,6 +1679,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
+              allowImages={allowCommentImages}
               mentionSource={mentionSource}
               // A pinpoint click opens this composer directly (never the
               // selection toolbar), so it carries the surface's one-click 👍.
@@ -1575,6 +1716,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               // The words typed survive a close (Escape, X) and come back on reopen.
               draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
+              allowImages={allowCommentImages}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}
               skillReferences

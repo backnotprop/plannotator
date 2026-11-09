@@ -36,9 +36,16 @@ configurePlannotatorUI({
   alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
   fenceTheme,                  // (colorTheme, mode) => Shiki theme name | undefined for code fences (default: SHIKI_THEME_MAP, else pierre-dark/light)
   componentTooltips,           // true: ui's own hover text (components/HostTitle) draws as ui's Tooltip, not a native title (ui 0.53.0; default false)
+  commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
+  visibleCommentDrafts,        // true: a Viewer comment closed with words keeps its highlight and a floating "Draft" badge that reopens it (default false)
   digitHexIssueRefs,           // true: digit-only #123456 / #12345678 link as issue refs (when a ref link can be built), not hex swatches (default false)
+  crossRepoRefsWithoutRepo,    // true | { host }: owner/repo#123 links on github.com, or that host, where InlineMarkdown has no githubRepo (default false: plain text); may be set again, mounted text re-renders
+  touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
   refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
+  deferOffscreenCodeHighlight, // true: a code fence off screen stays plain until it comes near (highlighted before it shows), the rest in idle time (default false)
+  codeHighlightWorker,         // { html(code, lang, theme) }: with deferOffscreenCodeHighlight, a waiting fence's markup made off the main thread (default: none)
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
+  pageMarks,                   // true: <body data-pn-popout> while a PopoutDialog is open, <html data-pn-selection-chooser> while the code review's selection chooser shows, so a host's build can key theme.css's / comments.css's html:has(…) / body:has(…) on them (default false)
 });
 ```
 

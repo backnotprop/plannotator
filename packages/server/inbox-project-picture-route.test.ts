@@ -2,7 +2,7 @@
  * A project's letter-mark picture through the Inbox's real door: `GET` and `POST /api/inbox/projects/:id/picture`
  * on a running Inbox (temp data dir and HOME, loopback, a scripted GitHub and tailscale: nothing real is asked).
  * What can regress: the switches taken from the request instead of config.json (a page turning GitHub on by
- * itself), an SVG served without its sandbox headers, the 404 the window draws letters on, a tailnet guest
+ * itself; only the repo's logo, a local file, may be asked for with `logo=1`, for the list dialog's Detailed card), an SVG served without its sandbox headers, the 404 the window draws letters on, a tailnet guest
  * reading or setting a picture, and a refusal that is not one of the approved words (a phone photo's data URL
  * once got a developer's sentence in the toast).
  */
@@ -91,7 +91,7 @@ async function world(config: Record<string, unknown>, tailscale?: { magic: strin
   const base = `http://127.0.0.1:${server.port}`;
   const path = `/api/inbox/projects/${project.id}/picture`;
   // The window's own cache key asks for everything: the answer must still follow config.json.
-  const get = (headers: Record<string, string> = {}) => fetch(`${base}${path}?v=0-11`, { headers });
+  const get = (headers: Record<string, string> = {}, query = "v=0-11") => fetch(`${base}${path}?${query}`, { headers });
   const post = (picture: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ picture }) });
   return { server, project, path, get, post, github, writeConfig };
@@ -105,6 +105,13 @@ describe("GET /api/inbox/projects/:id/picture", () => {
     const none = await w.get();
     expect(none.status).toBe(404);
     expect((await errorOf(none)).code).toBe("no_picture");
+    expect(w.github).toEqual([]);
+
+    // The list dialog's Detailed card asks for the repo's logo before the look is saved: served, from the folder;
+    // the request still never turns GitHub on.
+    const asked = await w.get({}, "v=0-11&logo=1&github=1&githubPictures=1");
+    expect(asked.status).toBe(200);
+    expect(await asked.text()).toBe(SVG);
     expect(w.github).toEqual([]);
 
     w.writeConfig({ inboxRows: ["marksProjects", "repoLogo"], inboxRowsDefaults: 99 });

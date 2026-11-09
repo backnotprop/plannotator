@@ -90,6 +90,8 @@ test('the dialog is offered every project on this Mac with a remote, with what w
     ['prj_app', 'The app', 'github.com/acme/app'],
     ['prj_docs', 'docs', 'gitlab.com/acme/docs'],
   ]);
+  // The drawing folder is Plannotator's, under the data dir, never a folder in the repo.
+  expect(offered.map((p) => p.drawing)).toEqual([join(dataDir, 'system', app.key, 'drawing'), join(dataDir, 'system', docs.key, 'drawing')]);
   expect(offered[0]!.setup?.docs).toEqual(['https://help.example.com/']);
   expect(offered[1]!.setup).toBeNull();
 });

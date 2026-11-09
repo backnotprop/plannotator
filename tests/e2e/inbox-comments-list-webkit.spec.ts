@@ -49,9 +49,9 @@ test('the closed foot\'s Draft carries the comment count; from the reply box\'s 
   await expect(draft.locator('[data-draft-count]')).toHaveText(String(t.count));
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   await draft.tap();
-  // With a question open beside the comments, the box's foot line opens what goes with the reply; Review comments opens
-  // their list (approval "inbox-reply-foot-phone").
-  const line = pane(page).locator('.ib-rfoot [data-foot-summary]');
+  // With a question open beside the comments, the box's summary line (over its row) opens what goes with the reply;
+  // Review comments opens their list (approvals "inbox-reply-foot-phone", "inbox-reply-box").
+  const line = pane(page).locator('.ib-rbox [data-reply-line] [data-foot-summary]');
   await expect(line).toHaveText(/2 comments/);
   expect((await line.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await line.tap();
@@ -86,6 +86,8 @@ test('the full-screen card count opens the sheet, not a box held inside the card
   await page.goto(fileUrl(world, t, t.page, 'full'));
   // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
   await page.locator('[data-fcomp-pill]').tap();
+  // It opens on Comment, as an image's card does: the count is the Reply tab's.
+  await page.locator('[data-fcomp-mode="reply"]').tap();
   await cardChip(page).tap();
   await isTheSheet(page, t.count);
   await page.context().close();

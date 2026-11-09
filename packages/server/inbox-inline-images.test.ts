@@ -340,7 +340,8 @@ test("a large capture on first read never blocks health: the read answers at onc
       writeFileSync(join(project, "design", `big-${m}-${k}.png`), bytes);
       refs.push(`![${m}-${k}](design/big-${m}-${k}.png)`);
     }
-    const sent = old.sendMessage({ project_id: projectRecord.id, author: { kind: "agent", host: "claude-code", session: "s1", name: null }, body: refs.join("\n\n") });
+    // One thread of 16 messages: each after the first replies into it.
+    const sent = old.sendMessage({ project_id: projectRecord.id, author: { kind: "agent", host: "claude-code", session: "s1", name: null }, body: refs.join("\n\n"), ...(threadId ? { reply_to: threadId } : {}) });
     threadId = sent.message.thread_id;
   }
   const server = await start(dataDir);

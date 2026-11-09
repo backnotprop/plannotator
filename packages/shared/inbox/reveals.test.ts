@@ -25,7 +25,7 @@ describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
     // Code review's day-0 offer (approval "code-review-offer-card"), the update-day dialogs (approval
     // "inbox-one-time-dialogs"), then the offers.
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["code_review", "sound", "list_intro", "voice", "snooze", "board", "steps", "star", "list_view"]);
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["code_review", "sound", "list_intro", "voice", "snooze", "bro", "board", "steps", "grill_me_tip", "star", "list_view"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();
@@ -51,6 +51,15 @@ describe("the order", () => {
     const after = (ms: number) => revealNext(state({ firstUseAt: ago(6 * DAY), lastShownAt: ago(ms), open: { steps: true } }), NOW);
     expect(after(24 * HOUR - 1)).toBeNull();
     expect(after(24 * HOUR)).toBe("steps");
+  });
+
+  test("the list dialog waits for five threads, fresh installs included (no day count); below that the line passes it", () => {
+    // Approval "inbox-rows-dialog", round 7b (q-2c590791): 5+ threads, no day-four rule.
+    const list = (threads: number, firstUseAt: string | null = ago(4 * DAY)) => revealNext(state({ threads, firstUseAt, open: { list_intro: true, voice: true } }), NOW);
+    expect(list(4)).toBe("voice");
+    expect(list(5)).toBe("list_intro");
+    expect(list(5, null)).toBe("list_intro");
+    expect(list(5, ago(HOUR))).toBe("list_intro");
   });
 
   test("a dev build, or no first use known, decides nothing", () => {

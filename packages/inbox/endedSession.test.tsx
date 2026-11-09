@@ -169,7 +169,7 @@ async function settle() {
   });
 }
 
-async function render(thread: InboxThread, sent: { at: string; checked_at: string | null; read_by?: string } | null = null, run?: InboxRun | null) {
+async function render(thread: InboxThread, sent: { at: string; checked_at: string | null; read_by?: string } | null = null, run?: InboxRun | null, options: { phone?: boolean } = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -180,6 +180,7 @@ async function render(thread: InboxThread, sent: { at: string; checked_at: strin
           thread={thread}
           sent={sent}
           {...(run === undefined ? {} : { run })}
+          phone={options.phone === true}
           onQuestions={() => {}}
           onChanged={async () => {}}
           onClose={() => {}}
@@ -717,6 +718,13 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
   expect(inFoot(el, 'Reply')).toBe(true);
   expect(inFoot(el, 'Send to another session')).toBe(true);
   expect(inFoot(el, 'Archive')).toBe(true);
+  // The actions first, then what is open, right after them (the owner, 2026-11-08: "I want them next to the button").
+  const order = [...el.querySelectorAll('[data-foot-buttons] button')];
+  const archiveAt = order.findIndex((b) => b.hasAttribute('data-ended-archive'));
+  expect(archiveAt).toBeGreaterThan(order.findIndex((b) => b.hasAttribute('data-reply-button')));
+  expect(order.findIndex((b) => b.hasAttribute('data-open-questions'))).toBe(archiveAt + 1);
+  // The open questions are the ended pair's next neighbour in the row: nothing sits between them to push them away.
+  expect(el.querySelector('[data-foot-buttons] > [data-foot-ended]')!.nextElementSibling!.hasAttribute('data-open-questions')).toBe(true);
 
   act(() => button(el, 'Send to another session').click());
   await settle();
@@ -730,6 +738,20 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
   act(() => button(again, 'Archive').click());
   await settle();
   expect(posted.some((p) => p.path.endsWith(`/messages/${M1}/resolve`) && p.body.resolved === true)).toBe(true);
+});
+
+// A phone draws the pair on a line of its own under Reply and the open questions: it comes last in the markup too, so
+// Tab and a screen reader go in the order on screen (Reply, the open questions, then the pair).
+test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive come after the open questions, last in the row', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking()), null, undefined, { phone: true });
+  const parts = [...el.querySelector('[data-foot-buttons]')!.children];
+  const at = (sel: string) => parts.findIndex((p) => p.matches(sel));
+  expect(at('[data-reply-button]')).toBeGreaterThanOrEqual(0);
+  expect(at('[data-open-questions]')).toBeGreaterThan(at('[data-reply-button]'));
+  expect(at('[data-foot-ended]')).toBe(parts.length - 1);
+  const pair = [...parts[parts.length - 1]!.querySelectorAll('button')].map((b) => b.textContent?.trim());
+  expect(pair).toEqual(['Send to another session', 'Archive']);
 });
 
 test.skipIf(!hasDom)('ended, nothing live: only Archive, since nothing could take the reply', async () => {

@@ -216,6 +216,17 @@ export function findRepoLogo(root: string): { type: string; body: Uint8Array<Arr
   return null;
 }
 
+/**
+ * Which pictures a read may use: the saved Rows switches (config.json `inboxRows`), plus the repo's logo when the
+ * window asks for it with `logo=1`. A window that draws a look the person has not saved yet (the "Choose how your
+ * list looks" dialog's Detailed card) shows that look's logos: the repo's logo is a file in the project's own folder,
+ * read from disk, so nothing leaves this computer. GitHub pictures come only from the saved switch, never from the
+ * request: a page never makes the Inbox ask GitHub by itself.
+ */
+export function pictureSources(rows: readonly string[], params: URLSearchParams): { logo: boolean; github: boolean } {
+  return { logo: rows.includes("repoLogo") || params.get("logo") === "1", github: rows.includes("githubPictures") };
+}
+
 export interface ProjectPictures {
   /** When the project's uploaded picture was set (ms), or undefined: the window's key for it. */
   uploadedAt(projectId: string): number | undefined;

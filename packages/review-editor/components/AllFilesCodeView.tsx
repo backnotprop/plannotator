@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
 import type {
@@ -407,6 +408,13 @@ export interface AllFilesCodeViewProps {
   onViewAIResponse?: (questionId?: string) => void;
   /** Line-scoped questions rendered as inline sparkle markers. */
   aiMessages?: AIChatEntry[];
+  /**
+   * A host's context notes (the Inbox's code review): an agent's words on lines, drawn under their last line by
+   * `renderContextNote`, as line annotations of their own (`context-note`), never as comments. Absent: nothing changes.
+   */
+  contextNotes?: readonly ContextNoteAnchor[];
+  /** Draws one context note by its id. Without it, `contextNotes` draws nothing. */
+  renderContextNote?: (id: string) => React.ReactNode;
   onClickAIMarker?: (questionId: string) => void;
   getAIHistoryForFile?: (filePath: string) => AIChatEntry[];
   /** Let wheel/touch gestures continue into a containing page when this nested
@@ -421,6 +429,17 @@ export interface AllFilesCodeViewProps {
   onContentHeightChange?: (height: number) => void;
   /** No scroller of its own: as tall as its content, windowed and sticky against the page's scroller. Read once, at mount. */
   scrollsWithPage?: boolean;
+  /**
+   * Files that sit flush, a header's own hairline the only seam (the Inbox's PR page, one file per viewer that scrolls
+   * with the page). Every list counts no spacing around a hunk separator (#2713). Here a file whose whole text is not
+   * read yet draws no row after its last hunk (neither "More unchanged context may be available" nor "N unmodified
+   * lines"), and gives back the room it is laid out in, so the next file's header sits right under the last code row,
+   * as in the code review app; once the text is read (an arrow above it), what is left below shows as "N unmodified
+   * lines". The header draws its hairline whether stuck or not.
+   */
+  flushFiles?: boolean;
+  /** A narrow header keeps the folder before the name (FileHeader `keepsFolder`). */
+  headerKeepsFolder?: boolean;
   /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
@@ -467,6 +486,28 @@ export interface AllFilesCodeViewProps {
    * ("Make annotation"): a line-scoped comment anchored to PRISTINE new-side
    * lines snapshotted at selection time (see edit/selectionAnchor.ts). */
   onAddEditorCommentForFile?: (filePath: string, comment: EditSelectionComment) => void;
+}
+
+/** Where a host's context note sits: its file, side and lines (it draws under `lineEnd`); in its own module. */
+export type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
+
+/** A file's context notes as line annotations of their own kind (never `CodeAnnotation`s: no comment chrome, no count). */
+export function projectFileContextNotes(
+  notes: readonly ContextNoteAnchor[],
+  filePath: string,
+): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  return notes
+    .filter((note) => note.filePath === filePath)
+    .map((note) => ({
+      side: note.side === 'new' ? ('additions' as const) : ('deletions' as const),
+      lineNumber: note.lineEnd,
+      metadata: {
+        annotationId: `context-note:${note.id}`,
+        type: 'comment' as CodeAnnotationType,
+        kind: 'context-note' as const,
+        contextNoteId: note.id,
+      },
+    }));
 }
 
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
@@ -523,12 +564,13 @@ export function projectFileAIMarkers(
     }));
 }
 
-function projectFileAnnotations(
+export function projectFileAnnotations(
   annotations: CodeAnnotation[],
   aiMessages: AIChatEntry[],
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
+  contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
   const reviewAnnotations = annotations
     .filter(
@@ -542,7 +584,10 @@ function projectFileAnnotations(
       lineNumber: ann.lineEnd,
       metadata: lineAnnotationMetadata(ann),
     }));
-  return [...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
+  const markers = projectFileAIMarkers(aiMessages, filePath);
+  // No notes: the same array as before notes existed.
+  if (contextNotes.length === 0) return [...reviewAnnotations, ...markers];
+  return [...projectFileContextNotes(contextNotes, filePath), ...reviewAnnotations, ...markers];
 }
 
 function buildItemIdentity(
@@ -556,6 +601,7 @@ function buildItemIdentity(
   seedCollapsed: boolean,
   generatedFiles: Set<string> | undefined,
   expandedGeneratedFiles: Set<string> | undefined,
+  contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -604,7 +650,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, contextNotes);
     // Generated files (#1317) seed collapsed like GitHub's diff view, unless
     // the user already expanded them this session. A view-state seed only —
     // the item carries the full fileDiff either way.
@@ -687,9 +733,16 @@ const SCROLLS_WITH_PAGE_CSS = `
   :host([data-reading-whole-file]) [data-expand-button] { cursor: progress; animation: reading-whole-file 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   @keyframes reading-whole-file { 50% { opacity: 0.5; } }
   @media (prefers-reduced-motion: reduce) { :host([data-reading-whole-file]) [data-expand-button] { animation: none; } }
+`;
+const STUCK_HEADER_LINE_CSS = `
   @container sticky-header scroll-state(stuck: top) {
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
   }
+`;
+// Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
+// (the viewer gives its room back, HUNK_SEPARATOR_HEIGHT).
+const FLUSH_FILES_CSS = `
+  :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
 // How long the scroller must be quiet before queued augmentation applies
@@ -700,6 +753,7 @@ const AUGMENT_APPLY_IDLE_MS = 150;
 const REVEAL_WAIT_MS = 30_000;
 
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
+const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
@@ -779,10 +833,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   isAILoading = false,
   onViewAIResponse,
   aiMessages = EMPTY_AI_MESSAGES,
+  contextNotes = EMPTY_CONTEXT_NOTES,
+  renderContextNote,
   onClickAIMarker,
   getAIHistoryForFile,
   allowScrollChaining = false,
   onContentHeightChange,
+  flushFiles = false,
+  headerKeepsFolder = false,
   scrollsWithPage = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
@@ -860,6 +918,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const contentHeightRef = useRef(onContentHeightChange);
   contentHeightRef.current = onContentHeightChange;
   const reportsContentHeight = !!onContentHeightChange;
+  // A flush file's hidden trailing row (flushFiles, below): its room is given back, from the report as from the page.
+  const [trailingUnread, setTrailingUnread] = useState(false);
   useEffect(() => {
     if (!scrollEl || !reportsContentHeight || typeof ResizeObserver === 'undefined') return;
     let last = -1;
@@ -867,7 +927,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const report = () => {
       if (!list) return;
       const style = getComputedStyle(list);
-      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0'));
+      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0')) - (trailingUnread ? HUNK_SEPARATOR_HEIGHT : 0);
       if (height <= 0 || height === last) return;
       last = height;
       contentHeightRef.current?.(height);
@@ -890,7 +950,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       children.disconnect();
       sizes.disconnect();
     };
-  }, [scrollEl, reportsContentHeight]);
+  }, [scrollEl, reportsContentHeight, trailingUnread]);
 
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
@@ -948,6 +1008,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Previous line-card snapshots for the per-item annotation-sync effect (P4).
   const prevAnnotationsRef = useRef<CodeAnnotation[]>(annotations);
   const prevAIMessagesRef = useRef<AIChatEntry[]>(aiMessages);
+  const prevContextNotesRef = useRef<readonly ContextNoteAnchor[]>(contextNotes);
 
   // Order items to mirror whichever left panel is active: 'tree' replays the
   // file-tree's visual order (folders-first); 'list' keeps the files array
@@ -990,6 +1051,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotationsRef.current = annotations;
   const aiMessagesRef = useRef(aiMessages);
   aiMessagesRef.current = aiMessages;
+  const contextNotesRef = useRef(contextNotes);
+  contextNotesRef.current = contextNotes;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
@@ -1018,6 +1081,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       seedCollapsed === true,
       generatedFiles,
       expandedGeneratedRef.current,
+      contextNotesRef.current,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
@@ -1283,6 +1347,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     ) => {
       if (!('side' in annotation) || item.type !== 'diff') return null;
       if (!annotation.metadata) return null;
+      if (annotation.metadata.kind === 'context-note') {
+        const id = annotation.metadata.contextNoteId;
+        const drawn = id && renderContextNote ? renderContextNote(id) : null;
+        return drawn ? <div className="context-note-slot" data-context-note={id}>{drawn}</div> : null;
+      }
       if (annotation.metadata.kind === 'ai-marker') {
         return (
           <InlineAIMarker
@@ -1359,6 +1428,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // both snapshots here to avoid a spurious refresh post-remount.
     prevAnnotationsRef.current = annotations;
     prevAIMessagesRef.current = aiMessages;
+    prevContextNotesRef.current = contextNotes;
     // Garbage-collect STALE-generation content fetches. Generation-aware on
     // purpose: this passive effect runs AFTER the remounted CodeView's seed
     // layout effect has already fired the new diff's first postRender wave —
@@ -1930,6 +2000,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   });
   // Only a file with both sides has anything to open.
   const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' || file.status === 'renamed');
+  // Flush, one file per viewer (the PR page): while its whole text is unread, Pierre would close the file with a
+  // "More unchanged context may be available" row (a loader, a partial diff). It is hidden and its room given back.
+  const flushesFiles = flushFiles && scrollsWithPage && files.length === 1;
+  const hidesTrailingRow = (item: CodeViewItem<DiffAnnotationMetadata>) =>
+    item.type === 'diff' &&
+    opensWholeFiles &&
+    item.collapsed !== true &&
+    item.fileDiff.isPartial &&
+    (item.fileDiff.type === 'change' || item.fileDiff.type === 'rename-changed') &&
+    item.fileDiff.hunks.length > 0;
+  // Nothing is read for it: the row stays hidden until an arrow above it opens the file's whole text.
+  const syncTrailingRow = (node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
+    const unread = hidesTrailingRow(item);
+    node.toggleAttribute('data-trailing-unread', unread);
+    setTrailingUnread(unread);
+  };
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
@@ -2017,6 +2103,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // selection's shadow-root host. Registered on every mount/update because
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
+      if (flushesFiles) syncTrailingRow(node, context);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -2244,6 +2331,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         filePath,
         prUrl,
         prDiffScope,
+        contextNotesRef.current,
       );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
@@ -2325,6 +2413,35 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
     }
   }, [aiMessages, annotations, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
+
+  // Context notes come and go on their own (a host's agent wrote one, a note moved): only the files whose notes
+  // changed are republished. No notes before or after: nothing runs.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevContextNotesRef.current;
+    if (handle == null) return;
+    prevContextNotesRef.current = contextNotes;
+    if (prev === contextNotes) return;
+    const sig = (list: readonly ContextNoteAnchor[]) => {
+      const map = new Map<string, string>();
+      for (const n of list) map.set(n.filePath, `${map.get(n.filePath) ?? ''}${n.id}:${n.side}:${n.lineStart}-${n.lineEnd}\n`);
+      return map;
+    };
+    const before = sig(prev);
+    const after = sig(contextNotes);
+    const changedPaths = new Set<string>();
+    after.forEach((s, path) => {
+      if (before.get(path) !== s) changedPaths.add(path);
+    });
+    before.forEach((_s, path) => {
+      if (!after.has(path)) changedPaths.add(path);
+    });
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
+      }
+    }
+  }, [contextNotes, annotations, aiMessages, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
   // --- Header actions ---------------------------------------------------------
 
@@ -3173,6 +3290,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       >
         <FileHeader
         compactTouchLayout={compactTouchLayout}
+        keepsFolder={headerKeepsFolder}
         readOnly={readOnly || commentOnly}
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
@@ -3338,7 +3456,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}` : pierreTheme.css,
+      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -3423,6 +3541,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       itemMetrics,
       leadingHeight,
       scrollsWithPage,
+      flushFiles,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
       onCodeNavRequest,
@@ -3494,6 +3613,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   return (
     <div
       className="relative h-full"
+      // The hidden trailing row's room, given back (flushFiles): the next file's header meets the last code row.
+      style={flushesFiles && trailingUnread ? { marginBottom: -HUNK_SEPARATOR_HEIGHT } : undefined}
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
       onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
       onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}

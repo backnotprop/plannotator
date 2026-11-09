@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeGuideData, GuideSection } from '@plannotator/core/guide';
 import type { DiffFile } from './types';
@@ -29,6 +30,8 @@ interface GuideViewProps {
    * counts, source line) and the host's 16px page margins, so the width goes to the code.
    */
   bare?: boolean;
+  /** Bare: draw the actions (Global comment, `headerActions`) in this element of the host's, not on a row of their own. */
+  actionsHost?: HTMLElement | null;
   /**
    * Drawn under a host's top bar that names the review and lists its chapters (the Inbox's review): the heading reads
    * like a thread's (GuideHeading), with the review's actions on its title's line. Default off: the heading as before.
@@ -90,6 +93,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   onRegenerate,
   sourceLine,
   headerActions,
+  actionsHost,
   bare = false,
   threadHeading = false,
   fitFileHeights,
@@ -215,7 +219,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   // The first card drawn: the first section, or "Everything else" when the guide has none.
   const firstCardIndex = guide.sections.length > 0 ? 0 : unplacedSection ? guide.sections.length : -1;
   const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex, { folded: false, diffs: 1, title: '' }) : null;
-  const actionsOnTab = !!actions && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
+  const actionsOnTab = !!actions && !actionsHost && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
 
   return (
     <GuideViewportProvider className={threadHeading ? 'gv-guide' : bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
@@ -223,7 +227,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
       {/* The host's global comments add their button to the same row, ahead of the host's own controls. Bare (no title
           to float beside), the row stays above the content at every width. */}
       {/* Bare, with a tab on the first card (the Inbox's Split | Unified), the actions sit on the tab's row instead. */}
-      {actions && !actionsOnTab && (
+      {actions && !actionsOnTab && actionsHost && createPortal(actions, actionsHost)}
+      {actions && !actionsOnTab && !actionsHost && (
         <div className={bare ? 'mb-3 flex items-center justify-end gap-2' : 'mb-3 flex items-center justify-end gap-2 md:float-right md:mb-0 md:ml-6'}>
           {actions}
         </div>
