@@ -6366,12 +6366,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The middle of a long read run: one fold ("Show 20 earlier · N hidden") in place of the part still hidden.
           // What is still hidden always starts at the run's first message, so no slice is needed here.
           const run = fold.hidden.findIndex((ids, i) => (fold.shown[i] ?? 0) < ids.length && ids[0] === message.id);
-          if (run >= 0) before.push(foldBand(run));
-          if (hiddenNow.has(message.id)) return before;
           const isNew = showNew && fresh.has(message.id);
           // "New since you looked", above the first new message (not above the first message of the thread).
           // "Back from snooze" takes that line's words when it sits there, and otherwise draws the same line itself.
+          // With more than 20 new, the older new ones start behind a fold (planFolds): the line sits above that fold.
           const backHere = snoozeBackPlace.current?.above === message.id;
+          if (run < 0 && hiddenNow.has(message.id)) return before;
           if (isNew && index > 0 && thread.messages.findIndex((m) => fresh.has(m.id)) === index) {
             before.push(
               <div className="ib-newdiv" key="new-divider" data-new-divider="" data-snooze-back-line={backHere ? '' : undefined} role="separator" aria-label={backHere ? `${snoozeBackWords}: ${plural(fresh.size, 'new message')}` : `New since you looked: ${plural(fresh.size, 'message')}`}>
@@ -6385,6 +6385,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </div>,
             );
           }
+          if (run >= 0) before.push(foldBand(run));
+          if (hiddenNow.has(message.id)) return before;
           const move = threadMoves.get(message.id);
           if (move) {
             const held = move.kind === 'handoff' && !message.handoff?.settled_at;

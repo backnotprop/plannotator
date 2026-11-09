@@ -60,6 +60,25 @@ test('the fold plan: open when new, holding an unsent pick, or last; each read r
   expect(planFolds(messages, new Set(), null).folded.size).toBe(0);
 });
 
+test('past 20 new, only the newest 20 open: the older new ones hide behind one fold (the first message stays a line), a pick not sent stays open', () => {
+  const ids = Array.from({ length: 26 }, (_, i) => `m${i + 1}`);
+  const messages = ids.map((id, i) => msg(id, AGENT, i + 1));
+  // m1, m2 read; m3..m26 (24) new: m3..m6 hide, m7..m26 open.
+  const fresh = newSinceLook(messages, 2);
+  const plan = planFolds(messages, fresh, 2);
+  expect(plan.hidden).toEqual([['m3', 'm4', 'm5', 'm6']]);
+  expect([...plan.folded]).toEqual(['m1', 'm2', 'm3', 'm4', 'm5', 'm6']);
+  // Every message new: the first stays as its line above the fold.
+  expect(planFolds(messages, newSinceLook(messages, 0), 0).hidden).toEqual([['m2', 'm3', 'm4', 'm5', 'm6']]);
+  // An unsent pick among the older new ones stays open and splits the fold.
+  const picked = messages.map((m) => (m.id === 'm4' ? { ...m, questions: [{ state: 'picked' } as never] } : m));
+  const split = planFolds(picked, fresh, 2);
+  expect(split.hidden).toEqual([['m3'], ['m5', 'm6']]);
+  expect(split.folded.has('m4')).toBe(false);
+  // Exactly 20 new: as before, every one open.
+  expect(planFolds(messages.slice(0, 22), fresh, 2).hidden).toEqual([]);
+});
+
 test("a folded line's first words: question blocks, fences, tables and images out; marks and link targets gone; cut at a word", () => {
   const body = [
     '## Search',
