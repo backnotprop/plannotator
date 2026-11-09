@@ -87,14 +87,15 @@ export interface InboxCodexAccountReader {
   stop(): void;
 }
 
-export function createInboxCodexAccount(options: { environment: AgentEnvironment; dataDir: string; extraClis?: readonly string[]; now?: () => number }): InboxCodexAccountReader {
-  const { environment } = options;
+/** `environment`: the env a launch finds `codex` and its home on (read again for each run). */
+export function createInboxCodexAccount(options: { environment: () => AgentEnvironment; dataDir: string; extraClis?: readonly string[]; now?: () => number }): InboxCodexAccountReader {
   const now = options.now ?? Date.now;
-  /** Codex's config and login are read from the home it runs with, never one the Inbox was not given. */
-  const codexEnv = { ...environment.env, CODEX_HOME: codexHome(environment) };
   const running = new Set<CodexAppServerProcess>();
 
   const readOnce = async (): Promise<InboxCodexAccount> => {
+    const environment = options.environment();
+    /** Codex's config and login are read from the home it runs with, never one the Inbox was not given. */
+    const codexEnv = { ...environment.env, CODEX_HOME: codexHome(environment) };
     const path = codexCliCandidates(environment, options.extraClis)[0];
     if (!path) return { state: "missing" };
     const codex = new CodexAppServerProcess(LINE_MAX);

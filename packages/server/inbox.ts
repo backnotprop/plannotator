@@ -3958,6 +3958,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
   // Launch: compose starts Claude Code, Pi or Codex in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
+  // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
+  const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
+    process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
   const launch = createInboxLaunch({
     store,
     live,
@@ -3974,7 +3977,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           env: () => process.env,
           log: (line) => process.stderr.write(`${line}\n`),
         }),
-    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env),
+    ownEnv: launchOwnEnv,
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
     // that is the Keychain's rule, so only on a Mac.
@@ -4189,7 +4192,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
   // Settings → Agents' Codex account line: read from Codex when the page asks, never polled (inbox-codex-account.ts).
-  const codexAccount = createInboxCodexAccount({ environment: agentEnvironment, dataDir, ...(options.voice?.extraClis ? { extraClis: options.voice.extraClis } : {}) });
+  // The same `codex` and Codex home a launch finds (the plain env launch uses), so the line is the account a launch runs as.
+  const codexAccount = createInboxCodexAccount({
+    environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchOwnEnv() }),
+    dataDir,
+    ...(options.voice?.extraClis ? { extraClis: options.voice.extraClis } : {}),
+  });
   const voice = createInboxVoice({
     dataDir,
     environment: agentEnvironment,

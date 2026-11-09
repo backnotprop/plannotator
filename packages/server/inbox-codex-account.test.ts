@@ -28,7 +28,7 @@ function setup(state: FakeCodexLaunchState, withCodex = true) {
   mkdirSync(bin, { recursive: true });
   const clock = { now: 1_000_000 };
   const reader = createInboxCodexAccount({
-    environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } }),
+    environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } }),
     dataDir: data,
     extraClis: [],
     now: () => clock.now,
