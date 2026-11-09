@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import { ShapeSurface, type ShapeBoxOptions } from '@plannotator/ui/components/shape';
 import { OpenInCodeSpans } from '../components/OpenIn';
+import { markShapeDock, markShapePill } from '../pageMarks';
 import type { ShapeBoardProps } from './types';
 import type BoardShape from './board-module';
 
@@ -53,6 +54,10 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       onNavigate={onNavigate}
       headStart={headStart}
       headSide={headSide}
+      // Every board here sits in a [data-shape-layer] (ShapeBoardLayer, the Shape page): its dock and its update pill
+      // mark <body> for the toast's room (pageMarks.ts).
+      dockRef={markShapeDock}
+      pillRef={markShapePill}
     />
     </OpenInCodeSpans>
   );

@@ -18,6 +18,7 @@ import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useRowDraft } from '../fileCommentDrafts';
+import { markImageComposer } from '../pageMarks';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -515,7 +516,7 @@ export function ImageAttachmentView({
         <FullScreenComposer value={composer} noun="image" comment={readOnly ? null : <div className="ib-fcomp-comment" data-image-composer="">{commentCard}</div>} />
       ) : (
         !readOnly && (
-          <div className="ib-imgcompose" data-image-composer="">
+          <div ref={markImageComposer} className="ib-imgcompose" data-image-composer="">
             {commentCard}
           </div>
         )
