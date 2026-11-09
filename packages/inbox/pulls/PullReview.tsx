@@ -494,7 +494,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
-  // The tab row's Collapse all (DiffControls): every file's diff, this view only.
+  // The bar's Collapse all (DiffControls): every file's diff, this view only.
   const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   // The comments panel, open or not, at every width: closed at first, as in the review app; from REVIEW_FOLD_PANEL_BELOW
   // up an open one is the column beside the code, below it the sheet. Crossing the fold closes it. Nothing is kept: a
@@ -869,6 +869,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         {!phone && readOnlyNote}
         {!phone && <DetailsButton open={detailsOpen} data={details.data} onToggle={toggleDetails} />}
         <span className="ib-sp" />
+        {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
+            Split / Unified button, Collapse all, the Diff display gear. No row over the code holds them: in the Inbox they
+            are always in the header (the owner). A phone has none. */}
+        {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
           <button
@@ -1000,14 +1004,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             }}
             data-pull-rail-handle=""
           />
-        )}
-        {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
-            (approval pr-view-one-surface, 11-07 19:08). The controls are every review header's (approval
-            diff-controls-headers): one Split / Unified button, Collapse all, the Diff display gear. */}
-        {!phone && (
-          <div className="ib-prp-tabs" data-pull-tabs="">
-            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
-          </div>
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (
