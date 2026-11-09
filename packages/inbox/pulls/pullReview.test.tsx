@@ -278,21 +278,30 @@ test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole 
   expect(fileAsks).toEqual(['layer', 'stack']);
 });
 
-// Guards the PR page keeping the old two-mark Split | Unified switch, or a Collapse all that reaches no file
-// (approval diff-controls-headers: every review header's one button, Collapse all and the gear).
-test.skipIf(!hasDom)("the tab row over the code holds every review header's diff controls, and Collapse all reaches the reader", async () => {
+// Guards the PR page keeping the old two-mark Split | Unified switch, a Collapse all that reaches no file (approval
+// diff-controls-headers: every review header's one button, Collapse all and the gear), or its controls going back to a
+// row over the code: in the Inbox they are always in the header (the owner), before the Global comment globe.
+test.skipIf(!hasDom)("the bar holds every review header's diff controls before the globe, no row over the code, and Collapse all reaches the reader", async () => {
   diffPatch = ['a.ts', 'b.ts'].map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('');
   // Its own push time: the window keeps a patch read a moment ago per push, and other tests read this layer's.
   const pushed = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, updated_at: '2026-11-03T14:00:00.000Z' } : p)) };
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed} />);
   await settle();
   expect(shown.at(-1)!.patch).toContain('b.ts');
-  expect(document.querySelector('[data-pull-tabs] [data-diff-controls] [data-diff-layout-toggle]')).not.toBeNull();
+  const controls = el('.ib-vhead > [data-diff-controls]');
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  // Right of the spacer, before the globe's host (and so before the comments and the ending's marks).
+  expect(controls.previousElementSibling?.classList.contains('ib-sp')).toBe(true);
+  expect(controls.nextElementSibling?.hasAttribute('data-pull-controls')).toBe(true);
+  expect(document.querySelectorAll('[data-diff-controls]')).toHaveLength(1);
+  // No row of its own over the code: the split holds the rail, its handle and the code, nothing before them.
+  expect(document.querySelector('[data-pull-tabs], .ib-prp-tabs')).toBeNull();
+  expect(document.querySelector('.ib-rsplit > :not(.ib-rrail, .ib-prp-handle, .ib-gbody, .ib-gpanel)')).toBeNull();
   expect(document.querySelector('[data-diff-style-switch]')).toBeNull();
   expect(readerCollapse).toBeUndefined();
-  await act(async () => el('[data-pull-tabs] [data-diff-collapse-all="open"]').click());
+  await act(async () => el('.ib-vhead [data-diff-collapse-all="open"]').click());
   expect(readerCollapse).toEqual({ collapsed: true, token: 1 });
-  await act(async () => el('[data-pull-tabs] [data-diff-collapse-all="collapsed"]').click());
+  await act(async () => el('.ib-vhead [data-diff-collapse-all="collapsed"]').click());
   expect(readerCollapse).toEqual({ collapsed: false, token: 2 });
 });
 
