@@ -9,7 +9,7 @@
  * `delivered` once the turn is in). Chromium drives the window.
  *
  *  1. No agent: compose says so, Send does nothing but say why, a file
- *     attaches, Escape asks "Keep draft / Discard", the draft waits under
+ *     attaches, Escape keeps it as a draft (Reopen restores it), the draft waits under
  *     Drafts (the row appears only then).
  *  2. An agent connects: the draft reopens with To prefilled; Send starts a
  *     thread the person wrote, handed to that session alone as a new-thread
