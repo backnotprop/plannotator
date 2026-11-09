@@ -15,6 +15,8 @@ import type { EditSelectionComment } from '../edit/useEditSession';
 import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
 import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
+import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
+import type { ChangedFileView } from '../components/FileViewSwitch';
 import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
@@ -129,12 +131,33 @@ export interface ReviewState {
   onAddEditorCommentForFile: (filePath: string, comment: EditSelectionComment) => void;
   onAddFileComment: (text: string) => void;
   onAddFileCommentForFile: (filePath: string, text: string) => void;
+  /** Explorer (step 2): a changed file's view, Changes or Whole file. Absent: no switch. */
+  fileViewOf?: (filePath: string) => ChangedFileView;
+  onFileViewChange?: (filePath: string, view: ChangedFileView) => void;
+  /** A comment made in a whole-file view (a changed file's Whole file, or a
+   *  file the review does not change). `inDiff`: the lines sit in one hunk. */
+  onAddWholeFileAnnotation?: (input: CodeFileAnnotationInput, options: { inDiff: boolean }) => void;
+  /** Keep a preview tab (a comment in it, a double click on its tab). */
+  onKeepFileTab?: (panelId: string) => void;
+  /** Explorer (step 3): a jump's landing line, and where it came from. */
+  revealTarget?: import('../utils/explorerNavigation').RevealTarget | null;
+  jumpCrumb?: import('../utils/explorerNavigation').JumpCrumb | null;
+  /** Back / forward across jumps (absent: no history in this host). */
+  navigation?: { canBack: boolean; canForward: boolean; back: () => void; forward: () => void };
+  /** Where F12 looks: the token under the pointer in a diff, and the last one clicked. */
+  onTokenTarget?: import('../utils/tokenTarget').TokenTargetHandler;
+  /** The same for a whole-file view, and its Cmd+click (references). */
+  fileTokens?: (filePath: string) => import('../components/RepoFileView').FileTokenHandlers;
+  /** A result of the references panel opened in a tab at its line. */
+  onOpenCodeNavLocation?: (location: import('@plannotator/shared/code-nav').CodeNavLocation) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   /** Highlight a comment without moving the viewport (in-diff click). */
   onSelectAnnotation: (id: string | null) => void;
   /** Select AND scroll the diff to a comment (sidebar / findings-list click). */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
 
   // PR description prose annotations (comment-only; text-anchored Annotation[],
   // kept separate from the diff CodeAnnotation[] above).

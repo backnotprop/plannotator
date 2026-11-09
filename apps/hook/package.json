@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cp dist/index.html dist/redline.html && cp ../review/dist/index.html dist/review.html && rm -rf dist/diagram-engine && cp -R ../review/dist/diagram-engine dist/diagram-engine && bun run --cwd ../inbox build && cp ../inbox/dist/index.html dist/inbox.html && bun run --cwd ../inbox build:surface && cp ../inbox/dist/surface.html dist/surface.html",
+    "build": "vite build && cp dist/index.html dist/redline.html && cp ../review/dist/index.html dist/review.html && rm -rf dist/diagram-engine && cp -R ../review/dist/diagram-engine dist/diagram-engine && bun run --cwd ../inbox build && cp ../inbox/dist/index.html dist/inbox.html && bun run --cwd ../inbox build:surface && cp ../inbox/dist/surface.html dist/surface.html && bun run --cwd ../inbox build:shape && cp ../inbox/dist/shape.html dist/shape.html && bun ../../scripts/gzip-page.ts dist/shape.html",
     "serve": "bun run server/index.ts"
   },
   "dependencies": {
@@ -14,6 +14,7 @@
     "@plannotator/inbox": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
+    "@plannotator/system": "workspace:*",
     "@plannotator/t3-code": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "react": "^19.3.1",
@@ -26,7 +27,6 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vite-plugin-singlefile": "^2.3.4",
     "@types/node": "^26.6.5"
   }
 }

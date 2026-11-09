@@ -1,15 +1,16 @@
 /**
  * Negotiated compression for the single-file app HTML (#1617).
  *
- * Every Plannotator server answers its SPA catch-all with the whole app as one
- * HTML document (~24 MB plan, ~17 MB review). Over a slow tunnel that is the
- * entire load time, so a session reachable over a network sends the page
- * brotli- or gzip-compressed when the client says it can decode it.
+ * Every Plannotator server answers its SPA catch-all with the app page, and
+ * the plan and review pages with the code-split chunks packed behind them
+ * (./packed-app). Over a slow tunnel the bytes are the load time, so a session
+ * reachable over a network sends the page and its text chunks brotli- or
+ * gzip-compressed when the client says it can decode it.
  *
- * Shared by the Bun servers (`appHtmlResponse`) and the Pi node:http servers
- * (`prepareAppHtml`, vendored to Pi by `apps/pi-extension/vendor.sh`), so the
- * negotiation and the cache cannot drift between runtimes. Only `node:zlib` is
- * used, which both runtimes provide.
+ * Shared by the Bun and the Pi node:http servers (through ./packed-app, and
+ * the Inbox's own page; vendored to Pi by `apps/pi-extension/vendor.sh`), so
+ * the negotiation and the cache cannot drift between runtimes. Only
+ * `node:zlib` is used, which both runtimes provide.
  *
  * Which sessions compress (the `compress` argument): remote mode
  * (PLANNOTATOR_REMOTE or SSH detection) and `--tailscale`-published sessions,
@@ -106,6 +107,19 @@ export function negotiateAppHtmlEncoding(
   return br >= gzip ? "br" : "gzip";
 }
 
+/**
+ * Whether an `Accept-Encoding` header value takes gzip (or `x-gzip`, or `*`) with a q above 0. For a body that is
+ * only kept gzipped (the Shape page): it is sent as it is when this holds, unzipped otherwise.
+ */
+export function acceptsGzip(acceptEncoding: string | null | undefined): boolean {
+  if (!acceptEncoding) return false;
+  const codings = parseAcceptEncoding(acceptEncoding);
+  const explicit = codings.find((c) => c.name === "gzip" || c.name === "x-gzip");
+  if (explicit) return explicit.q > 0;
+  const wildcard = codings.find((c) => c.name === "*");
+  return wildcard ? wildcard.q > 0 : false;
+}
+
 interface CacheEntry {
   html: string;
   encoded: Partial<Record<"br" | "gzip", Promise<Buffer>>>;
@@ -121,7 +135,12 @@ interface CacheEntry {
  */
 const cache: CacheEntry[] = [];
 
-function compress(html: string, encoding: "br" | "gzip"): Promise<Buffer> {
+/**
+ * Compress `html` once, uncached, off the event loop. The packed app's chunks
+ * (./packed-app) use it with a cache of their own, so a page load's few dozen
+ * chunks never evict the page from the one above.
+ */
+export function compressAppText(html: string, encoding: "br" | "gzip"): Promise<Buffer> {
   const input = Buffer.from(html, "utf8");
   return new Promise((resolve, reject) => {
     const done = (err: Error | null, out: Buffer) => (err ? reject(err) : resolve(out));
@@ -154,7 +173,7 @@ export function encodeAppHtml(html: string, encoding: "br" | "gzip"): Promise<Bu
   let pending = entry.encoded[encoding];
   if (!pending) {
     const owner = entry;
-    pending = compress(html, encoding);
+    pending = compressAppText(html, encoding);
     owner.encoded[encoding] = pending;
     // A failed compression must not poison later requests.
     pending.catch(() => {
@@ -230,11 +249,4 @@ export async function prepareAppHtml(
     body: html,
     headers: { "Content-Type": contentType, Vary: "Accept-Encoding" },
   };
-}
-
-/** Fetch-API flavor for the Bun servers. */
-export async function appHtmlResponse(req: Request, html: string, compress: boolean): Promise<Response> {
-  const prepared = await prepareAppHtml(html, req.headers.get("accept-encoding"), compress);
-  // A Buffer is a valid fetch body in both runtimes; the lib types lag.
-  return new Response(prepared.body as BodyInit, { headers: prepared.headers });
 }

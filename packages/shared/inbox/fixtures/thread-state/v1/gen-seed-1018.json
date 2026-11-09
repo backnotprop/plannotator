@@ -1480,12 +1480,12 @@
         "archived": [],
         "counts": {
           "waiting": 4,
-          "unread": 4
+          "unread": 3
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -1587,12 +1587,12 @@
         "archived": [],
         "counts": {
           "waiting": 4,
-          "unread": 4
+          "unread": 3
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -1694,12 +1694,12 @@
         "archived": [],
         "counts": {
           "waiting": 4,
-          "unread": 4
+          "unread": 3
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,

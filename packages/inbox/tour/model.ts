@@ -33,10 +33,18 @@ import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { tourAssetLoaded, tourAssetUrl } from './assets';
 
-export const TOUR_STEPS = 10;
+export const TOUR_STEPS = 11;
+/** Step 9: New message, the person starts a thread (then "That's the loop" and "Also in your Inbox"). */
+export const TOUR_COMPOSE_STEP = 9;
+/**
+ * Step 10, "Make it yours" (the owner, 2026-11-02): the tour's last card, over
+ * the tour's Inbox, with the theme, three colour sets and the text size. Unlike
+ * the replay before it, what is picked here is the person's own and is kept.
+ */
+export const TOUR_SETTINGS_STEP = 10;
 
 /**
- * Step 10's prompt to copy (v1 step 6, "Get your first question"): one real
+ * Step 11's prompt to copy (v1 step 6, "Get your first question"): one real
  * question about the work at hand, with pictures when the choice is visual.
  */
 export const TOUR_FIRST_QUESTION_PROMPT =
@@ -474,7 +482,10 @@ export function tourStateAt(step: number, realAnswer: string, fixture?: TourFixt
   const film = comment('film').map((r) => ({ ...r, sent_reply_id: TOUR_FILM_REPLY_ID }));
   const filmed = { ...replayed, artifactsTour: 2 as const, route: 'list' as TourRoute, comments: [...sentFirst, ...shot, ...film], filmSent: true, filmDelivered: true, filmArrived: true, looked: { ...looked, film: true } };
   if (s === 9) return { ...filmed, step: 9 };
-  return { ...filmed, step: 10, compose: 'sent', newDelivered: true, newArrived: true, also: true };
+  const looped = { ...filmed, compose: 'sent' as const, newDelivered: true, newArrived: true, also: true };
+  // "Make it yours" draws over the thread with pictures, so a pick shows on a full window.
+  if (s === TOUR_SETTINGS_STEP) return { ...looped, step: TOUR_SETTINGS_STEP, route: TOUR_THREAD };
+  return { ...looped, step: TOUR_STEPS };
 }
 
 /** Same target: the same file (or the same message's words). */
@@ -491,12 +502,12 @@ function sameTarget(a: InboxAnnotationRecord, b: InboxAnnotationRecord): boolean
  */
 export function tourForward(state: TourState, realAnswer: string, fixture?: TourFixture): TourState {
   const { step } = state;
-  if (step >= TOUR_STEPS) return state;
+  if (step >= TOUR_SETTINGS_STEP) return state;
   if (step === 1 && state.orient) return { ...state, orient: false };
   let end: TourState;
-  if (step === TOUR_STEPS - 1) {
+  if (step === TOUR_COMPOSE_STEP) {
     if (state.newArrived) return state;
-    const done = tourStateAt(TOUR_STEPS, realAnswer, fixture);
+    const done = tourStateAt(TOUR_SETTINGS_STEP, realAnswer, fixture);
     end = { ...done, step, also: false, route: TOUR_NEW_THREAD, looked: { ...done.looked, new: true } };
   } else {
     end = tourStateAt(step + 1, realAnswer, fixture);
@@ -630,7 +641,9 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
       if (state.step === 7 && state.artifactsTour === 2) return { ...state, step: 8, route: 'list', file: null, artifactsOpen: false, replyOpen: false };
       if (state.step === 8 && state.filmArrived) return { ...state, step: 9, route: 'list', file: null, replyOpen: false };
       if (state.step === 9 && state.newArrived && !state.also) return { ...state, also: true };
-      if (state.step === 9 && state.also) return { ...state, step: 10, file: null, route: 'list', replyOpen: false };
+      if (state.step === TOUR_COMPOSE_STEP && state.also) return { ...state, step: TOUR_SETTINGS_STEP, file: null, route: TOUR_THREAD, replyOpen: false, artifactsOpen: false };
+      // "Connect agents next" and Skip on "Make it yours" (Skip's putting back runs in TourSettings, after one settings read, as the tour goes on).
+      if (state.step === TOUR_SETTINGS_STEP) return { ...state, step: TOUR_STEPS, file: null, route: 'list', replyOpen: false, artifactsOpen: false };
       return state;
     case 'back':
       if (state.step === 8 && !state.filmSent) return { ...state, step: 7, route: TOUR_THREAD, file: null, replyOpen: false, artifactsOpen: false };
@@ -723,11 +736,15 @@ export interface TourCoach {
   action?: string;
   /** One-line items in place of the text (the "Also in your Inbox" card). */
   items?: { mark: string; title: string; text: string }[];
-  /** A small live picture under the text (the "How it's organised" card). */
-  picture?: 'orient';
+  /** A small live picture under the text (the "How it's organised" card), or the settings of "Make it yours". */
+  picture?: 'orient' | 'settings';
+  /** A Skip beside Next ("Make it yours": puts back what the step opened with). */
+  skip?: boolean;
   next?: boolean;
   /** The Next button's words (default "Next"). */
   nextLabel?: string;
+  /** A → (Heroicons arrow-right) after the Next button's words, drawn, not read. */
+  nextArrow?: boolean;
   wait?: boolean;
   target: TourTarget | null;
 }
@@ -736,9 +753,13 @@ export interface TourDegraded {
   pictures?: boolean;
 }
 
-/** The four things the "Also in your Inbox" card names (the approved mock): they exist, and each could be a step. */
+/**
+ * The things the "Also in your Inbox" card names (the approved mock): they exist, and each could be a step. Snooze
+ * joined them (approval "inbox-snooze-announce", 2026-11-02): new users never get its one-time dialog, so the tour names it.
+ */
 export const TOUR_ALSO_ITEMS: { mark: string; title: string; text: string }[] = [
-  { mark: '📌', title: 'Pin a thread', text: 'to keep it at the top of the sidebar.' },
+  { mark: '⭐', title: 'Star a thread', text: 'to keep it at the top of the sidebar.' },
+  { mark: '⏰', title: 'Snooze', text: 'puts a thread away until later, and brings it back on time.' },
   { mark: '👍', title: 'Looks good', text: 'tells an agent in one click when there’s nothing to add.' },
   { mark: '↻', title: 'Re-ask', text: 'gathers an agent’s open questions into one fresh message.' },
   { mark: '➤', title: 'Send now', text: 'puts your reply into a turn that’s running.' },
@@ -764,11 +785,14 @@ export function tourYourTurn(coach: Pick<TourCoach, 'action' | 'next' | 'wait'>)
   return !!coach.action && !coach.next && !coach.wait;
 }
 
-/** The coach card a state shows (steps 1 to 9; step 10 is the person's own screen and has none). Copy: the approved mock, plus the owner's crawl step. */
+/** The coach card a state shows (steps 1 to 10; step 11 is the person's own screen and has none). Copy: the approved mock, plus the owner's crawl step. */
 export function tourCoach(state: TourState, names: { developer: string; agent: string }, degraded: TourDegraded = {}, ui: TourUi = {}): TourCoach | null {
   const { developer, agent } = names;
   const { step } = state;
   if (step === TOUR_STEPS) return null;
+  if (step === TOUR_SETTINGS_STEP)
+    // The owner (2026-11-02): the button says what comes next.
+    return { key: '10-yours', title: 'Make it yours', text: 'Pick how the Inbox looks. It changes as you tap.', picture: 'settings', next: true, nextLabel: 'Connect agents next', nextArrow: true, skip: true, target: null };
   if (step === 1 && state.orient)
     return {
       key: '1-orient',
@@ -854,7 +878,7 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
     return { key: '8-file', title, text: 'Pause anywhere; your comment keeps the time and the frame.', action: 'Play it and pause near the chapter text, or start typing.', target: 'film-rail' };
   }
   // Step 9.
-  if (state.also) return { key: '9-also', title: 'Also in your Inbox', text: '', items: TOUR_ALSO_ITEMS, next: true, nextLabel: 'Connect my agents', target: null };
+  if (state.also) return { key: '9-also', title: 'Also in your Inbox', text: '', items: TOUR_ALSO_ITEMS, next: true, target: null };
   if (state.newArrived) return { key: '9-loop', title: 'That’s the loop', text: 'Agents ask, you answer when you can, and they keep going.', next: true, target: state.route === TOUR_NEW_THREAD ? 'arrival' : 'new-row' };
   if (state.compose === 'sent')
     return { key: state.newDelivered ? '9-delivered' : '9-sending', title: state.newDelivered ? 'Delivered.' : 'Sending…', text: 'It went into that session as its next turn.', wait: true, target: state.route === TOUR_NEW_THREAD ? 'delivered' : 'new-row' };

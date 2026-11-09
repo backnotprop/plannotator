@@ -1,4 +1,12 @@
 export type DefaultDiffType = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+/** The diff types a Jujutsu review can open on by default. */
+export type JjDefaultDiffType = 'jj-current' | 'jj-last' | 'jj-line' | 'jj-evolog' | 'jj-all';
+
+/**
+ * Saved review defaults for a VCS other than Git, keyed by VCS id (today:
+ * `jj`). Git keeps its original `diffOptions.defaultDiffType`.
+ */
+export type ReviewDefaults = Record<string, { defaultDiffType?: string }>;
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**

@@ -112,6 +112,7 @@ test('Back to a bundle file restores the reading position, from a linked markdow
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url: session.url })),

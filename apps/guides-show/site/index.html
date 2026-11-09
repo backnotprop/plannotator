@@ -29,6 +29,10 @@
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 var(--sans);font-feature-settings:"cv11","ss01"}
+  /* On desktop Linux (pn-os-linux, set by the script below), Inter's cv11 and ss01 are named for Inter only: as
+     font-feature-settings they reach Linux's monospace fallback too, where feature tags draw other glyphs (#1961). */
+  @font-feature-values "Inter"{@styleset{inter-digits:1}@character-variant{inter-a:11}}
+  .pn-os-linux body{font-feature-settings:normal;font-variant-alternates:styleset(inter-digits) character-variant(inter-a)}
   main{max-width:64ch;margin:0 auto;padding:6vh 1.25rem 12vh}
   a{color:var(--heading);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
   a:hover{text-decoration-color:var(--add)}
@@ -94,6 +98,11 @@
     .cmd button{padding:.55rem .85rem;font-size:.8rem}
   }
 </style>
+<script>
+// Desktop Linux only, before the first paint: the same test as rootPlatform in packages/ui/utils/platform.ts.
+(function(){var n=navigator,s=((n.userAgentData&&n.userAgentData.platform)||'')+' '+(n.platform||'')+' '+(n.userAgent||'');
+if(!/Android|CrOS|Chrome OS|Mac|iPhone|iPad|iPod|Win/i.test(s)&&/Linux|X11|BSD/i.test(s))document.documentElement.classList.add('pn-os-linux')})();
+</script>
 </head>
 <body>
 <main>

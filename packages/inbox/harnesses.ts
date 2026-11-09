@@ -15,11 +15,13 @@ export type HarnessId =
   | 'vscode'
   | 'windsurf'
   | 'gemini'
+  | 'qwen'
   | 'goose'
   | 'amp'
   | 'cline'
   | 'pi'
   | 'opencode'
+  | 'dsh'
   | 'zed'
   | 'kiro'
   | 'jetbrains'
@@ -39,11 +41,13 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'vscode', label: 'VS Code' },
   { id: 'windsurf', label: 'Windsurf / Devin' },
   { id: 'gemini', label: 'Gemini CLI' },
+  { id: 'qwen', label: 'Qwen Code' },
   { id: 'goose', label: 'Goose' },
   { id: 'amp', label: 'Amp' },
   { id: 'cline', label: 'Cline' },
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'jetbrains', label: 'JetBrains' },
@@ -76,6 +80,16 @@ export interface ConnectContext {
 }
 
 const SERVER = 'plannotator-inbox';
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+const CLINE_PLUGIN = '@plannotator/cline';
+/** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
+const DSH_PLUGIN = '@plannotator/dsh';
+
+/** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
+export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
+
+/** When Cline's tool switch takes effect: the plugin decides at each session's setup, never in a running one. */
+export const CLINE_APPLIES = 'It applies to Cline sessions started from now on.';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -169,7 +183,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'link', label: 'Add to Cursor', href: cursorInstallLink(ctx) }],
         note: 'Opens Cursor, which asks before it adds the server.',
-        another: { summary: 'add it to ~/.cursor/mcp.json by hand', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
+        another: { summary: 'add it to ~/.cursor/mcp.json yourself', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
       };
     case 'vscode':
       return {
@@ -185,7 +199,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         artefacts: [{ kind: 'code', text: `devin mcp add -s user ${SERVER} -- ${cmd}` }],
         note: 'Adds it to Devin Desktop (formerly Windsurf) in every project.',
         another: {
-          summary: 'add it to ~/.config/devin/config.json by hand',
+          summary: 'add it to ~/.config/devin/config.json yourself',
           body: { kind: 'code', label: '~/.config/devin/config.json', text: mcpServersSnippet(ctx) },
         },
       };
@@ -193,6 +207,13 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'code', text: `gemini mcp add -s user ${SERVER} ${cmd}` }],
         note: 'Adds it to Gemini CLI in every project.',
+      };
+    case 'qwen':
+      // After NonoElRobot's fork (c6a02a0): the settings.json entry. Not `qwen mcp add`: it writes the
+      // other servers back with their ${VAR} values filled in, so a token kept in the environment lands in the file.
+      return {
+        artefacts: [{ kind: 'code', label: '~/.qwen/settings.json', text: mcpServersSnippet(ctx) }],
+        note: "Merge it into mcpServers in Qwen Code's settings.json ($QWEN_HOME/settings.json when you set QWEN_HOME). It applies in every project.",
       };
     case 'goose':
       return {
@@ -209,11 +230,13 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         note: 'Run it in a terminal.',
       };
     case 'cline':
+      // Plannotator's Cline plugin: its tool, and replies as turns (apps/cline-plugin); over MCP alone nothing can
+      // wake a Cline session. The VS Code extension's older ("Legacy") bundle loads no plugins: MCP stays its way.
       return {
-        artefacts: [{ kind: 'code', text: `cline mcp add ${SERVER} --yes -- ${cmd}` }],
-        note: 'Adds it to the Cline CLI.',
+        artefacts: [{ kind: 'code', text: `cline plugin install npm:${CLINE_PLUGIN}` }],
+        note: "Plannotator's Cline plugin. Its Inbox tool starts off: turn it on for Cline in Settings > Agents. Your replies then come back into each Cline session by themselves.",
         another: {
-          summary: 'in the Cline extension: MCP Servers > Configure > Configure MCP Servers then paste this',
+          summary: 'in the Cline extension without the plugin: MCP Servers > Configure > Configure MCP Servers then paste this',
           body: { kind: 'code', text: mcpServersSnippet(ctx) },
         },
       };
@@ -232,6 +255,18 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           },
         ],
         note: "Use the project's opencode.json or ~/.config/opencode/opencode.json.",
+      };
+    case 'dsh':
+      // Plannotator's DSH plugin, not MCP: DSH's MCP client strips every DSH_* variable and sends no session,
+      // so over MCP the Inbox cannot tell which DSH session wrote, and a reply can never wake it.
+      return {
+        artefacts: [{ kind: 'code', text: `dsh plugin --profile <profile> add ${DSH_PLUGIN}` }],
+        note: `Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents. ${DSH_APPLIES} Your replies then come back into each DeepSeek Harness session by themselves.`,
+        another: {
+          // A summary is a label: no comma (house rule, tests/e2e/inbox.spec.ts). Wording: the owner's (#2529).
+          summary: 'for DSH Desktop: open and quit it once before you run this',
+          body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
+        },
       };
     case 'zed':
       return {

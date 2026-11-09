@@ -13,6 +13,7 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { BaseSession } from "../base-session.ts";
 import { buildSystemPrompt } from "../context.ts";
+import { withAskAiChildEnv } from "./ask-ai-env.ts";
 import type {
 	AIMessage,
 	AIProvider,
@@ -92,11 +93,18 @@ export class OpenCodeProvider implements AIProvider {
 		// port. An explicitly configured port is still honored verbatim.
 		let server: { url: string; close: () => void };
 		try {
-			server = await createOpencodeServer({
-				hostname: this.config.hostname ?? "127.0.0.1",
-				port: this.config.port ?? 0,
-				timeout: 15_000,
-			});
+			// Plannotator's integration off in this `opencode serve`
+			// (ask-ai-env.ts): the Plannotator OpenCode plugin it loads reads
+			// process.env and stands down. The SDK takes no env, so the switches
+			// are set on process.env only for the synchronous part of the call,
+			// where the SDK copies it into the spawn.
+			server = await withAskAiChildEnv(() =>
+				createOpencodeServer({
+					hostname: this.config.hostname ?? "127.0.0.1",
+					port: this.config.port ?? 0,
+					timeout: 15_000,
+				}),
+			);
 		} catch (err: unknown) {
 			// A missing CLI is a spawn error with code ENOENT in every runtime
 			// (Node: "spawn opencode ENOENT"; Bun: "Executable not found in
@@ -181,11 +189,12 @@ export class OpenCodeProvider implements AIProvider {
 
 		const session = new OpenCodeSession({
 			sessionId: sessionData.id,
-			systemPrompt: buildSystemPrompt(options.context),
+			systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
 			client,
 			model: options.model,
 			parentSessionId: null,
 			firstEventTimeoutMs: this.config.firstEventTimeoutMs,
+			noTools: !!options.oneShot,
 		});
 		return session;
 	}
@@ -306,6 +315,8 @@ interface SessionConfig {
 	parentSessionId: string | null;
 	/** How long to wait for the event stream's first frame before prompting. */
 	firstEventTimeoutMs?: number;
+	/** A single judgment (`CreateSessionOptions.oneShot`): every tool off for this prompt. */
+	noTools?: boolean;
 }
 
 class OpenCodeSession extends BaseSession {
@@ -399,6 +410,8 @@ class OpenCodeSession extends BaseSession {
 									system: this.config.systemPrompt,
 								}),
 							...(modelParam && { model: modelParam }),
+							// `variant`: the low effort of a model that has one; anything else ignores it.
+							...(this.config.noTools && { tools: { "*": false }, variant: "low" }),
 							parts: [{ type: "text", text: prompt }],
 						},
 					});

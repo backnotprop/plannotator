@@ -23,6 +23,10 @@
  *     forgotten after a successful off. `--bg` mappings survive a hard kill
  *     (SIGKILL) or reboot — that is Tailscale's persistence model, and the
  *     warning names the cleanup command for that case too.
+ *
+ * Each command sequence is written once, as steps (`TailscaleSteps`: a generator that yields each `tailscale`
+ * call and is handed its result), and run either at once (`runTailscaleSteps`, a sync runner: the session flow,
+ * exit cleanup) or without blocking the event loop (`runTailscaleStepsAsync`: the Inbox's request paths).
  */
 
 import {
@@ -30,10 +34,12 @@ import {
   buildServeOffArgs,
   checkServeStatusPort,
   describeTailscaleFailure,
+  explainTailscaleSetup,
   extractServeHttpsUrl,
   runTailscale,
   serveStatusProxy,
   TAILSCALE_SERVE_TIMEOUT_MS,
+  type TailscaleRunResult,
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
 import { allowServedHostname, resetServedHostnamesForTests } from "./request-host-guard";
@@ -44,17 +50,67 @@ const activePorts = new Set<number>();
 let exitCleanupInstalled = false;
 let cleanupRunner: TailscaleRunner = runTailscale;
 
+/** One `tailscale` call a step sequence asks for. */
+export interface TailscaleStep {
+  args: string[];
+  timeoutMs: number;
+}
+
+/** A sequence of `tailscale` calls with the logic between them: yields each call, is handed its result. */
+export type TailscaleSteps<T> = Generator<TailscaleStep, T, TailscaleRunResult>;
+
+/** A runner that may answer later: the Inbox's child-process runner, or a test's scripted one. */
+export type TailscaleRunnerAsync = (args: string[], timeoutMs: number) => TailscaleRunResult | Promise<TailscaleRunResult>;
+
+/** Run `steps` with a runner that answers at once. A runner that throws throws at the step's `yield`. */
+export function runTailscaleSteps<T>(steps: TailscaleSteps<T>, run: TailscaleRunner): T {
+  let next = steps.next();
+  while (!next.done) {
+    let result: TailscaleRunResult;
+    try {
+      result = run(next.value.args, next.value.timeoutMs);
+    } catch (error) {
+      next = steps.throw(error);
+      continue;
+    }
+    next = steps.next(result);
+  }
+  return next.value;
+}
+
+/** Run `steps` without blocking the event loop between calls: the same sequence, the same answers. */
+export async function runTailscaleStepsAsync<T>(steps: TailscaleSteps<T>, run: TailscaleRunnerAsync): Promise<T> {
+  let next = steps.next();
+  while (!next.done) {
+    let result: TailscaleRunResult;
+    try {
+      result = await run(next.value.args, next.value.timeoutMs);
+    } catch (error) {
+      next = steps.throw(error);
+      continue;
+    }
+    next = steps.next(result);
+  }
+  return next.value;
+}
+
+const step = (args: string[], timeoutMs: number): TailscaleStep => ({ args, timeoutMs });
+
 /** One off attempt plus one retry; true only when the CLI reported success. */
-function runServeOff(port: number, run: TailscaleRunner): boolean {
+export function* serveOffSteps(port: number): TailscaleSteps<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = run(buildServeOffArgs(port), TAILSCALE_SERVE_TIMEOUT_MS);
+      const result = yield step(buildServeOffArgs(port), TAILSCALE_SERVE_TIMEOUT_MS);
       if (!result.error && result.status === 0) return true;
     } catch {
       // Fall through to the retry / warning.
     }
   }
   return false;
+}
+
+function runServeOff(port: number, run: TailscaleRunner): boolean {
+  return runTailscaleSteps(serveOffSteps(port), run);
 }
 
 function warnLeakedMapping(port: number): void {
@@ -125,8 +181,15 @@ export function enableTailscaleServe(
   run: TailscaleRunner = runTailscale,
   options: TailscaleServeOptions = {},
 ): { url: string } {
+  const { url } = runTailscaleSteps(enableServeSteps(port, options), run);
+  if (!options.persist) registerServeMapping(new URL(url).hostname, options.httpsPort ?? port, run);
+  return { url };
+}
+
+/** `enableTailscaleServe`'s calls, up to the URL (the mapping is made, or the reason it was not, thrown). */
+export function* enableServeSteps(port: number, options: TailscaleServeOptions = {}): TailscaleSteps<{ url: string }> {
   const httpsPort = options.httpsPort ?? port;
-  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  const status = yield step(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
   if (status.error || status.status !== 0) {
     throw new TailscaleServeError("unavailable", `--tailscale: ${describeTailscaleFailure(status)}`);
   }
@@ -146,28 +209,40 @@ export function enableTailscaleServe(
         `or set PLANNOTATOR_PORT to a free port.`,
     );
   }
-  const serve = run(buildServeArgs(port, httpsPort), TAILSCALE_SERVE_TIMEOUT_MS);
-  if (serve.error || serve.status !== 0) {
+  const serve = yield step(buildServeArgs(port, httpsPort), TAILSCALE_SERVE_TIMEOUT_MS);
+  const failed = Boolean(serve.error) || serve.status !== 0;
+  const url = failed ? undefined : extractServeHttpsUrl(`${serve.stdout}\n${serve.stderr}`, httpsPort);
+  if (!url) {
+    // Serve off for the tailnet: Tailscale prints its link to turn it on, then
+    // exits 0 or waits (we time out). No mapping was made, so none to take down.
+    const explained = explainTailscaleSetup(serve);
+    if (explained) throw new TailscaleServeError("serve_failed", `--tailscale: ${explained}`);
+  }
+  if (failed) {
     throw new TailscaleServeError("serve_failed", `--tailscale: could not start tailscale serve. ${describeTailscaleFailure(serve)}`);
   }
-  const url = extractServeHttpsUrl(`${serve.stdout}\n${serve.stderr}`, httpsPort);
   if (!url) {
     // The mapping may exist even though we could not read a URL for our
     // port; take our own port back down rather than leak it.
-    if (!runServeOff(httpsPort, run)) warnLeakedMapping(httpsPort);
+    if (!(yield* serveOffSteps(httpsPort))) warnLeakedMapping(httpsPort);
     throw new TailscaleServeError(
       "no_url",
       `--tailscale: could not find an https:// URL for port ${httpsPort} in \`tailscale serve\` output.`,
     );
   }
-  // The Inbox (persist) publishes its own tailnet-only listeners (Phones'
-  // door, the window's owner-only listener), which check the tailnet name
-  // themselves, so the window port's Host allowlist never learns it. The
-  // Inbox takes its mapping down itself and installs its own exit handling.
-  if (options.persist) return { url };
+  return { url };
+}
+
+/**
+ * A session's mapping (not `persist`), once made: torn down on exit. The Inbox (persist) publishes its own
+ * tailnet-only listeners (Phones' door, the window's owner-only listener), which check the tailnet name
+ * themselves, so the window port's Host allowlist never learns it. The Inbox takes its mapping down itself and
+ * installs its own exit handling.
+ */
+function registerServeMapping(hostname: string, httpsPort: number, run: TailscaleRunner): void {
   // tailscale serve forwards the browser's Host (the MagicDNS name) to the
   // loopback backend, so the server's Host allowlist must know the name.
-  allowServedHostname(new URL(url).hostname);
+  allowServedHostname(hostname);
   activePorts.add(httpsPort);
   cleanupRunner = run;
   if (!exitCleanupInstalled) {
@@ -181,7 +256,6 @@ export function enableTailscaleServe(
     // or the `--bg` mapping leaks.
     process.once("SIGHUP", onSigHup);
   }
-  return { url };
 }
 
 /**
@@ -211,6 +285,7 @@ export function removeTailscaleServe(httpsPort: number, run: TailscaleRunner = r
   return runServeOff(httpsPort, run);
 }
 
+
 /**
  * Take down the mapping on `httpsPort` only when it points at one of
  * `targets` (proxy targets this caller made): someone else's mapping on that
@@ -222,13 +297,18 @@ export function takeDownOwnServeMapping(
   httpsPort: number,
   targets: readonly string[],
 ): "removed" | "none" | "failed" {
+  return runTailscaleSteps(takeDownOwnServeSteps(httpsPort, targets), run);
+}
+
+/** `takeDownOwnServeMapping`'s calls. */
+export function* takeDownOwnServeSteps(httpsPort: number, targets: readonly string[]): TailscaleSteps<"removed" | "none" | "failed"> {
   if (targets.length === 0) return "none";
-  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  const status = yield step(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
   if (status.error || status.status !== 0) return "failed";
   const existing = serveStatusProxy(status.stdout, httpsPort);
   if (existing.state === "malformed") return "failed";
   if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
-  return runServeOff(httpsPort, run) ? "removed" : "failed";
+  return (yield* serveOffSteps(httpsPort)) ? "removed" : "failed";
 }
 
 /**

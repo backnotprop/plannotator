@@ -15,6 +15,10 @@ import {
   extractChangedFiles,
 } from "@plannotator/shared/code-nav";
 
+import { readFileCapped } from "@plannotator/shared/repo-file";
+import { resolve } from "node:path";
+import { decodeBunText } from "./git";
+
 export type { CodeNavRequest, CodeNavResponse, CodeNavHoverResponse };
 
 const bunCodeNavRuntime: CodeNavRuntime = {
@@ -47,15 +51,12 @@ const bunCodeNavRuntime: CodeNavRuntime = {
   },
 
   async readFile(path, options) {
-    try {
-      const file = Bun.file(options?.cwd ? `${options.cwd}/${path}` : path);
-      // Check the size before pulling bytes: rg would not have searched a
-      // file this large either.
-      if (file.size > CODE_NAV_MAX_FILE_BYTES) return null;
-      return await file.text();
-    } catch {
-      return null;
-    }
+    // Capped at what rg searches, non-blocking (repo-file.ts).
+    const read = await readFileCapped(options?.cwd ? resolve(options.cwd, path) : path, {
+      maxBytes: CODE_NAV_MAX_FILE_BYTES,
+      decode: decodeBunText,
+    });
+    return read.ok ? read.content : null;
   },
 };
 
@@ -121,3 +122,14 @@ export async function handleCodeNavHover(
 }
 
 export { extractChangedFiles };
+
+/** The hover answer for a parsed body, as status and JSON (Shape's code routes, packages/shared/shape/routes.ts). */
+export async function codeNavHoverAnswer(body: unknown, cwd: string): Promise<{ status: number; body: unknown }> {
+  const error = validateCodeNavRequest(body);
+  if (error) return { status: 400, body: { error } };
+  try {
+    return { status: 200, body: await resolveCodeNavHover(bunCodeNavRuntime, body as CodeNavRequest, cwd, []) };
+  } catch (err) {
+    return { status: 500, body: { error: err instanceof Error ? err.message : "Code navigation failed" } };
+  }
+}

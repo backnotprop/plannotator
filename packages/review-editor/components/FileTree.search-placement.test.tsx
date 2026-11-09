@@ -50,20 +50,20 @@ afterEach(async () => {
 
 describe("FileTree search placement", () => {
   test.skipIf(!hasDom)(
-    "keeps the search field directly below its utility row",
+    "keeps the search field directly below its sticky tools block",
     async () => {
       host = document.createElement("div");
       document.body.appendChild(host);
       root = createRoot(host);
 
       await act(async () => root?.render(<Tree query="" />));
-      let controls = host.querySelector("[data-panel-controls-row]");
+      let controls = host.querySelector("[data-review-sticky-tools]");
       let search = host.querySelector("[data-panel-search-field]");
       expect(controls).not.toBeNull();
       expect(controls?.nextElementSibling).toBe(search);
 
       await act(async () => root?.render(<Tree query="needle" />));
-      controls = host.querySelector("[data-panel-controls-row]");
+      controls = host.querySelector("[data-review-sticky-tools]");
       search = host.querySelector("[data-panel-search-field]");
       expect(controls?.nextElementSibling).toBe(search);
       expect(host.textContent).toContain("No matches found");

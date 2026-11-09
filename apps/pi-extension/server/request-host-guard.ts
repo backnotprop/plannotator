@@ -11,7 +11,7 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import os from "node:os";
-import { loadConfig, resolveUrlHost } from "../generated/config.ts";
+import { loadConfig, resolvePublicUrl, resolveUrlHost } from "../generated/config.ts";
 import {
 	ALLOWED_HOSTS_ENV,
 	forwardedPortHostPatterns,
@@ -35,9 +35,13 @@ import { isRemoteSession } from "./network.ts";
 function remoteExtraHosts(): string[] {
 	const hosts = machineHostnames(os.hostname());
 	try {
-		const urlHost = resolveUrlHost(loadConfig());
+		const config = loadConfig();
+		const urlHost = resolveUrlHost(config);
 		const resolved = urlHost && isAutoUrlHost(urlHost) ? resolveAutoHostCached() : urlHost;
 		if (resolved) hosts.push(resolved);
+		// A reverse proxy in front of PLANNOTATOR_PUBLIC_URL may forward the browser's Host.
+		const publicUrl = resolvePublicUrl(config);
+		if (publicUrl) hosts.push(new URL(publicUrl).hostname);
 	} catch {
 		// A broken config never widens the allowlist.
 	}

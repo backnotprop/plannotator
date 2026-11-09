@@ -1,7 +1,7 @@
 /**
  * Images the Inbox refuses to serve, drawn quietly. An agent's message may
- * name an image the message image route refuses: one in a hidden folder
- * outside the project (403 image_hidden), one that is not there (404). The
+ * name an image the message image route refuses: one in a hidden folder of
+ * the home folder (403 image_hidden), one that is not there (404). The
  * window used to draw a broken-image icon for each. What regresses if this
  * fails: a refused image in the message text, an `<img>` in a raw-HTML block,
  * a question card's `Shows:` picture or its picture choices stays a broken
@@ -14,7 +14,7 @@
  * the `<img>` gets the `load` or `error` event a browser fires for that
  * answer. tests/e2e/inbox-picture-choices.spec.ts proves it in real browsers.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -82,10 +82,10 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
-  // Outside the project: a hidden folder the route refuses, and a plain folder it serves.
-  mkdirSync(join(dir, 'elsewhere', '.secret'), { recursive: true });
+  // Outside the project: a hidden folder of the home folder (HOME is `dir`) the route refuses, and a plain folder it serves.
+  mkdirSync(join(dir, '.secret'), { recursive: true });
   mkdirSync(join(dir, 'pub'));
-  for (const name of ['shot.png', 'raw.png', 'both.png', 'a.png']) writeFileSync(join(dir, 'elsewhere', '.secret', name), PNG);
+  for (const name of ['shot.png', 'raw.png', 'both.png', 'a.png']) writeFileSync(join(dir, '.secret', name), PNG);
   writeFileSync(join(dir, 'pub', 'ok.png'), PNG);
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '1'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}` },
@@ -141,7 +141,7 @@ async function settleImages(el: HTMLElement): Promise<Map<string, number>> {
 
 test.skipIf(!hasDom)('images the Inbox refuses show as their alt text; the card falls back to text rows; the image that loads is as before', async () => {
   setImageSrcResolver(inboxImageSrcResolver);
-  const hidden = (name: string) => join(dir, 'elsewhere', '.secret', name);
+  const hidden = (name: string) => join(dir, '.secret', name);
   const ok = join(dir, 'pub', 'ok.png');
   const body = [
     'Here is the run.',

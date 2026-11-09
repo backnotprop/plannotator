@@ -7,13 +7,13 @@
  * live sessions grouped by agent with the owner first and the MCP agents
  * last, as a listbox the field controls; nothing is active until arrowed
  * onto; a pick inserts the readable `@Pi` and says what it means; a session on
- * an older Plannotator cannot be picked and says to update; the notes under
- * the field say who it goes to, with one heads-up for a session that does not
- * own the thread and another for one that cannot be woken; Send carries the
+ * an older Plannotator cannot be picked and says to update; the one line under
+ * the field says Send asks the agents tagged (approval "inbox-tag-handoff",
+ * A2) and which cannot be woken; Send carries the
  * tags; the sent reply shows one line per agent, each with its own Send now;
  * the thread head and the row show the agents' marks.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -231,11 +231,13 @@ test.skipIf(!hasDom)('@ opens the agents grouped by agent, the owner first and t
   expect(box.value).toBe('Queue it, and cap retries at 5. @Pi ');
   expect(picker()).toBeNull();
   expect(el.querySelector('[data-tag-live]')!.textContent).toContain("Tagged Pi. It doesn't own this thread; it gets your reply and a pointer to this thread.");
-  // Who it goes to, and the heads-up, described on the field.
-  const notes = el.querySelector('[data-tag-notes]')!;
-  expect([...notes.querySelectorAll('[data-tag-recipient]')].map((r) => r.textContent)).toEqual(['Claude Code owns this thread', 'Pi']);
-  expect(notes.querySelector('[data-tag-heads-up="non-owner"]')!.textContent).toBe("Pi doesn't own this thread. It gets your reply and a pointer to this thread.");
-  expect(box.getAttribute('aria-describedby')).toContain(notes.id);
+  // What Send does, in one line described on the field (approval "inbox-tag-handoff", A2): an Ask, with the two switches.
+  const line = el.querySelector('[data-tag-mode]')!;
+  expect(line.getAttribute('data-tag-mode')).toBe('ask');
+  expect(line.querySelector('[data-tag-mode-words]')!.textContent).toBe('Asks Pi');
+  expect([...line.querySelectorAll('[data-tag-mode-to]')].map((b) => b.textContent)).toEqual(['Add instead', 'Hand off instead']);
+  expect(el.querySelector('[data-tag-notes]')).toBeNull();
+  expect(box.getAttribute('aria-describedby')).toContain(line.id);
 
   // Picking the older Pi inserts nothing and says why.
   await type(box, `${box.value}@pi`);
@@ -266,11 +268,12 @@ test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tag
   while (document.querySelector('[data-tag-option][aria-selected="true"]')?.getAttribute('data-tag-option') !== S.codex) await press(box, 'ArrowDown');
   await press(box, 'Enter');
   await type(box, `${box.value}the runbook needs the alert.`);
-  const notes = el.querySelector('[data-tag-notes]')!;
-  expect([...notes.querySelectorAll('[data-tag-heads-up]')].map((n) => [n.getAttribute('data-tag-heads-up'), n.textContent])).toEqual([
-    ['non-owner', "Pi doesn't own this thread. It gets your reply and a pointer to this thread."],
-    ['not-woken', `${codexLabel} can't be woken: it reads the Inbox through MCP. It sees your reply the next time it reads this thread.`],
-  ]);
+  // One line: an Ask to both, saying which one is not woken; Add and Hand off reach live sessions only, so no switch.
+  const line = el.querySelector('[data-tag-mode]')!;
+  expect(line.querySelector('[data-tag-mode-words]')!.textContent).toBe(
+    `Asks Pi and ${codexLabel} · ${codexLabel} isn't woken: it sees your reply the next time it reads this thread`,
+  );
+  expect(line.querySelectorAll('[data-tag-mode-to]')).toHaveLength(0);
   await press(box, 'Enter', { metaKey: true });
   await until(async () => posted.some((p) => p.path.endsWith('/reply')), 'the Send');
   const sent = posted.filter((p) => p.path.endsWith('/reply'));
@@ -313,7 +316,7 @@ test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tag
   expect(again.querySelector(`[data-tag-line="${S.owner}"]`)!.getAttribute('data-delivery')).not.toBe('delivered');
 }, 30_000);
 
-test.skipIf(!hasDom)('the thread head and the row show the agents in the thread, overlapping; the Sent row counts deliveries', async () => {
+test.skipIf(!hasDom)('the thread head shows the agents in the thread overlapping, the row beside its project; the Sent row counts deliveries', async () => {
   const el = await renderApp(`#thread=${tags.ids.t3}`);
   await until(() => el.querySelector('[data-thread-participants]') !== null, 'the thread head');
   expect(el.querySelector('[data-thread-participants]')!.textContent).toBe('Claude Code and Pi');
@@ -322,7 +325,7 @@ test.skipIf(!hasDom)('the thread head and the row show the agents in the thread,
   const rows = model.sections.flatMap((s) => s.threads);
   expect(rows.find((r) => r.thread_id === tags.ids.t3)!.participants?.map((p) => p.host)).toEqual(['claude-code', 'pi']);
   const row = el.querySelector(`.ib-lbody [data-thread-id="${tags.ids.t2}"]`)!;
-  expect(row.querySelector('[data-tag-stack]')!.getAttribute('data-tag-stack')).toBe('3');
+  expect(row.querySelector('[data-row-agents]')!.getAttribute('data-row-agents')).toBe('3');
   // Pi's connection took its copy in the test before (it delivers everything it is handed): the owner still waits.
   expect(row.textContent).toContain('1 of 3 delivered · Claude Code queued');
 }, 30_000);

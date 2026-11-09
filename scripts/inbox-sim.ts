@@ -21,6 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { INBOX_WAKES_META_KEY } from '../packages/shared/inbox/connection';
+import { refuseRealHome } from '../tests/helpers/inbox-process';
 import { refuseRealDataDir } from '../tests/helpers/real-data-dir';
 
 export interface SimAgentOptions {
@@ -48,6 +49,7 @@ export class SimAgent {
   static async connect(options: SimAgentOptions): Promise<SimAgent> {
     // The shim falls back to the default data dir without one: never let it reach the person's Inbox.
     refuseRealDataDir(options.env.PLANNOTATOR_DATA_DIR, 'SimAgent.connect');
+    refuseRealHome(options.env.HOME, 'SimAgent.connect');
     const client = new Client({ name: `inbox-sim-${options.host}`, version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: options.binary,
@@ -91,6 +93,11 @@ export class SimAgent {
     return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host }, options.wakes ? { [INBOX_WAKES_META_KEY]: true } : undefined);
   }
 
+  /** resolve_message: the agent archives the thread. */
+  resolve(messageId: string): Promise<Structured> {
+    return this.call('resolve_message', { message_id: messageId });
+  }
+
   /** The Board's `card` tool (create, move, say, link, ship, drop, list); a refusal throws with the Inbox's words. */
   card(input: { op: string; project_path?: string; [field: string]: unknown }): Promise<Structured> {
     return this.call('card', { ...input, agent_name: this.name, agent_host: this.host });
@@ -111,9 +118,22 @@ export class SimAgent {
     return (await this.call('read_thread', { thread_id: threadId })).thread as Structured;
   }
 
-  /** `cursor`: the one a previous answer returned, to wait for a later reply only. */
-  waitForReply(threadId: string, timeoutSeconds = 50, cursor?: number): Promise<Structured> {
-    return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds, ...(cursor === undefined ? {} : { cursor }) });
+  /**
+   * The person's reply as the full record read_thread gives: the newest of their
+   * messages after `after` (a message id), or after this thread's last agent
+   * message. Reads again until one lands, as an agent that is not woken reads later.
+   */
+  async nextReply(threadId: string, timeoutSeconds = 50, after?: string): Promise<Structured> {
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    for (;;) {
+      const { thread } = await this.call('read_thread', { thread_id: threadId, format: 'full' });
+      const messages = (thread as { messages: (Structured & { id: string; author: { kind: string } })[] }).messages;
+      const from = after ? messages.findIndex((m) => m.id === after) : messages.findLastIndex((m) => m.author.kind === 'agent');
+      const reply = messages.slice(from + 1).findLast((m) => m.author.kind === 'person');
+      if (reply) return reply;
+      if (Date.now() >= deadline) throw new Error(`No reply in ${threadId} after ${timeoutSeconds} seconds`);
+      await new Promise((done) => setTimeout(done, 200));
+    }
   }
 
   close(): Promise<void> {
@@ -205,7 +225,10 @@ async function main(): Promise<void> {
   const src = join(dirname(dataDir), 'src');
   const billing = scratchProject(src, 'billing-svc');
   const docs = scratchProject(src, 'docs-site');
-  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir };
+  // The sandbox gives the Inbox these agents start an empty agent PATH: a window opened on it must not run the person's real `cswap`.
+  const home = join(dataDir, 'home');
+  mkdirSync(home, { recursive: true });
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const claude2 = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });

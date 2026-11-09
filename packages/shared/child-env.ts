@@ -21,12 +21,32 @@
 export type ChildEnv = Record<string, string | undefined>;
 
 /**
+ * What keeps a sandboxed child's git and gh away from the macOS Keychain and
+ * from prompts. A sandbox (`PLANNOTATOR_TEST_SANDBOX`) runs with a scratch
+ * HOME, where macOS finds no keychain, so any credential write there showed
+ * "Keychain Not Found" on the person's screen, once per process.
+ *
+ * - `GIT_CONFIG_NOSYSTEM`: git skips the system config, Xcode's included,
+ *   which sets `credential.helper=osxkeychain`.
+ * - `GCM_INTERACTIVE=never`: no Git Credential Manager window.
+ * - `GH_PROMPT_DISABLED`, `GH_NO_UPDATE_NOTIFIER`: gh never prompts and never
+ *   checks for its own update.
+ */
+export const SANDBOX_NO_KEYCHAIN_ENV: Readonly<Record<string, string>> = Object.freeze({
+  GIT_CONFIG_NOSYSTEM: "1",
+  GCM_INTERACTIVE: "never",
+  GH_PROMPT_DISABLED: "1",
+  GH_NO_UPDATE_NOTIFIER: "1",
+});
+
+/**
  * A fresh copy of the live `process.env`, with `extra` laid over it. A key in
  * `extra` whose value is `undefined` removes that variable from the child's
- * environment.
+ * environment. Under the test sandbox, `SANDBOX_NO_KEYCHAIN_ENV` comes before
+ * `extra`; outside it nothing is added.
  */
 export function childEnv(extra?: Readonly<ChildEnv>): ChildEnv {
-  const env: ChildEnv = { ...process.env };
+  const env: ChildEnv = { ...process.env, ...(process.env.PLANNOTATOR_TEST_SANDBOX ? SANDBOX_NO_KEYCHAIN_ENV : {}) };
   if (extra) {
     for (const [key, value] of Object.entries(extra)) {
       if (value === undefined) delete env[key];
@@ -34,6 +54,18 @@ export function childEnv(extra?: Readonly<ChildEnv>): ChildEnv {
     }
   }
   return env;
+}
+
+/**
+ * Whether this process runs inside an agent Plannotator's Ask AI started:
+ * `PLANNOTATOR_ASK_AI_CHILD` is exactly "1" (set by `askAiChildEnv` in
+ * packages/ai/providers/ask-ai-env.ts). There, Plannotator's own integration
+ * stands down: the Inbox MCP shim lists no tools, the plan-review hook exits
+ * 0, and the OpenCode plugin registers nothing. Any other value, or none, is
+ * a person's session and changes nothing.
+ */
+export function isAskAiChild(env: Readonly<ChildEnv> = process.env): boolean {
+  return env.PLANNOTATOR_ASK_AI_CHILD === "1";
 }
 
 /**

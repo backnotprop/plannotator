@@ -38,6 +38,14 @@ const tempDirs: string[] = [];
 const originalSemPath = process.env.PLANNOTATOR_SEM_PATH;
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 
+/**
+ * The discovery tests build their fixtures with real `git` (six spawns per repo in initRepo).
+ * On the Windows runner each spawn can take a few hundred ms, so a test with three repos
+ * spent over 5 s (bun's default) in setup alone while discovery itself takes milliseconds.
+ * The longer budget covers the fixture; every assertion is unchanged.
+ */
+const GIT_FIXTURE_TIMEOUT_MS = 30_000;
+
 function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(dir);
@@ -657,7 +665,7 @@ describe("review-workspace", () => {
       // Root itself is excluded even though it's a git repo
       expect(repos).toHaveLength(0);
       expect(repos).not.toContain(root);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("discovers multiple nested VCS repos", () => {
       const root = makeTempDir("plannotator-workspace-multi-");
@@ -680,7 +688,7 @@ describe("review-workspace", () => {
       expect(repos).toContain(backendApi);
       expect(repos).not.toContain(root);
       expect(repos).not.toContain(backend); // backend itself is not a repo
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("uses a symlinked Git repo's logical workspace path end to end", async () => {
       const root = makeTempDir("plannotator-workspace-symlink-git-");
@@ -697,7 +705,7 @@ describe("review-workspace", () => {
       expect(workspace.repos).toHaveLength(1);
       expect(workspace.repos[0]).toMatchObject({ cwd: alias, label: "backend", selected: true });
       expect(workspace.rawPatch).toContain("diff --git a/backend/README.md b/backend/README.md");
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("discovers a symlinked JJ repo using its logical workspace path", () => {
       const root = makeTempDir("plannotator-workspace-symlink-jj-");
@@ -708,7 +716,7 @@ describe("review-workspace", () => {
       linkDirectory(targetRepo, alias);
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([alias]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("discovers repos nested below a symlinked directory", () => {
       const root = makeTempDir("plannotator-workspace-symlink-nested-");
@@ -720,7 +728,7 @@ describe("review-workspace", () => {
       linkDirectory(targetRoot, alias);
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([join(alias, "services", "api")]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("does not recurse forever through a directory-link cycle", () => {
       const root = makeTempDir("plannotator-workspace-symlink-cycle-");
@@ -731,7 +739,7 @@ describe("review-workspace", () => {
       linkDirectory(root, join(container, "back-to-root"));
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([repo]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("ignores broken directory links", () => {
       const root = makeTempDir("plannotator-workspace-symlink-broken-");
@@ -742,7 +750,7 @@ describe("review-workspace", () => {
       rmSync(brokenTarget, { recursive: true });
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it.skipIf(process.platform === "win32")("ignores symlinks to files", () => {
       const root = makeTempDir("plannotator-workspace-symlink-file-");
@@ -752,7 +760,7 @@ describe("review-workspace", () => {
       symlinkSync(targetFile, join(root, "linked-file"), "file");
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("bounds discovery when a symlink escapes into a huge external tree", () => {
       // Regression for the #1060 follow-up: a symlink inside the workspace
@@ -782,7 +790,7 @@ describe("review-workspace", () => {
         if (prior === undefined) delete process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
         else process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = prior;
       }
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("keeps discovering symlinked repos under the default budget", () => {
       // The budget must not break the feature it bounds: an external
@@ -795,7 +803,7 @@ describe("review-workspace", () => {
       linkDirectory(targetRepo, join(root, "linked"));
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([join(root, "linked")]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("chooses the first logical alias deterministically for duplicate targets", () => {
       const root = makeTempDir("plannotator-workspace-symlink-duplicates-");
@@ -808,7 +816,7 @@ describe("review-workspace", () => {
       linkDirectory(targetRepo, alphaAlias);
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([alphaAlias]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("does not follow a directory link whose logical name is skipped", () => {
       const root = makeTempDir("plannotator-workspace-symlink-skip-");
@@ -822,7 +830,7 @@ describe("review-workspace", () => {
       linkDirectory(targetRepo, join(root, "node_modules"));
 
       expect(discoverWorkspaceRepoPaths(root)).toEqual([realRepo]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("stops recursion at git repo boundaries (does not discover nested repos inside other repos)", () => {
       const root = makeTempDir("plannotator-workspace-boundary-");
@@ -846,7 +854,7 @@ describe("review-workspace", () => {
       expect(repos).toHaveLength(1);
       expect(repos).toContain(parentRepo);
       expect(repos).not.toContain(grandchildRepo);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("discovers nested jj repos", () => {
       const root = makeTempDir("plannotator-workspace-jj-");
@@ -856,7 +864,7 @@ describe("review-workspace", () => {
       const repos = discoverWorkspaceRepoPaths(root);
 
       expect(repos).toEqual([jjRepo]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("skips ignored directories", () => {
       const root = makeTempDir("plannotator-workspace-skip-");
@@ -875,7 +883,7 @@ describe("review-workspace", () => {
 
       expect(repos).toHaveLength(1);
       expect(repos[0]).toBe(realRepo);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("returns empty array when root has no git repos", () => {
       const root = makeTempDir("plannotator-workspace-empty-");
@@ -888,7 +896,7 @@ describe("review-workspace", () => {
       const repos = discoverWorkspaceRepoPaths(root);
 
       expect(repos).toHaveLength(0);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("sorts results alphabetically", () => {
       const root = makeTempDir("plannotator-workspace-sort-");
@@ -908,7 +916,7 @@ describe("review-workspace", () => {
       const repos = discoverWorkspaceRepoPaths(root);
 
       expect(repos).toEqual([alpha, beta, zebra]);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("handles deeply nested repos", () => {
       const root = makeTempDir("plannotator-workspace-deep-");
@@ -921,7 +929,7 @@ describe("review-workspace", () => {
 
       expect(repos).toHaveLength(1);
       expect(repos[0]).toBe(deepRepo);
-    });
+    }, GIT_FIXTURE_TIMEOUT_MS);
   });
 
   describe("buildRepoLabel (via discoverWorkspaceRepoPaths integration)", () => {

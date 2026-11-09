@@ -16,6 +16,7 @@ import {
   type ResolvedReviewProfile,
 } from "@plannotator/shared/review-profiles";
 import { classifyFindingPlacement } from "@plannotator/shared/external-annotation";
+import { codexAskAiConfigArgs, readCodexConfigTexts } from "@plannotator/ai/providers/ask-ai-env";
 
 // ---------------------------------------------------------------------------
 // Debug log — only active when PLANNOTATOR_DEBUG is set
@@ -216,6 +217,8 @@ export async function buildCodexCommand(options: CodexCommandOptions): Promise<s
     ...(model ? ["-m", model] : []),
     ...(reasoningEffort ? ["-c", `model_reasoning_effort=${reasoningEffort}`] : []),
     ...(fastMode ? ["-c", "service_tier=fast"] : []),
+    // The Inbox MCP server off: Codex hands a stdio MCP server none of the job's env.
+    ...codexAskAiConfigArgs(readCodexConfigTexts(cwd)),
     "exec",
     "--output-schema", schemaPath,
     "-o", outputPath,

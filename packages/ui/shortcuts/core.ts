@@ -1,11 +1,21 @@
-import { isMac } from '../utils/platform';
+import { isMac, isWindows } from '../utils/platform';
 
 export type ShortcutPlatform = 'mac' | 'non-mac' | 'cross-platform';
+
+/** The three desktop systems a binding can differ on (VS Code's split). */
+export type ShortcutOS = 'mac' | 'windows' | 'linux';
 
 export interface ShortcutDefinition {
   description: string;
   /** Alternative bindings for the same action, shown as “or” in the shortcuts UI. */
   bindings: string[];
+  /**
+   * Per-system bindings that replace `bindings` on that system (VS Code's
+   * defaults differ by OS, e.g. Back is ⌃- on macOS, Alt+← on Windows and
+   * Ctrl+Alt+- on Linux). `bindings` stays the fallback and what tools that
+   * know nothing of systems read.
+   */
+  platformBindings?: Partial<Record<ShortcutOS, string[]>>;
   section: string;
   hint?: string;
   preventDefault?: boolean;
@@ -17,6 +27,21 @@ export interface ShortcutScopeDefinition<TAction extends string = string> {
   id: string;
   title: string;
   shortcuts: Record<TAction, ShortcutDefinition>;
+  /**
+   * Optional, off by default: a letter binding also matches its physical key
+   * (`event.code`, `KeyE` for `E`) when the character typed is one letter
+   * outside A–Z, so letter keys keep working on Cyrillic, Greek or Hebrew
+   * layouts. Punctuation, dead keys and unidentified keys never fall back.
+   * A Latin layout still matches by character (AZERTY's A is A), and
+   * punctuation (`?`, `/`) is always matched by character.
+   */
+  lettersByCode?: boolean;
+}
+
+/** How a binding is matched. */
+export interface ShortcutMatchOptions {
+  /** See `ShortcutScopeDefinition.lettersByCode`. */
+  lettersByCode?: boolean;
 }
 
 export interface ShortcutEntry extends ShortcutDefinition {
@@ -41,6 +66,9 @@ export interface ShortcutSurface {
 
 const NAMED_TOKENS = new Set([
   'Mod',
+  // The physical Control key on every system (⌃ on macOS), unlike `Mod`,
+  // which is ⌘ on macOS. For VS Code's macOS bindings such as ⌃-.
+  'Ctrl',
   'Shift',
   'Alt',
   'Enter',
@@ -69,13 +97,15 @@ const NAMED_TOKENS = new Set([
   '}',
   '?',
   '$',
+  // Matched by its key code, so Shift (which turns it into `_`) still reads as it.
+  '-',
 ]);
 
 for (let n = 1; n <= 12; n += 1) {
   NAMED_TOKENS.add(`F${n}`);
 }
 
-const MODIFIER_TOKENS = new Set(['Mod', 'Shift', 'Alt']);
+const MODIFIER_TOKENS = new Set(['Mod', 'Ctrl', 'Shift', 'Alt']);
 const SHIFTED_LITERAL_TOKENS = new Set(['{', '}', '?', '$']);
 type ShortcutKeyEvent = Pick<
   KeyboardEvent,
@@ -184,7 +214,11 @@ export function validateShortcutRegistry(registry: ShortcutRegistry): string[] {
         errors.push(`Shortcut ${id} must define at least one binding.`);
       }
 
-      for (const binding of shortcut.bindings) {
+      const allBindings = [
+        ...shortcut.bindings,
+        ...Object.values(shortcut.platformBindings ?? {}).flat(),
+      ];
+      for (const binding of allBindings) {
         if (!binding.trim()) {
           errors.push(`Shortcut ${id} contains an empty binding.`);
           continue;
@@ -264,9 +298,36 @@ export function getShortcutPlatform(): Exclude<ShortcutPlatform, 'cross-platform
   return isMac ? 'mac' : 'non-mac';
 }
 
+export function getShortcutOS(): ShortcutOS {
+  return isMac ? 'mac' : isWindows ? 'windows' : 'linux';
+}
+
+/** The bindings that apply on a system: its own when it has some, else `bindings`. */
+export function resolveShortcutBindings(
+  shortcut: Pick<ShortcutDefinition, 'bindings' | 'platformBindings'>,
+  os: ShortcutOS = getShortcutOS(),
+): string[] {
+  return shortcut.platformBindings?.[os] ?? shortcut.bindings;
+}
+
+const OS_LABELS: Record<ShortcutOS, string> = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
+
+/**
+ * A shortcut's bindings as text for a reference that serves every system (the
+ * docs): `Cmd+P or Ctrl+P` style text, or one entry per system when they
+ * differ ("Ctrl+- (macOS) · Alt+ArrowLeft (Windows) · Ctrl+Alt+- (Linux)").
+ */
+export function formatShortcutDefinitionText(shortcut: Pick<ShortcutDefinition, 'bindings' | 'platformBindings'>): string {
+  if (!shortcut.platformBindings) return formatShortcutBindingsText(shortcut.bindings);
+  return (['mac', 'windows', 'linux'] as const)
+    .map((os) => `${formatShortcutBindingsText(resolveShortcutBindings(shortcut, os), os === 'mac' ? 'mac' : 'non-mac')} (${OS_LABELS[os]})`)
+    .join(' · ');
+}
+
 function formatKeycapToken(token: string, platform: Exclude<ShortcutPlatform, 'cross-platform'>): string {
   if (platform === 'mac') {
     if (token === 'Mod') return '⌘';
+    if (token === 'Ctrl') return '⌃';
     if (token === 'Alt') return '⌥';
     if (token === 'Shift') return '⇧';
     if (token === 'Enter') return '⏎';
@@ -293,6 +354,7 @@ function formatTextToken(token: string, platform: ShortcutPlatform): string {
     return platform === 'mac' ? 'Option' : 'Alt';
   }
 
+  if (token === 'Ctrl') return 'Ctrl';
   if (token === 'Escape') return 'Escape';
   if (token === 'hold') return 'hold';
   return token;
@@ -351,12 +413,16 @@ export function getShortcutDigit(event: ShortcutKeyEvent): number | null {
   return digitCode === null ? null : Number.parseInt(digitCode, 10);
 }
 
-function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
+function matchesKeyToken(event: ShortcutKeyEvent, token: string, options?: ShortcutMatchOptions): boolean {
   const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
   const shortcutDigit = getShortcutDigit(event);
 
   if (token === 'Space') {
     return event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space';
+  }
+
+  if (token === '-') {
+    return event.code === 'Minus' || event.key === '-' || event.key === '_';
   }
 
   if (token === 'A-Z') {
@@ -368,7 +434,12 @@ function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
   }
 
   if (isSingleLetter(token)) {
-    return key === token;
+    if (key === token) return true;
+    // Opt-in: a non-Latin letter on the letter's physical key (Cyrillic У on KeyE). Only a single letter outside
+    // A–Z counts: punctuation (Dvorak's `.` on KeyE, Hebrew's `/` on KeyQ), a dead key or an unidentified one never
+    // turns into a letter.
+    const typed = event.key;
+    return options?.lettersByCode === true && typed.length === 1 && /\p{L}/u.test(typed) && !/^[A-Za-z]$/.test(typed) && event.code === `Key${token}`;
   }
 
   if (isSingleDigit(token)) {
@@ -384,7 +455,7 @@ function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
  * Sequential and hold bindings deliberately return false; their timing
  * semantics are handled by the shortcut runtime's dedicated paths.
  */
-export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string): boolean {
+export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string, options?: ShortcutMatchOptions): boolean {
   if (binding.includes(' ') || binding.includes('hold')) {
     return false;
   }
@@ -393,6 +464,7 @@ export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string)
   if (tokens.length === 0) return false;
 
   const requiresMod = tokens.includes('Mod');
+  const requiresCtrl = tokens.includes('Ctrl');
   const requiresShift = tokens.includes('Shift');
   const requiresAlt = tokens.includes('Alt');
   const keyTokens = tokens.filter(token => !MODIFIER_TOKENS.has(token));
@@ -403,11 +475,18 @@ export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string)
     || (!requiresShift && keyToken === 'A-Z' && event.shiftKey)
     || (!requiresShift && SHIFTED_LITERAL_TOKENS.has(keyToken) && event.key === keyToken);
 
-  if (requiresMod !== (event.metaKey || event.ctrlKey)) return false;
+  // `Mod` is ⌘ or Ctrl (as before); `Ctrl` is the physical Control key only.
+  if (requiresMod) {
+    if (!(event.metaKey || event.ctrlKey)) return false;
+  } else if (requiresCtrl) {
+    if (!event.ctrlKey || event.metaKey) return false;
+  } else if (event.metaKey || event.ctrlKey) {
+    return false;
+  }
   if (!shiftMatches) return false;
   if (requiresAlt !== event.altKey) return false;
 
-  return matchesKeyToken(event, keyToken);
+  return matchesKeyToken(event, keyToken, options);
 }
 
 /**
@@ -415,8 +494,8 @@ export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string)
  *
  * The group uses the same normalized syntax as an ordinary one-press binding.
  */
-export function matchesShortcutBindingGroup(event: ShortcutKeyEvent, group: string): boolean {
-  return matchesShortcutBinding(event, group);
+export function matchesShortcutBindingGroup(event: ShortcutKeyEvent, group: string, options?: ShortcutMatchOptions): boolean {
+  return matchesShortcutBinding(event, group, options);
 }
 
 export function getMatchingShortcutBindingIndex(event: ShortcutKeyEvent, bindings: string[]): number {

@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.28.33",
+  "version": "0.28.55",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -46,11 +46,13 @@
     "pi-host.ts",
     "runtime-tls.ts",
     "package-version.ts",
+    "auto-reload.ts",
     "inbox.ts",
     "server.ts",
     "tool-scope.ts",
     "config.ts",
     "plannotator.json",
+    "release.json",
     "server/",
     "todo-providers/",
     "generated/",
@@ -62,7 +64,7 @@
   ],
   "scripts": {
     "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && bash vendor.sh",
-    "prepublishOnly": "cd ../.. && bun run build:pi"
+    "prepublishOnly": "cd ../.. && bun run build:viewer-pin && bun run build:pi"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",

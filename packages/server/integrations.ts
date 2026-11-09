@@ -1,5 +1,5 @@
 /**
- * Note-taking app integrations (Obsidian, Bear)
+ * Note-taking app integrations (Obsidian, Bear, Octarine, Notion)
  */
 
 import { $ } from "bun";
@@ -11,6 +11,7 @@ import {
 	type ObsidianConfig,
 	type BearConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	type IntegrationResult,
 	extractTitle,
 	generateFrontmatter,
@@ -24,7 +25,8 @@ import {
 } from "@plannotator/shared/integrations-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 
-export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
+export type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult };
+export { isNotionAvailable, saveToNotion, NOTION_API_VERSION } from "@plannotator/shared/notion";
 export { detectObsidianVaults, extractTitle, generateFrontmatter, generateFilename, generateOctarineFrontmatter, stripH1, buildHashtags, buildBearContent };
 
 /**

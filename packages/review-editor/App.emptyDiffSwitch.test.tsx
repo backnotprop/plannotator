@@ -168,12 +168,14 @@ function dockTabs(): string[] {
   return Array.from(document.querySelectorAll(".dv-tab")).map((el) => el.textContent?.trim() ?? "");
 }
 
-const allFilesShown = () => dockTabs().some((title) => title.includes("All files"));
+// The every-change dock tab is titled "All changes" (approved design record
+// "review-sidebar-header"), so it never reads like the All files scope.
+const allFilesShown = () => dockTabs().some((title) => title.includes("All changes"));
 const noChangesShown = () => document.body.textContent?.includes("No changes") ?? false;
 
 function panelSegment(label: string): HTMLButtonElement | undefined {
-  const group = document.querySelector<HTMLElement>('[role="group"][aria-label="Panel view"]');
-  return Array.from(group?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+  const group = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Panel view"]');
+  return Array.from(group?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
     .find((el) => el.textContent?.trim() === label);
 }
 
@@ -196,6 +198,7 @@ async function pickDiffType(label: string): Promise<void> {
 function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
+  memory.set("plannotator-announce-inbox-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");
   memory.set("plannotator-guide-hint-acked", "true");
   memory.set("plannotator-edit-mode-announcement-seen", "3");

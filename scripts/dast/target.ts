@@ -89,7 +89,8 @@ const scanTarget = Bun.serve({
     const sourceUrl = new URL(request.url);
     if (
       !readOnlyMethods.has(request.method) ||
-      !forwardedPaths.has(sourceUrl.pathname)
+      // The page's packed chunks, so the scan sees their responses too.
+      !(forwardedPaths.has(sourceUrl.pathname) || sourceUrl.pathname.startsWith("/assets/"))
     ) {
       return new Response("Not found", {
         status:

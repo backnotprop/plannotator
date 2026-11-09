@@ -4,8 +4,10 @@
  * Product rule: arbitrary HTML must render exactly as it would in a plain
  * browser tab. The viewer never writes into the document's namespace — no bare
  * CSS custom properties, no classes on the author's root, no `color-scheme`,
- * no styling of author elements. Host theme tokens are pushed under the
- * viewer-owned `--pn-*` prefix, which the annotation CSS reads.
+ * no screen styling of author elements. Print-only defaults keep a page from
+ * being cut off on paper (`injectPrintDefaults`); section page breaks are
+ * added only for a document with the host-theme marker. Host theme tokens
+ * are pushed under the viewer-owned `--pn-*` prefix, which the annotation CSS reads.
  *
  * Documents that WANT to follow the host theme (e.g. Plannotator-generated
  * artifacts) opt in with `<meta name="plannotator-theme" content="host">`,
@@ -15,6 +17,7 @@
  * Pure string logic (no DOM) so the rendering-neutrality contract is unit-testable.
  */
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
 
 export const THEME_TOKENS = [
   "--background",
@@ -160,6 +163,93 @@ export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
   return `<script>${BRIDGE_SCRIPT}</script>`;
 }
 
+// These defaults live inside the sandbox: host print.css cannot style a
+// child document. Every page gets only what keeps it from being cut off on
+// paper: no clipping by an app shell's `height: 100vh; overflow: hidden`, and
+// long code lines wrapped instead of running off the sheet. Otherwise an
+// arbitrary page prints exactly as it would from a browser tab.
+const DOCUMENT_PRINT_CSS = `
+@layer plannotator-print-defaults {
+@media print {
+  :where(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+}
+@media print {
+  html, body { height: auto !important; overflow: visible !important; }
+}
+`;
+
+// Only a document that opts in to the host's look
+// (`<meta name="plannotator-theme" content="host">`, which Plannotator's own
+// explainers carry) gets pagination: each sibling section on a new sheet,
+// headings kept with what follows, and figures, images, diagrams, code and
+// tables kept whole where they fit. Low specificity leaves authored print
+// layouts in control.
+const SECTION_BREAK_PRINT_CSS = `
+@layer plannotator-print-defaults {
+@media print {
+  :where(html, body) { min-height: 0; }
+  :where(section ~ section) { break-before: page; }
+  :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  :where(figure, img, svg, pre, table) { break-inside: avoid; }
+}
+}
+`;
+
+/**
+ * Where an injection goes so it comes before everything the author wrote in
+ * `<head>`: just inside the real `<head>`, or right after the doctype when
+ * there is no `<head>` (before it would put the page in quirks mode). A
+ * `<head` inside a comment, a script, a `<style>`, `<title>` or `<textarea>`,
+ * or an attribute value is skipped. `firstScript` is where the first page
+ * script before that point starts, if one does (a script ahead of `<head>`).
+ */
+function headStart(rawHtml: string): { position: number; firstScript: number | null } {
+  // Built from strings: Semgrep's TypeScript parser cannot read this pattern
+  // as a regex literal, and a file it cannot parse fails the security scan.
+  const attributes = "(?:\"[^\"]*\"|'[^']*'|[^>\"'])*";
+  const tokens = new RegExp(
+    [
+      "<!--[\\s\\S]*?(?:-->|$)",
+      "<script\\b[\\s\\S]*?(?:</script\\s*>|$)",
+      "<(style|title|textarea)\\b[\\s\\S]*?(?:</\\1\\s*>|$)",
+      "<!doctype\\b[^>]*>",
+      `<head\\b${attributes}>`,
+      "<body\\b",
+      `<[a-z][^\\s/>]*${attributes}>`,
+    ].join("|"),
+    "gi",
+  );
+  let afterDoctype = 0;
+  let firstScript: number | null = null;
+  for (let match = tokens.exec(rawHtml); match; match = tokens.exec(rawHtml)) {
+    const token = match[0].toLowerCase();
+    const end = match.index + match[0].length;
+    if (token.startsWith("<script")) firstScript ??= match.index;
+    else if (token.startsWith("<!doctype")) afterDoctype = end;
+    else if (/^<head[\s>]/.test(token)) return { position: end, firstScript };
+    else if (token === "<body") break;
+  }
+  return { position: afterDoctype, firstScript: firstScript !== null && firstScript < afterDoctype ? firstScript : null };
+}
+
+function printDefaultsPosition(rawHtml: string): number {
+  return headStart(rawHtml).position;
+}
+
+/**
+ * Splice the print defaults in ahead of author styles, declaring their layer
+ * before any authored one. Every document gets the no-clip rule (it wins over
+ * an app shell's `html, body { height: 100vh; overflow: hidden }`) and
+ * wrapped code lines; `sectionBreaks` adds the pagination (a new sheet per
+ * section and the keep-together hints).
+ */
+export function injectPrintDefaults(rawHtml: string, { sectionBreaks = false }: { sectionBreaks?: boolean } = {}): string {
+  const style = `<style>${DOCUMENT_PRINT_CSS}${sectionBreaks ? SECTION_BREAK_PRINT_CSS : ""}</style>`;
+  const position = printDefaultsPosition(rawHtml);
+  return rawHtml.slice(0, position) + style + rawHtml.slice(position);
+}
+
 /** The `<style>` + `<script>` block spliced into the document's head. */
 export function buildSrcdocInjection({
   tokens,
@@ -191,7 +281,7 @@ export function buildSrcdocInjection({
  * for its standalone context, so it is removed before injection.
  *
  * The package itself never adds a CSP `<meta>` to the srcdoc document (the
- * injection is one `<style>` and one `<script>`), so nothing here blocks a
+ * injection is `<style>` and `<script>` only), so nothing here blocks a
  * `<script src>` on the URL path. A CSP delivered as an HTTP header on the
  * HOST page is inherited by the srcdoc document, and the host must allow
  * `script-src` for the origin the asset is served from.
@@ -221,6 +311,19 @@ export function prependSrcdocPolicy(html: string, policy: string | undefined): s
   const meta = `<meta http-equiv="Content-Security-Policy" content="${value}">`;
   const doctype = LEADING_DOCTYPE_RE.exec(html);
   return doctype ? html.slice(0, doctype[0].length) + meta + html.slice(doctype[0].length) : meta + html;
+}
+
+/**
+ * The sandbox shim (`sandboxShim.ts`) ahead of every page script, so a page's
+ * own head scripts already find history and storage safe to use: at the start
+ * of `<head>` (or after the doctype when there is none), or just before a
+ * script that comes ahead of `<head>`. The bridge, at the end of `<head>`,
+ * runs it again, which then does nothing.
+ */
+export function injectSandboxShim(html: string): string {
+  const { position, firstScript } = headStart(html);
+  const at = firstScript ?? position;
+  return `${html.slice(0, at)}<script>${SANDBOX_SHIM_SCRIPT}</script>${html.slice(at)}`;
 }
 
 /** Splice the injection just before `</head>`, or prepend when there is none. */

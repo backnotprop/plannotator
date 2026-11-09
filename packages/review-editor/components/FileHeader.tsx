@@ -20,6 +20,8 @@ interface FileHeaderProps {
   /** Chrome preference: false hides the Viewed button (the `V` shortcut and
    *  viewed state are unaffected). */
   showViewedControl?: boolean;
+  /** The review app's keys work here: the Viewed tooltip names its key (V). Off where they do not (the Inbox). */
+  viewedKeyHint?: boolean;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
@@ -60,6 +62,15 @@ interface FileHeaderProps {
    * `iconOnly` on a tight header; `touch` in the compact touch shell.
    */
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
+  /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
+  accessory?: React.ReactNode;
+  /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
+  openIn?: React.ReactNode;
+  /**
+   * A narrow header keeps the folder, dimmed and cut from its start, before the whole name, so two files of one name
+   * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
+   */
+  keepsFolder?: boolean;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -128,6 +139,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isViewed = false,
   onToggleViewed,
   showViewedControl = true,
+  viewedKeyHint = true,
   isStaged = false,
   isStaging = false,
   onStage,
@@ -146,6 +158,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isGenerated = false,
   isTest = false,
   renderMarkdownView,
+  accessory,
+  openIn,
+  keepsFolder = false,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -155,7 +170,10 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const { directory, name } = splitFilePath(filePath);
   const isCompact = headerWidth > 0 && headerWidth < 760;
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
-  const showFilenameOnly = headerWidth > 0 && headerWidth < 560;
+  const narrow = headerWidth > 0 && headerWidth < 560;
+  // Narrow, with keepsFolder: the folder gives way first, from its start (`direction: rtl` puts the ellipsis there).
+  const foldedFolder = narrow && keepsFolder && !!directory;
+  const showFilenameOnly = narrow && !foldedFolder;
   const truncatedName = showFilenameOnly
     ? frontEllipsize(
         name,
@@ -183,6 +201,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   return (
     <div
       ref={headerRef}
+      data-file-header=""
       className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
       style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
     >
@@ -194,7 +213,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         >
           {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
               under tight widths — the icon + tooltip still carry it. */}
-          {status === 'renamed' && oldPath && !showFilenameOnly && !isCompactTouchLayout && (
+          {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
             <>
               <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
                 {oldPath}
@@ -220,6 +239,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             >
               <bdi>{filePath}</bdi>
             </span>
+          ) : foldedFolder ? (
+            <>
+              <span data-file-header-folder="" className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground/70 [direction:rtl]">
+                <bdi>{directory}</bdi>
+              </span>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{name}</span>
+            </>
           ) : (
             <>
               {!showFilenameOnly && directory && (
@@ -254,6 +280,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button
@@ -263,7 +290,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 ? 'bg-success/15 text-success'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isViewed ? "Mark as not viewed (V)" : "Mark as viewed (V)"}
+            title={`${isViewed ? 'Mark as not viewed' : 'Mark as viewed'}${viewedKeyHint ? ' (V)' : ''}`}
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -359,6 +386,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             PR has no checkout or a committed GitButler layer is selected. */}
         {/* Icon-only in the header (the picked app's name shows in the dropdown),
             matching the plan/annotate side. */}
+        {openIn}
         {!readOnly && <OpenInAppButton
           filePath={filePath}
           base={state?.agentCwd ?? null}

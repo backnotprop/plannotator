@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { PlannotatorMod, STORE_LAUNCHES } from './controller'
+import { PromptDropped } from './host'
 import { PLAN_APPROVAL_NEXT_STEP } from './delivery'
+import { inboxCommandBriefing } from './inbox-contract'
 import { CLASSIC_PLAN_REVIEW_TEXT } from './plan'
 import { PLANNOTATOR_BUNDLE_HINT_LINE, PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT } from './tool'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
@@ -98,6 +100,41 @@ describe('plan review', () => {
     expect(launch?.env?.PLANNOTATOR_SESSION_BRIDGE_TOKEN?.length).toBeGreaterThanOrEqual(32)
     const stdin = JSON.parse(host.files.get(`${launchDirOf(launch!)}/stdin`) ?? '{}')
     expect(stdin.plan).toBe(PLAN)
+  })
+
+  // #2197: the CLI names the plan's history project from the session root,
+  // not from its cwd, which a shell cd moves between submits.
+  test("the session root rides the launch's stdin, read once per session", async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    let reads = 0
+    let root = '/work/workspace'
+    const mod = new PlannotatorMod(host, {
+      ...SESSION,
+      root: async () => {
+        reads += 1
+        return root
+      },
+    })
+
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    root = '/work/workspace/service-a'
+    decide(host, launches(host)[0]!, { surface: 'plan', decision: 'denied', message: 'No.', noop: false })
+    await host.tick()
+    await mod.onPlanCall({ tool_use_id: 't2', plan: `${PLAN}2. And more.\n` })
+
+    const roots = launches(host).map((call) => JSON.parse(host.files.get(`${launchDirOf(call)}/stdin`) ?? '{}').projectRoot)
+    expect(roots).toEqual(['/work/workspace', '/work/workspace'])
+    expect(reads).toBe(1)
+  })
+
+  test('without a session root the stdin names none, so the CLI keeps its cwd', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const mod = new PlannotatorMod(host, { ...SESSION, root: async () => '' })
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    const stdin = JSON.parse(host.files.get(`${launchDirOf(launches(host)[0]!)}/stdin`) ?? '{}')
+    expect('projectRoot' in stdin).toBe(false)
   })
 
   test('the plan file wins over a stale inline plan (#1667)', async () => {
@@ -1598,7 +1635,11 @@ describe('/plannotator-inbox', () => {
     host.onRun = (call) =>
       call.argv[1] === 'inbox' ? { exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: '' } : undefined
     const mod = new PlannotatorMod(host, SESSION)
-    const text = await mod.openInbox()
+    const { text, context } = await mod.openInbox('mcp__plannotator__plannotator_inbox')
+    // The model gets the Inbox briefing as the command's hidden context (no
+    // turn), naming the tool as this session registered it.
+    expect(context).toEqual([inboxCommandBriefing('mcp__plannotator__plannotator_inbox')])
+    expect(context![0]).toContain('`mcp__plannotator__plannotator_inbox` tool')
     const call = host.runs.find((run) => run.argv[1] === 'inbox')
     expect(call?.argv).toEqual(['plannotator', 'inbox', '--open'])
     expect(call?.env?.PLANNOTATOR_DATA_DIR).toBe('/data')
@@ -1610,7 +1651,7 @@ describe('/plannotator-inbox', () => {
   test('over SSH the CLI opens no browser and says how to reach the Inbox: the answer passes that on', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: 'No browser opened: this is a remote session. Forward the port (ssh -L 59812:127.0.0.1:59812 <this host>) and open the URL, or run plannotator inbox --tailscale.\n' })
-    const text = await new PlannotatorMod(host, SESSION).openInbox()
+    const { text } = await new PlannotatorMod(host, SESSION).openInbox()
     expect(text).toContain('http://localhost:59812/')
     expect(text).toContain('ssh -L 59812:127.0.0.1:59812')
   })
@@ -1618,10 +1659,106 @@ describe('/plannotator-inbox', () => {
   test('an older CLI without --open is told to update; any other failure says why', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 1, stdout: '', stderr: "Unknown inbox option: --open\nRun 'plannotator inbox --help' for usage.\n" })
-    expect(await new PlannotatorMod(host, SESSION).openInbox()).toContain('plannotator update')
+    // Not opened: the command's answer carries no briefing (register.ts).
+    expect(await new PlannotatorMod(host, SESSION).openInbox()).toEqual({ text: expect.stringContaining('plannotator update') })
 
     const failing = fakeHost()
     failing.onRun = () => ({ exitCode: 1, stdout: '', stderr: 'The Plannotator Inbox did not start; see /data/inbox/inbox.log.\n' })
-    expect(await new PlannotatorMod(failing, SESSION).openInbox()).toContain('/data/inbox/inbox.log')
+    expect((await new PlannotatorMod(failing, SESSION).openInbox()).text).toContain('/data/inbox/inbox.log')
+  })
+})
+
+// The owner's report, for review decisions: Claude Code drops a plugin prompt after the person stopped the session
+// until someone types (`PromptDropped`). The decision was marked delivered, its files cleaned up, and it never went in.
+describe('a decision Claude Code dropped', () => {
+  /** An engine that drops every plugin prompt while `held.value` (any reason: a Stop, an idle compaction). */
+  function stoppedHost(serve = true) {
+    const host = fakeHost()
+    const held = { value: true }
+    const attempts: string[] = []
+    host.submit = async (text) => {
+      attempts.push(text)
+      if (held.value) throw new PromptDropped('plugin input is held')
+      host.submits.push(text)
+    }
+    if (serve) serveOnLaunch(host)
+    return { host, held, attempts }
+  }
+
+  test('is not marked delivered; it goes in once after the person types, and the next decision goes in as usual', async () => {
+    const { host, held, attempts } = stoppedHost()
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'a.md')
+    const [first] = launches(host)
+    const dir = launchDirOf(first!)
+
+    decide(host, first!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nfix it', noop: false, annotationCount: 1 })
+    await host.tick()
+    await host.tick()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.submits).toEqual([])
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(false)
+    expect(host.files.has(`${dir}/stdin`)).toBe(true)
+    expect(host.logs.some((line) => line.startsWith('Could not send'))).toBe(false)
+
+    // The person types: input moves again, and the decision is tried once more.
+    held.value = false
+    mod.onPromptEntered({ text: 'carry on', fromUs: false, originKind: 'composer' })
+    await mod.onTurnStart('turn-1', 'carry on')
+    await host.tick()
+
+    expect(attempts).toHaveLength(2)
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toStartWith('Plannotator: a.md (pn-ababab) — Feedback · 1 comment.')
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(true)
+
+    mod.onTurnComplete('turn-1', 'Done.', false)
+    await mod.runCommand('annotate', 'b.md')
+    decide(host, launches(host)[1]!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nand this', noop: false, annotationCount: 1 })
+    await host.tick()
+
+    expect(host.submits).toHaveLength(2)
+    expect(host.submits[1]).toContain('and this')
+  })
+
+  test("an old CLI's late refusal: the ask to call ExitPlanMode again waits for the person's input, then goes in once", async () => {
+    const { host, held, attempts } = stoppedHost(false)
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    const dir = launchDirOf(launches(host)[0]!)
+    host.files.set(`${dir}/stderr`, 'Unknown command: claude-mod-plan\n')
+    host.files.set(`${dir}/exit`, '1')
+    await host.tick()
+    await host.tick()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.submits).toEqual([])
+
+    held.value = false
+    mod.onPromptEntered({ text: 'carry on', fromUs: false, originKind: 'composer' })
+    await host.tick()
+
+    expect(attempts).toHaveLength(2)
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toContain('Call ExitPlanMode again')
+    expect(host.logs).toEqual([CLASSIC_PLAN_REVIEW_TEXT])
+  })
+
+  test('the session ending while it waits leaves it undelivered, for a restore to report', async () => {
+    const { host, attempts } = stoppedHost()
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'a.md')
+    const [first] = launches(host)
+    const dir = launchDirOf(first!)
+    decide(host, first!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nfix it', noop: false, annotationCount: 1 })
+    await host.tick()
+
+    mod.dispose()
+    for (let index = 0; index < 500; index += 1) await Promise.resolve()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(false)
+    expect(host.files.has(`${dir}/stdin`)).toBe(true)
   })
 })

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deleteAnswer, listAnswers, loadAnswer, newAnswerId, saveAnswer, staleNote, answersPath, type AnswerRecord } from "./answers";
+import { deleteAnswer, fileLinesHash, linesHash, listAnswers, loadAnswer, newAnswerId, saveAnswer, staleNote, answersPath, type AnswerRecord } from "./answers";
 import { deleteSavedGuide } from "../store";
 
 let dir = "";
@@ -77,8 +77,30 @@ describe("answers saved with the guide", () => {
     expect(existsSync(answersPath(a.repoKey, GUIDE))).toBe(false);
   });
 
+  it("says when the lines asked about changed: their text then and now, not the whole file", () => {
+    const code = "const attempt = job.attempt + 1;\nreturn attempt;";
+    const a = record({ about: { ...record().about, fileHash: undefined, codeHash: linesHash(code) } });
+    const file = (body: string) => `// header\n${body}\n// more\n`;
+    // Lines 2-3 of the file now hold the same text: the file changed elsewhere, the answer is not stale.
+    expect(staleNote(a, { codeHash: fileLinesHash(file(code).replace("// more", "// edited"), 2, 3) })).toBeNull();
+    expect(staleNote(a, { codeHash: fileLinesHash(file(code.replace("+ 1", "+ 2")), 2, 3) })).toBe("Written for 9b07e4d; these lines have changed since.");
+    // The file is gone (or shorter): changed.
+    expect(staleNote(a, { codeHash: null })).toBe("Written for 9b07e4d; these lines have changed since.");
+    // Line endings and a final line break do not count.
+    expect(fileLinesHash(file(code).replace(/\n/g, "\r\n"), 2, 3)).toBe(linesHash(code));
+    expect(fileLinesHash("one\n", 2, 3)).toBeNull();
+    // Not known now (a head revision): no note, and no fallback to the head's commit.
+    expect(staleNote(a, { headSha: "1111111" })).toBeNull();
+  });
+
+  it("a question about the old version is never stale (the base does not move), whatever an older record carried", () => {
+    const base = record({ about: { ...record().about, side: "base", fileHash: "head-hash-from-an-older-build" } });
+    expect(staleNote(base, { fileHash: "something-else", headSha: "1111111" })).toBeNull();
+    expect(staleNote(record({ about: { ...record().about, side: "base", fileHash: undefined, codeHash: linesHash("x") } }), {})).toBeNull();
+  });
+
   it("says when the file or the change moved since the answer", () => {
-    const a = record();
+    const a = record({ about: { ...record().about, kind: "file", lines: undefined, code: undefined } });
     expect(staleNote(a, { fileHash: "aaa" })).toBeNull();
     expect(staleNote(a, { fileHash: "bbb" })).toBe("Written for 9b07e4d; the file has changed since.");
     const chapter = record({ about: { kind: "chapter", chapter: 1, chapterTitle: "x" } });

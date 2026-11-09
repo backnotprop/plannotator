@@ -1,15 +1,14 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
+import React, { createContext, useContext, useState, useMemo } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { forgeRefLinks } from "@plannotator/core/forge-refs";
-import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
-import { useFenceTheme } from "../hooks/useFenceTheme";
+import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { CodeSnippetPreview } from "./CodeSnippetPreview";
+import { useHoverPreview } from "../hooks/useHoverPreview";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
+import { CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -77,101 +76,6 @@ function gateCodePath(
   }
 }
 
-function extToLanguage(filepath: string): string | undefined {
-  const ext = filepath.split('.').pop()?.toLowerCase();
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java',
-    css: 'css', scss: 'scss', json: 'json', yml: 'yaml', yaml: 'yaml',
-    sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown',
-    html: 'html', xml: 'xml', toml: 'toml', swift: 'swift', kt: 'kotlin',
-  };
-  return ext ? map[ext] : undefined;
-}
-
-const CodeSnippetPreview: React.FC<{
-  anchorEl: HTMLElement | null;
-  contents: string;
-  filepath: string;
-  line: number;
-  lineEnd?: number;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-}> = ({ anchorEl, contents, filepath, line, lineEnd, onMouseEnter, onMouseLeave }) => {
-  const allLines = contents.split('\n');
-  const start = Math.max(0, line - 1);
-  const end = Math.min(allLines.length, (lineEnd ?? line));
-  const snippet = allLines.slice(start, end).join('\n');
-
-  const fenceTheme = useFenceTheme();
-  // Bumped once the grammar is attached, to re-run the memo below with the
-  // highlighter warm. Until then the snippet renders as plain text — no
-  // auto-detection, and an unknown extension simply stays plain.
-  const [highlighterGeneration, setHighlighterGeneration] = useState(0);
-  const lang = extToLanguage(filepath);
-
-  useEffect(() => {
-    if (!lang) return;
-    let cancelled = false;
-    void ensureHighlight(lang, fenceTheme).then((ok) => {
-      if (ok && !cancelled) setHighlighterGeneration((n) => n + 1);
-    });
-    return () => { cancelled = true; };
-  }, [lang, fenceTheme]);
-
-  const highlightedLines = useMemo(() => {
-    // Highlight the snippet as one unit so multi-line constructs (block
-    // comments, template literals) tokenise correctly, then split back into
-    // rows: the highlighter joins lines with "\n" and never emits one inside a
-    // span, so the split is exact.
-    const html = lang ? highlightToHtml(snippet, lang, fenceTheme) : null;
-    if (html !== null) return html.split('\n');
-    return snippet.split('\n').map(line =>
-      line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-    // highlighterGeneration is the "grammar just became available" signal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snippet, lang, fenceTheme, highlighterGeneration]);
-
-  if (!anchorEl) return null;
-
-  const rect = anchorEl.getBoundingClientRect();
-  const spaceBelow = window.innerHeight - rect.bottom;
-  const showAbove = spaceBelow < 200 && rect.top > spaceBelow;
-  const top = showAbove ? undefined : rect.bottom + 4;
-  const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 520));
-
-  return createPortal(
-    <div
-      className="fixed z-[9999] rounded-lg border border-border bg-card shadow-xl flex flex-col"
-      style={{ top, bottom, left, maxWidth: 'min(600px, 90vw)', maxHeight: '300px' }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between gap-4 flex-shrink-0">
-        <span>{filepath.split('/').pop()}</span>
-        <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
-      </div>
-      <div className="code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
-        <table className="border-collapse w-full">
-          <tbody>
-            {snippet.split('\n').map((_, i) => (
-              <tr key={start + i} className="hover:bg-white/5">
-                <td className="select-none text-muted-foreground/40 text-right pr-3 pl-3 py-0 align-top font-mono w-8 whitespace-nowrap" style={{ userSelect: 'none' }}>{start + i + 1}</td>
-                <td
-                  className="font-mono pr-3 py-0 whitespace-pre"
-                  dangerouslySetInnerHTML={{ __html: highlightedLines[i] ?? '' }}
-                />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>,
-    document.body,
-  );
-};
-
 const CodeFileLink: React.FC<{
   candidate: string;
   display: string;
@@ -181,57 +85,16 @@ const CodeFileLink: React.FC<{
   const validation = useCodePathValidation();
   const gate = gateCodePath(candidate, validation);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [hoverPreview, setHoverPreview] = useState<{ contents: string; filepath: string } | null>(null);
-  const hoverPreviewRef = useRef(hoverPreview);
-  hoverPreviewRef.current = hoverPreview;
-  const anchorRef = useRef<HTMLElement | null>(null);
-  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parsed = parseCodePath(candidate);
   const hasLineRef = parsed.line != null;
-
-  const cancelHide = useCallback(() => {
-    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-  }, []);
-
-  const scheduleHide = useCallback(() => {
-    cancelHide();
-    hideTimerRef.current = setTimeout(() => {
-      setHoverPreview(null);
-    }, 200);
-  }, [cancelHide]);
-
-  const handleMouseEnter = useCallback(() => {
-    if (!hasLineRef || gate.render === 'plain') return;
-    cancelHide();
-    if (hoverPreviewRef.current) return;
-    showTimerRef.current = setTimeout(async () => {
-      try {
-        const data = await docPreviewFetcher(candidate, baseDir);
-        if (data?.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
-      } catch {}
-    }, 150);
-  }, [candidate, hasLineRef, gate.render, cancelHide, baseDir]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (showTimerRef.current) { clearTimeout(showTimerRef.current); showTimerRef.current = null; }
-    scheduleHide();
-  }, [scheduleHide]);
-
-  const handlePreviewEnter = useCallback(() => {
-    cancelHide();
-  }, [cancelHide]);
-
-  const handlePreviewLeave = useCallback(() => {
-    scheduleHide();
-  }, [scheduleHide]);
-
-  useEffect(() => {
-    return () => {
-      if (showTimerRef.current) clearTimeout(showTimerRef.current);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, []);
+  const hover = useHoverPreview<{ contents: string; filepath: string }>(async () => {
+    const data = await docPreviewFetcher(candidate, baseDir);
+    return data?.contents ? { contents: data.contents, filepath: data.filepath ?? candidate } : null;
+  }, hasLineRef && gate.render !== 'plain');
+  const hoverPreview = hover.preview;
+  const anchorRef = hover.anchorRef;
+  const handleMouseEnter = hover.onEnter;
+  const handleMouseLeave = hover.onLeave;
 
   if (gate.render === 'plain') {
     return (
@@ -280,8 +143,7 @@ const CodeFileLink: React.FC<{
           filepath={hoverPreview.filepath}
           line={parsed.line!}
           lineEnd={parsed.lineEnd}
-          onMouseEnter={handlePreviewEnter}
-          onMouseLeave={handlePreviewLeave}
+          {...hover.previewHandlers}
         />
       )}
       {pickerOpen && isAmbiguous && (
@@ -297,6 +159,30 @@ const CodeFileLink: React.FC<{
 };
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
+/**
+ * A code span at the start of `text`, as CommonMark reads one: a run of N
+ * backticks closed by the next run of exactly N, so a span can hold shorter
+ * runs (``use `x` here``). One space comes off each side when both sides have
+ * one and the content is not all spaces, so `` `x` `` shows `x` in backticks.
+ * Null when no run of the same length closes it.
+ */
+export function matchCodeSpan(text: string): { content: string; length: number } | null {
+  const open = /^`+/.exec(text);
+  if (!open) return null;
+  const width = open[0].length;
+  const runs = /`+/g;
+  runs.lastIndex = width;
+  for (let run = runs.exec(text); run; run = runs.exec(text)) {
+    if (run[0].length !== width) continue;
+    let content = text.slice(width, run.index);
+    if (content.length > 1 && content[0] === ' ' && content[content.length - 1] === ' ' && content.trim() !== '') {
+      content = content.slice(1, -1);
+    }
+    return content ? { content, length: run.index + width } : null;
+  }
+  return null;
+}
+
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
   return url;
@@ -350,6 +236,9 @@ function canRenderSpacedDollarMath(tex: string): boolean {
   const trimmed = normalizeMathTex(tex);
   if (!trimmed) return false;
   if (!/^\s|\s$/.test(tex)) return true;
+  // Padding must be symmetric (`$ y $`). In `$write-better on the copy, and $`
+  // the closing `$` is really the opener of the next `$skill` token.
+  if (/^\s/.test(tex) !== /\s$/.test(tex)) return false;
   return (
     /\\[a-zA-Z]+/.test(trimmed) ||
     /[=^_{}+\-*/<>|]/.test(trimmed) ||
@@ -557,6 +446,13 @@ const HostResolvedImage: React.FC<{
  */
 let digitHexIssueRefs = false;
 
+/**
+ * Forge comment text (a GitHub issue, PR or comment body) shows every newline
+ * as a line break. Provided by `RenderedMarkdown`'s `softLineBreaks` prop;
+ * absent (false), a bare newline stays a soft break (a space), as in files.
+ */
+export const SoftLineBreaksContext = createContext<boolean>(false);
+
 export function setDigitHexIssueRefs(on: boolean): void {
   digitHexIssueRefs = on;
 }
@@ -604,11 +500,25 @@ export const InlineMarkdown: React.FC<{
   githubRepo?: string;
   /** Host of that repo's git remote; picks the forge refs link to. Absent means github.com. */
   repoHost?: string;
-}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
+  /**
+   * The text is a link's label: code, emphasis, strikethrough, escapes, math
+   * and images render, and nothing that is itself a link does, since a link
+   * cannot hold another.
+   */
+  linkLabel?: boolean;
+}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
+  // Cross-repo `owner/repo#123` refs: only for a caller that names its
+  // project's repo (it knows the forge); otherwise they stay plain text, never
+  // a guessed github.com link. With a code-file handler, an `owner/repo` that
+  // is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  const crossRepoAccept = (ref: CrossRepoRef): boolean =>
+    !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -692,7 +602,7 @@ export const InlineMarkdown: React.FC<{
     // renders the period outside the link. Closing brackets are kept when
     // they balance an earlier opener inside the URL (e.g. Wikipedia's
     // https://…/Function_(mathematics) keeps its trailing paren).
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       const bareMatch = remaining.match(/^https?:\/\/[^\s<>"']+/);
       if (bareMatch) {
         const url = trimUrlTail(bareMatch[0]);
@@ -716,9 +626,35 @@ export const InlineMarkdown: React.FC<{
       }
     }
 
+    // Cross-repo ref: owner/repo#123, shown as written, linked on the
+    // project's forge host. Read before file-path detection, so
+    // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
+    // file, see crossRepoAccept); `docs/guide.md#2` stays a path.
+    const crossRepoRef = crossRepoProject && !linkLabel ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
+    if (crossRepoRef && crossRepoAccept(crossRepoRef)) {
+      parts.push(
+        crossRepoRef.href ? (
+          <a
+            key={key++}
+            href={crossRepoRef.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary font-medium hover:underline"
+          >
+            {crossRepoRef.label}
+          </a>
+        ) : (
+          crossRepoRef.label
+        ),
+      );
+      remaining = remaining.slice(crossRepoRef.label.length);
+      previousChar = crossRepoRef.label[crossRepoRef.label.length - 1];
+      continue;
+    }
+
     // Autolinks: <https://url> or <email@domain.com>
     match = remaining.match(/^<(https?:\/\/[^>]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const url = match[1];
       parts.push(
         <a
@@ -736,7 +672,7 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const email = match[1];
       parts.push(
         <a
@@ -882,9 +818,18 @@ export const InlineMarkdown: React.FC<{
     }
 
     // Inline code: `code` — when the content is a code file path, render as clickable
-    match = remaining.match(/^`([^`]+)`/);
-    if (match) {
-      const codeContent = match[1];
+    const codeSpan = remaining[0] === '`' ? matchCodeSpan(remaining) : null;
+    if (remaining[0] === '`' && !codeSpan) {
+      // A run with no closing run of the same length is literal, all of it: its
+      // tail must not open a shorter span with a later backtick.
+      const run = remaining.match(/^`+/)![0];
+      parts.push(run);
+      remaining = remaining.slice(run.length);
+      previousChar = '`';
+      continue;
+    }
+    if (codeSpan) {
+      const codeContent = codeSpan.content;
       if (isCodeFilePath(codeContent) && onOpenCodeFile) {
         const cleanPath = codeContent.replace(/#.*$/, '');
         parts.push(
@@ -898,16 +843,15 @@ export const InlineMarkdown: React.FC<{
         );
       } else {
         parts.push(
-          <code
-            key={key++}
-            className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono"
-          >
-            {codeContent}
-          </code>,
+          <CodeSpan key={key++} text={codeContent}>
+            <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
+              {codeContent}
+            </code>
+          </CodeSpan>,
         );
       }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
+      remaining = remaining.slice(codeSpan.length);
+      previousChar = '`';
       continue;
     }
 
@@ -950,7 +894,7 @@ export const InlineMarkdown: React.FC<{
     // Issue / PR reference: #123 — only at word boundary, digits only.
     // Hex-swatch branch above already consumed #fff / #123abc etc. (and digit-only
     // #123456 / #12345678 unless the host opted in), so a bare #\d+ here is an issue ref.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^#(\d+)(?!\w)/);
       if (match) {
         const num = match[1];
@@ -978,7 +922,7 @@ export const InlineMarkdown: React.FC<{
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^@([a-zA-Z][a-zA-Z0-9_-]{0,38})(?!\w)/);
       if (match) {
         const handle = match[1];
@@ -1007,7 +951,7 @@ export const InlineMarkdown: React.FC<{
 
     // Wikilinks: [[filename]] or [[filename|display text]]
     match = remaining.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
-    if (match) {
+    if (match && !linkLabel) {
       const target = match[1].trim();
       const storedLabel = match[2]?.trim();
       // Host resolution gets the RAW target (pre-`.md` normalization): host
@@ -1128,7 +1072,7 @@ export const InlineMarkdown: React.FC<{
     // /Function_(mathematics)). Plain `[^)]+` would truncate at the first
     // inner close-paren, so we scan the destination manually tracking depth.
     const linkParsed = (() => {
-      if (remaining[0] !== '[') return null;
+      if (linkLabel || remaining[0] !== '[') return null;
       let i = 1;
       let depth = 1;
       while (i < remaining.length && depth > 0) {
@@ -1159,11 +1103,13 @@ export const InlineMarkdown: React.FC<{
     })();
     if (linkParsed) {
       const { linkText, linkUrl, consumed } = linkParsed;
+      // Its label is markdown too (`` [`README.md`](…) ``), drawn without links.
+      const label = <InlineMarkdown text={linkText} linkLabel imageBaseDir={imageBaseDir} githubRepo={githubRepo} repoHost={repoHost} />;
       const safeLinkUrl = sanitizeLinkUrl(linkUrl);
 
       // Dangerous protocol stripped — render as plain text, not a dead link
       if (safeLinkUrl === null) {
-        parts.push(<span key={key++}>{linkText}</span>);
+        parts.push(<span key={key++}>{label}</span>);
         remaining = remaining.slice(consumed);
         previousChar = ')';
         continue;
@@ -1203,7 +1149,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             data-local-link="open"
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1222,13 +1168,17 @@ export const InlineMarkdown: React.FC<{
           </HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
-        parts.push(
-          <HostTitle key={key++} title={localLink.title}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-              {linkText}
-            </span>
-          </HostTitle>,
+        const inert = (
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {label}
+          </span>
         );
+        parts.push(
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{inert}</HostTitle>,
+        );
+        if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
       } else if (isInPageAnchor) {
         parts.push(
           <a
@@ -1240,7 +1190,7 @@ export const InlineMarkdown: React.FC<{
             } : undefined}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else if (isLocalDoc && onOpenLinkedDoc) {
@@ -1255,7 +1205,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`Open: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1284,7 +1234,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`View: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <CodeFileIcon />
           </a>,
         );
@@ -1296,7 +1246,7 @@ export const InlineMarkdown: React.FC<{
             href={safeLinkUrl}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else {
@@ -1308,12 +1258,20 @@ export const InlineMarkdown: React.FC<{
             rel="noopener noreferrer"
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       }
       remaining = remaining.slice(consumed);
       previousChar = ')';
+      continue;
+    }
+
+    // Forge text: a bare newline is a line break too.
+    if (softLineBreaks && remaining[0] === "\n") {
+      parts.push(<br key={key++} />);
+      remaining = remaining.slice(1);
+      previousChar = "\n";
       continue;
     }
 
@@ -1348,22 +1306,29 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@$]/);
+    const nextSpecial = remaining.slice(1).search(softLineBreaks ? /[\*_`\[!~\\<#@$\n]/ : /[\*_`\[!~\\<#@$]/);
     // A bare URL that starts inside this plain-text chunk and runs past its
     // end would be cut there, and `_`, `~`, `#`, `@`, `$` and `!` all end a
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where
     // that URL starts instead, so the bare-URL branch above takes it whole.
     const chunkEnd = nextSpecial === -1 ? remaining.length : nextSpecial + 1;
-    const urlStart = bareUrlRunningPast(remaining, chunkEnd);
-    if (urlStart !== -1) {
-      const before = remaining.slice(0, urlStart);
-      emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+    // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
+    // stop before the ref and let the cross-repo branch above take it whole.
+    // A ref inside a URL never splits it: the URL starts first and wins.
+    const urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
+    const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
+    const splitAt = refAt !== -1 ? refAt : urlAt;
+    if (splitAt !== -1) {
+      const before = remaining.slice(0, splitAt);
+      if (linkLabel) parts.push(transformPlainText(before));
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
       previousChar = before[before.length - 1] || previousChar;
-      remaining = remaining.slice(urlStart);
+      remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+    if (linkLabel) parts.push(transformPlainText(plainText));
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

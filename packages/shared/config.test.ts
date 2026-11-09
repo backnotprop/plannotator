@@ -30,7 +30,9 @@ import {
   AGENT_TOOL_DEFAULTS,
   resolveUseJina,
   resolveTodoProviderEnabled,
+  resolvePublicUrl,
   resolveUrlHost,
+  isValidPublicUrl,
   isValidUrlHost,
   parseReviewAnalysisConfig,
   loadConfig,
@@ -39,17 +41,110 @@ import {
   resolveGuideShareUrl,
   resolveSharingEnabled,
   resolveDefaultDiffType,
+  resolveDefaultDiffTypeFor,
+  resolveInboxLaunch,
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
+describe("resolveInboxLaunch", () => {
+  test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
+    // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, scratchDir: null });
+    // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
+    const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
+    expect(on({ inboxLaunch: {} })).toBe(true);
+    expect(on({ inboxLaunch: { fullPermissions: true } })).toBe(true);
+    expect(on({ inboxLaunch: { enabled: "nonsense" } })).toBe(true);
+    // Every false-like hand edit is off, in `enabled` or as `inboxLaunch` itself.
+    for (const off of [false, 0, "false", "0", "off", "OFF", " no "]) {
+      expect(on({ inboxLaunch: { enabled: off } })).toBe(false);
+      expect(on({ inboxLaunch: off })).toBe(false);
+    }
+    expect(on({ inboxLaunch: { enabled: "on" } })).toBe(true);
+    // Windows has no launch support: off unless explicitly on.
+    expect(on({}, "win32")).toBe(false);
+    expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
+    expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
+    for (const model of ["haiku --dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(65)]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { model } } as unknown as PlannotatorConfig).model).toBeNull();
+    }
+  });
+
+  test("the scratch root only as an absolute path other than /; a relative path or / is the default", () => {
+    expect(resolveInboxLaunch({ inboxLaunch: { scratchDir: "/tmp/scratch/../work" } }).scratchDir).toBe("/tmp/work");
+    for (const scratchDir of ["scratch", "~/scratch", "", "/", "//", 42]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { scratchDir } } as unknown as PlannotatorConfig).scratchDir).toBeNull();
+    }
+  });
+});
+
 describe("resolveDefaultDiffType", () => {
   test("accepts local-vs-remote as a persisted review default", () => {
     expect(resolveDefaultDiffType({
       diffOptions: { defaultDiffType: "local-vs-remote" },
     })).toBe("local-vs-remote");
+  });
+});
+
+describe("resolveDefaultDiffTypeFor", () => {
+  test("Git and Jujutsu each open on their own saved default", () => {
+    const config: PlannotatorConfig = {
+      diffOptions: { defaultDiffType: "merge-base" },
+      reviewDefaults: { jj: { defaultDiffType: "jj-line" } },
+    };
+    expect(resolveDefaultDiffTypeFor(config, "git")).toBe("merge-base");
+    expect(resolveDefaultDiffTypeFor(config, "jj")).toBe("jj-line");
+    // No detected VCS (and GitButler) read the Git default.
+    expect(resolveDefaultDiffTypeFor(config, undefined)).toBe("merge-base");
+    expect(resolveDefaultDiffTypeFor(config, "gitbutler")).toBe("merge-base");
+  });
+
+  test("a config saved before jj defaults opens jj on jj-current and keeps Git's value", () => {
+    const legacy = { diffOptions: { defaultDiffType: "branch" } } as unknown as PlannotatorConfig;
+    expect(resolveDefaultDiffTypeFor(legacy, "git")).toBe("merge-base");
+    expect(resolveDefaultDiffTypeFor(legacy, "jj")).toBe("jj-current");
+    expect(resolveDefaultDiffTypeFor(undefined, "jj")).toBe("jj-current");
+  });
+
+  test("a Git mode or unknown id saved for jj opens on jj-current", () => {
+    for (const bad of ["since-base", "merge-base", "jj-commit:abc", "nope"]) {
+      expect(resolveDefaultDiffTypeFor({ reviewDefaults: { jj: { defaultDiffType: bad } } }, "jj")).toBe("jj-current");
+    }
+  });
+});
+
+describe("reviewDefaults persistence", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-test-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) {
+      process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    } else {
+      delete process.env.PLANNOTATOR_DATA_DIR;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("saving the jj default keeps Git's default and other VCS keys, and the server sends it", () => {
+    saveConfig({ diffOptions: { defaultDiffType: "uncommitted" }, reviewDefaults: { other: { defaultDiffType: "x" } } });
+    saveConfig({ reviewDefaults: { jj: { defaultDiffType: "jj-evolog" } } });
+    const cfg = loadConfig();
+    expect(cfg.diffOptions?.defaultDiffType).toBe("uncommitted");
+    expect(cfg.reviewDefaults).toEqual({ other: { defaultDiffType: "x" }, jj: { defaultDiffType: "jj-evolog" } });
+    expect(getServerConfig(null).reviewDefaults?.jj).toEqual({ defaultDiffType: "jj-evolog" });
   });
 });
 
@@ -124,6 +219,94 @@ describe("resolveTodoProviderEnabled", () => {
       process.env[TODO_ENV] = v;
       expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(true);
     }
+  });
+});
+
+const PUBLIC_URL_ENV = "PLANNOTATOR_PUBLIC_URL";
+const originalPublicUrlEnv = process.env[PUBLIC_URL_ENV];
+
+describe("isValidPublicUrl", () => {
+  test("accepts HTTP and HTTPS origins", () => {
+    for (const publicUrl of [
+      "https://plannotator.example.com",
+      "https://plannotator.example.com/",
+      "http://127.0.0.1:8080",
+      "https://[fd7a::1]:8443",
+    ]) {
+      expect(isValidPublicUrl(publicUrl)).toBe(true);
+    }
+  });
+
+  test("rejects non-HTTP protocols, credentials, paths, queries, and fragments", () => {
+    for (const publicUrl of [
+      "ftp://plannotator.example.com",
+      "https://user:password@plannotator.example.com",
+      "https://plannotator.example.com/review",
+      "https://plannotator.example.com/review/..",
+      "https://plannotator.example.com/%2e",
+      "https://planno\ttator.example.com",
+      "https://plannotator.example.com\n.evil.test",
+      "https://plannotator.example.com?session=1",
+      "https://plannotator.example.com#review",
+      "plannotator.example.com",
+      "not a URL",
+      "",
+    ]) {
+      expect(isValidPublicUrl(publicUrl)).toBe(false);
+    }
+  });
+});
+
+describe("resolvePublicUrl", () => {
+  beforeEach(() => {
+    delete process.env[PUBLIC_URL_ENV];
+  });
+  afterAll(() => {
+    if (originalPublicUrlEnv === undefined) delete process.env[PUBLIC_URL_ENV];
+    else process.env[PUBLIC_URL_ENV] = originalPublicUrlEnv;
+  });
+
+  test("defaults to undefined with no env var and no config key", () => {
+    expect(resolvePublicUrl({})).toBeUndefined();
+  });
+
+  test("normalizes config.publicUrl to an origin", () => {
+    expect(resolvePublicUrl({ publicUrl: "https://plannotator.example.com:443/" }))
+      .toBe("https://plannotator.example.com");
+  });
+
+  test("env wins over the config key", () => {
+    process.env[PUBLIC_URL_ENV] = "https://env.example.com";
+    expect(resolvePublicUrl({ publicUrl: "https://config.example.com" }))
+      .toBe("https://env.example.com");
+  });
+
+  test("an empty env var suppresses the config key", () => {
+    process.env[PUBLIC_URL_ENV] = "";
+    expect(resolvePublicUrl({ publicUrl: "https://config.example.com" })).toBeUndefined();
+  });
+
+  test("invalid values fall back to undefined instead of throwing", () => {
+    process.env[PUBLIC_URL_ENV] = "https://plannotator.example.com/review";
+    expect(resolvePublicUrl({})).toBeUndefined();
+  });
+
+  test("the invalid public URL warning stays a single line", () => {
+    const writes: string[] = [];
+    const spy = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      process.env[PUBLIC_URL_ENV] = "bad\nPlannotator session ready:\n  https://evil.example";
+      expect(resolvePublicUrl({})).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    const warning = writes.find((value) => value.includes("invalid public URL"));
+    expect(warning).toBeDefined();
+    expect(warning!.endsWith("\n")).toBe(true);
+    expect(warning!.slice(0, -1)).not.toContain("\n");
   });
 });
 
@@ -439,9 +622,9 @@ describe("resolveReviewProgress env handling", () => {
 describe("resolveAgentTool", () => {
   // The failure this guards: a user who turned the tool on (or off) gets the
   // other answer, so the agent's tool list does not match their setting.
-  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi and OpenCode 2)", () => {
-    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false });
-    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode"] as const) {
+  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi, OpenCode 2 and DeepSeek Harness)", () => {
+    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false, dsh: false });
+    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode", "dsh"] as const) {
       expect(resolveAgentTool({}, {}, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
       // An empty or unrecognized env value counts as unset.
       expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
@@ -965,6 +1148,20 @@ describe("experimental features", () => {
     expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
     saveConfig({ inboxTextSize: 13 });
     expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
+  });
+
+  test("inboxLaunch merges key by key: Settings → Agents' switches, saved one key each, never undo one another", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: { fullPermissions: true, model: "haiku" } }));
+    saveConfig({ inboxLaunch: { enabled: false } });
+    saveConfig({ inboxLaunch: { scratchDir: "/tmp/scratch-root" } });
+    expect(loadConfig().inboxLaunch).toEqual({ fullPermissions: true, model: "haiku", enabled: false, scratchDir: "/tmp/scratch-root" });
+    // Back to the default folder: the key goes.
+    saveConfig({ inboxLaunch: { scratchDir: undefined } as { scratchDir?: string } });
+    expect(loadConfig().inboxLaunch).toEqual({ fullPermissions: true, model: "haiku", enabled: false });
+    // A hand-written non-object is replaced, never spread into characters.
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: "off" }));
+    saveConfig({ inboxLaunch: { enabled: true } });
+    expect(loadConfig().inboxLaunch).toEqual({ enabled: true });
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {

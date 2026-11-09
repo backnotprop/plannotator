@@ -6,7 +6,7 @@
  * catches: a reply to a working agent that reads as dropped, a Send now that
  * is offered where nothing can take it, and a press that posts nothing.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

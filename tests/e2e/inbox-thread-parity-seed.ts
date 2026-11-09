@@ -64,6 +64,7 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
+    PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     PLANNOTATOR_INSTALL_SCRIPT_URL: 'http://127.0.0.1:9/install.sh',
   };
 }
@@ -336,7 +337,7 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
       return Boolean(t.messages.find((m) => m.id === merged.message_id)?.ack?.settled_at);
     });
     // Pi picks it up: the pill reads "Delivered to Pi" and the row's tick is Delivered.
-    await pi.waitForReply(merged.thread_id, 20);
+    await pi.readThread(merged.thread_id);
   } finally {
     await Promise.all(agents.map((a) => a.close().catch(() => {})));
     await stop(dataDir);

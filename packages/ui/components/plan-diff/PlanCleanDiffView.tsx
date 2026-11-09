@@ -8,13 +8,15 @@
 
 import React, { useEffect, useRef, useState, useCallback, createContext, useContext, useMemo } from "react";
 import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
-import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from "../../utils/codeHighlight";
+import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout, ensureHighlight, highlightToRuns, type HighlightRun } from "../../utils/codeHighlight";
+import { chunkSegments, codeSegmentsToHtml, wordDiffSegments } from "../../utils/codeDiffSegments";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import {
+  computeCodeInlineDiff,
   foldUnchangedPlanDiff,
   type PlanDiffBlock,
   type PlanDiffFold,
@@ -42,6 +44,15 @@ export type PlanDiffBlockRenderer = (
 
 /** Provided only when a host passes `renderBlock`; absent, chunks render as always. */
 const RenderBlockContext = createContext<PlanDiffBlockRenderer | null>(null);
+
+/** A config or data file diffed as its own text: see `codeDocument`. */
+export interface PlanDiffCodeDocument {
+  /** Shiki grammar for the chunks, or undefined for plain monospace text. */
+  language?: string;
+}
+
+/** Provided only when a host passes `codeDocument`; absent, chunks parse as markdown. */
+const CodeDocumentContext = createContext<PlanDiffCodeDocument | null>(null);
 
 interface PlanCleanDiffViewProps {
   blocks: PlanDiffBlock[];
@@ -80,9 +91,23 @@ interface PlanCleanDiffViewProps {
    * (`opacity-60 hover:opacity-100 transition-opacity`).
    */
   unchangedClassName?: string;
+  /**
+   * Optional: the document is a config or data file (`renderAs: "code"`).
+   * Every chunk renders as its own monospace text in `language` instead of
+   * being parsed as markdown, so a `#` comment stays a comment, and a
+   * modified block word-diffs the raw text. `renderBlock` is not used.
+   * Absent, the view renders exactly as before.
+   */
+  codeDocument?: PlanDiffCodeDocument;
 }
 
 const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity";
+
+/**
+ * The strike on a removed block. A config file's chunks strike their own text
+ * instead (see `chunkSegments`), so a removed line's indentation stays unstruck.
+ */
+const STRIKE_CLASS = "line-through decoration-destructive/30";
 
 export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   blocks,
@@ -96,6 +121,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   lineGutter = false,
   foldUnchanged = false,
   unchangedClassName,
+  codeDocument,
 }) => {
   const modeRef = useRef<EditorMode>(mode);
   const onAddAnnotationRef = useRef(onAddAnnotation);
@@ -426,7 +452,9 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
 
   return (
     <div className="space-y-1">
-      {renderBlock ? (
+      {codeDocument ? (
+        <CodeDocumentContext.Provider value={codeDocument}>{body}</CodeDocumentContext.Provider>
+      ) : renderBlock ? (
         <RenderBlockContext.Provider value={renderBlock}>{body}</RenderBlockContext.Provider>
       ) : (
         body
@@ -554,6 +582,7 @@ interface DiffBlockRendererProps {
 const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
   block, index, hoveredIndex, hoveredDiffContext, isBlockAnnotated, wordLevel, unchangedClassName, onHover, onLeave, onClick,
 }) => {
+  const codeDocument = useContext(CodeDocumentContext);
   const hoverProps = (diffContext: Annotation['diffContext']) => onHover ? {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) => onHover(e.currentTarget, diffContext),
     onMouseLeave: () => onLeave?.(),
@@ -573,7 +602,13 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
   switch (block.type) {
     case "unchanged":
       return (
-        <div className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`}>
+        <div
+          className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`}
+          data-doc-text=""
+          // A config file reads by its columns: line its unchanged chunks up
+          // with the changed ones, which sit past a 3px border and 0.75rem.
+          style={codeDocument ? { paddingLeft: "calc(3px + 0.75rem)" } : undefined}
+        >
           <MarkdownChunk content={block.content} />
         </div>
       );
@@ -592,7 +627,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
     case "removed":
       return (
         <div
-          className={`plan-diff-removed line-through decoration-destructive/30 opacity-70 transition-shadow ${ringClass('removed')}`}
+          className={`plan-diff-removed ${codeDocument ? "" : `${STRIKE_CLASS} `}opacity-70 transition-shadow ${ringClass('removed')}`}
           data-diff-block-index={index}
           {...hoverProps('removed')}
         >
@@ -600,12 +635,33 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
         </div>
       );
 
-    case "modified":
+    case "modified": {
+      // A config file word-diffs its raw text; the engine's tokens come from
+      // the markdown parse, which drops a comment's `#` and reads `- ` as a list.
+      const codeTokens = codeDocument && wordLevel ? computeCodeInlineDiff(block.oldContent ?? "", block.content) : null;
+      if (codeDocument && codeTokens) {
+        const { style: hoverStyle, ...hoverRest } = hoverProps('modified');
+        return (
+          <div
+            data-diff-block-index={index}
+            className={`plan-diff-modified transition-shadow ${ringClass('modified')}`}
+            style={hoverStyle}
+            {...hoverRest}
+          >
+            <CodeWordDiff
+              oldText={block.oldContent ?? ""}
+              newText={block.content}
+              tokens={codeTokens}
+              language={codeDocument.language}
+            />
+          </div>
+        );
+      }
       // When the engine populated inlineTokens, we render a single in-context
       // block with <ins>/<del> spans inside the structural wrapper. Falls
       // back to the stacked strike-through rendering when tokens are absent
       // (gate rejected: code/table/structural mismatch/inline-code hazard).
-      if (wordLevel && block.inlineTokens && block.inlineWrap) {
+      if (!codeDocument && wordLevel && block.inlineTokens && block.inlineWrap) {
         return (
           <InlineModifiedBlock
             tokens={block.inlineTokens}
@@ -619,7 +675,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
       return (
         <div data-diff-block-index={index}>
           <div
-            className={`plan-diff-removed line-through decoration-destructive/30 opacity-60 transition-shadow ${ringClass('removed')}`}
+            className={`plan-diff-removed ${codeDocument ? "" : `${STRIKE_CLASS} `}opacity-60 transition-shadow ${ringClass('removed')}`}
             {...hoverProps('removed')}
           >
             <MarkdownChunk content={block.oldContent!} side="old" />
@@ -632,6 +688,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
           </div>
         </div>
       );
+    }
 
     default:
       return null;
@@ -753,7 +810,88 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
 
 // --- Rendering components (unchanged from main) ---
 
+/**
+ * One chunk of a config or data file: its own lines in monospace, highlighted
+ * in the file's language. Chunks sit flush so the diff reads as one file; the
+ * `pn-code` fence styling (padding, its own background) would box each one.
+ */
+const CODE_CHUNK_CLASS = "font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] px-2 py-0.5 m-0 bg-transparent";
+
+/** A chunk ends with its last line's newline, which is not another line. */
+const chunkText = (content: string) => content.replace(/\n$/, "");
+
+/**
+ * Shiki's runs for `text` in `language`, or null while the grammar attaches
+ * (the chunk shows plain, then re-renders once it is ready) or without one.
+ */
+function useHighlightRuns(text: string, language: string | undefined): HighlightRun[] | null {
+  const fenceTheme = useFenceTheme();
+  const [attached, setAttached] = useState(0);
+  const runs = useMemo(
+    () => (language ? highlightToRuns(text, language, fenceTheme) : null),
+    // `attached` re-reads the runs once ensureHighlight below lands.
+    [text, language, fenceTheme, attached],
+  );
+  const waiting = Boolean(language) && runs === null;
+  useEffect(() => {
+    if (!waiting || !language) return;
+    let live = true;
+    void ensureHighlight(language, fenceTheme).then((ok) => {
+      if (ok && live) setAttached((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, [waiting, language, fenceTheme]);
+  return runs;
+}
+
+const CodeChunk: React.FC<{ content: string; language?: string; side: PlanDiffSide }> = ({ content, language, side }) => {
+  const text = chunkText(content);
+  const runs = useHighlightRuns(text, language);
+  const html = useMemo(() => codeSegmentsToHtml(chunkSegments(text, runs, side === "old")), [text, runs, side]);
+  return (
+    <pre className={CODE_CHUNK_CLASS} data-plan-diff-code="">
+      <code
+        className={`font-mono${language ? ` language-${language}` : ""}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </pre>
+  );
+};
+
+/** A modified block's word diff, each side's words in that side's colours. */
+const CodeWordDiff: React.FC<{
+  oldText: string;
+  newText: string;
+  tokens: InlineDiffToken[];
+  language?: string;
+}> = ({ oldText, newText, tokens, language }) => {
+  const oldPlain = chunkText(oldText);
+  const newPlain = chunkText(newText);
+  const oldRuns = useHighlightRuns(oldPlain, language);
+  const newRuns = useHighlightRuns(newPlain, language);
+  const html = useMemo(
+    () => codeSegmentsToHtml(wordDiffSegments(oldPlain, newPlain, tokens, oldRuns, newRuns)),
+    [oldPlain, newPlain, tokens, oldRuns, newRuns],
+  );
+  return (
+    <pre className={CODE_CHUNK_CLASS} data-plan-diff-code="">
+      <code
+        className={`font-mono${language ? ` language-${language}` : ""}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </pre>
+  );
+};
+
 const MarkdownChunk: React.FC<{ content: string; side?: PlanDiffSide }> = ({ content, side = "new" }) => {
+  const codeDocument = useContext(CodeDocumentContext);
+  if (codeDocument) return <CodeChunk content={content} language={codeDocument.language} side={side} />;
+  return <ParsedMarkdownChunk content={content} side={side} />;
+};
+
+const ParsedMarkdownChunk: React.FC<{ content: string; side: PlanDiffSide }> = ({ content, side }) => {
   const renderBlock = useContext(RenderBlockContext);
   const blocks = React.useMemo(
     () => parseMarkdownToBlocks(content),

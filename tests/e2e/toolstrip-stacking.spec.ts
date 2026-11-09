@@ -261,7 +261,9 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
     const fileUrl = `${url}#thread=${sent.thread_id}&file=${sent.attachments[0].id as string}`;
     const layouts: Array<{ label: string; options: BrowserContextOptions; full?: boolean }> = [
       { label: 'inbox-beside-1440', options: { viewport: { width: 1440, height: 900 } } },
-      { label: 'inbox-full-1440', options: { viewport: { width: 1440, height: 900 } }, full: true },
+      // Full screen in a window narrow enough that the centred document reaches under the toolstrip (the floating
+      // comments panel no longer narrows the page).
+      { label: 'inbox-full-1120', options: { viewport: { width: 1120, height: 900 } }, full: true },
       { label: 'inbox-beside-1280', options: { viewport: { width: 1280, height: 800 } } },
       { label: 'inbox-narrow-1000', options: { viewport: { width: 1000, height: 800 } } },
       { label: 'inbox-phone', options: { ...devices['Pixel 7'] } },
@@ -279,7 +281,7 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
         if (layout.full) {
           await page.getByRole('button', { name: 'Full screen' }).click();
           await expect(page.locator('.ib-view.ib-full')).toBeVisible();
-          // The comments drawer open beside the page, so the centred document reaches under the toolstrip.
+          // The comments panel open, floating over the page: the strip stays above the document with it open too.
           await page.locator('[data-full-view-comments]').click();
           await expect(page.locator('.ib-view.ib-drawer')).toBeVisible();
         }
@@ -332,6 +334,7 @@ test('Annotate (the editor plan review shares): the document never paints over t
           [
             ['plannotator-plan-look-choice-resolved', 'true'],
             ['plannotator-announce-tui-herdr-seen', '1'],
+            ['plannotator-announce-inbox-seen', '1'],
             ['plannotator-announce-ask-session-seen', '1'],
             ['plannotator-announce-agent-tool-seen', '1'],
           ].map(([name, value]) => ({ name: name!, value: value!, url })),

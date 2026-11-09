@@ -12,6 +12,7 @@ import {
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	getVcsFileBytesForDiff,
+	listVcsFiles,
 	canStageFiles,
 	runVcsDiff,
 	stageFile,
@@ -44,7 +45,7 @@ import {
 } from "./generated/pr-provider.ts";
 import { parseRemoteUrl } from "./generated/repo.ts";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.ts";
+import { loadConfig, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled } from "./generated/config.ts";
 import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
@@ -297,6 +298,7 @@ async function buildLocalWorkspaceReview(
 		runVcsDiff,
 		getVcsFileContentsForDiff,
 		getVcsFileBytesForDiff,
+		listVcsFiles,
 		getVcsDiffFingerprint,
 		canStageFiles,
 		stageFile,
@@ -784,7 +786,7 @@ async function createCodeReviewBrowserSession(
 				vcsType: options.vcsType,
 				requestedDiffType,
 				requestedBase,
-				configuredDiffType: resolveDefaultDiffType(config),
+				configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
 				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 			});
 			gitCtx = result.gitContext;
@@ -902,6 +904,14 @@ export async function startMarkdownAnnotationSession(
 	bundleFiles?: AnnotateBundleFile[],
 	/** The caller shows the URL in its own in-turn message (`sessionOpenedMessage`). */
 	announcedInTurn?: boolean,
+	/**
+	 * Whether a gated local session gets the blocking CLI's client lease (a
+	 * closed tab settles as dismissed after 30 s, #1143). On for callers that
+	 * await the decision (the event bus, `openMarkdownAnnotation`). The tool and
+	 * the slash commands pass false: they return at once, and the review must
+	 * stay open after tab loss until an explicit decision or close.
+	 */
+	clientLease = true,
 ): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -953,7 +963,7 @@ export async function startMarkdownAnnotationSession(
 		sourceConverted,
 		gate,
 		approvalNotesSupported: true,
-		clientLeaseSupported: gate === true && !isRemoteSession(),
+		clientLeaseSupported: clientLease && gate === true && !isRemoteSession(),
 		rawHtml,
 		renderHtml,
 		convertHtml,
@@ -990,6 +1000,8 @@ export async function startLastMessageAnnotationSession(
 	sessionBridge?: SessionBridge,
 	/** The caller shows the URL in its own in-turn message (`sessionOpenedMessage`). */
 	announcedInTurn?: boolean,
+	/** See `startMarkdownAnnotationSession`: false from the tool and commands. */
+	clientLease = true,
 ): Promise<BrowserDecisionSession<AnnotateDecision>> {
 	return startMarkdownAnnotationSession(
 		ctx,
@@ -1008,6 +1020,7 @@ export async function startLastMessageAnnotationSession(
 		sessionBridge,
 		undefined,
 		announcedInTurn,
+		clientLease,
 	);
 }
 

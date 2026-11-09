@@ -67,6 +67,8 @@ test.beforeAll(async () => {
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
+      // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+      NO_ANON_PING: '1',
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
       PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
@@ -76,6 +78,7 @@ test.beforeAll(async () => {
       PLANNOTATOR_INSTALL_SCRIPT_URL: 'http://127.0.0.1:9/install.sh',
       PLANNOTATOR_UPDATE_LATEST_URL: `http://127.0.0.1:${port}/r/p/releases/latest`,
       PLANNOTATOR_UPDATE_API_URL: `http://127.0.0.1:${port}/api/releases/latest`,
+      PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

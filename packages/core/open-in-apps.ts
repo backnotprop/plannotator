@@ -37,6 +37,12 @@ export interface OpenInApp {
   win?: { bin: string };
   /** Linux PATH binary. */
   linux?: { bin: string };
+  /**
+   * How it opens a file at a line. `mac`: the app's URL scheme, `<scheme>://file/<path>:<line>`
+   * through `open -a`. `cli`: `--goto <path>:<line>` or `<path>:<line>` on its Windows and Linux
+   * binary. Absent: the file opens at its top.
+   */
+  line?: { mac?: string; cli?: 'goto' | 'suffix' };
 }
 
 /**
@@ -61,6 +67,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Visual Studio Code' },
     win: { bin: 'code' },
     linux: { bin: 'code' },
+    line: { mac: 'vscode', cli: 'goto' },
   },
   {
     id: 'cursor',
@@ -70,6 +77,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Cursor' },
     win: { bin: 'cursor' },
     linux: { bin: 'cursor' },
+    line: { mac: 'cursor', cli: 'goto' },
   },
   {
     id: 'zed',
@@ -79,6 +87,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Zed' },
     win: { bin: 'zed' },
     linux: { bin: 'zed' },
+    line: { cli: 'suffix' },
   },
   {
     id: 'zed-preview',
@@ -98,6 +107,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     mac: { appName: 'Sublime Text' },
     win: { bin: 'subl' },
     linux: { bin: 'subl' },
+    line: { cli: 'suffix' },
   },
   {
     id: 'textmate',

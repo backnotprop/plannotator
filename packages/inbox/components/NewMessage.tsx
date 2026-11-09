@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
 import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { InboxComposerField } from './ComposerField';
+import { VoiceFootRow } from './VoiceMic';
+import { usePhone } from '../phone';
+import { useVoiceSession } from '../voice';
+import { newUuid } from '../uuid';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -39,6 +43,11 @@ export function sessionWords(session: LiveSession): string {
   else if (session.busy === false && session.idle_since) parts.push(`Idle since ${whenTime(session.idle_since)}.`);
   else if (!session.wrote_thread) parts.push(`Seen ${whenTime(session.last_seen_at)}.`);
   return parts.join(' ');
+}
+
+/** What type-ahead in the session picker matches: the host's name, then "started" and the time ("pi started 10:05 am"). */
+function typeaheadLabel(session: LiveSession): string {
+  return `${hostName(session.host)} started ${whenTime(session.started_at)}`.toLowerCase();
 }
 
 export type NewMessageMode = { kind: 'pick' } | { kind: 'none' } | { kind: 'compose'; target: LiveSession } | null;
@@ -95,6 +104,7 @@ export function NewMessagePopover({
   thread,
   asker,
   askerHost,
+  replyTo = asker,
   live,
   mode,
   onPick,
@@ -104,6 +114,8 @@ export function NewMessagePopover({
   thread: InboxThread;
   asker: string;
   askerHost: string | null;
+  /** Whom "Reply instead" goes to (the session the box's words answer): `asker` in a thread with one agent. */
+  replyTo?: string;
   live: LiveSessionsModel | null;
   mode: NewMessageMode;
   onPick: (session: LiveSession) => void;
@@ -111,6 +123,65 @@ export function NewMessagePopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
+  // The menu keeps one item in the Tab order and moves focus between items itself (APG menu pattern).
+  const [active, setActive] = useState(0);
+  const typed = useRef({ text: '', at: 0 });
+  const picking = mode?.kind === 'pick' && live !== null;
+  // Opened, focus goes into the menu, on the first item (the thread's own writers are first).
+  useEffect(() => {
+    if (!picking) return;
+    setActive(0);
+    typed.current = { text: '', at: 0 };
+    items.current[0]?.focus();
+  }, [picking]);
+  const focusItem = (index: number) => {
+    const el = items.current[index];
+    if (!el) return;
+    setActive(index);
+    el.focus();
+  };
+  /** Up / Down (wrapping), Home / End and type-ahead on the host and start time, inside the open menu. */
+  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!live) return;
+    const count = live.sessions.length;
+    if (count === 0) return;
+    const at = Math.max(0, items.current.findIndex((el) => el === document.activeElement));
+    if (event.key === 'Escape') {
+      // One layer: the menu closes, focus goes back to New message, and the key stops here.
+      event.preventDefault();
+      event.stopPropagation();
+      const opener = ref.current?.closest('section')?.querySelector<HTMLElement>('[data-new-message]');
+      onClose();
+      opener?.focus();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    let next: number | null = null;
+    if (event.key === 'ArrowDown') next = (at + 1) % count;
+    else if (event.key === 'ArrowUp') next = (at - 1 + count) % count;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = count - 1;
+    else if (event.key.length === 1 && event.key.trim() !== '') {
+      const now = Date.now();
+      const key = event.key.toLowerCase();
+      const text = now - typed.current.at > 500 ? key : typed.current.text + key;
+      typed.current = { text, at: now };
+      // The same letter pressed again cycles through the items it starts; more letters narrow from the current item.
+      const query = [...text].every((c) => c === key) ? key : text;
+      const from = query === text && text.length > 1 ? at : at + 1;
+      for (let step = 0; step < count; step += 1) {
+        const index = (from + step) % count;
+        if (typeaheadLabel(live.sessions[index]!).startsWith(query)) {
+          next = index;
+          break;
+        }
+      }
+      if (next === null) return;
+    } else return;
+    event.preventDefault();
+    focusItem(next);
+  };
   useEffect(() => {
     if (mode?.kind !== 'pick' && mode?.kind !== 'none') return;
     const onKey = (event: KeyboardEvent) => {
@@ -129,16 +200,30 @@ export function NewMessagePopover({
   }, [mode, onClose]);
 
   if (mode?.kind === 'pick' && live) {
+    // A refresh can take sessions away: the Tab stop stays on an item that is still there.
+    const current = Math.min(active, live.sessions.length - 1);
     return (
-      <div className="ib-menu ib-nmpop" ref={ref} role="menu" aria-label={pickerHeading(live.sessions, thread.project.name)} data-session-picker="">
-        <div className="ib-mh">{pickerHeading(live.sessions, thread.project.name)}</div>
+      <div
+        className="ib-menu ib-nmpop"
+        ref={ref}
+        role="menu"
+        aria-label={pickerHeading(live.sessions, thread.project.name)}
+        data-session-picker=""
+        onKeyDown={onMenuKey}
+      >
+        <div className="ib-mh" aria-hidden="true">{pickerHeading(live.sessions, thread.project.name)}</div>
         {live.sessions.map((session, index) => (
           <button
             type="button"
             role="menuitem"
-            className={`ib-mi${index === 0 ? ' ib-on' : ''}`}
+            ref={(el) => {
+              items.current[index] = el;
+            }}
+            tabIndex={index === current ? 0 : -1}
+            className={`ib-mi${index === current ? ' ib-on' : ''}`}
             key={session.session}
             data-session={session.session}
+            onFocus={() => setActive(index)}
             onClick={() => onPick(session)}
           >
             <HostMark host={session.host} />
@@ -160,8 +245,8 @@ export function NewMessagePopover({
         <h5>{connected ? `${asker} is not running in ${thread.project.name}` : `No agent is running in ${thread.project.name}`}</h5>
         <p>
           {connected
-            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`
-            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`}
+            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`
+            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`}
         </p>
         <div className="ib-acts">
           <button type="button" className="ib-btn ib-sm" onClick={onReplyInstead}>
@@ -190,13 +275,15 @@ export function NewMessageComposer({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(newUuid());
   const textRef = useRef<HTMLTextAreaElement>(null);
   const name = hostName(target.host);
+  const phone = usePhone();
+  const voice = useVoiceSession();
   useEffect(() => textRef.current?.focus(), []);
 
   const send = async () => {
-    if (sending) return;
+    if (sending || voice.busy) return;
     const body = text.trim();
     if (!body) {
       setError('Write a message first.');
@@ -225,6 +312,7 @@ export function NewMessageComposer({
       <div className="ib-rbox">
         <InboxComposerField
           textareaRef={textRef}
+          voice={voice}
           ariaLabel={`New message to ${name}`}
           placeholder="Write a message"
           destination="your message"
@@ -240,17 +328,16 @@ export function NewMessageComposer({
             }
           }}
         />
+        <VoiceFootRow voice={voice} phone={phone} />
       </div>
       <div className="ib-acts">
-        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
+        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || voice.busy}>
           <Icon name="send" size={15} />
           Send
         </button>
         <button type="button" className="ib-btn ib-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <span className="ib-sp" />
-        <span className="ib-st">{target.busy ? `${name} takes it when its turn ends.` : `${name} takes it as its next turn.`}</span>
       </div>
       {error && (
         <div className="ib-error" role="alert">

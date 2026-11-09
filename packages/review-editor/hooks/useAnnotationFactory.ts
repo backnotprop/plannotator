@@ -4,7 +4,7 @@ import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
-import { captureAnchor } from '../utils/codeAnnotationAnchor';
+import { captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 
 /** The active commit diff, if any — stamped onto annotations created while a
  *  commit:<sha> diff is on screen. Mirrors the PR fields: both exist so an
@@ -27,14 +27,15 @@ export function useAnnotationFactory(
   diffScope?: PRDiffScope,
   commitContext?: CommitAnnotationContext | null,
   gitButlerContext?: GitButlerAnnotationContext | null,
-  /** Current diff files. PR mode only: line comments record the text of the
-   *  lines they anchor to (#1590), so a draft restored after the PR changed
+  /** Current diff files. PR/local Git line comments record the text of the
+   *  lines they anchor to (#1590), so a draft restored after the diff changed
    *  can tell which comments still point at the same code. */
   files?: readonly DiffFile[],
-  /** Snapshot id of the diff `files` belong to; stamped on PR line comments
+  /** Snapshot id of the diff `files` belong to; stamped on anchored line comments
    *  so a later diff (push, scope switch, restore) can tell whether their
    *  coordinates still apply. */
   snapshotId?: string,
+  localReviewTarget?: string | null,
 ) {
   const prContext = useMemo(() => ({
     ...(prMetadata ? {
@@ -58,15 +59,15 @@ export function useAnnotationFactory(
 
   const withPRContext = useCallback(
     (annotation: CodeAnnotation): CodeAnnotation => {
-      const stamped = { ...annotation, ...prContext };
-      if (!prMetadata || !files || (stamped.scope ?? 'line') !== 'line') return stamped;
+      const stamped = { ...annotation, ...prContext, ...(localReviewTarget ? { localReviewTarget } : {}) };
+      if ((!prMetadata && !localReviewTarget) || !files || (stamped.scope ?? 'line') !== 'line') return stamped;
       return {
         ...stamped,
         ...captureAnchor(stamped, files),
         ...(snapshotId ? { anchorSnapshot: snapshotId } : {}),
       };
     },
-    [prContext, prMetadata, files, snapshotId],
+    [prContext, prMetadata, files, snapshotId, localReviewTarget],
   );
 
   return { withPRContext };

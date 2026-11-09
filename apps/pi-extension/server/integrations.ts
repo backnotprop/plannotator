@@ -1,5 +1,5 @@
 /**
- * Note-taking app integrations (Obsidian, Bear, Octarine).
+ * Note-taking app integrations (Obsidian, Bear, Octarine, Notion).
  * Node.js equivalents of packages/server/integrations.ts.
  * Config types, save functions, tag extraction, filename generation
  */
@@ -12,6 +12,7 @@ import {
 	type ObsidianConfig,
 	type BearConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	type IntegrationResult,
 	extractTitle,
 	generateFrontmatter,
@@ -26,7 +27,8 @@ import {
 import { sanitizeTag } from "../generated/project.ts";
 import { resolveUserPath } from "../generated/resolve-file.ts";
 
-export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
+export type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult };
+export { isNotionAvailable, saveToNotion, NOTION_API_VERSION } from "../generated/notion.ts";
 export {
 	extractTitle,
 	generateFrontmatter,

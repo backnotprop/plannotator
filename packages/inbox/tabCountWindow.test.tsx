@@ -9,7 +9,7 @@
  * back. happy-dom has no 2D canvas, so the icon here is the SVG form; the PNG
  * a browser draws is shown by the screenshots in the PR.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

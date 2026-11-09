@@ -179,6 +179,45 @@ export function piCatalogFromRpc(rows: readonly PiRpcModel[], toolVersion: strin
   });
 }
 
+/** The subset of one Qwen Code `modelProviders.<authType>[]` entry the catalog reads. */
+export interface QwenSettingsModel {
+  id?: unknown;
+  name?: unknown;
+}
+
+/**
+ * Build the Qwen Code catalog from its `settings.json` (already parsed), so no
+ * `qwen` process runs. `qwen -m <id>` resolves the id against the models
+ * configured for the selected auth type (`security.auth.selectedType`, else
+ * `openai`), so only `modelProviders[<that type>]` is listed: a model of
+ * another type would not run. `model.name` is the model qwen uses without
+ * `-m`; it is the default, and it is listed first when the provider list
+ * does not name it (a built-in model). No reasoning efforts: qwen takes no
+ * per-run effort flag.
+ */
+export function qwenCatalogFromSettings(settings: unknown): CatalogModel[] {
+  if (!settings || typeof settings !== 'object') return [];
+  const root = settings as {
+    model?: { name?: unknown };
+    modelProviders?: Record<string, unknown>;
+    security?: { auth?: { selectedType?: unknown } };
+  };
+  const selected = root.security?.auth?.selectedType;
+  const authType = typeof selected === 'string' && selected.trim() ? selected.trim() : 'openai';
+  const entries = root.modelProviders && typeof root.modelProviders === 'object' ? root.modelProviders[authType] : undefined;
+  const rows: CatalogModel[] = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as QwenSettingsModel;
+    if (typeof id !== 'string' || !id.trim() || rows.some((r) => r.id === id.trim())) continue;
+    rows.push({ id: id.trim(), label: (typeof name === 'string' && name.trim()) || id.trim() });
+  }
+  const active = typeof root.model?.name === 'string' ? root.model.name.trim() : '';
+  if (active && !rows.some((r) => r.id === active)) rows.unshift({ id: active, label: active });
+  const defaultId = active || rows[0]?.id;
+  return rows.map((r) => (r.id === defaultId ? { ...r, default: true } : r));
+}
+
 /**
  * The version in a CLI's own output: `claude --version` ("2.1.282 (Claude
  * Code)") or the codex app-server initialize `userAgent` ("plannotator/0.155.1

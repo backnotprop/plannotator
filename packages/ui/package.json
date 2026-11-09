@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.53.1",
+  "version": "0.62.0",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -9,8 +9,14 @@
     "./components/ai/*": "./components/ai/*.tsx",
     "./components/core/*": "./components/core/*.tsx",
     "./components/goal-setup/*": "./components/goal-setup/*.tsx",
+    "./components/inbox-thread/*": "./components/inbox-thread/*.tsx",
+    "./components/inbox-thread/reask": "./components/inbox-thread/reask.ts",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
     "./components/html-viewer": "./components/html-viewer/index.ts",
+    "./components/chat": "./components/chat/index.ts",
+    "./components/shape": "./components/shape/index.ts",
+    "./components/shape/scene/frame": "./components/shape/scene/frame.ts",
+    "./shape.css": "./components/shape/shape.css",
     "./components/diagram": "./components/diagram/index.ts",
     "./components/diagramLanguages": "./components/diagramLanguages.ts",
     "./components/diagram/*": "./components/diagram/*.tsx",
@@ -29,7 +35,10 @@
     "./theme-modes": "./components/themeModes.tsx",
     "./types": "./types.ts",
     "./theme": "./theme.css",
-    "./styles.css": "./styles.css"
+    "./styles.css": "./styles.css",
+    "./contents-rail.css": "./contents-rail.css",
+    "./comment-card.css": "./comment-card.css",
+    "./inbox-thread.css": "./inbox-thread.css"
   },
   "files": [
     "components",
@@ -51,6 +60,9 @@
     "theme.css",
     "print.css",
     "styles.css",
+    "contents-rail.css",
+    "comment-card.css",
+    "inbox-thread.css",
     "plannotator.webp",
     "HANDOFF.md",
     "!**/*.test.ts",
@@ -78,20 +90,20 @@
     "@lezer/highlight": "^1.2.5",
     "@pierre/diffs": "1.5.2",
     "@plannotator/atomic-editor": "^0.9.0",
-    "@plannotator/core": "0.25.14",
+    "@plannotator/core": "0.25.21",
     "@plannotator/markdown-editor": "^0.5.0",
-    "@plannotator/web-highlighter": "^0.8.1",
+    "@plannotator/web-highlighter": "^0.8.2",
     "@tanstack/react-table": "^8.21.3",
     "@viz-js/viz": "3.31.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "diff": "^8.0.4",
     "dompurify": "^3.4.17",
-    "katex": "^0.18.11",
+    "katex": "^0.19.0",
     "lucide-react": "^1.59.0",
     "marked": "^17.0.6",
     "mermaid": "12.2.0",
-    "motion": "^12.38.0",
+    "motion": "^14.4.0",
     "perfect-freehand": "^1.2.2",
     "tailwind-merge": "^3.7.0",
     "unique-username-generator": "^1.5.1"
@@ -107,6 +119,7 @@
     "@types/bun": "^1.2.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "postcss": "8.5.28",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.1.18",
@@ -117,7 +130,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:css": "vite build --config vite.css.config.ts && rm -f styles.js",
     "build:bridge-assets": "bun run scripts/build-bridge-assets.ts",
+    "build:inbox-thread-css": "bun run scripts/build-inbox-thread-css.ts",
     "smoke:package": "bun run scripts/package-smoke.ts",
-    "prepack": "bun run build:css && bun run build:bridge-assets"
+    "prepack": "bun run build:css && bun run build:bridge-assets && bun run build:inbox-thread-css"
   }
 }

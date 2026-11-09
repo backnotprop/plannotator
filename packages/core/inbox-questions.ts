@@ -59,8 +59,9 @@ import {
   questionChoiceWithoutRecommendedMarker,
   parseQuestionChoiceText,
 } from "./question-block";
-import { readInboxQuestionKind } from "./inbox-types";
+import { INBOX_ROW_WAITS_MAX, INBOX_ROW_WAIT_ENTRY_MAX, INBOX_ROW_WAIT_HOLDS_MAX, INBOX_ROW_WAIT_TEXT_MAX, readInboxQuestionKind } from "./inbox-types";
 import type {
+  InboxRowWait,
   InboxQuestionContract,
   InboxQuestion,
   InboxQuestionFacts,
@@ -94,6 +95,28 @@ const CLOSE_RE = /^\s*:::\s*$/;
  */
 export function inboxQuestionKeysWithRecommendedMarker(markdown: string): string[] {
   return questionBlocksOf(markdown).flatMap(({ key, parsed }) => (parsed.recommendedMarker ? [key] : []));
+}
+
+/** One question of a body worth a second look, in block order: `position` 1-based among the questions. */
+export interface InboxQuestionToCheck {
+  key: string;
+  position: number;
+  /** A pick-one or pick-several block (`:::question`, `:::question-multi`) with no choices, as written: the person answers in words. */
+  no_choices: string;
+}
+
+/**
+ * The questions of a body that likely do not ask what the agent meant (the
+ * send result says so; the send goes through): a `:::question` or
+ * `:::question-multi` block with no choices, which the person answers in
+ * words. (An `id:` label before the question line is no mistake: the parser
+ * reads the next line as the question and shows the label as context, see
+ * "Id label" in `./question-block`.) Pure; never throws.
+ */
+export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] {
+  return questionBlocksOf(markdown).flatMap(({ key, parsed }, index) =>
+    parsed.directiveKind !== "question-text" && parsed.choices.length === 0 ? [{ key, position: index + 1, no_choices: `:::${parsed.directiveKind}` }] : [],
+  );
 }
 
 /** Each question block of a body, parsed as the Inbox reads it. */
@@ -440,10 +463,19 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
   let open = 0;
   let picked = 0;
   let actions = 0;
+  let staged = 0;
   let stopped = false;
   const holdsUp: string[] = [];
   let prompt: string | null = null;
   for (const q of questions) {
+    // A Done or Can't do it waiting in the reply draft: the agent is still stopped on it, so it keeps the
+    // row's Stopped / Holds up (approval "inbox-action-items-in-reply", Q2). Not open, not a pick.
+    if (q.kind === "action" && q.state === "picked" && q.action_result?.by === "person" && q.action_result.staged === true && !q.orphaned) {
+      staged += 1;
+      if (q.stopped !== null) stopped = true;
+      for (const name of q.holds_up) if (!holdsUp.includes(name)) holdsUp.push(name);
+      continue;
+    }
     // The list's rule: a kind this build does not know still counts (see inboxQuestionWaitsForList).
     if (!inboxQuestionWaitsForList(q)) continue;
     if (q.state === "picked") picked += 1;
@@ -454,7 +486,32 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
     for (const name of q.holds_up) if (!holdsUp.includes(name)) holdsUp.push(name);
     if (prompt === null) prompt = q.prompt;
   }
-  return { open, picked, stopped, holds_up: holdsUp, prompt, actions };
+  return { open, picked, stopped, holds_up: holdsUp, prompt, actions, ...(staged > 0 ? { staged } : {}) };
+}
+
+/**
+ * What a row's Stopped / Holds up badge holds (approval "inbox-row-badges"):
+ * the open questions and action items that stop the agent or hold something
+ * up, in the order given (thread order), capped. The same open rule as the
+ * badges' summary (`summarizeInboxQuestions`), so the card never lists a
+ * question the badge does not count.
+ */
+export function inboxRowWaits(questions: readonly InboxQuestion[]): InboxRowWait[] {
+  const out: InboxRowWait[] = [];
+  for (const q of questions) {
+    if (out.length >= INBOX_ROW_WAITS_MAX) break;
+    if (!inboxQuestionWaitsForList(q) || q.state !== "open") continue;
+    if (q.stopped === null && q.holds_up.length === 0) continue;
+    out.push({
+      message_id: q.message_id,
+      key: q.key,
+      position: q.position,
+      prompt: cutText(q.prompt, INBOX_ROW_WAIT_TEXT_MAX),
+      stopped: q.stopped === null ? null : cutText(q.stopped, INBOX_ROW_WAIT_TEXT_MAX),
+      holds_up: q.holds_up.slice(0, INBOX_ROW_WAIT_HOLDS_MAX).map((h) => cutText(h, INBOX_ROW_WAIT_ENTRY_MAX)),
+    });
+  }
+  return out;
 }
 
 // ─────────────────────────────── Picks ───────────────────────────────
@@ -534,7 +591,7 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
  * 2026-10-21): every question it neither answers nor skips stays open, and
  * the reply says so, so the agent does not guess or ask again.
  */
-export function composeInboxReplyBody(input: {
+function composeReplyParts(input: {
   questions: readonly InboxQuestionRecord[];
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
@@ -558,7 +615,7 @@ export function composeInboxReplyBody(input: {
   messages?: readonly InboxReplyMessageAnswers[];
   /** The message the reply answers (`reply_to`), for `messages`. */
   replyTo?: string;
-}): string {
+}): { head: string; stillOpen: string; section: string } {
   // Action items (`kind: "action"`) are reported in their own section ("Actions
   // you asked for"), never numbered or counted as questions here.
   const questionsOnly = <T extends { kind: string }>(list: readonly T[]): T[] => list.filter((q) => q.kind !== "action");
@@ -601,7 +658,18 @@ export function composeInboxReplyBody(input: {
   const sentIds = new Set(groups.flatMap((g) => g.sent.map((a) => `${g.message_id}/${a.key}`)));
   const pool = questionsOnly(input.stillOpen ?? groups.flatMap((g) => g.questions)).filter((q) => !sentIds.has(`${q.message_id ?? ""}/${q.key}`));
   const stillOpen = sentGroups.length === 0 ? inboxStillOpenLine(pool) : inboxOtherStillOpenLine(pool);
-  return [sentence, words, stillOpen, section].filter((part) => part !== "").join("\n\n");
+  return { head: [sentence, words].filter((part) => part !== "").join("\n\n"), stillOpen, section };
+}
+
+export function composeInboxReplyBody(input: Parameters<typeof composeReplyParts>[0]): string {
+  const { head, stillOpen, section } = composeReplyParts(input);
+  return [head, stillOpen, section].filter((part) => part !== "").join("\n\n");
+}
+
+/** What `composeInboxReplyBody` puts before its still-open sentence, and that sentence ('' with none): how the store knows it wrote it, whatever the person typed. */
+export function inboxReplyStillOpenOf(input: Parameters<typeof composeReplyParts>[0]): { head: string; stillOpen: string } {
+  const { head, stillOpen } = composeReplyParts(input);
+  return { head, stillOpen };
 }
 
 /** One message a reply answers questions on (`composeInboxReplyBody`'s `messages`). */

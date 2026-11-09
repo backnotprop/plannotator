@@ -12,9 +12,13 @@
  * two would still read the same.
  */
 import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
-import type { MentionPerson } from '@plannotator/ui/utils/mentions';
-import type { TaggableModel, TaggableSession } from './api';
+import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
+import type { TagMode, TaggableModel, TaggableSession } from './api';
+import { shortLabel } from './sessionLabels';
 import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+
+/** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
+export const TAG_LABEL_MAX = 40;
 
 /** The group heading of the agents that read the Inbox only (MCP): never woken. */
 export const TAG_READERS_GROUP = 'Reads the Inbox, not woken';
@@ -44,7 +48,8 @@ export interface TagOption {
 /** The person's name for an agent: an MCP agent's own name, else its host's, else "An agent". */
 export function agentName(host: string | null | undefined, name?: string | null): string {
   if (name) return name;
-  if (host) return INBOX_HOST_NAMES[host] ?? host;
+  // Own keys only: a host string like "constructor" is its own name, never Object's.
+  if (host) return Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host;
   return 'An agent';
 }
 
@@ -83,19 +88,31 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
     ...readers.sort((a, b) => Number(b.session === owner) - Number(a.session === owner)),
   ];
   const used = new Map<string, number>();
+  // A live session's own label (issue #2450): what the person named it, as the To picker shows it. Cut in the middle
+  // past TAG_LABEL_MAX, so the `@` token stays a short line (the reply route takes a tag's label up to 120).
+  const named = (s: TaggableSession) => (s.kind === 'live' && typeof s.label === 'string' ? shortLabel(sanitizeMentionLabel(s.label), TAG_LABEL_MAX) || null : null);
+  const unnamedLabel = (s: TaggableSession, agent: string) => {
+    // Only rows that can be tagged collide in the text: a session on an older Plannotator never makes Pi read "Pi (infra)".
+    // Named sessions count too, so an unnamed one beside them reads exactly as it did.
+    const sameAgent = sorted.filter((o) => (o.taggable || o === s) && agentName(o.host, o.kind === 'mcp' ? o.name : null) === agent);
+    if (s.session === owner || sameAgent.length < 2) return agent;
+    const here = !s.project || s.project.id === threadProjectId;
+    return here ? `${agent} (another session)` : `${agent} (${s.project!.name})`;
+  };
+  const plainLabels = new Set(sorted.filter((o) => o.taggable && !named(o)).map((o) => unnamedLabel(o, agentName(o.host, o.kind === 'mcp' ? o.name : null))));
   return sorted.map((s) => {
     const agent = agentName(s.host, s.kind === 'mcp' ? s.name : null);
-    // Only rows that can be tagged collide in the text: a session on an older Plannotator never makes Pi read "Pi (infra)".
-    const sameAgent = sorted.filter((o) => (o.taggable || o === s) && agentName(o.host, o.kind === 'mcp' ? o.name : null) === agent);
-    let label = agent;
-    if (s.session !== owner && sameAgent.length > 1) {
-      const here = !s.project || s.project.id === threadProjectId;
-      label = here ? `${agent} (another session)` : `${agent} (${s.project!.name})`;
-    }
+    const own = named(s);
+    let label = own ?? unnamedLabel(s, agent);
+    // Two sessions named alike, or a name that reads as another row's ("Pi"): the agent after it.
+    if (own && (plainLabels.has(own) || sorted.some((o) => o !== s && o.taggable && named(o) === own))) label = `${own} (${agent})`;
     // Two that would still read the same (two Pi sessions in infra): the later ones say "another session".
     const seen = used.get(label) ?? 0;
     used.set(label, seen + 1);
-    if (seen > 0) {
+    if (seen > 0 && own) {
+      // Two Claude Code sessions both named "Fix login": "Fix login (Claude Code 2)".
+      label = `${own} (${agent} ${seen + 1})`;
+    } else if (seen > 0) {
       const inner = label.endsWith(')') ? label.slice(label.lastIndexOf('(') + 1, -1) : null;
       label = inner === null ? `${agent} (another session)` : inner === 'another session' ? `${agent} (another session ${seen + 1})` : `${agent} (${inner}, another session)`;
     }
@@ -119,13 +136,17 @@ export function tagPeople(options: readonly TagOption[]): MentionPerson[] {
   return options.map((o) => ({ id: o.id, kind: 'agent' as const, label: o.label, detail: o.taggable ? o.detail : TAG_UPDATE_WORDS, group: o.group, canOpen: o.taggable }));
 }
 
-/** The sessions a set of mention ids tags, leaving out the owner (it gets the reply anyway), in the order given. */
-export function tagsToSend(ids: readonly string[], options: readonly TagOption[], ownerSession: string | null): TagToSend[] {
+/**
+ * The sessions a set of mention ids tags, leaving out the owner (it gets the reply anyway), in the order given.
+ * `modes`: the reply box line's choice for a session (absent: an Ask, sent without a mode as before).
+ */
+export function tagsToSend(ids: readonly string[], options: readonly TagOption[], ownerSession: string | null, modes: ReadonlyMap<string, TagMode> = new Map()): TagToSend[] {
   const out: TagToSend[] = [];
   for (const id of ids) {
     if (id === ownerSession || out.some((t) => t.session === id)) continue;
     const option = options.find((o) => o.id === id);
-    out.push(option ? { host: option.host, session: id, label: option.label } : { session: id });
+    const mode = modes.get(id);
+    out.push({ ...(option ? { host: option.host, session: id, label: option.label } : { session: id }), ...(mode && mode !== 'ask' ? { mode } : {}) });
   }
   return out;
 }
@@ -135,6 +156,76 @@ export interface TagToSend {
   host?: string | null;
   session: string;
   label?: string;
+  /** Add or Hand off (the reply box's line); absent: an Ask. */
+  mode?: TagMode;
+}
+
+/**
+ * The one line under the reply box once it tags agents that do not own the
+ * thread (approval "inbox-tag-handoff", A2): what Send does with them, and
+ * the links that switch it. "Asks Claude Code (herdr) · Add instead · Hand
+ * off instead"; "Adds Pi to this thread · Ask instead"; "Hands this thread
+ * to Claude Code (herdr) · Ask instead". Add and Hand off are offered only
+ * when every agent tagged is woken (a live session); Hand off only for one.
+ * A mode that is no longer offered reads as an Ask (`mode`).
+ */
+export interface TagModeLine {
+  mode: TagMode;
+  lead: string;
+  names: string;
+  after: string;
+  links: { mode: TagMode; label: string }[];
+}
+
+export function tagModeLine(tagged: readonly TagOption[], chosen: TagMode): TagModeLine | null {
+  const others = tagged.filter((t) => !t.owner);
+  if (others.length === 0) return null;
+  const names = namesList(others.map((t) => t.label));
+  const canAdd = others.every((t) => t.wakes && t.taggable);
+  const canHandOff = canAdd && others.length === 1;
+  const mode = effectiveTagMode(tagged, chosen);
+  if (mode === 'add') return { mode, lead: 'Adds', names, after: ' to this thread', links: [{ mode: 'ask', label: 'Ask instead' }] };
+  if (mode === 'handoff') return { mode, lead: 'Hands this thread to', names, after: '', links: [{ mode: 'ask', label: 'Ask instead' }] };
+  const asleep = others.filter((t) => !t.wakes);
+  const after =
+    asleep.length === 0
+      ? ''
+      : ` · ${namesList(asleep.map((t) => t.label))} ${asleep.length === 1 ? "isn't" : "aren't"} woken: ${asleep.length === 1 ? 'it sees' : 'they see'} your reply the next time ${asleep.length === 1 ? 'it reads' : 'they read'} this thread`;
+  return {
+    mode,
+    lead: 'Asks',
+    names,
+    after,
+    links: [...(canAdd ? [{ mode: 'add' as const, label: 'Add instead' }] : []), ...(canHandOff ? [{ mode: 'handoff' as const, label: 'Hand off instead' }] : [])],
+  };
+}
+
+/** The mode a Send uses: the one chosen while it is still offered for these tags, else an Ask. */
+export function effectiveTagMode(tagged: readonly TagOption[], chosen: TagMode): TagMode {
+  const others = tagged.filter((t) => !t.owner);
+  if (others.length === 0 || !others.every((t) => t.wakes && t.taggable)) return 'ask';
+  if (chosen === 'handoff' && others.length !== 1) return 'ask';
+  return chosen;
+}
+
+/**
+ * The thread's active hand-off (approval "inbox-tag-handoff"): the person's
+ * latest reply that handed it to another session and was not taken back.
+ * Its `to` owns the thread now. Null: no hand-off.
+ */
+export function activeHandoff(thread: InboxThread): InboxMessageWire | null {
+  for (let index = thread.messages.length - 1; index >= 0; index--) {
+    const message = thread.messages[index]!;
+    if (message.author.kind === 'person' && message.handoff && !message.handoff.undone_at && message.to) return message;
+    // A later reply took over from the session that ended: the thread is no longer that hand-off's.
+    if (message.took_over) return null;
+  }
+  return null;
+}
+
+/** The name a hand-off's new owner reads by: the label the person picked, else its agent's name. */
+export function handoffName(message: InboxMessageWire): string {
+  return message.handoff?.label || agentName(message.to?.host ?? null);
 }
 
 /** What one heads-up under the field says (the approved words). */
@@ -275,12 +366,15 @@ export function sendTagsByTarget(
   wordTags: readonly string[],
   commentTags: ReadonlyMap<string, readonly string[]>,
   options: readonly TagOption[],
+  /** The reply box line's mode, for the agents tagged in the words (a comment's tag is an Ask). */
+  wordMode: TagMode = 'ask',
 ): Map<string, TagToSend[]> {
   const out = new Map<string, TagToSend[]>();
   for (const t of targets) out.set(t.id, []);
   const last = targets.at(-1);
   if (!last) return out;
   const ids = [...wordTags, ...targets.flatMap((t) => commentTags.get(t.id) ?? [])];
-  out.set(last.id, tagsToSend(ids, options, last.owner));
+  const modes = new Map(wordMode === 'ask' ? [] : wordTags.map((id) => [id, wordMode] as const));
+  out.set(last.id, tagsToSend(ids, options, last.owner, modes));
   return out;
 }

@@ -12,7 +12,7 @@
  * which opens Settings → Agents with the "Open sessions" row: the same lead,
  * the sessions as a list, and a Copy restart per session behind the fold.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

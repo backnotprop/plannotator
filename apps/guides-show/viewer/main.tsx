@@ -19,7 +19,7 @@
  * Decision record: adr/decisions/007-portable-guided-reviews-20260815.md.
  * Hosting contract: adr/implementation/guide-share-hosting.md (section 6).
  */
-import '@plannotator/review-editor/styles';
+import './review-styles.css';
 import './portable.css';
 import React, { Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';

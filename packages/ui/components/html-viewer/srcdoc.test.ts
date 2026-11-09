@@ -5,7 +5,8 @@
  * viewer writes NOTHING into the document's namespace — no bare CSS custom
  * properties (a host `--muted` clobbering an author `--muted` visibly corrupts
  * documents), no `color-scheme`, no root classes, no styling of author
- * elements. Host tokens travel only under the viewer-owned `--pn-*` prefix
+ * elements on screen. Print-only pagination defaults are the exception.
+ * Host tokens travel only under the viewer-owned `--pn-*` prefix
  * unless the document opts in via <meta name="plannotator-theme" content="host">.
  *
  * These tests are the mutation guard: reintroducing any bare-token injection
@@ -22,6 +23,7 @@ import {
   hasHostThemeOptIn,
   injectIntoHead,
   prependSrcdocPolicy,
+  injectPrintDefaults,
 } from "./srcdoc";
 
 const HOST_TOKENS = {
@@ -188,6 +190,23 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       }),
     );
   }
+
+  test("print requests run only for messages from the parent", () => {
+    const originalPrint = window.print;
+    let prints = 0;
+    window.print = () => { prints += 1; };
+    try {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "plannotator-bridge-print" },
+        source: null,
+      }));
+      expect(prints).toBe(0);
+      postBridge({ type: "plannotator-bridge-print" });
+      expect(prints).toBe(1);
+    } finally {
+      window.print = originalPrint;
+    }
+  });
 
   /** find-and-mark renders through the rAF-coalesced overlay scheduler (a
    * batch restore renders once instead of once per annotation); happy-dom's
@@ -5068,5 +5087,54 @@ describe("prependSrcdocPolicy (a host's optional srcdoc policy)", () => {
     expect(html.startsWith(META)).toBe(true);
     expect(html).not.toContain("default-src *");
     expect(prependSrcdocPolicy("x", 'a" onload="b<')).toBe('<meta http-equiv="Content-Security-Policy" content="a&quot; onload=&quot;b&lt;">x');
+  });
+});
+
+describe("injectPrintDefaults", () => {
+  const STYLE = /<style>[\s\S]*?<\/style>/;
+  const styleAt = (html: string) => html.search(STYLE);
+
+  // Before the doctype, the page would render in quirks mode on screen.
+  test("a document with a doctype and no <head> gets the style after the doctype", () => {
+    const out = injectPrintDefaults("<!DOCTYPE html>\n<p>no head</p>");
+    expect(out.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(styleAt(out)).toBe("<!DOCTYPE html>".length);
+    expect(out.endsWith("\n<p>no head</p>")).toBe(true);
+  });
+
+  test("a comment before the doctype is not mistaken for the insertion point", () => {
+    const out = injectPrintDefaults("<!-- built by x --><!doctype html><p>body</p>");
+    expect(styleAt(out)).toBe("<!-- built by x --><!doctype html>".length);
+  });
+
+  test("a <head> inside a comment or an early script is skipped for the real one", () => {
+    const real = "<head><title>t</title>";
+    const commented = `<!doctype html><!-- <head> moved below --><html>${real}</head><body></body></html>`;
+    const out = injectPrintDefaults(commented);
+    expect(out).toContain("<!-- <head> moved below -->");
+    expect(styleAt(out)).toBe(commented.indexOf(real) + "<head>".length);
+
+    const scripted = `<script>document.write("<head>")</script><html>${real}</head></html>`;
+    expect(styleAt(injectPrintDefaults(scripted))).toBe(scripted.indexOf(real) + "<head>".length);
+  });
+
+  test("a <head> with attributes takes the style just inside it, ahead of author styles", () => {
+    const html = '<!doctype html><html><head lang="en"><style>@layer a{}</style></head></html>';
+    const out = injectPrintDefaults(html);
+    expect(styleAt(out)).toBe(html.indexOf('<head lang="en">') + '<head lang="en">'.length);
+  });
+
+  test("a fragment with no doctype and no <head> gets the style first", () => {
+    expect(styleAt(injectPrintDefaults("<p>x</p>"))).toBe(0);
+  });
+
+  test("without sectionBreaks only the no-clip and pre-wrap rules are added, no pagination", () => {
+    const out = injectPrintDefaults("<!doctype html><html><head></head><body><section>a</section></body></html>");
+    const css = out.match(STYLE)?.[0] ?? "";
+    expect(css).toContain("overflow: visible");
+    expect(css).toContain("pre-wrap");
+    expect(css).not.toContain("break-inside");
+    expect(css).not.toContain("break-after");
+    expect(css).not.toContain("min-height");
   });
 });

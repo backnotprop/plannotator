@@ -11,24 +11,25 @@
  * full screen), the
  * page filling the window, and plan review's shared hide-tools cookie neither
  * read nor written; a pin and a comment work and the count goes up without
- * opening the drawer; Hide tucks the toolbar into its corner handle, the
- * corner and the keyboard bring it back, the pin keeps it out; the count
- * opens the comments drawer and the page narrows beside it (remembered across
- * a reload); ⋯ holds Open in and Download; Side by side puts the file beside
- * the thread and Full screen brings the toolbar back showing; × leaves full
- * screen as Escape's last step does (HTML, markdown and the image), its
- * tooltip showing Esc, and the corner that reveals a tucked toolbar puts the
- * pointer on the pin, never on ×; Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, the
+ * opening the drawer; Hide gathers the tools into one control in the bottom
+ * right corner (approval "inbox-fullscreen-gather") and one press, by pointer
+ * or keyboard, brings everything back; a pointer resting in a corner reveals
+ * nothing; the count opens the comments panel over the page, which keeps its width
+ * (closed again after a reload); ⋯ holds Open in and Download; Side by side
+ * puts the file beside the thread and Full screen brings the toolbar back
+ * showing; × leaves full screen as Escape's last step does (HTML, markdown and
+ * the image), its tooltip showing Esc; Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, the
  * page's own Escape left to the page) and only then leaves full screen;
- * ⌘⇧X from the window and the page tucks and shows; `]` keeps full screen
- * with the chip; N/M opens the peek; a changed file keeps its chip and dots
- * the handle; on an iPhone the toolbar sits bottom right with 44 px targets.
+ * ⌘⇧X from the window and the page gathers and brings back; `]` keeps full
+ * screen with the chip; N/M opens the peek; a changed file keeps its chip and
+ * dots the corner control; on an iPhone the toolbar sits bottom right with
+ * 44 px targets and gathers into a 44 px corner control.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-full-view.spec.ts`.
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/full-view):
- * html-, markdown- and image-{showing,tucked,revealed,pinned,drawer}-{light,dark}
- * and phone-{showing,tucked,revealed,comments}-{light,dark}, among others.
+ * html-, markdown- and image-{showing,gathered,back,drawer}-{light,dark}
+ * and phone-{showing,gathered,comments}-{light,dark}, among others.
  */
 
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -168,40 +169,50 @@ const handle = (page = world.page) => page.locator('[data-full-view-handle]');
 const hide = (page = world.page) => page.locator('[data-full-view-hide]');
 const count = (page = world.page) => bar(page).locator('[data-full-view-comments]');
 
+/** What floats over a file in full screen and gathers into the corner control with the toolbar. */
+const FLOATING = '.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
+
 /** Put the pointer where it reaches nothing of the toolbar. */
 async function pointerAway(page = world.page) {
   await page.mouse.move(400, 500);
 }
 
 /**
- * The approved states, in light and dark: the toolbar showing, tucked into its
- * handle, revealed by the corner, pinned, and the comments drawer open. Starts
- * and ends with the toolbar showing and the drawer closed.
+ * The approved states, in light and dark: the toolbar showing, gathered into
+ * the corner control (approval "inbox-fullscreen-gather"), back after one
+ * press, and the comments drawer open. Starts and ends with the toolbar
+ * showing and the drawer closed.
  */
 async function stateShots(name: string) {
   const page = world.page;
-  // No focus ring or tooltip left on a toolbar button from the steps before (focus leaving to nothing tucks nothing).
+  // No focus ring or tooltip left on a toolbar button from the steps before.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await pointerAway();
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await shot(page, `${name}-showing`);
   await hide().click();
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await expect(bar()).toHaveJSProperty('inert', true);
+  // Gathered, everything that floats over the file is hidden once its flight ends (the toolbar, the reply card or
+  // its pill, an image's size bar, a text file's toolstrip and Contents button): only the corner control is left.
+  await expect(bar()).toBeHidden();
+  await expect
+    .poll(() => pane().locator(FLOATING).evaluateAll((els) => els.filter((el) => getComputedStyle(el).visibility !== 'hidden').length))
+    .toBe(0);
+  await expect(handle()).toBeVisible();
   await pointerAway();
   await page.waitForTimeout(600);
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
-  await shot(page, `${name}-tucked`);
-  // The corner: the toolbar comes out with the pin as its last button.
-  await page.mouse.move(1270, 20);
-  await expect(dock()).toHaveAttribute('data-bar', 'revealed');
-  await expect(hide()).toHaveAttribute('data-full-view-hide', 'pin');
-  await shot(page, `${name}-revealed`);
-  await hide().click();
+  await shot(page, `${name}-gathered`);
+  // One press on the corner control brings everything back.
+  await handle().click();
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(bar()).toBeVisible();
+  await expect(hide()).toHaveAttribute('data-full-view-hide', 'hide');
   await pointerAway();
   await page.waitForTimeout(600);
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
-  await shot(page, `${name}-pinned`);
+  await shot(page, `${name}-back`);
   await count().click();
   await expect(pane()).toHaveClass(/ib-drawer/);
   await pointerAway();
@@ -242,73 +253,82 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   expect((await world.context.cookies(world.url)).find((c) => c.name === 'plannotator-html-chrome')).toBeUndefined();
 });
 
-test('annotating works as before: a pin opens the composer, Save adds a marker; the drawer does not open, the count goes up', async () => {
+test('annotating works as before: a pin opens the composer, Comment adds a marker; the drawer does not open, the count goes up', async () => {
   const page = world.page;
   await frame().locator('#flagged').click();
   await composer().fill('"Repeats" reads like duplicate charges to a claims team. Say "repeated tool calls".');
   await shot(page, 'html-annotating', ['dark']);
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(count()).toHaveAccessibleName('Comments, 1');
   await expect(pane()).not.toHaveClass(/ib-drawer/);
   await expect(pane()).toHaveAttribute('data-full-view', '');
 });
 
-test('Hide tucks the toolbar into its corner handle; the corner brings it back; the pin keeps it out; the keyboard reaches it all', async () => {
+test('Hide gathers the tools into one control in the bottom right corner; one press, by keyboard or pointer, brings everything back; no hover reveal', async () => {
   const page = world.page;
   await hide().focus();
   await page.keyboard.press('Enter');
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
-  // Tucked: the toolbar is inert and off to the right; the handle is a button with the count, focused.
+  await expect(pane()).toHaveAttribute('data-tools', 'tucked');
+  // Gathered: the toolbar is inert; the corner control is a button with the count, focused.
   await expect(bar()).toHaveJSProperty('inert', true);
   await expect(handle()).toBeFocused();
   await expect(handle()).toHaveAccessibleName('Show tools, 1 comment');
-  await expect(page.locator('[data-step-live]')).toHaveText('Tools hidden. They are in the top right corner.');
+  await expect(page.locator('[data-step-live]')).toHaveText('Tools hidden. They are in the bottom right corner.');
+  // Bottom right, 32 px (approval "inbox-fullscreen-gather"), measured once it has landed (it scales in from 0.6).
+  await expect.poll(async () => Math.round((await handle().boundingBox())!.height)).toBe(32);
   const handleBox = (await handle().boundingBox())!;
-  expect(handleBox.x + handleBox.width).toBeGreaterThanOrEqual(1279);
-  // Enter on the handle: out, focus on the first button; Escape tucks it again, focus back on the handle.
+  expect(handleBox.width).toBeGreaterThanOrEqual(32);
+  expect(handleBox.x + handleBox.width).toBeGreaterThan(1280 - 40);
+  expect(handleBox.x + handleBox.width).toBeLessThanOrEqual(1280 - 8);
+  expect(handleBox.y + handleBox.height).toBeGreaterThan(800 - 40);
+  expect(handleBox.y + handleBox.height).toBeLessThanOrEqual(800 - 8);
+  // Enter on the corner control: everything back at once, focus on » where Hide was pressed.
   await page.keyboard.press('Enter');
-  await expect(dock()).toHaveAttribute('data-bar', 'revealed');
-  await expect(bar().locator('[data-full-view-pen]')).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
-  await expect(handle()).toBeFocused();
-  // The pointer in the corner reveals it; leaving tucks it again (a mouse user: nothing in the corner holds focus).
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await pointerAway();
-  await page.mouse.move(1265, 30);
-  await expect(dock()).toHaveAttribute('data-bar', 'revealed');
-  await pointerAway();
-  await expect(dock()).toHaveAttribute('data-bar', 'tucked', { timeout: 3000 });
-  // Out again, and the pin keeps it out.
-  await page.mouse.move(1265, 30);
-  await expect(hide()).toHaveAccessibleName('Keep tools out');
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(pane()).toHaveAttribute('data-tools', 'pinned');
+  await expect(bar()).toHaveJSProperty('inert', false);
+  await expect(hide()).toBeFocused();
+  await expect(page.locator('[data-step-live]')).toHaveText('Tools shown.');
+  // The pointer reveals nothing: not where the toolbar was, not on the corner control.
   await hide().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.mouse.move(1265, 30);
+  await page.waitForTimeout(700);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await handle().hover();
+  await page.waitForTimeout(700);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  // One click brings everything back, and stays: there is no pin and nothing tucks it again by itself.
+  await handle().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(hide()).toHaveAccessibleName('Hide tools');
   await pointerAway();
   await page.waitForTimeout(700);
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
 });
 
-test('the count opens the comments drawer: the page narrows beside it, its foot rides the next Send; Escape closes it; it is remembered', async () => {
+test('the count opens the comments panel over the page: the page keeps its width, its foot rides the next Send; Escape closes it; it is not remembered', async () => {
   const page = world.page;
   await count().click();
   await expect(pane()).toHaveClass(/ib-drawer/);
-  // Not covered: the page narrows by the drawer's width.
+  // It floats: the page keeps the whole window, the panel sits under the toolbar at the right.
   const frameBox = (await pane().locator('iframe').first().boundingBox())!;
-  const drawer = (await pane().locator('.ib-apanel').boundingBox())!;
-  expect(frameBox.width).toBe(1280 - 320);
-  expect(drawer.x).toBe(960);
-  // The toolbar sits left of it.
+  expect(frameBox.width).toBe(1280);
   const barBox = (await bar().boundingBox())!;
-  expect(barBox.x + barBox.width).toBeLessThanOrEqual(drawer.x);
+  await expect.poll(async () => (await pane().locator('.ib-apanel').boundingBox())!.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
   const foot = pane().locator('[data-full-view-foot]');
   await expect(foot).toContainText('1 annotation rides your next Send to Claude.');
   await expect(foot.getByRole('button', { name: 'Write the reply' })).toBeVisible();
-  // Remembered across a reload.
+  // Closed again when the file closes: a reload opens it closed.
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.reload();
   await page.getByRole('button', { name: 'Open turnkey.html' }).click();
-  await expect(pane()).toHaveClass(/ib-drawer/);
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(pane()).not.toHaveClass(/ib-drawer/);
+  await count().click();
+  await expect(pane()).toHaveClass(/ib-drawer/);
   await count().focus();
   await page.keyboard.press('Escape');
   await expect(pane()).not.toHaveClass(/ib-drawer/);
@@ -395,25 +415,24 @@ test('× Exit full screen, just before », leaves full screen as Escape\'s last 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 });
 
-test('the corner that reveals a tucked toolbar puts the pointer on the pin, never on ×: a habitual corner click keeps full screen', async () => {
+test('the corner control is far from ×: a click where the toolbar was does nothing, a click on the corner control keeps full screen', async () => {
   const page = world.page;
   await expect(pane()).toHaveAttribute('data-full-view', '');
+  const close = (await bar().locator('[data-full-view-close]').boundingBox())!;
   await hide().click();
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await pointerAway();
   await page.waitForTimeout(400);
+  // Nothing of the gathered toolbar takes a click where × was.
+  const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-full-view-close], [data-full-view-hide]') !== null, { x: close.x + close.width / 2, y: close.y + close.height / 2 });
+  expect(under).toBe(false);
+  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
+  await expect.poll(async () => Math.round((await handle().boundingBox())!.height)).toBe(32);
   const tab = (await handle().boundingBox())!;
   const corner = { x: tab.x + tab.width / 2, y: tab.y + tab.height / 2 };
-  await page.mouse.move(corner.x, corner.y);
-  await expect(dock()).toHaveAttribute('data-bar', 'revealed');
-  // Once the toolbar has slid out, what sits under the pointer is the pin.
-  await page.waitForTimeout(400);
-  const under = await page.evaluate(({ x, y }) => {
-    const button = document.elementFromPoint(x, y)?.closest('button');
-    return button ? { close: button.hasAttribute('data-full-view-close'), hide: button.getAttribute('data-full-view-hide') } : null;
-  }, corner);
-  expect(under).toEqual({ close: false, hide: 'pin' });
-  await shot(page, 'corner-revealed', ['light']);
+  const onCorner = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-full-view-handle]') !== null, corner);
+  expect(onCorner).toBe(true);
+  await shot(page, 'corner-gathered', ['light']);
   await page.mouse.click(corner.x, corner.y);
   await expect(pane()).toHaveAttribute('data-full-view', '');
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
@@ -427,7 +446,7 @@ test('the approved states of an HTML page, in light and dark', async () => {
 /**
  * Escape, one rung per press, on an HTML file opened full screen and armed
  * (the toolbar showing, the drawer closed), until full screen ends: an empty
- * draft closes by its own key; typed words are asked about (Discard it);
+ * draft closes by its own key, and so does one with typed words (nothing asks);
  * the drawer closes before Annotate (from inside the page); Annotate goes to
  * Interact; in Interact the page's own Escape (its menu, its text field) stays
  * the page's; one it does not use leaves full screen, back where it was opened
@@ -443,18 +462,13 @@ async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   await expect(composer(page)).toHaveCount(0);
   await expect(pen).toHaveAttribute('aria-pressed', 'true');
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
-  // Typed words are never lost: the question asks; Discard it closes the draft, full screen stays.
+  // Typed words: Escape in the comment is the comment's own (it closes; no question row), full screen stays.
   await frame(page).locator('#headline').click();
   await expect(composer(page)).toBeVisible();
   await page.waitForTimeout(200);
   await composer(page).fill('Shorter headline?');
   await expect(composer(page)).toHaveValue('Shorter headline?');
   await composer(page).press('Escape');
-  await expect(guard).toBeVisible();
-  await expect(guard.locator('[data-guard-save]')).toHaveText('Save it');
-  await expect(guard.locator('[data-guard-save]')).toBeFocused();
-  await expect(composer(page)).toHaveValue('Shorter headline?');
-  await guard.locator('[data-guard-discard]').click();
   await expect(composer(page)).toHaveCount(0);
   await expect(guard).toHaveCount(0);
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
@@ -499,7 +513,7 @@ async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   expect((await page.context().cookies()).find((c) => c.name === 'plannotator-inbox-file-view')).toBeUndefined();
 }
 
-test('Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, then the page’s own Escape is respected) and then leaves full screen; ⌘⇧X from the window and from the page tucks and shows the toolbar', async () => {
+test('Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, then the page’s own Escape is respected) and then leaves full screen; ⌘⇧X from the window and from the page gathers the tools and brings them back', async () => {
   const page = world.page;
   await climbTheLadder(page);
   // Back in full screen (the toolbar showing) for the chord.
@@ -507,12 +521,12 @@ test('Escape climbs one rung per press (a draft, typed words asked about, the dr
   await page.keyboard.press('Enter');
   await expect(pane()).toHaveAttribute('data-full-view', '');
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
-  // From the window: tucked, focus on the handle (it was in the toolbar).
+  // From the window: gathered, focus on the corner control (it was in the toolbar).
   await bar().locator('[data-full-view-pen]').focus();
   await page.keyboard.press('ControlOrMeta+Shift+X');
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await expect(handle()).toBeFocused();
-  // From inside the page (Interact: the page has the keyboard): shown.
+  // From inside the page (Interact: the page has the keyboard): back.
   await frame().locator('#q').click();
   await frame().locator('#q').press('ControlOrMeta+Shift+X');
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
@@ -579,7 +593,7 @@ test('N/M opens the file peek under the toolbar; a pick goes there and full scre
   expect(world.errors).toEqual([]);
 });
 
-test('a file that changed since it was sent: the chip at the top left stays when the toolbar tucks, the handle carries an amber dot, ⋯ opens the version it sent', async () => {
+test('a file that changed since it was sent: the chip at the top left stays when the tools gather, the corner control carries an amber dot, ⋯ opens the version it sent', async () => {
   const page = world.page;
   writeFileSync(join(world.project, 'docs', 'rollout.md'), PLAN.replace('Ship the step log', 'Hold the step log'));
   await page.goto(`${world.url}#thread=${world.threadId}`);
@@ -598,7 +612,7 @@ test('a file that changed since it was sent: the chip at the top left stays when
   await expect(changed).toBeVisible();
   await expect(handle().locator('.ib-fvhandle-dot')).toBeVisible();
   await expect(handle()).toHaveAccessibleName('Show tools, file changed since sent');
-  await shot(page, 'markdown-changed-tucked', ['dark']);
+  await shot(page, 'markdown-changed-gathered', ['dark']);
   await handle().click();
   await bar().locator('[data-full-view-more]').click();
   await page.locator('[data-full-view-version]').click();
@@ -607,7 +621,7 @@ test('a file that changed since it was sent: the chip at the top left stays when
   await expect(pane()).toHaveAttribute('data-full-view', '');
 });
 
-test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px targets; Hide leaves a 44 px tab; the count opens the sheet with the position; ‹ goes back', async () => {
+test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px targets; » and ⌄ gather into a 44 px corner control; the count opens the sheet with the position; ‹ goes back', async () => {
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
   const browser = await webkit.launch({ args: [] });
   try {
@@ -623,7 +637,42 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       const viewport = page.viewportSize()!;
       const barBox = (await bar(page).boundingBox())!;
       expect(barBox.x + barBox.width).toBeGreaterThan(viewport.width - 40);
-      expect(barBox.y + barBox.height).toBeGreaterThan(viewport.height - 80);
+      // At the foot, in one row with the reply's pill: an HTML page opens clear on a phone (approval "inbox-html-attachments-phone").
+      await expect(pane(page).locator('[data-fcomp]')).toHaveCount(0);
+      const pillBox = (await pane(page).locator('[data-fcomp-pill]').boundingBox())!;
+      expect(barBox.y + barBox.height).toBeGreaterThan(viewport.height - 40);
+      expect(Math.abs(pillBox.y + pillBox.height - (barBox.y + barBox.height))).toBeLessThanOrEqual(2);
+      expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(barBox.x);
+      // The pill opens the reply card at the foot (approval "inbox-fullscreen-composer"), and the toolbar sits just above it.
+      await pane(page).locator('[data-fcomp-pill]').click();
+      await expect(pane(page).locator('[data-fcomp]')).toBeVisible();
+      const composerBox = (await pane(page).locator('[data-fcomp]').boundingBox())!;
+      const openBarBox = (await bar(page).boundingBox())!;
+      expect(composerBox.y + composerBox.height).toBeGreaterThan(viewport.height - 40);
+      expect(openBarBox.y + openBarBox.height).toBeLessThanOrEqual(composerBox.y + 1);
+      expect(openBarBox.y + openBarBox.height).toBeGreaterThan(composerBox.y - 40);
+      // ⌄ on the card gathers everything, the toolbar too, into the corner control (approval "inbox-fullscreen-gather").
+      await pane(page).locator('[data-fcomp-minimize]').click();
+      await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+      await expect(pane(page).locator('[data-fcomp]')).toHaveJSProperty('inert', true);
+      await expect(pane(page).locator('[data-fcomp]')).toBeHidden();
+      await expect(bar(page)).toHaveJSProperty('inert', true);
+      await expect(bar(page)).toBeHidden();
+      await expect(pane(page).locator('[data-fcomp-pill]')).toHaveCount(0);
+      await expect(handle(page)).toBeVisible();
+      // One tap brings both back: the card open, the toolbar above it.
+      await handle(page).click();
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
+      await expect(pane(page).locator('[data-fcomp]')).toHaveJSProperty('inert', false);
+      await expect(pane(page).locator('[data-fcomp]')).toBeVisible();
+      await expect(bar(page)).toBeVisible();
+      // Opened again, an HTML page on a phone still starts with the card folded to its pill.
+      await page.goto(`${world.url}#thread=${world.threadId}`);
+      await page.reload();
+      await page.getByRole('button', { name: 'Open turnkey.html' }).click();
+      await expect(pane(page)).toHaveAttribute('data-full-view', '');
+      await expect(pane(page).locator('[data-fcomp]')).toHaveCount(0);
+      await expect(pane(page).locator('[data-fcomp-pill]')).toBeVisible();
       for (const control of ['[data-full-view-exit="back"]', '[data-full-view-pen]', '[data-full-view-comments]', '[data-full-view-position]', '[data-full-view-more]', '[data-full-view-hide]']) {
         const b = (await bar(page).locator(control).boundingBox())!;
         expect(b.width).toBeGreaterThanOrEqual(44);
@@ -644,19 +693,22 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       await expect(rows).toHaveCount(0);
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(shotsDir, `phone-showing-${scheme}.png`) });
+      // » gathers the toolbar and the pill into a 44 px corner control, bottom right; one tap brings both back.
       await hide(page).click();
       await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+      await expect(pane(page).locator('[data-fcomp-pill]')).toBeHidden();
+      await expect.poll(async () => Math.round((await handle(page).boundingBox())!.height)).toBeGreaterThanOrEqual(44);
       const tab = (await handle(page).boundingBox())!;
       expect(tab.width).toBeGreaterThanOrEqual(44);
       expect(tab.height).toBeGreaterThanOrEqual(44);
+      expect(tab.x + tab.width).toBeGreaterThan(viewport.width - 40);
+      expect(tab.y + tab.height).toBeGreaterThan(viewport.height - 80);
       await page.waitForTimeout(300);
-      await page.screenshot({ path: join(shotsDir, `phone-tucked-${scheme}.png`) });
+      await page.screenshot({ path: join(shotsDir, `phone-gathered-${scheme}.png`) });
       await handle(page).click();
-      await expect(dock(page)).toHaveAttribute('data-bar', 'revealed');
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: join(shotsDir, `phone-revealed-${scheme}.png`) });
-      await hide(page).click();
       await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
+      await expect(bar(page)).toBeVisible();
+      await expect(pane(page).locator('[data-fcomp-pill]')).toBeVisible();
       await count(page).click();
       await expect(pane(page)).toHaveClass(/ib-panel-open/);
       await expect(pane(page).locator('[data-full-view-foot] [data-full-view-position]')).toContainText('1 of 3');
@@ -669,6 +721,9 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
         // A hardware keyboard: Escape closes the sheet, then takes Annotate to Interact, then goes back to the thread.
         await page.keyboard.press('Escape');
         await expect(pane(page)).not.toHaveClass(/ib-panel-open/);
+        // The pen starts off on a phone; turned on, Escape takes it off again.
+        await expect(bar(page).locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'false');
+        await bar(page).locator('[data-full-view-pen]').click();
         await expect(bar(page).locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'true');
         await page.keyboard.press('Escape');
         await expect(bar(page).locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'false');

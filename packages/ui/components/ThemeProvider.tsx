@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { configStore } from '../config/configStore';
 import { readThemePairCookies, writeThemePairCookies } from '../config/settings';
 import { useConfigValue } from '../config/useConfig';
@@ -18,6 +18,7 @@ import {
 } from '../utils/themeRegistry';
 import type { Mode } from './themeModes';
 import { usePrintMedia } from '../hooks/usePrintMedia';
+import { markRootPlatform } from '../utils/platform';
 
 // Kept here because published consumers already import Mode from ThemeProvider.
 export type { Mode } from './themeModes';
@@ -62,13 +63,75 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
   manageFavicon: false,
 });
 
-/** Sync theme classes on <html> without stripping non-theme classes (e.g. transitions-ready). */
+/**
+ * Held on <html> while a theme change lands. theme.css sets every transition's
+ * duration and delay to 0 s under it, so a switch paints its new colours in one
+ * frame. Without it, theme.css's global 150 ms colour transition starts on every
+ * element at once, and the page froze for a third of a second before it faded.
+ * Only the timing changes: a transition already running (a sheet sliding, a
+ * menu fading) keeps going, and hover fades are back when the class goes.
+ */
+export const THEME_SWITCHING_CLASS = 'pn-theme-switching';
+
+let themeSwitchHold = 0;
+
+/**
+ * Hold THEME_SWITCHING_CLASS for the next two frames. Called again (by the
+ * swap, then by the commit that follows it), it restarts the two frames, so
+ * the hold always outlasts the React commit that redraws the new theme.
+ *
+ * ThemeProvider calls it on every switch. A host that swaps the theme classes
+ * on <html> itself calls it just before its swap, for the same instant switch.
+ */
+export function holdThemeSwitch(): void {
+  if (typeof document === 'undefined') return;
+  const el = document.documentElement;
+  el.classList.add(THEME_SWITCHING_CLASS);
+  const hold = ++themeSwitchHold;
+  const nextFrame = (cb: () => void) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 16));
+  nextFrame(() => nextFrame(() => {
+    if (hold === themeSwitchHold) el.classList.remove(THEME_SWITCHING_CLASS);
+  }));
+}
+
+/**
+ * For a part that redraws in the new theme a step later than the switch (it
+ * reads the new colours in a frame callback, say): call this just before that
+ * redraw, and while a switch is landing its two frames start again, so the
+ * redraw lands without the colour fade too. Outside a switch it does nothing,
+ * so calling it on any other change is harmless.
+ */
+export function extendThemeSwitch(): void {
+  if (typeof document === 'undefined' || !document.documentElement.classList.contains(THEME_SWITCHING_CLASS)) return;
+  holdThemeSwitch();
+}
+
+/**
+ * Sync theme classes on <html> without stripping non-theme classes (e.g. transitions-ready).
+ *
+ * A page that sets an inline `color-scheme` on <html> before its scripts run
+ * (Plannotator's packed pages do, so the empty page does not paint white under
+ * a dark theme) hands it over here: from the first render it follows the mode
+ * on screen, so it never goes stale after a theme switch. A host page that sets
+ * none keeps none.
+ *
+ * Every change of palette or mode passes here (a click in any surface, Match
+ * system following the OS, config.json arriving, printing), so this is where
+ * the switch is made instant: see THEME_SWITCHING_CLASS.
+ */
 function applyThemeClasses(themeId: string, resolvedMode: 'dark' | 'light'): void {
   const el = document.documentElement;
   const themeClass = `theme-${themeId}`;
   const wantLight = resolvedMode === 'light';
+  const unchanged = el.classList.contains(themeClass) && el.classList.contains('light') === wantLight;
+  const schemeStale = !!el.style.colorScheme && el.style.colorScheme !== resolvedMode;
+  if (unchanged && !schemeStale) return;
 
-  if (el.classList.contains(themeClass) && el.classList.contains('light') === wantLight) return;
+  holdThemeSwitch();
+
+  if (schemeStale) el.style.colorScheme = resolvedMode;
+
+  if (unchanged) return;
 
   for (const cls of Array.from(el.classList)) {
     if (cls.startsWith('theme-')) el.classList.remove(cls);
@@ -223,11 +286,23 @@ export function ThemeProvider({
   // without this the first frame has no valid --background/--foreground.
   if (typeof window !== 'undefined') {
     applyThemeClasses(colorTheme, resolvedMode);
+    // theme.css scopes the Linux-only font-feature rule to this class (#1961).
+    markRootPlatform();
   }
 
   // Keep class in sync after state changes
   useEffect(() => {
     applyThemeClasses(colorTheme, resolvedMode);
+  }, [resolvedMode, colorTheme]);
+
+  // The classes were swapped in render, before the tree below redrew in the
+  // new theme. Restart the instant-switch hold once that redraw has committed,
+  // so the two frames count from the commit however long it took.
+  const committedTheme = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const shown = `${colorTheme}:${resolvedMode}`;
+    if (committedTheme.current !== null && committedTheme.current !== shown) holdThemeSwitch();
+    committedTheme.current = shown;
   }, [resolvedMode, colorTheme]);
 
   // Enable color transitions after mount settles — prevents the global *

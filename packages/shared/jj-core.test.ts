@@ -15,6 +15,9 @@ import {
   runJjDiff,
   selectDefaultJjCompareTarget,
 } from "./jj-core";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 describe("jj diff args", () => {
   test("maps Call flow modes to the revsets used by each visible Jujutsu diff", () => {
@@ -101,7 +104,7 @@ describe("jj diff args", () => {
 
     expect(getJjDiffArgs("jj-all", "trunk()")).toEqual({
       args: ["diff", "--git", "--from", "root()", "--to", "@"],
-      label: "All files",
+      label: "Every file",
     });
   });
 
@@ -180,7 +183,7 @@ describe("jj compare targets", () => {
       configPath,
       '[user]\nname = "Plannotator Test"\nemail = "test@plannotator.invalid"\n',
     );
-    const env = { ...process.env, JJ_CONFIG: configPath };
+    const env = jjConfig.env({ JJ_CONFIG: configPath });
 
     const jj = (args: string[], options?: { cwd?: string; config?: string[] }) => {
       const result = Bun.spawnSync(["jj", ...(options?.config ?? []), ...args], {

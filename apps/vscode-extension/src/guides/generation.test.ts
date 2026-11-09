@@ -1,21 +1,21 @@
 /**
- * A whole guide run against the FAKE ACP agent (tests/fake-acp-agent.ts):
+ * A whole guide run against the FAKE ACP agent (tests/helpers/fake-acp-agent.ts):
  * the extension's ACP client starts it, it starts the builder relay script
  * from `session/new`, calls the guide_* tools through it, asks for a
  * permission, reports cost, and finishes. No real agent ever runs here.
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GuideGeneration, type GenerationDeps, type GenerationInput } from "./generation";
-import { CLAUDE_CODE, CODEX, KNOWN_AGENTS, customAgent, type AgentDescriptor } from "./acp/agents";
+import { GuideGeneration, resolveHeadFile, type GenerationDeps, type GenerationInput } from "./generation";
+import { CLAUDE_CODE, CODEX, KNOWN_AGENTS, customAgent, type AgentDescriptor } from "@plannotator/acp-client/agents";
 import { startRelayHost, type RelayHost } from "./mcp/relay-host";
 import { changedFilesFromPatch } from "./sources/git";
 import { listDraftRecords, loadDraftRecord, loadSavedGuide, listRecent } from "./store";
 
-const FAKE_AGENT = join(import.meta.dir, "..", "..", "tests", "fake-acp-agent.ts");
+const FAKE_AGENT = join(import.meta.dir, "..", "..", "..", "..", "tests", "helpers", "fake-acp-agent.ts");
 const RELAY_SCRIPT = join(import.meta.dir, "mcp", "relay-script.ts");
 
 function addedFilePatch(path: string, lines: string[]): string {
@@ -114,8 +114,20 @@ const ch1 = { mcp: { name: "guide_add_chapter", args: { title: "The retry budget
 const ch2 = { mcp: { name: "guide_add_chapter", args: { title: "Delivery loop learns to back off", overview: "The loop backs off." } } };
 const place = (file: string, chapter: string, extra: Record<string, unknown> = {}) => ({ mcp: { name: "guide_place_file", args: { file, chapter, summary: `What ${file} does.`, ...extra } } });
 
+/** The fake agent's stubborn grandchildren (they ignore SIGTERM): killed after each test whatever it asserted, so a failing test never leaves one running. */
+const stubborn = new Set<number>();
+
 describe("guide generation over ACP", () => {
-  afterEach(() => {});
+  afterEach(() => {
+    for (const pid of stubborn) {
+      try {
+        process.kill(pid, "SIGKILL"); // own grandchild (the fake agent's), never anything else
+      } catch {
+        // Already gone.
+      }
+    }
+    stubborn.clear();
+  });
 
   it("runs a whole guide: messages, tool calls, a permission, builder calls with a refused one, cost, finish", async () => {
     const w = world([
@@ -300,6 +312,7 @@ describe("guide generation over ACP", () => {
     await gen.run();
     const pid = w.log().find((e) => e.event === "stubborn")?.pid as number;
     expect(typeof pid).toBe("number");
+    stubborn.add(pid);
     expect(await gone(pid, 6000)).toBe(true);
   });
 
@@ -313,6 +326,7 @@ describe("guide generation over ACP", () => {
       pid = w.log().find((e) => e.event === "stubborn")?.pid;
     }
     expect(pid).toBeDefined();
+    stubborn.add(pid!);
     gen.kill();
     expect(await gone(pid!, 1500)).toBe(true);
     await running;
@@ -660,3 +674,26 @@ async function gone(pid: number, timeoutMs: number): Promise<boolean> {
     return true;
   }
 }
+
+describe("the builder's resolveFile hook", () => {
+  it("counts a real file's lines; a symlink out of the repository, a folder or a path up out of it is not there", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pn-resolve-file-"));
+    try {
+      const root = join(dir, "repo");
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "a.ts"), "one\ntwo\nthree\n");
+      writeFileSync(join(dir, "credentials"), "secret\n".repeat(40));
+      symlinkSync(join(dir, "credentials"), join(root, "notes.md"));
+      symlinkSync(join(root, "src", "a.ts"), join(root, "alias.ts"));
+      expect(await resolveHeadFile(root, "src/a.ts")).toEqual({ exists: true, lineCount: 3 });
+      expect(await resolveHeadFile(root, "alias.ts")).toEqual({ exists: true, lineCount: 3 });
+      expect(await resolveHeadFile(root, "notes.md")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "src")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "../credentials")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, join(dir, "credentials"))).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "missing.ts")).toEqual({ exists: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

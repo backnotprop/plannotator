@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
-import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, type SentContents } from './sendTargets';
+import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
 
 type State = 'open' | 'picked' | 'sent';
 const message = (id: string, session: string | null, states: State[]): InboxMessageWire =>
@@ -26,7 +26,7 @@ describe('sendTargetsOf', () => {
     for (let i = 2; i <= 7; i++) messages.push(message(`msg_${i}`, 'ses_a', ['open']));
     messages.push(message('msg_8', 'ses_a', ['picked']));
     const targets = sendTargetsOf(thread(messages));
-    expect(targets).toEqual([{ message: messages[7], questions: [{ key: 'q-msg_8-0', revision: 1 }], skip: [] }]);
+    expect(targets).toEqual([{ message: messages[7], questions: [{ key: 'q-msg_8-0', revision: 1 }], skip: [], actions: [] }]);
   });
 
   test('picks on three of one session\'s messages: one reply to the latest of them, naming the others', () => {
@@ -59,6 +59,21 @@ describe('sendTargetsOf', () => {
     expect(targets.map((t) => t.message.id)).toEqual(['msg_b1', 'msg_a1']);
   });
 
+  test("a launched agent's permission question takes only its answer: the words go to the agent's own latest message", () => {
+    const m = [message('msg_a1', 'ses_a', []), message('msg_p1', 'perm:ses_a', ['picked'])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.questions.length])).toEqual([
+      ['msg_p1', 1],
+      ['msg_a1', 0],
+    ]);
+  });
+
+  test('before the launched agent wrote, the words go to the thread the person started for it, never to the permission question', () => {
+    const root = { id: 'msg_1', thread_id: 'msg_1', author: { kind: 'person' }, body: 'Fix it', to: { host: 'claude-code', session: 'ses_a' } } as unknown as InboxMessageWire;
+    const targets = sendTargetsOf(thread([root, message('msg_p1', 'perm:ses_a', ['open'])]));
+    expect(targets.map((t) => t.message.id)).toEqual(['msg_1']);
+  });
+
   test('the latest agent message from a session with nothing to send comes last, empty, for the words', () => {
     const m = [message('msg_a1', 'ses_a', ['picked']), message('msg_b1', 'ses_b', [])];
     const targets = sendTargetsOf(thread(m));
@@ -71,6 +86,47 @@ describe('sendTargetsOf', () => {
   test('messages with no session are each a reply of their own', () => {
     const m = [message('msg_1', null, ['picked']), message('msg_2', null, ['picked'])];
     expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_1', 'msg_2']);
+  });
+});
+
+describe('action items whose Done waits in the draft go with the Send (approval "inbox-action-items-in-reply")', () => {
+  const withActions = (m: InboxMessageWire, actions: { key: string; staged?: boolean; by?: 'person' | 'agent'; note?: string | null; state?: string }[]) =>
+    ({
+      ...m,
+      actions: actions.map((a) => ({
+        key: a.key,
+        kind: 'action',
+        state: a.state ?? 'picked',
+        revision: 1,
+        sent_revision: null,
+        action_result:
+          a.by === 'agent'
+            ? { outcome: 'done', note: null, at: '2026-10-26T10:00:00.000Z', by: 'agent', message_id: 'msg_x', person: { outcome: 'done', note: a.note ?? null, at: '2026-10-26T09:00:00.000Z' } }
+            : { outcome: 'done', note: null, at: '2026-10-26T09:00:00.000Z', by: 'person', message_id: null, ...(a.staged ? { staged: true } : {}) },
+      })),
+    }) as unknown as InboxMessageWire;
+
+  test('with no pick, a Done alone makes a reply to its message', () => {
+    const m = [withActions(message('msg_1', 'ses_a', []), [{ key: 'a-1', staged: true }]), message('msg_2', 'ses_a', [])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.actions])).toEqual([['msg_1', [{ key: 'a-1' }]]]);
+  });
+
+  test("a Done on an older message rides the same session's reply with the picks, by message id", () => {
+    const m = [withActions(message('msg_1', 'ses_a', []), [{ key: 'a-1', staged: true }]), message('msg_2', 'ses_a', ['picked'])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.actions])).toEqual([['msg_2', [{ message_id: 'msg_1', key: 'a-1' }]]]);
+  });
+
+  test('a Done through the timed path (no staged) is not the Send\'s; the agent\'s own done goes only with a note to carry', () => {
+    const m = [
+      withActions(message('msg_1', 'ses_a', []), [
+        { key: 'a-timed' },
+        { key: 'a-seen', by: 'agent', state: 'closed' },
+        { key: 'a-noted', by: 'agent', state: 'closed', note: 'Rotated the key too.' },
+      ]),
+    ];
+    expect(sendTargetsOf(thread(m))[0]!.actions).toEqual([{ key: 'a-noted' }]);
   });
 });
 
@@ -94,5 +150,74 @@ describe('a retried Send keeps or renews each reply\'s key', () => {
     const m = [message('msg_1', 'ses_a', ['picked']), message('msg_2', 'ses_a', ['picked', 'open'])];
     const [target] = sendTargetsOf(thread(m), new Set(['msg_2/q-msg_2-1']));
     expect(sendTargetAnswerIds(target!)).toEqual(['a:msg_1/q-msg_1-0', 'a:msg_2/q-msg_2-0', 's:msg_2/q-msg_2-1']);
+  });
+});
+
+describe('the words after a hand-off (approval "inbox-tag-handoff")', () => {
+  const person = (id: string, extra: Partial<InboxMessageWire>): InboxMessageWire =>
+    ({ id, thread_id: 'msg_1', author: { kind: 'person' }, body: '', created_at: '2026-10-21T15:56:00.000Z', ...extra }) as unknown as InboxMessageWire;
+  const handoff = (id: string, undone = false) =>
+    person(id, { to: { host: 'claude-code', session: 'ses_new' }, handoff: { from: { host: 'claude-code', session: 'ses_old' }, at: '', ...(undone ? { undone_at: 'x' } : {}) } });
+
+  test('before the new owner writes, the words answer the hand-off reply itself (so they go to the new owner), even when the former owner writes after it', () => {
+    const m = [message('msg_1', 'ses_old', []), handoff('msg_2'), message('msg_3', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_2']);
+  });
+
+  test("once the new owner writes, the words answer its latest message; the former owner's picks still go to it", () => {
+    const m = [message('msg_1', 'ses_old', ['picked']), handoff('msg_2'), message('msg_3', 'ses_new', []), message('msg_4', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_1', 'msg_3']);
+  });
+
+  test('a hand-off taken back moves nothing: the latest agent writer gets the words, as before', () => {
+    const m = [message('msg_1', 'ses_old', []), handoff('msg_2', true), message('msg_3', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_3']);
+  });
+});
+
+describe('wordsMessage: who the next reply goes to after a session ended', () => {
+  const reply = (id: string, extra: Partial<InboxMessageWire>): InboxMessageWire =>
+    ({ id, thread_id: 'msg_1', author: { kind: 'person' }, reply_to: 'msg_1', body: '', created_at: '2026-10-21T16:00:00.000Z', ...extra }) as unknown as InboxMessageWire;
+  const ended = message('msg_1', 'ses_ended', []);
+  const to = { host: 'pi', session: 'ses_new' };
+
+  test('the session that replaced an ended one takes the words, so the next reply copies its `to` and nothing asks about the old one', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    expect(wordsMessage(thread([ended, moved])).id).toBe('msg_2');
+    expect(sendTargetsOf(thread([ended, moved])).at(-1)!.message.id).toBe('msg_2');
+  });
+
+  test('a reply aimed at another session while the asker is live changes nothing: the next one answers the asker', () => {
+    expect(wordsMessage(thread([ended, reply('msg_2', { to })])).id).toBe('msg_1');
+  });
+
+  test('a further reply to the session that took over is the one followed; one aimed elsewhere, without taking over, is not (as on the server)', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const next = reply('msg_3', { to, reply_to: 'msg_2' });
+    expect(wordsMessage(thread([ended, moved, next])).id).toBe('msg_3');
+    const elsewhere = reply('msg_4', { to: { host: 'pi', session: 'ses_third' }, reply_to: 'msg_1' });
+    expect(wordsMessage(thread([ended, moved, next, elsewhere])).id).toBe('msg_3');
+    const again = reply('msg_5', { to: { host: 'pi', session: 'ses_third' }, took_over: true });
+    expect(wordsMessage(thread([ended, moved, next, again])).id).toBe('msg_5');
+  });
+
+  test('a permission prompt after the take over is not an agent writing: the words stay', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const prompt = message('msg_3', 'perm:ses_new', []);
+    expect(wordsMessage(thread([ended, moved, prompt])).id).toBe('msg_2');
+  });
+
+  test('a hand-off after the take over owns the next reply', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const handed = reply('msg_3', { to: { host: 'pi', session: 'ses_third' }, handoff: { from: { host: 'pi', session: 'ses_new' }, label: null, at: 'x' } });
+    expect(wordsMessage(thread([ended, moved, handed])).id).toBe('msg_3');
+  });
+
+  test('any agent writing ends it: the latest writer takes the words again, the old session too if it was resumed', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const writer = message('msg_3', 'ses_new', []);
+    expect(wordsMessage(thread([ended, moved, writer])).id).toBe('msg_3');
+    const back = message('msg_4', 'ses_ended', []);
+    expect(wordsMessage(thread([ended, moved, back])).id).toBe('msg_4');
   });
 });

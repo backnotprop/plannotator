@@ -5,9 +5,11 @@
  * `plannotator inbox mcp` (scripts/inbox-sim.ts), and Chromium opens the
  * thread. The rules (owner ruling 2026-10-16):
  *  - an agent's message shows images relative to its project, hidden folders
- *    inside the project included, AND images outside the project;
+ *    inside the project included, AND images outside the project, a hidden
+ *    folder beside it included (`../.ops/`), as attachments from there show;
  *  - the person's own reply shows images from the project only;
- *  - a project that IS the home folder never shows its hidden folders;
+ *  - the home folder's own hidden folders never show, even to a project
+ *    that IS the home folder;
  *  - send_message says which images will not show (`images_not_shown`).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -54,6 +56,9 @@ test('an agent message shows images from its project and from outside it; the pe
   writeFileSync(join(project, '.walkthrough', 'shots', 'after.png'), PNG);
   // Outside the project, as a screenshot tool would leave it.
   writeFileSync(join(root, 'src', 'outside.png'), PNG);
+  // A hidden folder beside the project (not the home folder's own): shows, as an attachment from it would.
+  mkdirSync(join(root, 'src', '.ops'), { recursive: true });
+  writeFileSync(join(root, 'src', '.ops', 'explainer.png'), PNG);
   // A hidden folder of the home folder itself.
   mkdirSync(join(root, '.cache'), { recursive: true });
   writeFileSync(join(root, '.cache', 'thumb.png'), PNG);
@@ -72,6 +77,8 @@ test('an agent message shows images from its project and from outside it; the pe
         '',
         '![outside](../outside.png)',
         '',
+        '![beside](../.ops/explainer.png)',
+        '',
         '![later](.walkthrough/shots/not-yet.png)',
       ].join('\n'),
     });
@@ -83,7 +90,7 @@ test('an agent message shows images from its project and from outside it; the pe
 
     // An agent working in the home folder itself.
     const atHome = await agent.send({ project_path: root, subject: 'From home', body: '![home hidden](.cache/thumb.png)' });
-    expect(atHome.images_not_shown).toEqual([{ ref: '.cache/thumb.png', reason: 'in a hidden folder, or a hidden or .env file' }]);
+    expect(atHome.images_not_shown).toEqual([{ ref: '.cache/thumb.png', reason: 'a .env file, or in a hidden folder of the home folder such as ~/.ssh' }]);
 
     const page = await context.newPage();
     await page.goto(`${url}#thread=${sent.thread_id}`);
@@ -99,6 +106,8 @@ test('an agent message shows images from its project and from outside it; the pe
     const outside = body.locator('img[alt="outside"]');
     await expect(outside).toHaveAttribute('src', `/api/inbox/messages/${id}/image?path=${encodeURIComponent('../outside.png')}`);
     await expectLoaded(outside);
+    // So does the one in the hidden folder beside the project.
+    await expectLoaded(body.locator('img[alt="beside"]'));
 
     // The person replies naming the same outside file, and one of the project.
     const replied = await fetch(new URL(`/api/inbox/messages/${id}/reply`, url), {

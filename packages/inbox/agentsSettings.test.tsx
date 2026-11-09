@@ -6,12 +6,13 @@
  * lock, "Agent's next session" after a change, and the agents not found
  * folded behind the harness picker. Requests go to a recording fetch.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import type { InboxLaunchSettings } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { AgentsSettings, repliesOf } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
@@ -58,7 +59,7 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
       }),
       mcp('cursor', 'Cursor', '~/.cursor/mcp.json', {
         reach: { kind: 'mcp', on: false, state: 'removed', path: '~/.cursor/mcp.json', locked: false, reason: null },
-        note: note('cursor', { state: 'manual', reason: 'Cursor User Rules are managed in Settings → Rules; Plannotator cannot install, update or remove a copied rule.' }),
+        note: note('cursor', { state: 'manual', reason: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." }),
       }),
       { ...mcp('amp', 'Amp', '~/.config/amp/settings.json'), detected: false },
     ],
@@ -72,7 +73,7 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   };
 }
 
-function mount(start: InboxAgentsModel) {
+function mount(start: InboxAgentsModel, launch?: InboxLaunchSettings) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -86,6 +87,7 @@ function mount(start: InboxAgentsModel) {
           render();
         }}
         context={{ command: ['/opt/plannotator', 'inbox', 'mcp'], mcpUrl: 'http://127.0.0.1:1/mcp', platform: 'mac' }}
+        {...(launch ? { launch } : {})}
       />,
     );
   act(() => {
@@ -129,7 +131,7 @@ test.skipIf(!hasDom)('one group per agent found, with its switches and the state
   expect(group(el, 'cursor').querySelector('.ib-agstate')?.textContent).toBe('Removed outside Plannotator');
   expect(rows(group(el, 'cursor'))).toEqual([
     { k: 'Reaches the Inbox', v: "plannotator-inbox is no longer in ~/.cursor/mcp.json. Plannotator won't add it back on its own; turn this on to add it.", sw: 'false', sub: null },
-    { k: 'Note in its instructions', v: 'Cursor User Rules · copy into Settings → RulesShow note', sw: null, sub: 'Cursor User Rules are managed in Settings → Rules; Plannotator cannot install, update or remove a copied rule.' }
+    { k: 'Note in its instructions', v: 'Customize → Rules in Cursor · copy yourselfShow note', sw: null, sub: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." },
   ]);
 });
 
@@ -154,6 +156,81 @@ test.skipIf(!hasDom)('a switch saves that one change and says it applies to the 
   const show = [...group(el, 'codex').querySelectorAll('button')].find((b) => b.textContent === 'Show')!;
   act(() => show.click());
   expect(group(el, 'codex').querySelector('pre')?.textContent).toBe('<!-- plannotator-inbox:start v1 -->\nnote\n<!-- plannotator-inbox:end -->');
+
+  // Cursor's note is copied by hand: shown without the marker lines, which promise a removal that never happens there.
+  const showCursor = [...group(el, 'cursor').querySelectorAll('button')].find((b) => b.textContent === 'Show note')!;
+  act(() => showCursor.click());
+  expect(group(el, 'cursor').querySelector('pre')?.textContent).toBe('note');
+  expect(group(el, 'cursor').querySelector('.ib-cbox p')?.textContent).toBe("Copy this text into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+});
+
+test.skipIf(!hasDom)('"Start agents from New message": always shown, saves config.json\'s switch, and the launch rows follow it', async () => {
+  const on: InboxLaunchSettings = { enabled: true, full_permissions: false, follows: null, scratch_dir: '/Users/me/.plannotator/scratch', scratch_dir_shown: '~/.plannotator/scratch' };
+  const off: InboxLaunchSettings = { enabled: false, full_permissions: false };
+  let state = on;
+  const sent: { method: string; url: string; body: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    sent.push({ method, url, body });
+    if (method === 'POST' && body && typeof body.enabled === 'boolean') state = body.enabled ? on : off;
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), on);
+  await settle();
+  const enabledRow = () => el.querySelector('[data-launch-enabled-row]');
+  const launchRows = () => [!!el.querySelector('[data-launch-full-row]'), !!el.querySelector('[data-launch-scratch-row]')];
+  // Its own group, first, above the agents.
+  expect(el.querySelector('.ib-agents')!.firstElementChild!.hasAttribute('data-launch-enabled-group')).toBe(true);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+  const press = async () => {
+    await act(async () => (enabledRow()!.querySelector('[role="switch"]') as HTMLButtonElement).click());
+    await settle();
+  };
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }]);
+  expect(sent.find((r) => r.method === 'POST')!.url).toContain('/api/inbox/launch/settings');
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('off');
+  expect(enabledRow()!.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+  // Off: the rows for sessions you start hide; the switch stays to turn it back on.
+  expect(launchRows()).toEqual([false, false]);
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }, { enabled: true }]);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+});
+
+test.skipIf(!hasDom)('Windows (launch unsupported there): no switch, and no launch rows while off', () => {
+  const el = mount(model(), { enabled: false, full_permissions: false, unsupported: true });
+  expect(el.querySelector('[data-launch-enabled-row]')).toBeNull();
+  expect(el.querySelector('[data-launch-full-row]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('connected under another QWEN_HOME: shown off, where it is, and turning it on asks to move it here', async () => {
+  const qwen = mcp('qwen', 'Qwen Code', '~/.qwen/settings.json', {
+    reach: { kind: 'mcp', on: false, state: 'elsewhere', path: '~/.qwen/settings.json', locked: false, reason: null },
+  });
+  const el = mount(model({ agents: [qwen] }));
+  const reach = rows(group(el, 'qwen'))[0]!;
+  expect(reach.sw).toBe('false');
+  expect(reach.v).toBe('Connected in ~/.qwen/settings.json. Turn on to move it here.');
+  expect(group(el, 'qwen').textContent).toContain('Connected in another folder');
+  const sent: unknown[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ ...model({ agents: [qwen] }), error: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const button = group(el, 'qwen').querySelector('[role="switch"]') as HTMLButtonElement;
+  await act(async () => {
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(sent).toEqual([{ agent: 'qwen', reach: true }]);
 });
 
 test.skipIf(!hasDom)('PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches and says why', () => {
@@ -172,7 +249,7 @@ test.skipIf(!hasDom)('PLANNOTATOR_INBOX_TOOL locks the tool and reminder switche
 test.skipIf(!hasDom)('the agents not found fold behind the harness picker, editors included', () => {
   const el = mount(model());
   const more = [...el.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Not found on this computer'))!;
-  expect(more.textContent).toBe('Not found on this computer1 agent · connect one by hand');
+  expect(more.textContent).toBe('Not found on this computer1 agent · connect one yourself');
   expect(more.getAttribute('aria-expanded')).toBe('false');
   act(() => more.click());
   expect([...el.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('VS Code');
@@ -237,7 +314,7 @@ test.skipIf(!hasDom)('Claude Code\'s mod off: "Reaches the Inbox" says why in pl
   expect((group(el, 'claude-code').querySelectorAll('[role="switch"]')[0] as HTMLButtonElement).disabled).toBe(true);
 });
 
-test.skipIf(!hasDom)('Claude Code connected by hand through MCP: shown, never switched (Plannotator does not own that entry)', () => {
+test.skipIf(!hasDom)('Claude Code connected yourself through MCP: shown, never switched (Plannotator does not own that entry)', () => {
   const base = model();
   base.agents[0] = mcp('claude-code', 'Claude Code', '~/.claude.json');
   const el = mount(base);

@@ -1,3 +1,5 @@
+import type { GuideDiffNote } from './guide-notes';
+
 /** Hard cap on reviewer-supplied extra guide instructions (#1265): the
  *  freeform text appended to the organizer methodology at launch. A hygiene
  *  bound on prompt size, not a security boundary (the instructions run on the
@@ -25,6 +27,9 @@ export interface GuideDiffRef {
    *  for schema-enforced engines; optional here so a marker engine that omits
    *  it still yields a valid guide — the UI simply renders nothing. */
   summary?: string;
+  /** The author's notes on lines of this file (code review in the Inbox; snapshot format version 4, written only
+   *  when a note exists). Each sits inside one hunk. Readers that do not know them show the file as before. */
+  notes?: GuideDiffNote[];
 }
 
 export interface GuideSection {
@@ -50,6 +55,16 @@ export interface GuideOverviewDiagram {
   /** Mermaid source, or sanitized HTML. May carry `code:`, `symbol:` and
    *  `chapter:` links (Mermaid `click` lines, HTML `href`s). */
   source: string;
+  /**
+   * A drawn HTML picture (code review in the Inbox; snapshot format version 3,
+   * because version-2 parsers are strict): rules for this picture only, a
+   * fixed canvas in CSS pixels that the reader scales to fit (`width` and
+   * `height` together), and a stacked drawing for a phone. HTML only.
+   */
+  css?: string;
+  width?: number;
+  height?: number;
+  tall?: { source: string; css?: string };
 }
 
 /** The agent's overview above the chapters: a few sentences on how the change

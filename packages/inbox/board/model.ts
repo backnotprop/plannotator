@@ -2,9 +2,10 @@
  * The Board page's rules, pure (approval "inbox-board", step 2; the look in
  * "inbox-board-look", the unread signal in "inbox-board-signal").
  *
- * - Lanes: the five live columns in COLUMNS.md set d order (Backlog,
- *   Designing, Your look, Building, Your review). Shipped and Icebox are links
- *   to their own lists; Dropped is listed on the Icebox page.
+ * - Lanes (approval "inbox-board-columns-v2"): Backlog, Todo, In progress,
+ *   In review, and Done with the cards done in the last seven days.
+ *   "All done" and Cancelled (the Dropped column) are links to their own
+ *   lists; the Icebox folded into Backlog.
  * - A card (variant C "Lean") is two lines: the title, then "You: …" in the
  *   person's columns or the agent's last word otherwise, and its last-heard
  *   age on the right ("2d ago"). No counts on a card, no amber.
@@ -12,7 +13,7 @@
  *   after the person's last look at the Board (isInboxCardUnread). The look
  *   moves when the Board is opened; the page keeps the marks it opened with
  *   for the visit, and a card the person opens or moves stops being bold.
- * - The person's moves: any live column, Ship, Icebox, Drop (reason), Restore.
+ * - The person's moves: any live column, Done, Drop (reason), Restore.
  *   The store decides what is allowed; these say what the menu offers.
  */
 
@@ -25,6 +26,9 @@ import {
   isInboxCardPersonColumn,
   isInboxCardSentWaiting,
   isInboxCardUnread,
+  isInboxInitiativeId,
+  INBOX_NO_INITIATIVE,
+  type InboxInitiative,
   type InboxCardHistoryEntry,
   type InboxAuthor,
   type InboxCardColumn,
@@ -33,35 +37,180 @@ import {
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 
-export type BoardView = 'lanes' | 'shipped' | 'icebox';
+export type BoardView = 'lanes' | 'done' | 'cancelled';
 
-/** The Board's list a hash names (`#board=shipped`); anything else is the lanes. */
+/**
+ * The Board's list a hash names (`#board=done`, `#board=cancelled`); an older
+ * address still opens its list (`#board=shipped` is Done, `#board=icebox`
+ * from before v2 is Cancelled); anything else is the lanes.
+ */
 export function boardViewOf(value: string | null): BoardView {
-  return value === 'shipped' || value === 'icebox' ? value : 'lanes';
+  if (value === 'done' || value === 'cancelled') return value;
+  if (value === 'shipped') return 'done';
+  return value === 'icebox' ? 'cancelled' : 'lanes';
 }
 
-/** One lane: a live column and its cards, latest move first (the server's order). */
+/**
+ * The Board's project filter (`#board&project=prj_…`, the key the list uses
+ * for a project): only that project's cards, on the lanes, the counts, the
+ * Done and Cancelled lists and the agents' drops. Null: every card, as
+ * before the filter existed.
+ */
+export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(cards: readonly T[], project: string | null): readonly T[] {
+  return project ? cards.filter((card) => card.project_id === project) : cards;
+}
+
+/**
+ * The Board's initiative filter (approval "board-initiatives"): an `ini_` id
+ * (`#board&initiative=ini_…`), `none` for the cards in no initiative
+ * (`&initiative=none`), or null for every card. It narrows what the project
+ * filter left, so the two combine. Given the live initiatives, `none` also
+ * holds a card whose initiative is gone, as the counts do (`initiativeCounts`).
+ */
+export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(
+  cards: readonly T[],
+  initiative: string | null,
+  live?: readonly Pick<InboxInitiative, 'id'>[],
+): readonly T[] {
+  if (initiative === null) return cards;
+  if (initiative === INBOX_NO_INITIATIVE) {
+    const ids = live ? new Set(live.map((i) => i.id)) : null;
+    return cards.filter((card) => !card.initiative || (ids !== null && !ids.has(card.initiative)));
+  }
+  return cards.filter((card) => card.initiative === initiative);
+}
+
+/** The initiatives the person can pick, in the order they were made (a deleted one is gone from the filter and the menus). */
+export function liveInitiatives(initiatives: readonly InboxInitiative[] | undefined): InboxInitiative[] {
+  return (initiatives ?? []).filter((initiative) => initiative.deleted_at === null);
+}
+
+/**
+ * How many cards each initiative holds, and how many are in none (`none`),
+ * among `cards` (the Board passes the cards on its lanes in the picked
+ * project). A card whose initiative was deleted counts as in none (the
+ * server already reads it so).
+ */
+export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative'>[], live: readonly Pick<InboxInitiative, 'id'>[]): Map<string, number> {
+  const counts = new Map<string, number>([[INBOX_NO_INITIATIVE, 0], ...live.map((i) => [i.id, 0] as [string, number])]);
+  for (const card of cards) {
+    const key = card.initiative && counts.has(card.initiative) ? card.initiative : INBOX_NO_INITIATIVE;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The initiative filter an address names (`&initiative=`): `none`, or an
+ * `ini_` id; anything else is no filter. Once the initiatives have loaded
+ * (`live` not null) an id they do not hold (a deleted one, a stale link) is
+ * no filter either; before that the id filters as it stands, so a filtered
+ * link never flashes every card.
+ */
+export function boardInitiativeOf(value: string | null | undefined, live: readonly Pick<InboxInitiative, 'id'>[] | null): string | null {
+  if (!value) return null;
+  if (value === INBOX_NO_INITIATIVE) return value;
+  if (!isInboxInitiativeId(value)) return null;
+  return live === null || live.some((i) => i.id === value) ? value : null;
+}
+
+/** The Board's filter in an address, after `#board` (`&project=…&initiative=…`), in that order; empty for none. */
+export function boardFilterHash(filter: { project?: string | null; initiative?: string | null }): string {
+  return (
+    (filter.project ? `&project=${encodeURIComponent(filter.project)}` : '') + (filter.initiative ? `&initiative=${encodeURIComponent(filter.initiative)}` : '')
+  );
+}
+
+/** Where a New card starts on a Board filtered to an initiative: that one (never "No initiative", which is no initiative). */
+export function newCardInitiative(filter: string | null): string | null {
+  return filter && filter !== INBOX_NO_INITIATIVE ? filter : null;
+}
+
+/** An initiative's name by id, deleted ones too (an opened card's history names them); null when unknown. */
+export function initiativeName(initiatives: readonly InboxInitiative[] | undefined, id: string | null): string | null {
+  if (!id) return null;
+  return initiatives?.find((i) => i.id === id)?.name ?? null;
+}
+
+/**
+ * The projects the Board's Project menu offers: those with a card on the
+ * Board in any column (a project of Done or Cancelled cards only included),
+ * in the sidebar's order, and the chosen project even with no card left, so
+ * the menu always shows what is picked.
+ */
+export function boardProjects<P extends { id: string }>(cards: readonly Pick<InboxCardWire, 'project_id'>[], projects: readonly P[], chosen: string | null): P[] {
+  const withCards = new Set(cards.map((card) => card.project_id));
+  return projects.filter((project) => withCards.has(project.id) || project.id === chosen);
+}
+
+/** The Board's lanes: the live columns, then Done (its last week; "All done" lists the rest). */
+export const BOARD_LANE_COLUMNS: readonly InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'done'];
+
+/** How long a done card stays in the Done lane, from when it moved there. */
+export const DONE_LANE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Whether a done card is still in the Done lane at `now` (moved to Done in the last seven days). */
+export function inDoneLane(card: Pick<InboxCardWire, 'column' | 'moved_at'>, now: number): boolean {
+  if (card.column !== 'done') return false;
+  const at = Date.parse(card.moved_at);
+  return !Number.isNaN(at) && now - at < DONE_LANE_MS;
+}
+
+/** One lane: a column and its cards, latest move first (the server's order). */
 export interface BoardLane {
   column: InboxCardColumn;
   label: string;
-  /** Your look and Your review: the person owes the next move. */
+  /** In review: the person owes the next move. */
   onYou: boolean;
   cards: InboxCardWire[];
 }
 
-export function boardLanes(cards: readonly InboxCardWire[]): BoardLane[] {
-  return INBOX_CARD_LIVE_COLUMNS.map((column) => ({
+export function boardLanes(cards: readonly InboxCardWire[], now: number = Date.now()): BoardLane[] {
+  return BOARD_LANE_COLUMNS.map((column) => ({
     column,
     label: INBOX_CARD_COLUMN_LABELS[column],
     onYou: isInboxCardPersonColumn(column),
-    // A card the person sent to an agent sits at the top of Backlog until it moves (step 2 amendment).
+    // A card the person sent to an agent sits at the top of Todo until it moves (step 2 amendment).
     cards: cards
-      .filter((card) => card.column === column)
+      .filter((card) => (column === 'done' ? inDoneLane(card, now) : card.column === column))
       .map((card, index) => ({ card, index }))
       .sort((a, b) => Number(isInboxCardSentWaiting(b.card)) - Number(isInboxCardSentWaiting(a.card)) || a.index - b.index)
       .map(({ card }) => card),
   }));
 }
+
+/** The Inbox sections that say a thread waits on the person (Stopped on you, Holding up work, Waiting on you). */
+const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'waiting']);
+
+/**
+ * "Waiting on you" (display only): a card on the lanes before In review with a
+ * linked thread the Inbox already lists as waiting on the person (an agent's
+ * question, unanswered). It never moves the card: In review stays the agent's
+ * deliberate hand-over, and a card already there shows its "You: …". The
+ * thread to open, or null.
+ */
+export function waitingThread(card: Pick<InboxCardWire, 'column' | 'threads'>, rowOf: (threadId: string) => { section?: string } | null | undefined): string | null {
+  if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column) || isInboxCardPersonColumn(card.column)) return null;
+  return card.threads.find((threadId) => WAITING_SECTIONS.has(rowOf(threadId)?.section ?? '')) ?? null;
+}
+
+/**
+ * Where a New card goes unless the person picks another: the project the
+ * Board is filtered to, else the project of the card heard from last, else
+ * the first project.
+ */
+export function newCardProject(
+  filter: string | null,
+  projects: readonly { id: string }[],
+  cards: readonly Pick<InboxCardWire, 'project_id' | 'heard_at'>[],
+): string | null {
+  const known = (id: string | null | undefined) => (id && projects.some((p) => p.id === id) ? id : null);
+  const recent = [...cards].sort((a, b) => b.heard_at.localeCompare(a.heard_at)).find((card) => known(card.project_id));
+  return known(filter) ?? recent?.project_id ?? projects[0]?.id ?? null;
+}
+
+/** Under this page width the Board's Project chip sits on a row of its own under the header (BoardPage). */
+export const BOARD_FILTER_ROW_BELOW = 880;
 
 /** A lane's least width, and the gap between lanes (inbox.css `.ib-lane`, `.ib-blanes`). */
 export const BOARD_LANE_MIN = 188;
@@ -69,7 +218,7 @@ export const BOARD_LANE_GAP = 10;
 
 /** How many whole lanes fit a width (at least one, at most the five). */
 export function lanesThatFit(width: number): number {
-  return Math.max(1, Math.min(INBOX_CARD_LIVE_COLUMNS.length, Math.floor((width + BOARD_LANE_GAP) / (BOARD_LANE_MIN + BOARD_LANE_GAP))));
+  return Math.max(1, Math.min(BOARD_LANE_COLUMNS.length, Math.floor((width + BOARD_LANE_GAP) / (BOARD_LANE_MIN + BOARD_LANE_GAP))));
 }
 
 /** The first lane of the window of `fit` lanes that shows lane `index`: centred on it, held at the ends. */
@@ -77,21 +226,15 @@ export function laneWindowStart(index: number, fit: number, total: number): numb
   return Math.max(0, Math.min(total - fit, index - Math.floor(fit / 2)));
 }
 
-/** The header's facts: cards in the live lanes, those on the person, and the two links' counts. */
+/** The header links' counts: Done, and Cancelled (the Dropped column). The header counts nothing else (owner, 2026-11-02). */
 export function boardCounts(cards: readonly InboxCardWire[]) {
-  let inFlight = 0;
-  let onYou = 0;
-  let shipped = 0;
-  let icebox = 0;
+  let done = 0;
   let dropped = 0;
   for (const card of cards) {
-    if (INBOX_CARD_LIVE_COLUMNS.includes(card.column)) inFlight += 1;
-    if (isInboxCardPersonColumn(card.column)) onYou += 1;
-    if (card.column === 'shipped') shipped += 1;
-    if (card.column === 'icebox') icebox += 1;
+    if (card.column === 'done') done += 1;
     if (card.column === 'dropped') dropped += 1;
   }
-  return { inFlight, onYou, shipped, icebox, dropped };
+  return { done, dropped };
 }
 
 /** An agent's drops the person has not seen, newest first: the Board's "N dropped by an agent". */
@@ -135,43 +278,69 @@ export function cardShowsUnread(card: InboxCardWire, visitLook: number | null, h
   return !handled.has(card.id) && isInboxCardUnread(card, visitLook);
 }
 
-/** One thing the Move menu offers for a card. */
-export type CardMove =
-  | { kind: 'column'; column: InboxCardColumn; label: string }
-  | { kind: 'ship'; label: string }
-  | { kind: 'icebox'; label: string }
-  | { kind: 'drop'; label: string }
-  | { kind: 'restore'; label: string };
+/** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */
+export type BoardMove = { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' };
+
+/** One item of a card's right-click menu. */
+export type CardMenuItem =
+  | { kind: 'thread'; threadId: string; label: string }
+  | { kind: 'column'; column: InboxCardColumn; label: string; current: boolean }
+  | { kind: 'restore'; label: string }
+  | { kind: 'drop'; label: string };
 
 /**
- * The Move menu's items for a card. A live card: every other live column,
- * then Ship, Icebox and Drop…. A shipped card: back to a live column, Icebox,
- * Drop…. In the Icebox or Dropped: Restore (where it was), then Drop… for an
- * iceboxed one. The store refuses nothing the person may do here.
+ * A Board card's right-click menu (approval "inbox-board-card-menu", layout
+ * A "one flat menu"), as groups drawn with a line between them: Open thread
+ * when the card links one (`thread`, from `youThread`); then the opened
+ * card's Move menu item for item and word for word (`columnChoices`: the
+ * lanes, the card's own checked, then Done); then Cancel…. A cancelled
+ * card has no menu (its row has Restore): no groups.
  */
-export function cardMoves(card: InboxCardWire): CardMove[] {
-  if (card.column === 'icebox' || card.column === 'dropped') {
-    const back = card.aside_from ?? 'backlog';
-    const out: CardMove[] = [{ kind: 'restore', label: `Restore to ${INBOX_CARD_COLUMN_LABELS[back]}` }];
-    if (card.column === 'icebox') out.push({ kind: 'drop', label: 'Drop…' });
-    return out;
-  }
-  const out: CardMove[] = INBOX_CARD_LIVE_COLUMNS.filter((column) => column !== card.column).map((column) => ({
-    kind: 'column' as const,
-    column,
-    label: `Move to ${INBOX_CARD_COLUMN_LABELS[column]}`,
-  }));
-  if (card.column !== 'shipped') out.push({ kind: 'ship', label: 'Ship' });
-  out.push({ kind: 'icebox', label: 'Move to Icebox' });
-  out.push({ kind: 'drop', label: 'Drop…' });
-  return out;
+export function cardMenuItems(card: InboxCardWire, thread: string | null): CardMenuItem[][] {
+  if (card.column === 'dropped') return [];
+  const groups: CardMenuItem[][] = [];
+  if (thread) groups.push([{ kind: 'thread', threadId: thread, label: 'Open thread' }]);
+  const choices = columnChoices(card).map((choice) => ({ kind: 'column' as const, ...choice }));
+  groups.push(choices.slice(0, INBOX_CARD_LIVE_COLUMNS.length), choices.slice(INBOX_CARD_LIVE_COLUMNS.length));
+  groups.push([{ kind: 'drop', label: 'Cancel…' }]);
+  return groups;
+}
+
+/**
+ * The toast after a card leaves the lanes from its right-click menu (owner's
+ * yes, 2026-10-31): Done, or a Cancel started from the menu, each with
+ * Undo through the same route. Null for any other move (lane to lane, a
+ * restore): the card is seen moving, and the live region says it. Undo: a
+ * restore for a cancelled card (back where it was); the lane it came from
+ * for a card in Done.
+ */
+export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead: string; detail: string; undo: BoardMove } | null {
+  if (moved.column === card.column) return null;
+  const detail = `“${card.title}”`;
+  if (moved.column === 'dropped') return { lead: 'Cancelled', detail, undo: { op: 'restore' } };
+  if (moved.column === 'done' && INBOX_CARD_LIVE_COLUMNS.includes(card.column)) return { lead: 'Done', detail, undo: { op: 'move', column: card.column } };
+  return null;
+}
+
+/** The toast after one click on an initiative's Delete: every one deleted while it is up, undone together. */
+export function initiativeDeletedToast(deleted: readonly Pick<InboxInitiative, 'name'>[]): { lead: string; detail: string } {
+  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} initiatives` };
+}
+
+/**
+ * Whether a menu move's Undo may still run: the card is still where that
+ * move put it (its column, and no move since: `moved_at`). An agent or the
+ * person moved it on while the toast was up, or it is gone: Undo sends
+ * nothing, so it never pulls a card out of where it went since.
+ */
+export function cardUndoStillApplies(moved: Pick<InboxCardWire, 'column' | 'moved_at'>, now: Pick<InboxCardWire, 'column' | 'moved_at'> | null): boolean {
+  return now !== null && now.column === moved.column && now.moved_at === moved.moved_at;
 }
 
 /** What the live region says after a move. */
 export function moveSaid(card: InboxCardWire, moved: InboxCardWire): string {
-  if (moved.column === 'dropped') return `Dropped “${card.title}”. It is kept under Icebox, Dropped.`;
-  if (card.column === 'icebox' || card.column === 'dropped') return `Restored “${card.title}” to ${INBOX_CARD_COLUMN_LABELS[moved.column]}.`;
-  if (moved.column === 'shipped') return `Shipped “${card.title}”.`;
+  if (moved.column === 'dropped') return `Cancelled “${card.title}”. It is kept under Cancelled.`;
+  if (card.column === 'dropped') return `Restored “${card.title}” to ${INBOX_CARD_COLUMN_LABELS[moved.column]}.`;
   return `Moved “${card.title}” to ${INBOX_CARD_COLUMN_LABELS[moved.column]}.`;
 }
 
@@ -180,7 +349,7 @@ export function cardOwnerName(card: InboxCardWire): string {
   return card.agent?.kind === 'agent' ? inboxAgentName(card.agent) : 'You';
 }
 
-/** What the person owes on a card ("You: …"), only in Your look and Your review; null otherwise. */
+/** What the person owes on a card ("You: …"), only in In review; null otherwise. */
 export function cardYou(card: InboxCardWire): string | null {
   return isInboxCardPersonColumn(card.column) && card.you ? card.you : null;
 }
@@ -214,29 +383,34 @@ export function youLinkLabel(you: string): string {
   return `You: ${you}, open the thread`;
 }
 
-/** The agent a sent card went to, while it waits in Backlog: "Sent to Codex". */
+/** The "Waiting on you" link's name, its words first (WCAG 2.5.3): "Waiting on you: Page numbers, open the thread". */
+export function waitingLinkLabel(subject: string | null): string {
+  return `Waiting on you: ${subject ?? 'a question'}, open the thread`;
+}
+
+/** The agent a sent card went to, while it waits in Todo: "Sent to Codex". */
 export function sentTo(card: InboxCardWire): string | null {
   return isInboxCardSentWaiting(card) && card.sent ? inboxAgentName(card.sent.to) : null;
 }
 
 /**
- * The opened card's foot: Send to an agent for a Backlog card nobody was
- * asked about (no agent, never sent), Restore in the Icebox or Dropped, else
- * Ship; Icebox and Drop… beside it where they apply.
+ * The opened card's foot: Send to an agent for a card nobody was asked about
+ * (no agent, never sent), Start for a Backlog or Todo card that has an agent
+ * and is not waiting on a send, Restore for a cancelled card, else Mark done;
+ * Cancel… beside it where it applies.
  */
-export function cardFoot(card: InboxCardWire): { primary: 'send' | 'start' | 'ship' | 'restore' | null; icebox: boolean; drop: boolean } {
-  if (card.column === 'icebox') return { primary: 'restore', icebox: false, drop: true };
-  if (card.column === 'dropped') return { primary: 'restore', icebox: false, drop: false };
-  const unasked = card.column === 'backlog' && card.agent === null && card.sent === null;
-  if (unasked) return { primary: 'send', icebox: true, drop: true };
-  // A Backlog card with an agent (not just sent to it): Start tells that agent to begin (owner's note).
-  if (card.column === 'backlog' && card.agent !== null && !isInboxCardSentWaiting(card)) return { primary: 'start', icebox: true, drop: true };
-  return { primary: card.column === 'shipped' ? null : 'ship', icebox: true, drop: true };
+export function cardFoot(card: InboxCardWire): { primary: 'send' | 'start' | 'ship' | 'restore' | null; drop: boolean } {
+  if (card.column === 'dropped') return { primary: 'restore', drop: false };
+  const waiting = card.column === 'backlog' || card.column === 'todo';
+  if (waiting && card.agent === null && card.sent === null) return { primary: 'send', drop: true };
+  // Not started, with an agent (not just sent to it): Start tells that agent to begin (owner's note).
+  if (waiting && card.agent !== null && !isInboxCardSentWaiting(card)) return { primary: 'start', drop: true };
+  return { primary: card.column === 'done' ? null : 'ship', drop: true };
 }
 
-/** The column menu on the opened card: the five lanes (the card's own checked), then Shipped and Icebox. */
+/** The column menu on the opened card: the lanes (the card's own checked), then Done. */
 export function columnChoices(card: InboxCardWire): { column: InboxCardColumn; label: string; current: boolean }[] {
-  const columns: InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'shipped', 'icebox'];
+  const columns: InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'done'];
   return columns.map((column) => ({ column, label: INBOX_CARD_COLUMN_LABELS[column], current: card.column === column }));
 }
 
@@ -263,10 +437,20 @@ export function askWhereBody(card: Pick<InboxCardWire, 'id' | 'title'>): string 
   return `Where is “${card.title}”? (Board card ${card.id}) Move the card, or say where it stands with the card action.`;
 }
 
-/** Start (a Backlog card that has an agent): the short message telling it to begin, with the card's title and notes. */
+/** Start (a Backlog or Todo card that has an agent): the short message telling it to begin, with the card's title and notes. */
 export function startBody(card: Pick<InboxCardWire, 'id' | 'title' | 'notes'>): string {
   const notes = card.notes?.trim() ? `\n\n${card.notes.trim()}` : '';
   return `Please start on “${card.title}” (Board card ${card.id}).${notes}\n\nMove the card as the work goes.`;
+}
+
+/** `owner/repo#12` or `group/project!7` from a PR or MR URL (the history keeps URLs); the URL itself when it is neither. */
+function prRefOfUrl(url: string): string {
+  const gh = /\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+  if (gh) return `${gh[1]}/${gh[2]}#${gh[3]}`;
+  const gl = /\/-\/merge_requests\/(\d+)/.exec(url);
+  if (gl) return `!${gl[1]}`;
+  const bb = /\/pull-requests\/(\d+)/.exec(url);
+  return bb ? `#${bb[1]}` : url;
 }
 
 /** A ref as the opened card writes it: its number (`#2018`, GitLab's `!7`), the repository left to the link. */
@@ -280,9 +464,18 @@ function authorName(by: InboxAuthor): string {
 }
 
 /** One history line, in words: a lead, the bold part, the rest, and a quote under it. */
-export function historyWords(entry: InboxCardHistoryEntry): { before: string; bold: string | null; after: string; quote: string | null } {
+export function historyWords(
+  entry: InboxCardHistoryEntry,
+  /** An initiative's name by id (deleted ones too): the initiative line names it. */
+  initiativeNameOf: (id: string) => string | null = () => null,
+): { before: string; bold: string | null; after: string; quote: string | null } {
   const by = authorName(entry.by);
   switch (entry.kind) {
+    case 'initiative':
+      // Approval "board-initiatives": "Initiative: Code review by you", or "Initiative cleared by you".
+      return entry.initiative
+        ? { before: 'Initiative: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted initiative', after: ` by ${by}`, quote: null }
+        : { before: `Initiative cleared by ${by}`, bold: null, after: '', quote: null };
     case 'created':
       return { before: `Created by ${by}`, bold: null, after: '', quote: null };
     case 'sent':
@@ -292,7 +485,10 @@ export function historyWords(entry: InboxCardHistoryEntry): { before: string; bo
     case 'restored':
       return { before: 'Restored to ', bold: INBOX_CARD_COLUMN_LABELS[entry.column], after: ` by ${by}`, quote: null };
     case 'dropped':
-      return { before: `Dropped by ${by}`, bold: null, after: '', quote: entry.reason ? `“${entry.reason}”` : null };
+      return { before: `Cancelled by ${by}`, bold: null, after: '', quote: entry.reason ? `“${entry.reason}”` : null };
+    case 'auto_shipped':
+      // The Inbox moved it to Done (approval "inbox-board-columns-v2", Q3): every PR it links had merged.
+      return { before: 'Done automatically: ', bold: entry.prs.map((url) => shortRef(prRefOfUrl(url))).join(', '), after: entry.prs.length === 1 ? ' merged' : ' all merged', quote: null };
     case 'said':
       return { before: by === 'you' ? 'You' : by, bold: null, after: '', quote: `“${entry.text}”` };
     case 'you':
@@ -344,11 +540,13 @@ export function agentState(session: string | null, live: readonly { session: str
 }
 
 /**
- * A card's whole accessible name: the title, its line, the lane, the age,
- * whether it is new, and where a click goes.
+ * A card's whole accessible name: the title, its project while the card shows
+ * it, its line, the lane, the age, whether it is new, and where a click goes.
+ * The title stays first: it is the button's visible words.
  */
-export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now()): string {
+export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now(), project: string | null = null): string {
   const parts = [card.title];
+  if (project) parts.push(project);
   const line = cardLine(card);
   if (line) parts.push(line.you ? `You: ${line.text}` : line.text);
   parts.push(INBOX_CARD_COLUMN_LABELS[card.column]);

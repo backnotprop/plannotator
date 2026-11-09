@@ -16,7 +16,7 @@
  * itself behind this Inbox; the sidebar's row names the agents and clears
  * once they reload.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -271,10 +271,10 @@ test.skipIf(!hasDom)('Settings → Agents: per runtime, the reload leads with Co
   // and OpenCode's config is unknown here, so the update names no target (and says it updates every plugin).
   const opencode = document.querySelector<HTMLElement>('[data-agent-sessions="opencode"]')!;
   const leads = [...opencode.querySelectorAll<HTMLElement>('[data-reload-sessions="opencode"] [data-reload-lead="restart"]')];
-  expect(leads.map((l) => l.getAttribute('data-reload-command')).sort()).toEqual(['opencode2 plugin list && opencode2 plugin update', 'opencode2 reload']);
+  expect(leads.map((l) => l.getAttribute('data-reload-command')).sort()).toEqual(['opencode2 models && opencode2 plugin update', 'opencode2 reload']);
   const copiedFrom = [];
   for (const lead of leads) copiedFrom.push(await copyLead(lead));
-  expect(copiedFrom.sort()).toEqual(['opencode2 plugin list && opencode2 plugin update', 'opencode2 reload']);
+  expect(copiedFrom.sort()).toEqual(['opencode2 models && opencode2 plugin update', 'opencode2 reload']);
   // Each OpenCode box: one quiet line (what a reload cancels; that an untargeted update updates every plugin), no quitting note.
   for (const box of opencode.querySelectorAll('[data-reload-sessions="opencode"]')) expect(box.querySelectorAll('[data-opencode-quiet]')).toHaveLength(1);
   expect(opencode.querySelector('[data-opencode-quit-note]')).toBeNull();
@@ -314,8 +314,8 @@ test.skipIf(!hasDom)('OpenCode behind this Inbox: the update names its configure
     await openThread(ids.hosts.opencode.thread);
     await until(() => !!note(), 'the update note');
     let lead = note()!.querySelector<HTMLElement>('[data-reload-lead="restart"]')!;
-    expect(lead.getAttribute('data-reload-command')).toBe('opencode2 plugin list && opencode2 plugin update @plannotator/opencode@latest');
-    expect(await copyLead(lead)).toBe('opencode2 plugin list && opencode2 plugin update @plannotator/opencode@latest');
+    expect(lead.getAttribute('data-reload-command')).toBe('opencode2 models && opencode2 plugin update @plannotator/opencode@latest');
+    expect(await copyLead(lead)).toBe('opencode2 models && opencode2 plugin update @plannotator/opencode@latest');
     // An update with a target cancels nothing a reload does, updates nothing else: no quiet line, no server restart folded.
     expect(note()!.querySelector('[data-opencode-quiet]')).toBeNull();
     expect(note()!.querySelector('[data-restart-toggle]')).toBeNull();

@@ -1,6 +1,6 @@
 /**
  * Asking the agent about a guide, against the FAKE ACP agent
- * (tests/fake-acp-agent.ts): the extension's ACP client starts it, it starts
+ * (tests/helpers/fake-acp-agent.ts): the extension's ACP client starts it, it starts
  * the relay from `session/new` or `session/load`, and calls `show_answer`.
  * No real agent ever runs here.
  */
@@ -9,13 +9,13 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLAUDE_CODE } from "../acp/agents";
+import { CLAUDE_CODE } from "@plannotator/acp-client/agents";
 import { startRelayHost, type RelayHost } from "../mcp/relay-host";
 import { GuideAskSession, sessionsToLoad, type AskQuestion, type AskSessionDeps, type SavedSession } from "./session";
 import { buildAskPrompt, type AskGuideContext } from "./prompt";
 import type { AskAbout } from "./answers";
 
-const FAKE_AGENT = join(import.meta.dir, "..", "..", "..", "tests", "fake-acp-agent.ts");
+const FAKE_AGENT = join(import.meta.dir, "..", "..", "..", "..", "..", "tests", "helpers", "fake-acp-agent.ts");
 const RELAY_SCRIPT = join(import.meta.dir, "..", "mcp", "relay-script.ts");
 
 let work: string;

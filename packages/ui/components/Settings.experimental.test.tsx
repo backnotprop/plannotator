@@ -5,7 +5,7 @@
  * toggles and persists under the same cookie; the Editor tab no longer holds
  * it; plan review and annotate (which never showed it) get no Experimental tab.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';

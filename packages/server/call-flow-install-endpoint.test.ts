@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -15,17 +15,12 @@ const originalPath = process.env.PATH;
 const tempDirs: string[] = [];
 
 // ---------------------------------------------------------------------------
-// Test seams: both runtimes' call-flow modules are mocked so the endpoint
-// tests exercise the coordinator + endpoint wiring against a controllable
-// installCallFlowRuntime / preflightCallFlowNode. A real install
-// must never run in tests. Everything else in the modules stays real.
-//
-// bun's mock.module is process-global with no restore, so these overrides
-// outlive this file when CI runs the whole suite in one process. That is
-// safe here by construction: only these two functions are replaced, nothing
-// else in the repo's tests invokes installCallFlowRuntime (the throwing
-// default doubles as a guard against any future test accidentally starting
-// a real install), and preflight's default stays a harmless ok.
+// Test seams: both runtimes' review servers take the coordinator's own
+// install and Node preflight through the test-only `callFlowInstall` option,
+// so these tests exercise the coordinator + endpoint wiring against a
+// controllable install, and a real install never runs. Nothing is replaced
+// module-wide: other test files in the same process still see the real
+// installCallFlowRuntime and preflightCallFlowNode.
 // ---------------------------------------------------------------------------
 let installCalls = 0;
 let installedTargets: string[] = [];
@@ -40,24 +35,10 @@ const recordedInstall = (target: string, onStage: (stage: CallFlowInstallStage) 
   installedTargets.push(target);
   return installImpl(onStage);
 };
-
-const actualShared = { ...(await import('@plannotator/shared/call-flow')) };
-const sharedMock = () => ({
-  ...actualShared,
-  installCallFlowRuntime: (onStage: (stage: CallFlowInstallStage) => void) => recordedInstall('javascript-typescript', onStage),
-  installCallFlowLanguagePack: (id: string, onStage: (stage: CallFlowInstallStage) => void) => recordedInstall(id, onStage),
-  preflightCallFlowNode: () => preflightImpl(),
-});
-mock.module('@plannotator/shared/call-flow', sharedMock);
-mock.module('../shared/call-flow.ts', sharedMock);
-
-const actualPi = { ...(await import('../../apps/pi-extension/generated/call-flow.ts')) };
-mock.module('../../apps/pi-extension/generated/call-flow.ts', () => ({
-  ...actualPi,
-  installCallFlowRuntime: (onStage: (stage: CallFlowInstallStage) => void) => recordedInstall('javascript-typescript', onStage),
-  installCallFlowLanguagePack: (id: string, onStage: (stage: CallFlowInstallStage) => void) => recordedInstall(id, onStage),
-  preflightCallFlowNode: () => preflightImpl(),
-}));
+const callFlowInstall = {
+  install: recordedInstall,
+  preflight: () => preflightImpl(),
+};
 
 const { startReviewServer: startBunReviewServer } = await import('./review');
 const { startReviewServer: startPiReviewServer } = await import('../../apps/pi-extension/server');
@@ -80,7 +61,7 @@ const {
   CALLDIFF_COMMIT,
   CALLDIFF_VERSION,
   getCallFlowManagedRuntimeDir,
-} = actualShared;
+} = await import('@plannotator/shared/call-flow');
 
 function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -211,6 +192,7 @@ describe('Call flow install endpoints', () => {
         diffType: 'uncommitted',
         origin: runtime === 'Pi' ? 'pi' : 'claude-code',
         htmlContent: '<!doctype html><html><body>review</body></html>',
+        callFlowInstall,
       });
     };
 
@@ -294,7 +276,7 @@ describe('Call flow install endpoints', () => {
       preflightImpl = async () => ({
         ok: false,
         reason: 'node-unavailable',
-        message: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
+        message: 'Call flow needs Node.js 22.18 or newer, which was not found on PATH.',
       });
       try {
         const status = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -302,7 +284,7 @@ describe('Call flow install endpoints', () => {
         expect(status).toEqual({
           state: 'error',
           reason: 'node-unavailable',
-          error: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
+          error: 'Call flow needs Node.js 22.18 or newer, which was not found on PATH.',
           languageIds: ['javascript-typescript'],
         });
         expect(installCalls).toBe(0);

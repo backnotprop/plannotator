@@ -57,6 +57,27 @@ export function headPathOf(sides: ReaderSides, uri: vscode.Uri): string | null {
 }
 
 /**
+ * Which side of the guide a document belongs to, for any file of the
+ * repository (not only the change's): the head (the file on disk, the head
+ * revision) or the base revision, with the path it shows there. Null for a
+ * document of neither.
+ */
+export function docSideOf(sides: ReaderSides, uri: vscode.Uri): { path: string; side: "head" | "base" } | null {
+  if (uri.scheme === GUIDE_SCHEME) {
+    try {
+      const q = JSON.parse(uri.query) as VirtualQuery;
+      if (q.root === sides.gitRoot && q.rev === sides.baseRev && !(sides.head.kind === "rev" && sides.head.rev === sides.baseRev)) {
+        return { path: uri.path.replace(/^\//, ""), side: "base" };
+      }
+    } catch {
+      return null;
+    }
+  }
+  const head = headPathOf(sides, uri);
+  return head ? { path: head, side: "head" } : null;
+}
+
+/**
  * Which side of a guide diff a document is, and the file it shows (the
  * file's path in the change; a renamed file's base side is its old path).
  */

@@ -1,16 +1,22 @@
 /**
- * What the agent-note dialog and Settings → Agents show, from
- * `GET /api/inbox/agents` (the approved "inbox-agent-awareness" design, and
- * "inbox-agent-note-dialog", which asks once per agent in a dialog). Pure.
+ * What the agent-note dialog, the connect line above the list and Settings →
+ * Agents show, from `GET /api/inbox/agents` (the approved
+ * "inbox-agent-awareness" design; "inbox-agent-note-dialog", which asked once
+ * per agent in a dialog; and "inbox-agent-note-auto", which writes the note by
+ * itself for the agents proven to load it, so the dialog asks only about the
+ * others). Pure.
  */
 import {
   INBOX_AGENT_LABELS,
   INBOX_NOTE_AGENT_IDS,
+  INBOX_NOTE_AUTO_AGENT_IDS,
+  inboxElsewhereText,
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
   type InboxConnectReport,
   type InboxNoteAgentId,
+  type InboxNoteAutoAdd,
 } from '@plannotator/core/inbox-types';
 
 /** Agents that can take a note now: found, reaching the Inbox, no note yet, a file to put it in, and not failed this run. */
@@ -29,13 +35,16 @@ export function notesAskedOf(model: InboxAgentsModel): readonly InboxNoteAgentId
 
 /**
  * Who the dialog asks about: the candidates not asked yet (each agent is
- * asked once), Claude Code last as in the approved dialog ("Add to Codex,
- * Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
+ * asked once) whose note is not written by itself (the Inbox writes it for
+ * the agents proven to load it, INBOX_NOTE_AUTO_AGENT_IDS; Qwen Code and
+ * Cursor are still asked), Claude Code last as in the approved dialog ("Add
+ * to Codex, Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
  */
 export function noteQuestionRows(model: InboxAgentsModel): InboxAgentRow[] {
   if (model.notes_env_off) return [];
   const asked = new Set<string>(notesAskedOf(model));
-  const rows = noteCandidates(model).filter((row) => !asked.has(row.id));
+  const auto = new Set<string>(INBOX_NOTE_AUTO_AGENT_IDS);
+  const rows = noteCandidates(model).filter((row) => !asked.has(row.id) && !auto.has(row.id));
   return [...rows.filter((row) => row.id !== 'claude-code'), ...rows.filter((row) => row.id === 'claude-code')];
 }
 
@@ -44,20 +53,61 @@ export function noteQuestionOpen(model: InboxAgentsModel): boolean {
   return noteQuestionRows(model).length > 0;
 }
 
-/** The last run's news the person has not seen yet: the dialog's band. */
+/** The last run's news the person has not seen yet: the connect line's first lines. */
 export function cardReport(model: InboxAgentsModel): InboxConnectReport | null {
   const report = model.last_report;
   if (!report || report.seen || report.skipped) return null;
-  const news = report.added.length + report.failed.length + report.foreign.length + (report.manual_why?.length ?? 0);
+  const news =
+    report.added.length +
+    report.failed.length +
+    report.foreign.length +
+    (report.manual_why?.length ?? 0) +
+    (report.trusted?.length ?? 0) +
+    (report.trust_failed?.length ?? 0) +
+    (report.elsewhere?.length ?? 0);
   return news > 0 ? report : null;
+}
+
+/**
+ * What the connect line above the list says, or null for nothing: the last
+ * run's news not seen yet (`cardReport`) and the notes the Inbox wrote by
+ * itself that it has not said (`notes_auto`).
+ */
+export function connectLineNews(model: InboxAgentsModel): { report: InboxConnectReport | null; notes: InboxNoteAutoAdd[] } | null {
+  const report = cardReport(model);
+  const notes = model.notes_auto ?? [];
+  return report || notes.length > 0 ? { report, notes } : null;
+}
+
+/**
+ * The note line, "Added the Inbox note to Claude Code's instructions.", in
+ * parts: the names (each path is its tooltip), and the files for a screen
+ * reader (`files`, read before the full stop).
+ */
+export function notesAddedParts(notes: readonly InboxNoteAutoAdd[]): {
+  before: string;
+  names: { agent: InboxNoteAgentId; label: string; path: string }[];
+  after: string;
+  files: string;
+} {
+  const names = notes.map((note) => ({ agent: note.agent, label: INBOX_AGENT_LABELS[note.agent], path: note.path }));
+  return names.length === 1
+    ? { before: 'Added the Inbox note to ', names, after: "'s instructions", files: names[0]!.path }
+    : { before: 'Added the Inbox note to the instructions of ', names, after: '', files: names.map((name) => `${name.label}: ${name.path}`).join('; ') };
 }
 
 /** The band's lines (option A of the approved dialog): what was connected, who needs a person, what failed, whose entry is someone else's. */
 export interface BandLines {
   connected: string | null;
+  /** Agents this run registered Plannotator with as a trusted sender (Qwen Code): how far that reaches, and how to undo it. */
+  trusted: string | null;
+  /** Agents whose trusted sender failed, or was removed in the agent: replies wait until they read the Inbox. */
+  trustFailed: { agent: InboxAgentId; text: string }[];
   byHand: string | null;
   failed: { agent: InboxAgentId; text: string }[];
   foreign: { agent: InboxAgentId; text: string }[];
+  /** Connected in another file than this Inbox's environment names (`QWEN_HOME` differs): left there; Settings moves it. */
+  elsewhere: { agent: InboxAgentId; text: string }[];
 }
 
 export function bandLines(report: InboxConnectReport): BandLines {
@@ -65,9 +115,14 @@ export function bandLines(report: InboxConnectReport): BandLines {
   const manual = [...new Set((report.manual_why ?? []).map((m) => m.agent))];
   return {
     connected: report.added.length > 0 ? `Connected ${joinNames(report.added.map(label))} to the Inbox${report.first ? '' : ' (new on this computer)'}.` : null,
-    byHand: manual.length > 0 ? `${joinNames(manual.map(label))} ${manual.length === 1 ? 'needs' : 'need'} connecting by hand:` : null,
+    trusted: report.trusted?.length
+      ? `Plannotator can now send your replies straight into any running ${joinNames(report.trusted.map(label))} session, without it asking you first. Turn this off in Settings → Agents.`
+      : null,
+    trustFailed: (report.trust_failed ?? []).map((f) => ({ agent: f.agent, text: `${label(f.agent)} won't get your replies by itself: ${sentence(tidyReason(f.reason))}` })),
+    byHand: manual.length > 0 ? `${joinNames(manual.map(label))} ${manual.length === 1 ? 'needs' : 'need'} connecting yourself:` : null,
     failed: report.failed.map((f) => ({ agent: f.agent, text: `Couldn't connect ${label(f.agent)}: ${sentence(tidyReason(f.reason))}` })),
     foreign: report.foreign.map((f) => ({ agent: f.agent, text: `${label(f.agent)} has its own plannotator-inbox entry${f.path ? ` in ${f.path}` : ''}; Plannotator left it alone.` })),
+    elsewhere: (report.elsewhere ?? []).map((moved) => ({ agent: moved.agent, text: inboxElsewhereText(moved) })),
   };
 }
 
@@ -113,15 +168,47 @@ export function primaryAction(names: readonly string[]): { label: string; add: b
   return { label: `Add to ${whoLabel(names)}`, add: true };
 }
 
+/** Where Cursor keeps its global rules (in the app, not a file). */
+export const CURSOR_RULES_PLACE = 'Customize → Rules';
+
+/**
+ * A note the person copies by hand (Cursor: its rules live in the app, so
+ * nothing is written; the note is shown to copy). Plannotator never adds,
+ * sees or removes it.
+ */
+export function noteCopiedByHand(row: Pick<InboxAgentRow, 'note'>): boolean {
+  return row.note?.state === 'manual';
+}
+
+/** The note without its marker lines: what a person copies by hand (the markers promise a removal that never happens there). */
+export function noteWithoutMarkers(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !line.startsWith('<!-- plannotator-inbox:'))
+    .join('\n');
+}
+
+/**
+ * The dialog's primary with copy-by-hand agents among the ticked ones: it
+ * names only the agents a note is written for ("Add to Codex"); with only
+ * copy-by-hand agents ticked it shows the note to copy. Never disabled.
+ */
+export function notePrimaryAction(picked: readonly Pick<InboxAgentRow, 'label' | 'note'>[]): { label: string; add: boolean } {
+  const written = picked.filter((row) => !noteCopiedByHand(row)).map((row) => row.label);
+  if (written.length > 0) return primaryAction(written);
+  if (picked.length > 0) return { label: 'Show the note to copy', add: true };
+  return primaryAction([]);
+}
+
 /** Every agent in the dialog starts ticked (the owner's answer, 2026-10-13: Claude Code too). */
 export function defaultPicks(rows: readonly InboxAgentRow[]): Record<string, boolean> {
   return Object.fromEntries(rows.map((row) => [row.id, true]));
 }
 
 /** What a note result shows in its row. */
-export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Copy manually' | 'Not added' {
+export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Copy yourself' | 'Not added' {
   if (!result.ok) return 'Not added';
-  if (result.action === 'manual') return 'Copy manually';
+  if (result.action === 'manual') return 'Copy yourself';
   return result.action === 'created' ? 'Created' : 'Added';
 }
 

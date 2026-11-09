@@ -24,6 +24,7 @@ import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTar
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { prefersReducedMotion } from '../settle';
+import { registerReloadFlush } from '../stalePage';
 import { Tip } from '../components/Tip';
 import { DecisionCard, type CardPicture, type CardWords } from './DecisionCard';
 import {
@@ -60,6 +61,7 @@ import {
   type QueueState,
   type SessionChip,
 } from './model';
+import { newUuid } from '../uuid';
 
 export { DECISION_HOLD_MS } from './model';
 /**
@@ -126,12 +128,14 @@ type SendResult = 'sent' | 'draft' | 'failed';
 
 /**
  * What a reply carries, for its key (`replyKeysToRenew`): each pick with its revision, so a changed answer
- * (a new pick is a new revision) takes a new key, and an unchanged retry replays the old one.
+ * (a new pick is a new revision) takes a new key, and an unchanged retry replays the old one; and each
+ * action item whose Done or Can't do it waits in the thread's draft, so one marked since takes a new key.
  */
 function answersOf(target: SendTarget): string[] {
   return [
     ...target.questions.map((q) => `a:${q.message_id ?? target.message.id}/${q.key}@${q.revision}`),
     ...target.skip.map((q) => `s:${q.message_id ?? target.message.id}/${q.key}`),
+    ...target.actions.map((a) => `x:${a.message_id ?? target.message.id}/${a.key}`),
   ];
 }
 
@@ -217,6 +221,19 @@ export function DecisionMode(props: DecisionModeProps) {
   const unsavedWordsRef = useRef<(() => boolean) | null>(null);
   /** The `startNonce` already applied (each start moves to its card once). */
   const appliedStart = useRef<number | null>(null);
+  // The stale page notice's Reload (stalePage.ts) waits for the picks on their way; words typed on the card and not
+  // yet given as an answer would be lost, so they stop it.
+  useEffect(
+    () =>
+      registerReloadFlush(async () => {
+        for (let seen = pickChain.current; ; seen = pickChain.current) {
+          await seen;
+          if (seen === pickChain.current) break;
+        }
+        return !(unsavedWordsRef.current?.() ?? false);
+      }),
+    [],
+  );
   const [, setTick] = useState(0);
   const escapedAt = useRef(0);
   const [touch, setTouch] = useState(false);
@@ -512,13 +529,16 @@ export function DecisionMode(props: DecisionModeProps) {
         const last = sendContents.current.get(keyId);
         // A replay of a key answers the reply it wrote: a changed answer (a new revision) takes a new key.
         const renew = !sendKeys.current.has(keyId) || (last !== undefined && replyKeysToRenew(new Map([[keyId, last]]), new Map([[keyId, contents]])).length > 0);
-        if (renew) sendKeys.current.set(keyId, crypto.randomUUID());
+        if (renew) sendKeys.current.set(keyId, newUuid());
         sendContents.current.set(keyId, contents);
         const result = await inboxApi.reply(target.message.id, {
           idempotency_key: sendKeys.current.get(keyId)!,
           words: '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
+          // The session's Done and Can't do it waiting in the thread's draft go with its answers, as picks do:
+          // one reply, never the answers here and the action items in a second Send.
+          ...(target.actions.length > 0 ? { actions: target.actions } : {}),
         });
         const created = (result.reply as { created_at?: unknown } | null)?.created_at;
         if (typeof created === 'string') sentAt = created;
@@ -761,6 +781,23 @@ export function DecisionMode(props: DecisionModeProps) {
     return reasons;
   };
 
+  /**
+   * The close question let go (Escape, Keep deciding): its buttons leave the page, so focus goes back to the Close
+   * button that asked it, never to the page itself (approval "inbox-keyboard-shortcuts", consistent Escape).
+   */
+  // Keep deciding puts focus on × once the confirm has gone (the effect below runs after that render, however late:
+  // a frame timer could run before it on a slow machine and focus a × still behind the confirm).
+  const focusCloseAfterConfirm = useRef(false);
+  const keepDeciding = () => {
+    focusCloseAfterConfirm.current = true;
+    setConfirm(false);
+  };
+  useEffect(() => {
+    if (confirm || !focusCloseAfterConfirm.current) return;
+    focusCloseAfterConfirm.current = false;
+    document.querySelector<HTMLElement>('[data-decision-mode] [data-decision-close]')?.focus();
+  }, [confirm]);
+
   const requestClose = () => {
     const now = closeReasons();
     if (now.half + now.ready + now.failed + now.drafts + now.sending > 0 || now.words) setConfirm(true);
@@ -808,7 +845,7 @@ export function DecisionMode(props: DecisionModeProps) {
   /** Escape: one layer at a time (a box with words in it is a layer: it lets go of focus first). */
   const escape = () => {
     if (lightbox) return;
-    if (confirm) return setConfirm(false);
+    if (confirm) return keepDeciding();
     if (fieldOpenRef.current?.()) return;
     if (overview) return setOverview(false);
     requestClose();
@@ -987,7 +1024,7 @@ export function DecisionMode(props: DecisionModeProps) {
           <div className="ib-dm-loading">Reading what waits on you…</div>
         )}
       </div>
-      {confirm && <CloseConfirm reasons={closeReasons()} closing={closing} onKeep={() => setConfirm(false)} onKeepDraft={keepDraft} onSend={sendAnswered} />}
+      {confirm && <CloseConfirm reasons={closeReasons()} closing={closing} onKeep={keepDeciding} onKeepDraft={keepDraft} onSend={sendAnswered} />}
       <div className="ib-sr" aria-live="polite" data-decision-live="">
         {said}
       </div>
@@ -996,7 +1033,9 @@ export function DecisionMode(props: DecisionModeProps) {
           <ImageLightbox
             src={lightbox.pictures[lightbox.index]!.src}
             alt={lightbox.pictures[lightbox.index]!.name}
-            images={lightbox.pictures.length > 1 ? lightbox.pictures.map((p) => ({ src: p.src, alt: p.name })) : undefined}
+            // Each picture by its choice ("B · Quiet hover menu"), not its file's route; a finger swipes through them (approval "inbox-image-swipe").
+            images={lightbox.pictures.length > 1 ? lightbox.pictures.map((p) => ({ src: p.src, alt: p.alt ?? p.name, name: p.name })) : undefined}
+            swipe
             onClose={() => setLightbox(null)}
           />,
           dialogRef.current ?? document.body,

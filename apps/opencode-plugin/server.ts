@@ -3,9 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
-import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
+import { INBOX_COMMAND_BRIEFING, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
+import { isAskAiChild } from "@plannotator/shared/child-env";
 import { composeSystemPrompt, stripConflictingPlanModeRules } from "./plan-mode";
 import { replacePlanModeReminders } from "./plan-reminder";
 import {
@@ -33,6 +34,7 @@ import {
 } from "@plannotator/shared/plannotator-tool";
 import { OpenCodeLaunchRegistry, runPlannotatorTool, type LaunchHandle, type PlannotatorToolDeps } from "./plannotator-tool";
 import {
+  createInboxBriefings,
   createV2BridgeClient,
   dropSessionUrlNotices,
   formatSessionUrlNotice,
@@ -85,6 +87,9 @@ type EmbeddedRuntimeModule = {
 const serverPlugin = {
   id: "plannotator",
   setup: async (ctx) => {
+    // An OpenCode Plannotator's Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1):
+    // no submit_plan, planning prompts, commands, Inbox or agent tool in it.
+    if (isAskAiChild(process.env)) return;
     // Ends what this plugin generation started that would outlive it: OpenCode 2 unloads a generation
     // (on `opencode2 reload`, a plugin update, a config change, an hour idle) and calls the cleanup
     // setup returns. Without it the old generation's Inbox wakes kept polling with a dead context.
@@ -127,9 +132,12 @@ const serverPlugin = {
     // those domains is probed, so setup completes there instead of throwing.
     const hasSessionHooks = typeof (ctx.session as { hook?: unknown } | undefined)?.hook === "function";
     const hasToolTransform = typeof (ctx.tool as { transform?: unknown } | undefined)?.transform === "function";
+    // The sessions that opened the Inbox with /plannotator-inbox: their requests carry the Inbox briefing.
+    const inboxBriefings = createInboxBriefings();
     const nativeDeps: NativeCommandDeps = {
       ctx: v2,
       getAgents,
+      inboxBriefings,
       // Whether this host could register the `plannotator` tool rides along,
       // so the reviews it opens offer the tool's switch only where it exists.
       getBridgeContext: () => getBridgeContext(getAgents, hasToolTransform),
@@ -147,7 +155,14 @@ const serverPlugin = {
     // notice is posted by the slash commands too. See `dropSessionUrlNotices`.
     if (hasSessionHooks) {
       try {
-        await ctx.session.hook("context", (event) => {
+        await ctx.session.hook("context", async (event) => {
+          // Read before the notices go: /plannotator-inbox's notice marks a session for the briefing.
+          // Never in the filter's way: the notices are for the person whatever happens here.
+          try {
+            await addInboxBriefing(event, inboxBriefings, getAgents);
+          } catch (error) {
+            console.error(`[Plannotator] Could not add the Inbox briefing: ${error instanceof Error ? error.message : String(error)}`);
+          }
           dropSessionUrlNotices(event.messages as unknown[]);
           // A Send now reply that reached the session twice (its steer row and the fallback queued turn): one copy.
           dropInboxDuplicates(event.messages as unknown[]);
@@ -226,7 +241,7 @@ const serverPlugin = {
       if (inboxConfig && resolveInboxReminder(inboxConfig, process.env, "opencode")) {
         try {
           // A host without session.prompt registers the tool without the wake
-          // (registerInboxOpenCode2): its line names wait_for_reply instead.
+          // (registerInboxOpenCode2): its line says to read the thread instead.
           // The person's own line (config.json prompts.inbox) replaces either.
           const reminder = openCode2InboxReminder(v2, inboxConfig);
           await ctx.session.hook("context", async (event) => {
@@ -708,6 +723,28 @@ export async function addInboxReminder(
   const builtIn = reminder === INBOX_REMINDER_TEXT || reminder === INBOX_REMINDER_TEXT_NO_WAKE;
   if (builtIn ? systemText.includes(reminder.toLowerCase()) : inboxReminderAlreadyAdded(event.system.map((part) => part.text), reminder)) return;
   pushComposedSystemReminder(event.system, reminder);
+}
+
+/**
+ * `/plannotator-inbox`'s Inbox briefing (INBOX_COMMAND_BRIEFING) on one
+ * OpenCode 2 request of a session that opened the Inbox with it: the command
+ * starts no turn, so the briefing rides the session's requests from then on,
+ * composed into the system part like the reminder, once. Never for a
+ * subagent or a title request.
+ */
+export async function addInboxBriefing(
+  event: { sessionID: string; agent?: string; system: SystemPart[]; messages: readonly unknown[] },
+  briefings: { wants(event: { sessionID: string; messages: readonly unknown[] }): boolean },
+  getAgents: () => Promise<OpenCodeBridgeAgent[]>,
+): Promise<void> {
+  if (!briefings.wants(event)) return;
+  const systemText = event.system.map((part) => part.text).join("\n");
+  if (systemText.includes(INBOX_COMMAND_BRIEFING)) return;
+  const lower = systemText.toLowerCase();
+  if (lower.includes("title generator") || lower.includes("generate a title")) return;
+  const agent = (await getAgents()).find((candidate) => candidate.name === event.agent);
+  if (agent?.mode === "subagent") return;
+  pushComposedSystemReminder(event.system, INBOX_COMMAND_BRIEFING);
 }
 
 function getGenericPlanReminder(): string {

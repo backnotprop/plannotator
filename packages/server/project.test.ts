@@ -33,6 +33,26 @@ describe("sanitizeTag", () => {
     expect(sanitizeTag(long)?.length).toBe(30);
   });
 
+  test("a hyphen at the 30-char cut is trimmed, so the result is idempotent", () => {
+    // 29 chars, then "_": the cut lands right after the hyphen (#2306).
+    const name = "abcdefghijklmnopqrstuvwxyzabc_def";
+    expect(sanitizeTag(name)).toBe("abcdefghijklmnopqrstuvwxyzabc");
+    for (const input of [
+      name,
+      "northwind-industries-holdings-platform-billing-service",
+      "_leading-underscore-then-a-long-project-name",
+      "my project",
+      "a".repeat(50),
+    ]) {
+      const once = sanitizeTag(input)!;
+      expect(sanitizeTag(once)).toBe(once);
+    }
+  });
+
+  test("a leading hyphen does not shorten the 30-char budget", () => {
+    expect(sanitizeTag("_" + "a".repeat(50))).toBe("a".repeat(30));
+  });
+
   test("returns null for empty string", () => {
     expect(sanitizeTag("")).toBeNull();
   });

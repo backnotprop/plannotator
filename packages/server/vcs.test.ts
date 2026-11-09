@@ -32,7 +32,7 @@ describe("resolveInitialDiffType", () => {
       diffOptions: [
         { id: "jj-current", label: "Current change" },
         { id: "jj-line", label: "Line of work" },
-        { id: "jj-all", label: "All files" },
+        { id: "jj-all", label: "Every file" },
       ],
       vcsType: "jj",
     });

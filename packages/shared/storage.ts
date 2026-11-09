@@ -480,3 +480,32 @@ export function resolveHistorySlug(
   if (best && best.mtime > 0 && now - best.mtime <= PLAN_HISTORY_CONTINUE_WINDOW_MS) return best.slug;
   return datedSlug;
 }
+
+/**
+ * Pick the history project AND slug a plan appends to (#2197). `projects` is
+ * the order to look for an EXISTING chain in; the first one is also where a
+ * new chain starts. The Claude Code hosts pass the CLI's current folder's
+ * project first and the session root's second: a session that `cd`s into
+ * another repository between two submits keeps one chain (the second submit
+ * finds the first's chain under the root's project), while a plan whose chain
+ * the current folder's project holds, and every new plan, land exactly where
+ * they did before this rule. So a nested clone keeps its own new plans, and
+ * two clones' same-heading plans never merge.
+ *
+ * Each candidate runs `resolveHistorySlug` unchanged (its 48 h rule applies
+ * per project). One candidate (every other host) is exactly
+ * `resolveHistorySlug`.
+ */
+export function resolveHistoryChain(
+  projects: readonly string[],
+  datedSlug: string,
+  options: { now?: Date; current?: string } = {},
+): { project: string; slug: string } {
+  const candidates = [...new Set(projects.filter((project) => project))];
+  const home = candidates[0] ?? "_unknown";
+  for (const project of candidates) {
+    const slug = resolveHistorySlug(project, datedSlug, options);
+    if (getVersionCount(project, slug) > 0) return { project, slug };
+  }
+  return { project: home, slug: resolveHistorySlug(home, datedSlug, options) };
+}

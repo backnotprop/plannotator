@@ -57,6 +57,7 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
       "PLANNOTATOR_BROWSER",
       "PLANNOTATOR_AI",
       "PLANNOTATOR_URL_HOST",
+      "PLANNOTATOR_PUBLIC_URL",
       "PLANNOTATOR_ALLOWED_HOSTS",
       "VSCODE_PROXY_URI",
       "SSH_TTY",
@@ -161,6 +162,32 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
           expect((await get(server, FIRST_READ[kind], `${EVIL}:${port}`)).status).toBe(403);
         } finally {
           server.stop();
+        }
+      });
+
+      // A reverse proxy (Cloudflare Tunnel, Caddy) that forwards the browser's
+      // Host must reach the session it advertises, without PLANNOTATOR_ALLOWED_HOSTS.
+      test("remote mode answers the public URL's host; a local session does not", async () => {
+        await isolate({ remote: true });
+        process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+        const server = await start(kind, { docPath, htmlContent: HTML });
+        try {
+          expect(server.url).toBe("https://plannotator.example.com");
+          // The advertised URL has no port; reach the server on the one it bound.
+          const base = `http://127.0.0.1:${process.env.PLANNOTATOR_PORT}${FIRST_READ[kind]}`;
+          expect((await rawRequest(base, { headers: { host: "plannotator.example.com" } })).status).toBe(200);
+          expect((await rawRequest(base, { headers: { host: "other.example.com" } })).status).toBe(403);
+        } finally {
+          server.stop();
+          environment.restore();
+        }
+        await isolate();
+        process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+        const local = await start(kind, { docPath, htmlContent: HTML });
+        try {
+          expect((await get(local, FIRST_READ[kind], "plannotator.example.com")).status).toBe(403);
+        } finally {
+          local.stop();
         }
       });
 

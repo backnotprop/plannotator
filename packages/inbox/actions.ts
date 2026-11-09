@@ -63,8 +63,9 @@ export function actionForBlock(
   if (!actions || actions.length === 0) return null;
   const parsed = parseInboxActionBlocks(body);
   const hit = parsed.find((a) => a.startLine === block.startLine) ?? null;
-  if (hit) return actions.find((a) => a.key === hit.key) ?? null;
-  return null;
+  if (!hit) return null;
+  // By its place when the key moved: a message stored before the reader dropped a task box (`- [ ] …`) from the first line.
+  return actions.find((a) => a.key === hit.key) ?? actions.find((a) => a.position === hit.position) ?? null;
 }
 
 /** What an action item's card says it is, for its badge. */

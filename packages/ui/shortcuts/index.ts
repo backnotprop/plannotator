@@ -35,3 +35,4 @@ export { reviewAiShortcuts, useReviewAiShortcuts } from './code-review/ai.shortc
 export { reviewSuggestionModalShortcuts, useReviewSuggestionModalShortcuts } from './code-review/suggestionModal.shortcuts';
 export { reviewTourDialogShortcuts, useReviewTourDialogShortcuts } from './code-review/tourDialog.shortcuts';
 export { reviewMarkdownPreviewShortcuts, useReviewMarkdownPreviewShortcuts } from './code-review/markdownPreview.shortcuts';
+export { reviewExplorerShortcuts, useReviewExplorerShortcuts } from './code-review/explorer.shortcuts';

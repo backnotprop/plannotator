@@ -58,6 +58,7 @@ export const {
   runVcsDiff,
   getVcsFileContentsForDiff,
   getVcsFileBytesForDiff,
+  listVcsFiles,
   getVcsDiffFingerprint,
   canStageFiles,
   stageFile,

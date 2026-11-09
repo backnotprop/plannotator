@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
 	chmodSync,
 	existsSync,
@@ -12,8 +12,10 @@ import { createServer } from "node:http";
 import os, { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports.ts";
+import { isLocalOnlyAdvertisedUrl } from "../generated/advertised-url.ts";
 import {
 	buildAdvertisedUrl,
+	getLocalUrlHostname,
 	getServerHostname,
 	getServerPort,
 	getServerPorts,
@@ -24,7 +26,6 @@ import {
 	openBrowser,
 } from "./network.ts";
 
-const savedEnv: Record<string, string | undefined> = {};
 const envKeys = [
 	"PLANNOTATOR_REMOTE",
 	"PLANNOTATOR_PORT",
@@ -33,13 +34,23 @@ const envKeys = [
 	"PLANNOTATOR_BROWSER",
 	"BROWSER",
 	"PLANNOTATOR_URL_HOST",
+	"PLANNOTATOR_PUBLIC_URL",
+	"PLANNOTATOR_DATA_DIR",
 ];
+// The values this file found (the preload's NO_BROWSER among them). Every
+// test is put back to these, however many times it cleared the env: saving
+// at each clearEnv() would keep a value an earlier loop pass set, and leak
+// it (PLANNOTATOR_BROWSER="Google Chrome") into the files after this one.
+const savedEnv: Record<string, string | undefined> = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+
+// The advertised URL reads config.json; point it at an empty sandbox, never
+// the developer's real ~/.plannotator.
+const SANDBOX_DATA_DIR = mkdtempSync(join(tmpdir(), "plannotator-pi-network-test-"));
+afterAll(() => rmSync(SANDBOX_DATA_DIR, { recursive: true, force: true }));
 
 function clearEnv() {
-	for (const key of envKeys) {
-		savedEnv[key] = process.env[key];
-		delete process.env[key];
-	}
+	for (const key of envKeys) delete process.env[key];
+	process.env.PLANNOTATOR_DATA_DIR = SANDBOX_DATA_DIR;
 }
 
 afterEach(() => {
@@ -340,11 +351,16 @@ describe("pi PLANNOTATOR_BROWSER script path", () => {
 });
 
 describe("pi buildAdvertisedUrl", () => {
-	test("defaults to localhost", () => {
+	test("passes the Pi runtime's remote state to the shared URL policy", () => {
 		clearEnv();
 		process.env.PLANNOTATOR_REMOTE = "1";
-		// An empty (but set) env var suppresses any urlHost in the developer's
-		// real config.json, isolating the default path.
+		process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+		expect(buildAdvertisedUrl(19432)).toBe("https://plannotator.example.com");
+	});
+
+	test("defaults to localhost with nothing configured", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
 		process.env.PLANNOTATOR_URL_HOST = "";
 		expect(buildAdvertisedUrl(19432)).toBe("http://localhost:19432");
 	});
@@ -360,6 +376,36 @@ describe("pi buildAdvertisedUrl", () => {
 		process.env.PLANNOTATOR_REMOTE = "1";
 		process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
 		expect(buildAdvertisedUrl(19432)).toBe("http://my-machine.tailnet.ts.net:19432");
+	});
+
+	test("a local session honors a localhost subdomain (#2184), and only that shape", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_URL_HOST = "plannotator.localhost";
+		expect(buildAdvertisedUrl(1234)).toBe("http://plannotator.localhost:1234");
+		expect(getLocalUrlHostname()).toBe("plannotator.localhost");
+		process.env.PLANNOTATOR_URL_HOST = "a..localhost";
+		expect(buildAdvertisedUrl(1234)).toBe("http://localhost:1234");
+		expect(getLocalUrlHostname()).toBeUndefined();
+		process.env.PLANNOTATOR_URL_HOST = "plannotator.localhost";
+		expect(getServerHostname()).toBe("127.0.0.1");
+	});
+
+	test("a remote session treats a localhost subdomain as unset: localhost, no 'open it on your device'", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.PLANNOTATOR_URL_HOST = "plannotator.localhost";
+		expect(buildAdvertisedUrl(19432)).toBe("http://localhost:19432");
+		expect(isLocalOnlyAdvertisedUrl(buildAdvertisedUrl(19432))).toBe(true);
+		process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
+		expect(isLocalOnlyAdvertisedUrl(buildAdvertisedUrl(19432))).toBe(false);
+	});
+
+	test("with nothing configured there is no local name", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_URL_HOST = "";
+		expect(getLocalUrlHostname()).toBeUndefined();
+		process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
+		expect(getLocalUrlHostname()).toBeUndefined();
 	});
 
 	test("keeps bracketed IPv6 hosts intact", () => {
@@ -382,6 +428,22 @@ describe("pi buildAdvertisedUrl", () => {
 		expect(getServerHostname()).toBe("127.0.0.1");
 		process.env.PLANNOTATOR_REMOTE = "1";
 		expect(getServerHostname()).toBe("0.0.0.0");
+	});
+
+	test("a reverse-proxy public URL wins over the plannotator.localhost switch (#1266 + #2184)", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.PLANNOTATOR_PORT = "19432-19433";
+		process.env.PLANNOTATOR_URL_HOST = "plannotator.localhost";
+		process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+		expect(buildAdvertisedUrl(19432)).toBe("https://plannotator.example.com");
+		// A later port in the range is not fronted by the proxy; the localhost name
+		// still counts as unset remotely, so it falls back to localhost.
+		expect(buildAdvertisedUrl(19433)).toBe("http://localhost:19433");
+		// A local session ignores the proxy URL and honors the switch.
+		delete process.env.PLANNOTATOR_REMOTE;
+		delete process.env.PLANNOTATOR_PORT;
+		expect(buildAdvertisedUrl(1234)).toBe("http://plannotator.localhost:1234");
 	});
 });
 
@@ -529,6 +591,9 @@ describe("pi darwin configured browser launch", () => {
 	// The other half of the decision table: widening the script branch must not
 	// swallow app names or .app bundles, which only `open -a` can launch.
 	test("an app name or .app bundle still launches through open -a", async () => {
+		// Once, before the loop: a second clearEnv() would save the first pass's
+		// PLANNOTATOR_BROWSER as the value afterEach restores, leaking it.
+		clearEnv();
 		for (const value of ["Google Chrome", "/Applications/Firefox.app"]) {
 			const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-darwin-"));
 			const log = join(dir, "open.txt");
@@ -536,7 +601,6 @@ describe("pi darwin configured browser launch", () => {
 			const originalPath = process.env.PATH;
 			try {
 				process.env.PATH = `${dir}${delimiter}${originalPath ?? ""}`;
-				clearEnv();
 				mockDarwin();
 				process.env.PLANNOTATOR_BROWSER = value;
 

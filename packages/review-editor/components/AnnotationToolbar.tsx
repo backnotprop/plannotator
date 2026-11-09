@@ -49,6 +49,12 @@ interface AnnotationToolbarProps {
   onViewAIResponse?: (questionId?: string) => void;
   /** AI messages that overlap the current line selection */
   aiHistoryMessages?: AIChatEntry[];
+  /**
+   * A host where selected lines can only be asked about (the VS Code Guide
+   * tab: no comments there): the toolbar opens on the Ask box, with no way to
+   * switch to a comment.
+   */
+  askOnly?: boolean;
 }
 
 // The 338px border box contains the 320px composer, padding, and border.
@@ -124,6 +130,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   isAILoading = false,
   onViewAIResponse,
   aiHistoryMessages = [],
+  askOnly = false,
 }) => {
   const coarsePointer = hasPrimaryCoarsePointer();
   const visibleBounds = useVisibleViewportBounds(coarsePointer ? 16 : 0);
@@ -176,7 +183,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   const handleAskAISubmit = (question: string) => {
     onAskAI?.(question);
-    // Stay in AI mode so the history updates
+    // An ask-only host answers somewhere else (a page beside): the toolbar is done.
+    if (askOnly) onCancel();
+    // Otherwise stay in AI mode so the history updates
   };
 
   const handleAskAIClose = () => {
@@ -218,7 +227,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           }
       }
     >
-      {askAIMode ? (
+      {askAIMode || askOnly ? (
         <AskAIInput
           lineStart={toolbarState.range.start}
           lineEnd={toolbarState.range.end}
@@ -227,7 +236,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           isLoading={isAILoading}
           aiHistory={aiHistoryMessages}
           onViewResponse={onViewAIResponse}
-          onSwitchToComment={() => setAskAIMode(false)}
+          onSwitchToComment={askOnly ? undefined : () => setAskAIMode(false)}
           dragHandleProps={dragHandleProps}
         />
       ) : (

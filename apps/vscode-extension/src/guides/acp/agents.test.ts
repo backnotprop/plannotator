@@ -21,9 +21,9 @@ import {
   readAgentOptions,
   resolveAgentLaunch,
   type AgentDescriptor,
-} from "./agents";
-import { forgetSameProgramAnswers, isSameProgram, readVersionLine } from "./same-program";
-import { planSpawn, shimEntry } from "./spawn-plan";
+} from "@plannotator/acp-client/agents";
+import { forgetSameProgramAnswers, isSameProgram, readVersionLine } from "@plannotator/acp-client/same-program";
+import { planSpawn, shimEntry } from "@plannotator/acp-client/spawn-plan";
 
 /** What `npm install -g` writes on Windows for a package bin. */
 const NPM_SHIM = [
@@ -212,7 +212,7 @@ describe("cheap defaults", () => {
 
 describe("installing an agent on Windows", () => {
   it("types the documented PowerShell command, the same npm command, or nothing (the docs instead)", async () => {
-    const { installCommandFor } = await import("./agents");
+    const { installCommandFor } = await import("@plannotator/acp-client/agents");
     const win = (a: AgentDescriptor) => installCommandFor(a.installCommand, a.installCommandWindows, "win32");
     expect(win(CURSOR)).toBe("irm 'https://cursor.com/install?win32=true' | iex");
     expect(win(OPENCODE)).toBe("npm install -g opencode-ai");

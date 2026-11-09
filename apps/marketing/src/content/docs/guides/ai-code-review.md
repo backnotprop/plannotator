@@ -71,6 +71,7 @@ Review-agent permissions depend on the engine:
 - **GitHub Copilot CLI** has its write tool denied. Plannotator also denies specific high-risk Git operations and outward-facing GitHub and GitLab writes, allows the `git`, `gh`, `glab`, `jj`, and `wc` command families, and relies on Copilot's non-interactive mode to deny other shell tools.
 - **Codex** runs with `--approve-for-me`, which uses Codex's workspace-write sandbox and automatic approval review. It is not a read-only file sandbox.
 - **Claude** jobs load no MCP servers (`--strict-mcp-config`) and are told to run one simple command at a time, because `dontAsk` refuses compound commands. If your Claude Code settings enable its sandbox and it cannot start (for example Linux without `bubblewrap`), `PLANNOTATOR_CLAUDE_SANDBOX=0` turns the sandbox off for these jobs only. Their commands then run without OS containment; the allowlist above still limits what they can run but is not a containment boundary.
+- **Every** review agent (Claude, Codex, Cursor, OpenCode, Pi, Copilot), and the Code Tour and Guided Review agents, runs with Plannotator's own integration off: `PLANNOTATOR_ASK_AI_CHILD=1`, `PLANNOTATOR_INBOX_TOOL=0` and `PLANNOTATOR_AGENT_TOOL=0` in its environment, so it never loads the Plannotator Inbox or the agent tool and never stops for a plan review. Codex also gets a `-c` override that turns the Inbox MCP server off, and Claude disallows `mcp__plannotator-inbox`. A job returns its result on its own output, so it needs none of them.
 - **Cursor** runs in ask mode with its sandbox enabled by default. `PLANNOTATOR_CURSOR_SANDBOX=0` removes the explicit sandbox flag and defers to the user's Cursor configuration.
 - **OpenCode** runs its plan agent, but Plannotator does not add a shell restriction flag. Its permissions come from the user's OpenCode configuration.
 - **Pi** excludes the direct edit and write tools, but retains Bash and its other inspection paths under Pi's runtime controls.
@@ -200,7 +201,7 @@ claude -p \
   --model opus \
   --tools Agent,Bash,Read,Glob,Grep \
   --allowedTools 'Agent,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(git ls-files:*),Bash(git ls-tree:*),Bash(git branch),Bash(git branch --show-current),Bash(git remote),Bash(git remote -v),Bash(git remote get-url:*),Bash(jj status:*),Bash(jj diff:*),Bash(jj log:*),Bash(jj show:*),Bash(jj file show:*),Bash(jj cat:*),Bash(jj bookmark list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab issue view:*),Bash(wc:*)' \
-  --disallowedTools 'Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*),Bash(git * --out*),Bash(git -c *),Bash(git --config-env*),Bash(git * --config-env*),Bash(git grep *),Bash(git ls-remote *),Bash(gh api *),Bash(glab api *),Bash(jj --config*),Bash(jj * --config*),Bash(jj * --tool*)' \
+  --disallowedTools 'Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*),Bash(git * --out*),Bash(git -c *),Bash(git --config-env*),Bash(git * --config-env*),Bash(git grep *),Bash(git ls-remote *),Bash(gh api *),Bash(glab api *),Bash(jj --config*),Bash(jj * --config*),Bash(jj * --tool*),mcp__plannotator-inbox' \
   --setting-sources user \
   --strict-mcp-config \
   --append-system-prompt '<run one simple command at a time: no &&, pipes, $(...) or variables>'
@@ -270,13 +271,15 @@ At the end, output an overall correctness verdict.
 ### Codex: command
 
 ```bash
-codex exec \
+codex -c "mcp_servers.plannotator-inbox={command='plannotator',args=['inbox','mcp'],env={PLANNOTATOR_ASK_AI_CHILD='1'},enabled=false}" \
+  exec \
   --output-schema ~/.plannotator/codex-review-schema.json \
   -o /tmp/plannotator-codex-<uuid>.json \
   --approve-for-me \
   --ephemeral \
   -C <working-directory> \
   "<system-prompt>\n\n---\n\n<user-message>"
+  # when your config.toml gives plannotator-inbox a url: -c mcp_servers.plannotator-inbox.enabled=false
 ```
 
 ### Codex: output schema

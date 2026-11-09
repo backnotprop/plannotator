@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../core/favicon";
 import { saveConfig } from "./config";
+import { packApp } from "../shared/packed-app";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
 // the real server.
 import { startAnnotateServer as startBunAnnotateServer } from "./annotate.ts?api-404-guard";
@@ -21,6 +22,13 @@ import {
 } from "../../apps/pi-extension/server/ai-runtime";
 
 const SPA_HTML = "<!doctype html><html><body>SPA fallback</body></html>";
+// The built app carries its code-split chunks packed behind the page
+// (packages/shared/packed-app.ts): every server must serve the page without
+// the pack, and each chunk at its own URL.
+const SPA_CHUNK = "export default 'packed chunk';";
+const SPA_BUNDLE = packApp(SPA_HTML, {
+  "/assets/index-test.js": { type: "text/javascript; charset=utf-8", text: SPA_CHUNK },
+});
 const AI_ENDPOINTS_REQUIRING_BACKEND = [
   "/api/ai/session",
   "/api/ai/query",
@@ -53,7 +61,7 @@ const serverCases = [
       startBunPlanServer({
         plan: "# Test Plan",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
         mode: "archive",
         customPlanPath: archivePath,
       }),
@@ -66,7 +74,7 @@ const serverCases = [
         rawPatch: "",
         gitRef: "HEAD",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -77,7 +85,7 @@ const serverCases = [
         markdown: "# Test Document",
         filePath: "test.md",
         origin: "claude-code",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -88,7 +96,7 @@ const serverCases = [
       startPiPlanServer({
         plan: "# Test Plan",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
         mode: "archive",
         customPlanPath: archivePath,
       }),
@@ -101,7 +109,7 @@ const serverCases = [
         rawPatch: "",
         gitRef: "HEAD",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
   {
@@ -112,7 +120,7 @@ const serverCases = [
         markdown: "# Test Document",
         filePath: "test.md",
         origin: "pi",
-        htmlContent: SPA_HTML,
+        htmlContent: SPA_BUNDLE,
       }),
   },
 ] satisfies readonly ServerCase[];
@@ -281,6 +289,31 @@ describe("API route 404 guards", () => {
         expect(spaResponse.status).toBe(200);
         expect(spaResponse.headers.get("content-type")).toContain("text/html");
         expect(await spaResponse.text()).toBe(SPA_HTML);
+
+        // A local session: the chunk as built, uncompressed like the page.
+        const chunkResponse = await fetch(`${server.url}/assets/index-test.js`, {
+          headers: { "Accept-Encoding": "gzip" },
+        });
+        expect(chunkResponse.status).toBe(200);
+        expect(chunkResponse.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+        expect(chunkResponse.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(chunkResponse.headers.get("content-encoding")).toBeNull();
+        expect(await chunkResponse.text()).toBe(SPA_CHUNK);
+        const head = await fetch(`${server.url}/assets/index-test.js`, { method: "HEAD" });
+        expect(head.status).toBe(200);
+        expect(head.headers.get("content-length")).toBe(String(SPA_CHUNK.length));
+        expect(await head.text()).toBe("");
+
+        // Under /assets/ only exact packed names answer; nothing falls back to the page.
+        for (const path of ["/assets/missing.js", "/assets/index-test.js.map", "/assets/INDEX-TEST.js"]) {
+          const missing = await fetch(`${server.url}${path}`);
+          expect({ path, status: missing.status }).toEqual({ path, status: 404 });
+          expect(missing.headers.get("x-content-type-options")).toBe("nosniff");
+          expect(await missing.text()).not.toContain("SPA fallback");
+        }
+        const post = await fetch(`${server.url}/assets/index-test.js`, { method: "POST" });
+        expect(post.status).toBe(405);
+        expect(post.headers.get("allow")).toBe("GET, HEAD");
       } finally {
         server.stop();
       }

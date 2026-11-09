@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import {
   afterSendOf,
+  AFTER_SEND_WORDS,
   answerWords,
   choiceAnswer,
   emptyQueue,
@@ -30,6 +31,7 @@ import {
   putOff,
   skipAnswer,
   swipeChoices,
+  swipeHint,
   answerNeedsConfirm,
   confirmLabel,
   sessionChips,
@@ -231,6 +233,19 @@ describe('the Send', () => {
     expect(afterSendOf(row({ delivery: { state: 'delivered' } as InboxListRow['delivery'] }), at, true)).toBe('working');
     expect(afterSendOf(row({ last_author: 'agent', last_agent_at: '2026-10-24T10:06:00.000Z' }), at, true)).toBe('replied');
   });
+
+  // Approval "inbox-stopped-reply": a reply Claude Code holds until the person types in that session reads Stopped,
+  // in its words, where it would read Queued; once it went in, Delivered.
+  test('held by a stopped Claude Code session: Stopped, then Delivered once it went in', () => {
+    const row = (delivery: Partial<NonNullable<InboxListRow['delivery']>>) =>
+      ({ last_author: 'person', last_agent_at: '2026-10-24T10:00:00.000Z', sent: null, delivery }) as unknown as InboxListRow;
+    const at = '2026-10-24T10:05:00.000Z';
+    const stopped = afterSendOf(row({ state: 'queued', reason: 'stopped' }), at, false);
+    expect(stopped).toBe('stopped');
+    expect(AFTER_SEND_WORDS[stopped]).toBe('Stopped: goes in when you type in that session');
+    expect(afterSendOf(row({ state: 'delivered', reason: 'delivered' }), at, false)).toBe('delivered');
+    expect(afterSendOf(row({ state: 'queued', reason: 'working' }), at, true)).toBe('queued');
+  });
 });
 
 describe('answers', () => {
@@ -240,6 +255,21 @@ describe('answers', () => {
     expect(skipAnswer(A1.question, 'later').note).toBe('later');
     expect(swipeChoices(A1.question)).toEqual(['Yes', 'No']);
     expect(swipeChoices({ ...A1.question, kind: 'multi' })).toBeNull();
+  });
+
+  test("a picked label's markdown reads as its words on the stamp; the answer keeps the label as written", () => {
+    const linked = { ...A1.question, choices: [{ label: '[15% off](forecast-15.html)' }, { label: '`FLAT10` code' }] } as InboxQuestion;
+    const answer = choiceAnswer(linked, ['[15% off](forecast-15.html)'], '');
+    expect(answer.selected).toEqual(['[15% off](forecast-15.html)']);
+    expect(answerWords(answer)).toBe('15% off');
+    expect(answerWords({ ...answer, selected: ['**20%** for members', '`FLAT10` code'] })).toBe('20% for members, FLAT10 code');
+  });
+
+  test("the swipe hint says the labels' words; the swipe commits the label as written", () => {
+    const linked = { ...A1.question, choices: [{ label: '[Yes](a.html)' }, { label: '`No`' }] } as InboxQuestion;
+    const choices = swipeChoices(linked)!;
+    expect(choices).toEqual(['[Yes](a.html)', '`No`']);
+    expect(swipeHint(choices)).toBe('Swipe right for Yes, left for No.');
   });
 });
 

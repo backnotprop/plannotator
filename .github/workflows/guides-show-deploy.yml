@@ -44,8 +44,10 @@ jobs:
       - name: Size budgets
         run: bun run --cwd apps/guides-show check:budgets
 
-      - name: Checked-in manifest matches this build
-        run: bun run --cwd apps/guides-show check:manifest
+      # The Worker bundles the viewer pin as its fallback for uploads that
+      # send none. The pin is generated, not committed: pin this build.
+      - name: Pin the Worker to this build
+        run: bun run --cwd apps/guides-show sync:manifest
 
       - name: Publish viewer files to R2 (add-only)
         id: publish

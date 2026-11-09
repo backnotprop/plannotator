@@ -1,12 +1,15 @@
 export { configStore } from './configStore';
-export type { ServerSyncFn } from './configStore';
+export type { ServerSyncFn, SettingValue } from './configStore';
 export { useConfigValue } from './useConfig';
 export {
   setReviewPanelView,
   setReviewDefaultDiffType,
+  getProviderReviewDefaultDiffType,
+  setProviderReviewDefaultDiffType,
   getPersistedReviewPanelView,
   setReviewAutoViewed,
   needsAutoViewedNotice,
   markAutoViewedNoticeSeen,
   type ReviewDefaultDiffType,
+  type VcsReviewSettingsDescriptor,
 } from './reviewView';

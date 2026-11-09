@@ -37,6 +37,7 @@ import type {
   CodexSDKConfig,
   CreateSessionOptions,
 } from "../types.ts";
+import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
 import {
   buildWindowsCommandScriptSpawnCommand,
@@ -44,6 +45,7 @@ import {
   resolveWindowsCommandShim,
 } from "./command-path.ts";
 import { guardChildStreams, writeChildLine } from "./child-io.ts";
+import { askAiChildEnv, codexAskAiConfigArgs, codexOneShotConfigArgs, readCodexConfigTexts } from "./ask-ai-env.ts";
 import { CODEX_FALLBACK_MODELS, cliVersionFrom, effortList, type CatalogModel } from "@plannotator/core/model-catalog";
 
 const PROVIDER_NAME = "codex-sdk";
@@ -55,6 +57,13 @@ const IDLE_TIMEOUT_MS = 10 * 60_000;
 /** Reject a JSON-RPC request that gets no response in this long (RPC acks are
  *  fast — turn output streams via notifications, not the turn/start response). */
 const RPC_TIMEOUT_MS = 30_000;
+/**
+ * The longest unfinished stdout line, in characters. One line can hold a whole `thread/resume` answer or a command's
+ * `aggregatedOutput`, and neither has a size Plannotator knows, so this stops a runaway and not a long message.
+ */
+export const CODEX_LINE_MAX = 256 * 1024 * 1024;
+/** How long a Codex gets to stop on SIGTERM before SIGKILL. */
+const CODEX_STOP_GRACE_MS = 2_000;
 /** Model discovery must not gate the AI panel: cap its handshake + model/list
  *  RPCs much shorter than RPC_TIMEOUT_MS so a codex that's installed but not
  *  logged in (or otherwise unresponsive) falls back to the static model list
@@ -66,6 +75,10 @@ const FILE_APPROVAL_METHOD = "item/fileChange/requestApproval";
 // Permission-profile escalation (extra network/filesystem access). Distinct
 // response shape from the two above ({permissions} grant, not {decision}).
 const PERMISSIONS_APPROVAL_METHOD = "item/permissions/requestApproval";
+
+// The `-c` override that turns the Inbox MCP server off lives in
+// ask-ai-env.ts, so the review server's `codex exec` jobs use it too.
+export { codexAskAiConfigArgs, codexInboxEntryHasUrl, readCodexConfigTexts } from "./ask-ai-env.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -138,10 +151,34 @@ export function classifyRpcMessage(msg: RpcMessage): RpcClassification {
   return { kind: "unknown" };
 }
 
+/** The items that don't act: writing, and what a person's own hook or a long context adds. Any other is a tool of some kind, known or new. */
+const CODEX_ONE_SHOT_ITEMS: ReadonlySet<unknown> = new Set(["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction", "hookPrompt"]);
+
+/**
+ * In a single judgment (`oneShot`), an item that isn't plain writing counts as a tool use, not only the shell:
+ * MCP calls, web search and the like sit outside the read-only sandbox. Null for everything else.
+ */
+export function codexOneShotToolUse(notification: { method: string; params?: RpcMessage }): AIMessage | null {
+  if (notification.method !== "item/started") return null;
+  const item = notification.params?.item as RpcMessage | undefined;
+  if (!item || CODEX_ONE_SHOT_ITEMS.has(item.type)) return null;
+  return { type: "tool_use", toolName: String(item.type), toolInput: {}, toolUseId: String(item.id ?? "") };
+}
+
 /**
  * Map a Codex app-server notification (`{ method, params }`) to AIMessages.
  * `sessionId` is the resolved thread id, injected into the terminal result.
  */
+/**
+ * A TurnError's code: Codex's own `codexErrorInfo` says when the prompt was past the model's context window
+ * (`"contextWindowExceeded"`, or an object keyed by it); anything else keeps `fallback`.
+ */
+function codexErrorCode(error: RpcMessage | undefined, fallback: string): string {
+  const info = error?.codexErrorInfo;
+  const exceeded = info === "contextWindowExceeded" || (!!info && typeof info === "object" && "contextWindowExceeded" in info);
+  return exceeded ? AI_ERROR_CONTEXT_WINDOW_EXCEEDED : fallback;
+}
+
 export function mapCodexAppServerEvent(
   notification: { method: string; params?: RpcMessage },
   sessionId: string,
@@ -195,7 +232,7 @@ export function mapCodexAppServerEvent(
         return [{
           type: "error",
           error: (error?.message as string) ?? "Turn failed",
-          code: "turn_failed",
+          code: codexErrorCode(error, "turn_failed"),
         }];
       }
       return [{ type: "result", sessionId, success: true }];
@@ -212,7 +249,7 @@ export function mapCodexAppServerEvent(
       return [{
         type: "error",
         error: errObj?.message ?? (params.message as string) ?? "Unknown error",
-        code: "codex_error",
+        code: codexErrorCode(errObj as RpcMessage | undefined, "codex_error"),
       }];
     }
 
@@ -291,10 +328,25 @@ export function mapApprovalRequest(
 // JSON-RPC over stdio (bidirectional: responses, notifications, server requests)
 // ---------------------------------------------------------------------------
 
-type NotificationListener = (notification: { method: string; params: RpcMessage }) => void;
+/** SIGTERM, then SIGKILL for a Codex that ignores it. On Windows the tree kill is already forced. */
+function stopChild(proc: ChildProcess, now = false): void {
+  if (killWindowsProcessTree(proc.pid)) return;
+  if (now) {
+    proc.kill("SIGKILL");
+    return;
+  }
+  proc.kill();
+  const timer = setTimeout(() => {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+  }, CODEX_STOP_GRACE_MS);
+  timer.unref();
+  proc.once("exit", () => clearTimeout(timer));
+}
+
+type NotificationListener =(notification: { method: string; params: RpcMessage }) => void;
 type RequestHandler = (method: string, id: string | number, params: RpcMessage) => void;
 
-class CodexAppServerProcess {
+export class CodexAppServerProcess {
   private proc: ChildProcess | null = null;
   private listeners: NotificationListener[] = [];
   private requestHandlers: RequestHandler[] = [];
@@ -312,11 +364,16 @@ class CodexAppServerProcess {
   /** The initialize response's `userAgent` ("plannotator/<codex version> (…)"). */
   userAgent: string | undefined;
 
+  /** `lineMax`: past this many characters with no newline, the process is failed and stopped. */
+  constructor(private readonly lineMax: number = CODEX_LINE_MAX) {}
+
   /** Spawn + JSON-RPC initialize handshake, once. `initTimeoutMs` bounds the
-   *  initialize wait (model discovery passes a short value so it can't hang). */
-  start(codexPath: string, cwd: string, initTimeoutMs?: number): Promise<void> {
+   *  initialize wait (model discovery passes a short value so it can't hang).
+   *  `env`: the environment Codex runs in and whose config it reads; default this process's.
+   *  `oneShot`: a single judgment, with web search and the MCP servers off. */
+  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>, oneShot?: boolean): Promise<void> {
     if (!this.startPromise) {
-      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs).catch((err) => {
+      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env, oneShot).catch((err) => {
         this.startPromise = null;
         throw err;
       });
@@ -324,20 +381,24 @@ class CodexAppServerProcess {
     return this.startPromise;
   }
 
-  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number): Promise<void> {
+  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env, oneShot?: boolean): Promise<void> {
     const commandPath = resolveWindowsCommandShim(codexPath);
+    const configTexts = readCodexConfigTexts(cwd, env);
+    const appServerArgs = [...codexAskAiConfigArgs(configTexts), ...(oneShot ? codexOneShotConfigArgs(configTexts) : []), "app-server"];
     const command =
-      buildWindowsCommandScriptSpawnCommand(commandPath, ["app-server"]) ?? [
+      buildWindowsCommandScriptSpawnCommand(commandPath, appServerArgs) ?? [
         commandPath,
-        "app-server",
+        ...appServerArgs,
       ];
 
     let proc: ChildProcess;
     try {
       const [file, ...args] = command;
       // stderr is "ignore", not "pipe": we never read it, and an un-drained
-      // stderr pipe deadlocks the child once its buffer fills.
-      proc = spawn(file, args, { cwd, stdio: ["pipe", "pipe", "ignore"] });
+      // stderr pipe deadlocks the child once its buffer fills. The env turns
+      // Plannotator's integration off in this Codex (ask-ai-env.ts): its hooks
+      // read the marker; the Inbox MCP server is off by the `-c` overrides.
+      proc = spawn(file, args, { cwd, env: askAiChildEnv(env), stdio: ["pipe", "pipe", "ignore"] });
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.handleProcessEnd(error);
@@ -403,7 +464,7 @@ class CodexAppServerProcess {
     this.handleProcessEnd(error);
     if (proc) {
       try {
-        if (!killWindowsProcessTree(proc.pid)) proc.kill();
+        stopChild(proc);
       } catch {
         // Already gone.
       }
@@ -423,18 +484,30 @@ class CodexAppServerProcess {
 
   private readStream(): void {
     if (!this.proc?.stdout) return;
-    this.proc.stdout.on("data", (chunk: Buffer) => {
-      this.buffer += this.decoder.decode(chunk, { stream: true });
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.replace(/\r$/, "");
-        if (!trimmed) continue;
-        try {
-          this.routeMessage(JSON.parse(trimmed));
-        } catch {
-          // Ignore malformed lines.
+    const stdout = this.proc.stdout;
+    stdout.on("data", (chunk: Buffer) => {
+      const text = this.decoder.decode(chunk, { stream: true });
+      // Only a chunk with a newline splits: searching the whole buffer on every chunk starves the event loop on a long line.
+      const end = text.lastIndexOf("\n");
+      if (end >= 0) {
+        const lines = `${this.buffer}${text.slice(0, end)}`.split("\n");
+        this.buffer = text.slice(end + 1);
+        for (const line of lines) {
+          const trimmed = line.replace(/\r$/, "");
+          if (!trimmed) continue;
+          try {
+            this.routeMessage(JSON.parse(trimmed));
+          } catch {
+            // Ignore malformed lines.
+          }
         }
+      } else {
+        this.buffer += text;
+      }
+      if (this.buffer.length > this.lineMax) {
+        this.buffer = "";
+        stdout.destroy();
+        this.failProcess(new Error("Codex app-server wrote a line past the limit"));
       }
     });
   }
@@ -540,14 +613,13 @@ class CodexAppServerProcess {
     return this._alive;
   }
 
-  kill(): void {
+  /** `now`: SIGKILL at once, for when this process is exiting and no later timer would run. */
+  kill(now = false): void {
     this._alive = false;
     this.startPromise = null;
     const proc = this.proc;
     this.proc = null;
-    if (proc) {
-      if (!killWindowsProcessTree(proc.pid)) proc.kill();
-    }
+    if (proc) stopChild(proc, now);
     this.listeners.length = 0;
     this.requestHandlers.length = 0;
     for (const [, pending] of this.pendingRequests) {
@@ -630,12 +702,13 @@ export class CodexAppServerProvider implements AIProvider {
 
   async createSession(options: CreateSessionOptions): Promise<AISession> {
     const session = new CodexAppServerSession({
-      systemPrompt: buildSystemPrompt(options.context),
+      systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
       cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: null,
       codexExecutablePath: this.config.codexExecutablePath ?? "codex",
       model: options.model ?? this.config.model ?? DEFAULT_MODEL,
       reasoningEffort: options.reasoningEffort,
+      oneShot: !!options.oneShot,
       onClosed: (s) => this.sessions.delete(s),
     });
     this.sessions.add(session);
@@ -681,6 +754,8 @@ interface SessionConfig {
   model: string;
   reasoningEffort?: string;
   resumeThreadId?: string;
+  /** A single judgment (`CreateSessionOptions.oneShot`): the thread is not kept. */
+  oneShot?: boolean;
   onClosed: (session: CodexAppServerSession) => void;
 }
 
@@ -797,12 +872,23 @@ class CodexAppServerSession extends BaseSession {
           return;
         }
       }
+      const tool = this.config.oneShot ? codexOneShotToolUse(notif) : null;
+      if (tool) push(tool);
       for (const msg of mapCodexAppServerEvent(notif, this.id)) push(msg);
       if (notif.method === "turn/completed" || notif.method === "process_exited") {
         finish();
       }
     });
     const unsubRequests = proc.onRequest((method, id, params) => {
+      // A single judgment asks nothing of anyone: whatever Codex wants, the run ends with no answer.
+      if (this.config.oneShot) {
+        const requestId = String(id);
+        push({ type: "permission_request", requestId, toolName: method, toolInput: {}, toolUseId: requestId });
+        if (method === PERMISSIONS_APPROVAL_METHOD) proc.respond(id, { permissions: {}, scope: "turn" });
+        else if (method === CMD_APPROVAL_METHOD || method === FILE_APPROVAL_METHOD) proc.respond(id, { decision: "cancel" });
+        else proc.respondError(id, `Unsupported request: ${method}`);
+        return;
+      }
       // Permission-profile escalation (network/fs). Ask AI runs read-only, so
       // deny it by granting nothing — this is exactly Codex's own cancel
       // response (empty profile + turn scope), which lets the turn continue
@@ -903,7 +989,7 @@ class CodexAppServerSession extends BaseSession {
   private threadStartParams(): RpcMessage {
     return {
       method: "thread/start",
-      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only" },
+      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only", ...(this.config.oneShot && { ephemeral: true }) },
     };
   }
 
@@ -913,7 +999,7 @@ class CodexAppServerSession extends BaseSession {
 
     if (!this.process || !this.process.alive) {
       this.process = new CodexAppServerProcess();
-      await this.process.start(this.config.codexExecutablePath, this.config.cwd);
+      await this.process.start(this.config.codexExecutablePath, this.config.cwd, undefined, undefined, this.config.oneShot);
       this.threadStarted = false;
     }
     if (this.threadStarted) return;

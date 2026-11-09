@@ -7,6 +7,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { resetImageSrcResolver, setImageSrcResolver } from '@plannotator/ui/components/ImageThumbnail';
+import { inboxImageSrcResolver } from './images';
 
 const hasDom = typeof document !== 'undefined';
 // The pane pulls in the Viewer, which reads `window` at module-eval time.
@@ -23,6 +25,7 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = realFetch;
+  resetImageSrcResolver();
   if (hasDom) document.cookie = `${GRID_COOKIE}=; path=/; max-age=0`;
 });
 
@@ -43,11 +46,10 @@ const attachment: InboxAttachmentState = {
   unavailable: null,
 };
 
-test.skipIf(!hasDom)('an attached markdown file renders Clean even with Grid chosen in plan review', async () => {
-  // The cookie plan review's Settings writes for "Grid".
-  document.cookie = `${GRID_COOKIE}=true; path=/`;
+/** The pane for one attachment whose view route answers `text`, once its document has drawn. */
+async function renderPane(shown: InboxAttachmentState, text: string): Promise<void> {
   globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ serverSession: 's', attachment, version: 'current', text: PLAN, html: null }), {
+    new Response(JSON.stringify({ serverSession: 's', attachment: shown, version: shown.unavailable ? 'sent' : 'current', text, html: null }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })) as unknown as typeof fetch;
@@ -58,8 +60,8 @@ test.skipIf(!hasDom)('an attached markdown file renders Clean even with Grid cho
     root = createRoot(host!);
     root.render(
       <AttachmentPane
-        attachment={attachment}
-        attachments={[attachment]}
+        attachment={shown}
+        attachments={[shown]}
         records={[]}
         agent="Claude Code"
         projectName="api"
@@ -83,6 +85,12 @@ test.skipIf(!hasDom)('an attached markdown file renders Clean even with Grid cho
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   });
+}
+
+test.skipIf(!hasDom)('an attached markdown file renders Clean even with Grid chosen in plan review', async () => {
+  // The cookie plan review's Settings writes for "Grid".
+  document.cookie = `${GRID_COOKIE}=true; path=/`;
+  await renderPane(attachment, PLAN);
   const scroll = host!.querySelector('.ib-docscroll');
   expect(scroll).not.toBeNull();
   expect(scroll!.getAttribute('data-look')).toBe('clean');
@@ -92,4 +100,12 @@ test.skipIf(!hasDom)('an attached markdown file renders Clean even with Grid cho
   const article = scroll!.querySelector('article');
   expect(article?.textContent).toContain('Retry worker');
   expect(article!.classList.contains('shadow-xl')).toBe(false);
+});
+
+test.skipIf(!hasDom)('an image in the file loads from its attachment route, for the version on screen (#2228)', async () => {
+  setImageSrcResolver(inboxImageSrcResolver);
+  // The file is gone from disk, so the sent version opens, and its images ask for that version.
+  await renderPane({ ...attachment, current: null, unavailable: { code: 'attachment_missing', message: 'gone' } }, `${PLAN}\n![the admin view](shots/admin.png)\n`);
+  const src = host!.querySelector('.ib-docscroll img[data-image-src="shots/admin.png"]')?.getAttribute('src');
+  expect(src).toBe(`/api/inbox/attachments/${attachment.id}/markdown-image?path=shots%2Fadmin.png&version=sent`);
 });

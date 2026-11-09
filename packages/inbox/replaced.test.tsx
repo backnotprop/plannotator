@@ -5,7 +5,7 @@
  * guard stops a Send that would drop a pick the agent replaced while the
  * person was answering (once per replacement, and on the server's 422).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

@@ -1,18 +1,20 @@
 /**
  * The one-time agent-note dialog (components/AgentNoteDialog.tsx; the
- * approved "inbox-agent-note-dialog" design, Checklist with the band at the
- * top): one row per agent asked about, all ticked, Claude Code like the rest;
+ * approved "inbox-agent-note-dialog" design, Checklist; since
+ * "inbox-agent-note-auto" the window opens it only for agents whose note is
+ * not written by itself, and its band is the line above the list,
+ * connectLine.test.tsx): one row per agent asked about, all ticked, Claude Code like the rest;
  * one agent has no checkbox; the primary names who it adds to and never
  * refuses; results in the same rows with Try again; Not now, Escape and
  * "Don't add a note" answer for these agents only and write nothing. The
  * page's requests go to a recording fetch.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { sized, tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
@@ -49,19 +51,8 @@ const GEMINI = row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create
 const CLAUDE = row('claude-code', 'Claude Code', { path: '~/.claude/rules/plannotator-inbox.md', create: true }, 'tool');
 const PI = row('pi', 'Pi', { path: '~/.pi/agent/AGENTS.md' }, 'tool');
 const OPENCODE = row('opencode', 'OpenCode', { path: '~/.config/opencode/AGENTS.md' }, 'tool');
-
-const REPORT: InboxConnectReport = {
-  at: '2026-10-13T00:00:00.000Z',
-  first: true,
-  added: ['codex', 'gemini'],
-  already: [],
-  failed: [],
-  foreign: [],
-  manual: ['pi'],
-  manual_why: [{ agent: 'pi', why: 'Pi before 0.99 has no `pi mcp`' }],
-  unfinished: [],
-  claude_code: true,
-};
+// Cursor keeps its rules in the app: nothing is written; its note is copied by hand.
+const CURSOR = row('cursor', 'Cursor', { state: 'manual', reason: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." });
 
 function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   return { agents: [CLAUDE, CODEX, GEMINI], last_report: null, connecting: false, connect_env_off: false, tool_env: null, notes_offered: true, notes_asked: [], note_text: NOTE, ...over };
@@ -78,20 +69,18 @@ function recordFetch(answer: (path: string, body: Record<string, unknown>) => un
   }) as typeof fetch;
 }
 
-function mount(rows: InboxAgentRow[], report: InboxConnectReport | null = null) {
+function mount(rows: InboxAgentRow[]) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
-  const seen = { closed: 0, settings: 0, models: [] as InboxAgentsModel[] };
+  const seen = { closed: 0, models: [] as InboxAgentsModel[] };
   act(() => {
     root = createRoot(host!);
     root.render(
       <AgentNoteDialog
         rows={rows}
-        report={report}
         noteText={NOTE}
         onModel={(next) => seen.models.push(next)}
-        onSettings={() => seen.settings++}
         onClosed={() => seen.closed++}
       />,
     );
@@ -113,13 +102,10 @@ const rowsOf = (el: Element) =>
   }));
 const title = (el: Element) => el.querySelector('.ib-anote-head h2')?.textContent;
 
-test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code too), each exact file, and a primary that names them', () => {
-  const { el, dialog } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+test.skipIf(!hasDom)('several agents: no band (the line above the list says the news), every agent ticked (Claude Code too), each exact file, and a primary that names them', () => {
+  const { el, dialog } = mount([CODEX, GEMINI, CLAUDE]);
   expect(dialog().getAttribute('aria-labelledby')).toBe(el.querySelector('.ib-anote-head h2')!.id);
-  expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
-    'Connected Codex and Gemini CLI to the Inbox.',
-    'Pi needs connecting by hand: Settings → Agents',
-  ]);
+  expect(el.querySelector('[role="status"]')).toBeNull();
   expect(title(el)).toBe('Tell your agents about the Inbox');
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
@@ -137,7 +123,7 @@ test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code 
 });
 
 test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "Don\'t add a note", Not now goes, and pressing it writes nothing', async () => {
-  const { el, seen } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+  const { el, seen } = mount([CODEX, GEMINI, CLAUDE]);
   const boxes = () => [...el.querySelectorAll('.ib-anote-table input')] as HTMLInputElement[];
   act(() => boxes()[2]!.click());
   expect(primary(el).textContent).toBe('Add to Codex and Gemini CLI');
@@ -150,7 +136,7 @@ test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "
   recordFetch(() => model({ notes_asked: ['claude-code', 'codex', 'gemini'] }));
   act(() => primary(el).click());
   await flush();
-  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'gemini', 'claude-code'], seen: true } }]);
+  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'gemini', 'claude-code'], seen: false } }]);
   expect(seen.closed).toBe(1);
   expect(seen.models).toHaveLength(1);
 });
@@ -158,7 +144,6 @@ test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "
 test.skipIf(!hasDom)('four or more ticked: "Add to N agents"', () => {
   const { el } = mount([CODEX, GEMINI, PI, OPENCODE, CLAUDE]);
   expect(primary(el).textContent).toBe('Add to 5 agents');
-  expect(el.querySelector('.ib-anote-band')).toBeNull();
 });
 
 test.skipIf(!hasDom)('one agent: no checkbox; the two buttons are the choice', () => {
@@ -171,7 +156,7 @@ test.skipIf(!hasDom)('one agent: no checkbox; the two buttons are the choice', (
 });
 
 test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same rows, a failure with its reason and Try again; Done closes', async () => {
-  const { el, seen } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+  const { el, seen } = mount([CODEX, GEMINI, CLAUDE]);
   act(() => ([...el.querySelectorAll('.ib-anote-table input')][2] as HTMLInputElement).click());
   recordFetch((_path, body) =>
     (body.add as string[]).length === 2
@@ -186,17 +171,16 @@ test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same r
   );
   act(() => primary(el).click());
   await flush();
-  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: ['codex', 'gemini'], asked: ['codex', 'gemini', 'claude-code'], seen: true } }]);
+  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: ['codex', 'gemini'], asked: ['codex', 'gemini', 'claude-code'], seen: false } }]);
   expect(title(el)).toBe('Added the note to Codex');
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Added', ticked: null },
     { name: 'Gemini CLI', path: '~/.gemini/GEMINI.md', state: 'Not added', ticked: null },
   ]);
   expect(el.querySelector('.ib-anote-err')?.textContent).toBe("~/.gemini/GEMINI.md can't be written: permission denied. Try again");
-  // The results view: focus on Done, the live region says what was written, the band is gone.
+  // The results view: focus on Done, the live region says what was written.
   expect(document.activeElement).toBe(button(el, 'Done'));
-  expect(el.querySelector('[data-anote-band]')).toBeNull();
-  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Managed notes are read from each agent’s next session. Fix the file, then try again here or in Settings → Agents.');
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Each agent reads it from its next session. Fix the file, then try again here or in Settings → Agents.');
   expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe("Added the note to Codex. Couldn't add the note to Gemini CLI.");
 
   act(() => button(el, 'Try again').click());
@@ -222,18 +206,18 @@ test.skipIf(!hasDom)('Add that cannot reach the Inbox shows each row as not adde
   expect(button(el, 'Done')).toBeDefined();
 });
 
-test.skipIf(!hasDom)('Escape is Not now: nothing written, these agents answered, the band seen', async () => {
-  const { dialog, seen } = mount([CODEX, CLAUDE], REPORT);
+test.skipIf(!hasDom)('Escape is Not now: nothing written, these agents answered', async () => {
+  const { dialog, seen } = mount([CODEX, CLAUDE]);
   recordFetch(() => model());
   act(() => {
     dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
   await flush();
-  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'claude-code'], seen: true } }]);
+  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'claude-code'], seen: false } }]);
   expect(seen.closed).toBe(1);
 });
 
-test.skipIf(!hasDom)('Not now without news: seen is false', async () => {
+test.skipIf(!hasDom)('Not now: seen is false (the line above the list says the news)', async () => {
   const { el } = mount([CODEX]);
   recordFetch(() => model());
   act(() => button(el, 'Not now').click());
@@ -241,13 +225,57 @@ test.skipIf(!hasDom)('Not now without news: seen is false', async () => {
   expect(calls[0]!.body).toEqual({ add: [], asked: ['codex'], seen: false });
 });
 
-test.skipIf(!hasDom)('the band\'s Settings → Agents link: the dialog closes as Not now and Settings opens', async () => {
-  const { el, seen } = mount([CODEX], REPORT);
-  recordFetch(() => model());
-  act(() => button(el, 'Settings → Agents').click());
+test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says to copy it yourself; its copy has no markers', async () => {
+  const { el } = mount([CODEX, CURSOR]);
+  expect(rowsOf(el)).toEqual([
+    { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
+    { name: 'Cursor', path: undefined, state: 'Copy yourself', ticked: true },
+  ]);
+  expect(el.querySelector('[data-agent="cursor"] .ib-anote-sub')?.textContent).toBe('Nothing is written here: you paste the note into Customize → Rules.');
+  expect(primary(el).textContent).toBe('Add to Codex');
+  expect(el.querySelector('.ib-anote-desc')?.textContent).toContain("Cursor keeps its rules in the app, so you copy the note into Customize → Rules yourself; Plannotator can't see, update or remove that copy.");
+  // Unticking Codex leaves only the copy: the primary says so.
+  act(() => ([...el.querySelectorAll('.ib-anote-table input')][0] as HTMLInputElement).click());
+  expect(primary(el).textContent).toBe('Show the note to copy');
+  act(() => ([...el.querySelectorAll('.ib-anote-table input')][0] as HTMLInputElement).click());
+  recordFetch(() => ({
+    ...model(),
+    results: [
+      { ok: true, agent: 'codex', action: 'added', path: '~/.codex/AGENTS.md' },
+      { ok: true, agent: 'cursor', action: 'manual', path: null },
+    ],
+  }));
+  act(() => primary(el).click());
   await flush();
-  expect(calls[0]!.body).toEqual({ add: [], asked: ['codex'], seen: true });
-  expect(seen).toMatchObject({ closed: 1, settings: 1 });
+  expect(calls[0]!.body).toEqual({ add: ['codex', 'cursor'], asked: ['codex', 'cursor'], seen: false });
+  expect(title(el)).toBe('Added the note to Codex');
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Copy yourself']);
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Each agent reads it from its next session. Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+  const copy = el.querySelector('[data-anote-copy] pre')!;
+  expect(copy.textContent).toBe('## Plannotator Inbox');
+  expect(copy.textContent).not.toContain('plannotator-inbox:start');
+  expect(copy.getAttribute('aria-label')).toBe('The note to copy into Cursor');
+  expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Remove the added notes any time in Settings → Agents; the copy in Cursor is yours to remove.');
+  expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe('Added the note to Codex. The note for Cursor is shown below, to copy into Customize → Rules yourself.');
+});
+
+test.skipIf(!hasDom)('Cursor alone: worded as a copy, never as an add; the note shown has no markers', async () => {
+  const { el } = mount([CURSOR]);
+  expect(title(el)).toBe('Copy the note into Cursor?');
+  expect(el.querySelector('.ib-anote-desc')?.textContent).not.toContain('add');
+  expect(rowsOf(el)).toEqual([{ name: 'Cursor', path: undefined, state: 'Copy yourself', ticked: null }]);
+  expect(primary(el).textContent).toBe('Show the note to copy');
+  act(() => button(el, 'Show the note').click());
+  expect(el.querySelector('.ib-anote-note pre')?.textContent).toBe('## Plannotator Inbox');
+  recordFetch(() => ({ ...model(), results: [{ ok: true, agent: 'cursor', action: 'manual', path: null }] }));
+  act(() => primary(el).click());
+  await flush();
+  expect(title(el)).toBe('Copy the note into Cursor');
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Copy yourself']);
+  expect(el.querySelector('[data-anote-copy] pre')?.textContent).toBe('## Plannotator Inbox');
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+  expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Remove the copy in Cursor yourself when you no longer want it.');
+  expect(el.textContent).not.toMatch(/Added the note|Settings → Rules/);
 });
 
 test.skipIf(!hasDom)('Show the note opens the exact block', () => {
@@ -270,24 +298,4 @@ test.skipIf(!hasDom)('a long path is cut in the middle on screen, whole in the D
   expect([...el.querySelectorAll('.ib-anote-path')[1]!.querySelectorAll('bdi')].map((b) => b.textContent)).toEqual(['Users', 'ジョン・スミス', '.config', 'مشاريع', 'AGENTS.md']);
   expect(el.querySelector('.ib-anote-name')?.getAttribute('dir')).toBe('auto');
   expect(el.textContent).toContain('Pi reads only one of its instruction files; this is the one.');
-});
-
-test.skipIf(!hasDom)('a failure and a foreign entry in the band; "new on this computer" after the first run', () => {
-  const { el } = mount([CODEX], {
-    ...REPORT,
-    first: false,
-    added: ['codex'],
-    manual_why: [],
-    failed: [
-      { agent: 'amp', reason: 'amp mcp add exited with code 3', path: null },
-      { agent: 'gemini', reason: 'gemini mcp add exited with code 3 (boom: gemini could not write its config (permission denied))', path: null },
-    ],
-    foreign: [{ agent: 'cursor', path: '~/.cursor/mcp.json' }],
-  });
-  expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
-    'Connected Codex to the Inbox (new on this computer).',
-    "Couldn't connect Amp: amp mcp add exited with code 3. Settings → Agents",
-    "Couldn't connect Gemini CLI: gemini mcp add exited with code 3: boom: gemini could not write its config (permission denied). Settings → Agents",
-    'Cursor has its own plannotator-inbox entry in ~/.cursor/mcp.json; Plannotator left it alone.',
-  ]);
 });

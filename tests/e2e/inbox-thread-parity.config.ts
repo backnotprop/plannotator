@@ -26,6 +26,8 @@ const desktop = { browserName: 'chromium' as const, viewport: { width: 1440, hei
 
 export default defineConfig({
   testDir: '.',
+  // Agent CLI stubs first on PATH; a stub that is called fails the run (agent-cli-stubs.ts).
+  globalSetup: './agent-cli-stubs.ts',
   testMatch: ['inbox-thread-parity.spec.ts'],
   outputDir: join(out, role, 'test-results'),
   // Both runs read the reference run's PNGs; only the reference run writes them.

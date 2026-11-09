@@ -23,9 +23,11 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 let previousDataDir: string | undefined;
+let previousHome: string | undefined;
 
 beforeEach(() => {
   previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  previousHome = process.env.HOME;
 });
 
 afterEach(async () => {
@@ -34,6 +36,8 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
   else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
 });
 
 /** A PNG's signature and IHDR (w x h): enough for the sniffer and the dimension read; `salt` makes distinct bytes. */
@@ -56,6 +60,8 @@ function world() {
   writeFileSync(join(project, "design", "b.png"), png(4, 3, 2));
   writeFileSync(join(project, "design", "fake.png"), "not an image");
   writeFileSync(join(root, "outside.png"), png(4, 3, 9));
+  // The temp root is a scratch home folder: `.private` is one of its own hidden folders (as ~/.ssh), never shown.
+  process.env.HOME = root;
   mkdirSync(join(root, ".private"), { recursive: true });
   writeFileSync(join(root, ".private", "hidden.png"), png(4, 3, 8));
   const dataDir = join(root, "data");
@@ -270,6 +276,40 @@ test("images with no record are captured on a later read, in the background: wri
   await server.imageCapture.idle();
   const person = (await read(late.thread_id)).messages.find((m: any) => m.author.kind === "person");
   expect(person.inline_images.map((i: any) => i.ref)).toEqual(["design/b.png"]);
+});
+
+test("a thread with nothing left to capture starts no pass on a read; a new message in it is captured on its next read", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const first = await send(client, { project_path: project, body: "![a](design/a.png)", thread: "settled" });
+  const read = async () => ((await (await get(server, `/api/inbox/threads/${first.thread_id}`)).json()) as any).thread;
+  let scans = 0;
+  const scan = server.store.imageCaptureGaps.bind(server.store);
+  server.store.imageCaptureGaps = (...args) => {
+    scans += 1;
+    return scan(...args);
+  };
+  try {
+    await read();
+    await server.imageCapture.idle();
+    expect(scans).toBe(1);
+    // Nothing changed in the thread: no second pass.
+    await read();
+    await read();
+    await server.imageCapture.idle();
+    expect(scans).toBe(1);
+
+    // An image written after its message was sent: captured on the thread's next read.
+    await send(client, { project_path: project, body: "![c](design/c.png)", thread: "settled" });
+    writeFileSync(join(project, "design", "c.png"), png(4, 4, 33));
+    await read();
+    await server.imageCapture.idle();
+    const messages = (await read()).messages;
+    expect(messages.map((m: any) => (m.inline_images ?? []).map((i: any) => [i.ref, i.captured ?? null]))).toEqual([[["design/a.png", null]], [["design/c.png", "on_open"]]]);
+  } finally {
+    server.store.imageCaptureGaps = scan;
+  }
 });
 
 test("a send the store refuses leaves no blob of its images behind", async () => {

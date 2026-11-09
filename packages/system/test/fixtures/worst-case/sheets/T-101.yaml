@@ -1,0 +1,8 @@
+sheet: T-101
+scope: core
+kind: landscape
+title: Dispatch and billing core
+question: Every vendor we depend on.
+bands:
+  - { id: v, label: Vendors, row: [ kafka, snow, twilio, sfsl, sap ] }
+show: []

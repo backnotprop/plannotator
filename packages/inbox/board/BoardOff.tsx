@@ -7,10 +7,10 @@ import { SidebarTrigger } from '../shell/sidebar';
  * the Board is something the person turns on). It says so, what turning it on
  * does, and offers the one way: Turn it on (Settings → Capabilities has the
  * same switch, and the page links there). Nothing of the Board shows while it is off; its cards are kept.
- * Turning it on changes what agents on this computer are offered, so a page
- * that came through the tailnet says to do it on this computer.
+ * Turning it on changes what agents on this computer are offered, so a tailnet
+ * guest's page (`guest`) says to do it on this computer.
  */
-export function BoardOff({ via, onTurnOn, error }: { via: 'local' | 'tailnet'; onTurnOn: () => void; error: string | null }) {
+export function BoardOff({ guest, onTurnOn, error }: { guest: boolean; onTurnOn: () => void; error: string | null }) {
   const titleId = useId();
   return (
     <section className="ib-bpage" aria-labelledby={titleId} data-board-page="" data-board-view="off">
@@ -29,7 +29,7 @@ export function BoardOff({ via, onTurnOn, error }: { via: 'local' | 'tailnet'; o
           Turn it on for a page of the work in flight: one card per piece of work, in the column of its stage, that your agents keep current. Agents pick it up
           in their next session. Turned off again, every card is kept.
         </p>
-        {via === 'tailnet' ? (
+        {guest ? (
           <p className="ib-boff-note">Turn it on from this computer’s own screen: it changes what agents here are offered.</p>
         ) : (
           <>

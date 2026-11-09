@@ -6,7 +6,7 @@
  * the first click or with the tab in front, a burst rings once, Play always
  * plays. Never audible: the AudioContext is a stub that only counts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -55,7 +55,7 @@ const settingsModel = {
   notifications: { enabled: true, dismissed: false, allowed_origin: null },
   sound: { enabled: true, volume: 60, dialog_shown_for: null },
   phones: false,
-  store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+  store_dir: '/home/u/.plannotator/inbox',
 } as unknown as SettingsModel;
 
 function fakeSound(over: Partial<InboxSound> = {}) {

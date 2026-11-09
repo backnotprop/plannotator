@@ -133,7 +133,7 @@ By default the review opens showing **all changes since your base branch** — e
 - **Last commit** - the diff introduced by the most recent commit
 - **vs main** (or your default branch) - all committed changes on your branch compared to the base branch. Only appears when you're on a branch other than the default.
 
-Your default view and diff type live in **Settings → Git**. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
+Your default view and diff type live in **Settings → Review**, which keeps a separate default diff for Git and for Jujutsu repositories. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
 
 If the base branch has moved on GitHub since your last fetch, a "Baseline is behind" banner offers a one-click fetch so you're reviewing against the real base.
 
@@ -211,11 +211,21 @@ The rendered patch and expanded file contents are authoritative for Stack and Br
 
 The standalone GitButler CLI installer supports macOS and Linux. On Windows, install GitButler Desktop and make `but.exe` available on `PATH`. GitButler edit mode (`gitbutler/edit`) is not treated as a virtual-branch workspace.
 
+## Naming the tab
+
+The tab reads `<repository> · Code Review`, so two reviews of one repository (say, a pull request and your local changes) share a title. `--title` names the tab instead, exactly as given:
+
+```bash
+plannotator review https://github.com/acme/payments-service/pull/12 --title "PR 12: refunds"
+```
+
+The header keeps its branch and repository. A blank title is ignored.
+
 ## The diff viewer
 
 The review UI shows your changes in a familiar diff format:
 
-- **Left panel views** — a `Tree | Git status | Commits` toggle in the header (see below)
+- **Left panel views** — Tree, Git status and Commits as tabs at the top of the left panel (see below)
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
@@ -253,17 +263,17 @@ file you un-checked, until you mark it viewed by hand again. A file whose
 content changes under a refresh loses its checkmark, because a check on code
 the agent just rewrote is misleading.
 
-It is on by default, and there are two off switches: **Settings → Git →
-Auto-mark viewed**, and the **Auto-mark viewed** row in the gear popover above
+It is on by default, and there are two off switches: **Settings → Review →
+Auto-mark viewed**, and the **Auto-mark viewed** item in the **…** menu above
 the file list. The first time it fires, a toast points at both.
 
 ### Optional analysis layers
 
 Open **Settings → Analysis** to control Semantic Changes and Call Flow independently. A one-time review welcome presents the same two switches side by side. Disabling either layer avoids its analysis work and leaves the ordinary patch unchanged.
 
-**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
+**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22.18 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
 
-- **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output.
+- **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output. Each entry path is a card. A row leads with the called function's name, and a green or red dot marks a new or removed call. Its `file:line` chip is strong when the call moves into another file and faint when it stays in the same file.
 - **Lens** — a compact `flow N` badge in each impacted file header, opening the complete inferred entry trees that contain a changed call in that file, plus a link to the full Dock.
 
 In either structured tree, use the comment action on a changed call to open Plannotator's ordinary code-review annotation toolbar without leaving Call Flow. The resulting file-and-line annotation appears in the diff and sidebar and follows the normal feedback and hosted-review submission path. Unchanged context rows remain available for navigation but cannot become inline diff comments.
@@ -278,7 +288,11 @@ Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or
 
 ### Panel views
 
-The left panel has three views. **Tree** is the default. The header toggle is session-scoped — glancing at another view never changes your saved default (change that in Settings → Git).
+The left panel has three views. **Tree** is the default. At the very top, **Go to file…** opens Go to File (⌘P / Ctrl+P). The view tabs under it are session-scoped — glancing at another view never changes your saved default (change that in Settings → Review). Left and Right arrows move between the tabs; Enter or Space opens one.
+
+Under the tabs, the comparison reads as one sentence, for example **All changes ⌄ since main ⌄**: click the first words to pick which changes are shown, and the branch to pick what they are compared with. A long branch name keeps its start and end; hover it for the full name. The **All changes** row below opens every change of the review in one scrolling view.
+
+Above the files, a row that stays in view while you scroll holds **Changes** and **All files** (the files this review changes, or every file of the repository), Search in diff, Collapse all, and a **…** menu with Copy all diffs, Auto-mark viewed, Group by kind and the per-file Viewed and Git add buttons. Under it, the progress reads "0 of 12 viewed · 1 staged", with the eye that hides viewed files.
 
 - **Git status** — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
 - **Tree** (default) — the classic file tree over whichever diff type you've selected.
@@ -364,6 +378,33 @@ Resolution order:
 3. Plannotator's built-in default
 
 Runtime keys use Plannotator's runtime identifiers. For code review, the current values are `claude-code`, `opencode`, `copilot-cli`, `pi`, and `codex`.
+
+## Recovering unfinished reviews
+
+Unsubmitted comments in local Git and PR reviews survive changes to the diff.
+Reopen the review and use the draft restore prompt to recover them. Local drafts
+belong to the worktree, branch, and comparison you selected; changing branches,
+worktrees, diff modes, or base references opens a separate draft. On detached
+HEAD, drafts are scoped to that commit.
+
+Restored line comments stay inline only when their text and surrounding context
+still match at the same lines. Comments on changed, moved, or missing code remain
+in the sidebar and exported feedback, labelled **Outdated**, with their original
+code excerpt. File and general comments are retained. Refreshing an open review
+uses the same checks.
+
+Submitting or explicitly closing the review clears its draft. Closing just the
+browser tab keeps it for later. Draft recovery is independent of viewed-file
+progress and works with `PLANNOTATOR_REVIEW_PROGRESS=0`.
+
+If another tab changes the active review target, a notice explains that draft
+saving is paused. Use **Refresh review** to resume in place; your comments stay
+in the tab throughout the refresh.
+
+Drafts from older versions can still be recovered on their unchanged patch;
+already-orphaned drafts cannot be associated with a branch retroactively.
+Workspace, non-Git, and piped-patch reviews still require an unchanged diff to
+restore a draft.
 
 ## Server API
 

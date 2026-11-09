@@ -1,12 +1,18 @@
 import React from 'react';
+import { useDiffCountColors } from '../hooks/useDiffCountColors';
+import { CountColumns } from './FileRowBits';
 
 /**
  * Nav rows shared by the left panel's two views (FileTree, SectionsPanel).
  * One source so the rows render identically — same order, same icons, same
- * counts — in both views.
+ * counts — in both views. They scroll with the list (approved design record
+ * "review-sidebar-aligned"): All changes first, then the PR's own pages, then
+ * the analysis views.
  */
 
-/** Shared shell for the panel action rows (PR overview, Semantic diff, All files). */
+/** Shared shell for the panel action rows (PR overview, Semantic diff, All
+ *  changes): 28 px rows touching, the icon on the panel's content edge and
+ *  the label on its label edge; the selected row is a quiet grey fill. */
 export function SidebarActionRow({
   active,
   onClick,
@@ -20,12 +26,15 @@ export function SidebarActionRow({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
-      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors mb-0.5 ${
+      aria-current={active ? 'true' : undefined}
+      data-nav-row=""
+      className={`w-full min-w-0 flex items-center gap-1 h-7 px-2 rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-inset ${
         active
-          ? 'bg-primary/15 text-primary font-medium'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          ? 'bg-[var(--sidebar-fill-strong)] text-foreground'
+          : 'text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground'
       }`}
     >
       {children}
@@ -76,31 +85,37 @@ export function CallFlowRow({
   );
 }
 
-export function AllFilesRow({
+/**
+ * Opens every change of the review in one scrolling view. Named "All changes"
+ * so it never reads as the "All files" scope (the whole repository) in the
+ * header above it. The +/- counts keep 4.5:1 on every surface of the row in
+ * every palette (`useDiffCountColors`).
+ */
+export function AllChangesRow({
   active,
   onClick,
   additions,
   deletions,
-  afterLabel,
 }: {
   active: boolean;
   onClick: () => void;
   additions: number;
   deletions: number;
-  /** Optional control rendered right after the label (e.g. the tree view's
-   * expand/collapse-all-folders toggle). */
-  afterLabel?: React.ReactNode;
 }) {
+  const colors = useDiffCountColors();
   return (
-    <SidebarActionRow active={active} onClick={onClick}>
-      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <SidebarActionRow active={active} onClick={onClick} title="Every change of this review in one view">
+      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m-13.5 0A2.25 2.25 0 003 12v3a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 15v-3a2.25 2.25 0 00-2.25-2.25m-13.5 0h13.5" />
       </svg>
-      <span>All files</span>
-      {afterLabel}
-      <span className="ml-auto text-[10px] tabular-nums opacity-60">
-        <span className="text-green-500">+{additions}</span>{' '}
-        <span className="text-red-500">-{deletions}</span>
+      <span className="min-w-0 truncate">All changes</span>
+      <span className="ml-auto flex font-normal" data-all-changes-counts>
+        <CountColumns
+          additions={additions}
+          deletions={deletions}
+          addStyle={{ color: colors?.additions ?? 'var(--success)' }}
+          delStyle={{ color: colors?.deletions ?? 'var(--destructive)' }}
+        />
       </span>
     </SidebarActionRow>
   );

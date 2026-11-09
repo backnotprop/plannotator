@@ -6,6 +6,7 @@ export {
   saveFinalSnapshot,
   getHistoryDir,
   resolveHistorySlug,
+  resolveHistoryChain,
   saveToHistory,
   getPlanVersion,
   getPlanVersionPath,

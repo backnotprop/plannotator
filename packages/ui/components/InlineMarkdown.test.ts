@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import katex from 'katex';
 import { InlineMarkdown, resetDigitHexIssueRefs, setDigitHexIssueRefs, trimUrlTail } from './InlineMarkdown';
+import { CodePathValidationContext, type CodePathValidationContextValue } from './CodePathValidationContext';
 import { getMathRenderer, getMathRendererSource, resetMathRenderer, setMathRenderer } from '../utils/math';
 
 function renderInline(text: string): string {
@@ -277,6 +278,30 @@ describe('InlineMarkdown math', () => {
     expect(html).toContain('$5/mo and tier B is $10/mo.');
   });
 
+  // Regression: two `$skill` names in one paragraph made the text between them
+  // math, so the Inbox skill highlight (skillReferenceRanges) lost both names.
+  test('does not turn the text between two $skill references into math', () => {
+    const html = renderToStaticMarkup(
+      createElement(InlineMarkdown, { text: 'Go, then $write-better on the copy, and $readback after.' }),
+    );
+    expect(html).not.toContain('katex');
+    expect(html).toContain('$write-better on the copy, and $readback after.');
+  });
+
+  test('does not render "costs $5 and $10" as inline math', () => {
+    const html = renderToStaticMarkup(createElement(InlineMarkdown, { text: 'It costs $5 and $10 total.' }));
+    expect(html).not.toContain('katex');
+    expect(html).toContain('$5 and $10 total.');
+  });
+
+  test('still renders $x^2$ and $a + b$ as math', () => {
+    for (const tex of ['x^2', 'a + b']) {
+      const html = renderToStaticMarkup(createElement(InlineMarkdown, { text: `Take $${tex}$ here.` }));
+      expect(html).toContain('katex');
+      expect(html).toContain(`data-math-tex="${tex}"`);
+    }
+  });
+
   test('still renders a leading-digit formula not abutting a later amount', () => {
     const html = renderToStaticMarkup(createElement(InlineMarkdown, { text: 'Coefficient $2x + 1$ grows.' }));
     expect(html).toContain('katex');
@@ -341,6 +366,132 @@ describe('digit-only #refs vs hex swatches (#1932)', () => {
       const html = render(text, 'home-assistant/core');
       expect(isSwatch(html)).toBe(true);
       expect(html).not.toContain('/issues/');
+    }
+  });
+});
+
+describe('cross-repo owner/repo#N refs', () => {
+  type Opts = { githubRepo?: string; repoHost?: string; onOpenCodeFile?: (p: string) => void; validation?: CodePathValidationContextValue };
+  const render = (text: string, { validation, ...opts }: Opts = {}) => {
+    const el = createElement(InlineMarkdown, { text, ...opts });
+    return renderToStaticMarkup(validation ? createElement(CodePathValidationContext.Provider, { value: validation }, el) : el);
+  };
+  const hrefs = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+  const GH = { githubRepo: 'acme/herdr', repoHost: 'github.com' };
+
+  test('links on GitHub with the label as written; a bare #N still goes to the project', () => {
+    const html = render('herdr#104 is backnotprop/plannotator-tui#104, not #104.', GH);
+    expect(html).toContain('>backnotprop/plannotator-tui#104</a>');
+    expect(hrefs(html)).toEqual([
+      'https://github.com/backnotprop/plannotator-tui/issues/104',
+      'https://github.com/acme/herdr/issues/104',
+    ]);
+  });
+
+  test("links on the project's GitLab host with /-/issues", () => {
+    const html = render('See group/project#7.', { githubRepo: 'team/app', repoHost: 'gitlab.example.com' });
+    expect(hrefs(html)).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
+  });
+
+  test('a caller that names no repo, or an unknown self-hosted host, leaves it plain text', () => {
+    expect(render('See owner/repo#5')).not.toContain('<a');
+    expect(hrefs(render('See owner/repo#5', { githubRepo: 'acme/web' }))).toEqual(['https://github.com/owner/repo/issues/5']);
+    const html = render('See owner/repo#5', { githubRepo: 'a/b', repoHost: 'git.internal.example' });
+    expect(html).not.toContain('<a');
+    expect(html).toContain('owner/repo#5');
+  });
+
+  test('a repo named like a .js file is a ref, not a code path, unless the viewer knows the file', () => {
+    // No file handler: a ref.
+    expect(hrefs(render('Fixed in vercel/next.js#1 and my_org/repo#2', GH))).toEqual([
+      'https://github.com/vercel/next.js/issues/1',
+      'https://github.com/my_org/repo/issues/2',
+    ]);
+    // A handler, and the validator says the path is not a file: still a ref.
+    const missing: CodePathValidationContextValue = { ready: true, validated: new Map([['vercel/next.js', { status: 'missing' }]]) as never };
+    expect(hrefs(render('Fixed in vercel/next.js#1', { ...GH, onOpenCodeFile: () => {}, validation: missing }))).toEqual(['https://github.com/vercel/next.js/issues/1']);
+    // A handler and a file it knows (or cannot check): the code-file chip, as before.
+    const found: CodePathValidationContextValue = { ready: true, validated: new Map([['src/app.js', { status: 'found', resolved: 'src/app.js' }]]) as never };
+    for (const validation of [found, undefined]) {
+      const html = render('See src/app.js#12 now', { ...GH, onOpenCodeFile: () => {}, validation });
+      expect(html).not.toContain('/issues/');
+      expect(html).toContain('src/app.js');
+    }
+  });
+
+  test('file paths with a fragment are not refs', () => {
+    for (const text of ['docs/guide.md#2', 'src/foo.ts#L10', 'src/foo.ts#10', 'packages/core/forge-refs.ts#12', '../repo#3', 'owner/repo.git#4']) {
+      expect(render(text, GH)).not.toContain('/issues/');
+    }
+  });
+
+  test('schemeless hosts, addresses, prose pairs and names starting with punctuation are not refs', () => {
+    for (const text of ['example.com/page#1', 'www.example.com/x#1', 'john@owner/repo#1', 'and/or#1', '-owner/repo#7', '1/2#3']) {
+      expect(hrefs(render(text, GH))).toEqual([]);
+    }
+  });
+
+  test('_owner/repo#1 is done_ stays italic', () => {
+    expect(render('_owner/repo#1 is done_', GH)).toMatch(/^<em>/);
+  });
+
+  test('a URL containing owner/repo#N is linked once, whole', () => {
+    const url = 'https://example.com/search?q=owner/repo#12';
+    expect(hrefs(render(`Open ${url} now`, GH))).toEqual([url]);
+  });
+
+  test('inside inline code it is not linked', () => {
+    const html = render('Run `gh pr view owner/repo#12`', GH);
+    expect(html).not.toContain('<a');
+    expect(html).toContain('<code');
+  });
+});
+
+describe('code spans: a run of N backticks closes at the next run of exactly N', () => {
+  test('a double-backtick span holds a single backtick', () => {
+    expect(renderInline('``use `x` here``')).toContain('<code class="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">use `x` here</code>');
+  });
+
+  test('one space comes off each side, so a span can start and end with a backtick', () => {
+    expect(renderInline('`` `x` ``')).toContain('>`x`</code>');
+    // All spaces: nothing is stripped.
+    expect(renderInline('`` ``')).toContain('> </code>');
+  });
+
+  test('a run with no closing run of its length stays literal, all of it', () => {
+    const html = renderInline('``a` b');
+    expect(html).not.toContain('<code');
+    expect(html).toContain('``a` b');
+  });
+
+  test('single-backtick spans read as before, several on a line', () => {
+    const html = renderInline('`a` and ``b``');
+    expect(html.match(/<code /g)?.length).toBe(2);
+    expect(html).toContain('>a</code>');
+    expect(html).toContain('>b</code>');
+  });
+});
+
+describe('a link label is markdown too, without links inside it', () => {
+  test('code in a label renders as code inside the link', () => {
+    const html = renderInline('[`README.md`](https://example.com/readme)');
+    expect(html).toMatch(/<a [^>]*href="https:\/\/example.com\/readme"[^>]*><code [^>]*>README.md<\/code><\/a>/);
+    expect(html).not.toContain('`');
+  });
+
+  test('code among words in a label', () => {
+    const html = renderInline('[the `card --help` page](https://example.com/help)');
+    expect(html).toMatch(/<a [^>]*>the <code [^>]*>card --help<\/code> page<\/a>/);
+  });
+
+  test('emphasis in a label', () => {
+    expect(renderInline('[**bold** text](https://example.com)')).toMatch(/<a [^>]*><strong[^>]*>bold<\/strong> text<\/a>/);
+  });
+
+  test('a URL, a ref or a nested link in a label stays text: one link, never a link in a link', () => {
+    for (const label of ['see https://x.com', 'issue #12', '[inner](https://inner.example)', '<https://x.com>', '@someone']) {
+      const html = renderInline(`[${label}](https://example.com)`);
+      expect(html.match(/<a /g)?.length).toBe(1);
     }
   });
 });

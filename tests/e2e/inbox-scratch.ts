@@ -24,10 +24,11 @@
  * a spec does not rely on that.
  */
 
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { type InboxEntry, inboxEntryOf, mustSignalInbox, readInboxEntry, stopProvenInboxes, waitGone } from '../helpers/inbox-process';
+import { type InboxEntry, inboxEntryOf, mustSignalInbox, readInboxEntry, refuseRealHome, stopProvenInboxes, waitGone } from '../helpers/inbox-process';
+import { NO_BROWSER } from '../helpers/no-browser';
 import { refuseRealDataDir } from '../helpers/real-data-dir';
 
 /** Each scratch folder and the entries remembered for it. */
@@ -35,11 +36,50 @@ const roots = new Map<string, Map<string, InboxEntry>>();
 
 const keyOf = (e: InboxEntry) => `${e.pid}:${e.port}:${e.serverSession}`;
 
-/** A new folder under the OS temp dir, removed (with any Inbox it started) by `removeInboxScratch`. */
+/**
+ * A new folder under the OS temp dir, removed (with any Inbox it started) by `removeInboxScratch`. Its data dir
+ * (`<root>/data`, where nearly every spec points PLANNOTATOR_DATA_DIR) starts with launch off (`launchOff`).
+ */
 export function inboxScratch(prefix: string): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.set(root, new Map());
+  launchOff(join(root, 'data'));
   return root;
+}
+
+/**
+ * Starting agents from New message is on by default since 0.29, and with it on, opening New message (or the Board)
+ * looks `claude` up on the Inbox's PATH and runs `claude --version`: on the runner's PATH that is the stub
+ * (tests/e2e/agent-cli-stubs.ts), whose teardown fails the run, and the login shell is read too. So an e2e world
+ * starts with launch off (`inboxLaunch.enabled: false`, merged into config.json); a spec about launch turns it on
+ * in its own config, with its fakes on a PATH of its own. A spec that writes config.json whole keeps this key.
+ */
+export function launchOff(dataDir: string): void {
+  refuseRealDataDir(dataDir, 'tests/e2e/inbox-scratch.ts launchOff');
+  mkdirSync(dataDir, { recursive: true });
+  const file = join(dataDir, 'config.json');
+  const config = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
+}
+
+/** The config.json key every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. */
+export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false } } as const;
+
+/**
+ * What every Plannotator process a spec starts under `root` needs: a scratch
+ * HOME (with none, `os.homedir()` falls back to the account's home), a scratch
+ * data dir, no browser and no ping. Spread it into the spawn env, then add the
+ * spec's own variables. HOME is `root/home` unless the spec names its own
+ * (`{ home: root }` when the world's folders sit under HOME, as `~/src/…` does);
+ * either way it must be a scratch folder. tests/e2e-spawn-home.test.ts fails on
+ * an e2e env that sets a data dir with neither a scratch HOME nor this.
+ */
+export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
+  const HOME = refuseRealHome(options.home ?? join(root, 'home'), 'tests/e2e/inbox-scratch.ts scratchEnv');
+  mkdirSync(HOME, { recursive: true });
+  const PLANNOTATOR_DATA_DIR = join(root, 'data');
+  refuseRealDataDir(PLANNOTATOR_DATA_DIR, 'tests/e2e/inbox-scratch.ts scratchEnv');
+  return { HOME, PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
 }
 
 const inside = (path: string, root: string) => path === root || path.startsWith(`${root}${sep}`);
@@ -108,7 +148,8 @@ export async function removeInboxScratch(root?: string): Promise<void> {
   }
   await stopProvenInboxes(targets);
   for (const dir of chosen) {
-    rmSync(dir, { recursive: true, force: true });
+    // A short retry: a process that is still exiting may write into the folder while it is removed (ENOTEMPTY).
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     roots.delete(dir);
   }
 }

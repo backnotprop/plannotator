@@ -1,7 +1,8 @@
 /**
- * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
+ * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, Copilot CLI, and
+ * DeepSeek Harness
  *
- * Supports thirteen modes:
+ * Supports fifteen modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -52,16 +53,22 @@
  * 11. OpenCode Last (`plannotator opencode-annotate-last`):
  *    - Internal structured last-message annotation bridge for OpenCode
  *
- * 12. Improve Context (`plannotator improve-context`):
+ * 12. DeepSeek Harness Plan (`plannotator dsh-plan`):
+ *    - Internal bridge mode used by the @plannotator/dsh plugin (apps/dsh-plugin)
+ *    - Reads `{ plan, timeoutSeconds?, cwd? }` from stdin
+ *    - Outputs `{ approved, feedback?, message?, savedPath?, answersOnly? }`,
+ *      with `message` composed from the `dsh` prompt templates (dsh-plan.ts)
+ *
+ * 13. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
  *
- * 13. Uninstall (`plannotator uninstall`):
+ * 14. Uninstall (`plannotator uninstall`):
  *    - Removes recognized installer-owned components across supported hosts
  *    - Preserves local data by default; `--purge` removes known local data
  *
- * 14. Guide tools (`plannotator guide list|export|share|unshare`):
+ * 15. Guide tools (`plannotator guide list|export|share|unshare`):
  *    - List saved Guided Reviews; export one (or a snapshot JSON) as a portable
  *      HTML file whose viewer loads from guides.show; share one as a link on
  *      guides.show (encrypted by default) and remove it again
@@ -76,7 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { childEnv } from "@plannotator/shared/child-env";
+import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
   handleServerReady,
@@ -89,7 +96,9 @@ import {
 } from "@plannotator/server/review";
 import { runGuideCli } from "@plannotator/server/guide-cli";
 import { runUpdateCommand } from "./update-command";
+import { runUpdatePrepareCommand } from "@plannotator/server/update-prepare";
 import { takeUpdateHint } from "@plannotator/shared/update-check";
+import { cliDailyPingTool, scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -100,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -127,7 +136,7 @@ import { parsePRUrl, checkPRAuth, fetchPR, type PRAuthResult, getCliName, getCli
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { announceTailscaleSession, enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
-import { readTailnetOwner, setSessionTailnetOwner, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
+import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
 import { scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
@@ -161,9 +170,9 @@ import {
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
 import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
-import { registerSession, unregisterSession, listSessions, type SessionInfo } from "@plannotator/server/sessions";
+import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
-import { openBrowser } from "@plannotator/server/browser";
+import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -181,7 +190,8 @@ import {
   waitForPlanReviewCloseDelay,
   waitForPlanReviewDecision,
 } from "@plannotator/shared/plan-review-lifecycle";
-import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
+import type { Origin } from "@plannotator/shared/agents";
+import { detectOrigin } from "./detect-origin";
 import {
   findDroidSessionLogsByAncestorWalk,
   findDroidSessionLogsForCwd,
@@ -203,10 +213,15 @@ import {
   resolveCodexStopPlan,
 } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
+import { findDshSessionLog, getRecentDshMessages, resolveDshHome } from "./dsh-session";
+import { composeDshPlanOutput, dshPlanTimeoutFeedback, parseDshPlanInput } from "./dsh-plan";
 import { resolveLatestVibePlan } from "./vibe-plan";
+import { findQwenSessionLog, getRecentQwenMessages } from "./qwen-session";
+import { isQwenPlanPermissionRequest, qwenPlanFromEvent, qwenPlanHookOutput } from "./qwen-plan";
 import { resolveClaudePlan } from "./claude-plan";
 import { takeModPlanApproval } from "./mod-plan-approval";
 import {
+  DATA_DIR_COMMAND_USAGE,
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
   formatTopLevelHelp,
@@ -217,16 +232,31 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
   parseStrictAnnotateOptions,
+  parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
+  hasHelpFlag,
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
+// @ts-expect-error a text import of the optional helper file
+import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
+import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
+import { runShapeOpen, runShapeServe } from "./shape-open";
+import { runShapeFrame } from "./shape-frame";
+import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
+import { runInboxCallCommand } from "./inbox-call-command";
+import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
+import { writeWholeToStdout } from "./write-whole-stdout";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
-import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { getPlannotatorDataDir, getUnusedPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import {
   annotateStartupFailureExitCode,
@@ -259,6 +289,10 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
+// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
+// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
+// @ts-ignore - Bun import attribute for file
+import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -267,6 +301,8 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
+let shapeHtmlGz: Buffer | undefined;
+const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -313,6 +349,133 @@ const rawArgs = process.argv.slice(2);
         ensureRunning: () => ensureInboxRunning(cardDataDir),
       }),
     );
+  }
+}
+// `plannotator review draw …` / `plannotator review drawings <msg_id>`: Show me makes a Shape now, so an older
+// agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
+// while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
+// the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
+if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
+  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
+  process.exit(1);
+}
+// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
+// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
+// strict-annotate parse, which takes `--file`-style flags for itself.
+{
+  const args = rawArgs;
+  // Off unless the person turned Shape on, or Code review, whose Show me makes a board (Settings → Capabilities):
+  // no command and no help, so an agent learns nothing of it (the same switches hide the Pebble and the routes).
+  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
+  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
+    process.exit(runShapeSwitch(args.slice(1)));
+  }
+  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
+    process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
+    process.exit(1);
+  }
+  if (args[0] === "shape" && args[1] === "kit") {
+    await writeWholeToStdout(SHAPE_KIT);
+    process.exit(0);
+  }
+  // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
+  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
+  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
+    process.exit(
+      await runShapeOpen(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        // Bare: the page already open, if there is one; `shape open` always opens a tab.
+        reuseOpenPage: args.length === 1,
+      }),
+    );
+  }
+  // `shape --help animate` (or `shape animate [--help]`): the animation guide, read once the agent decides to animate.
+  if (args[0] === "shape" && isShapeAnimateHelp(args.slice(1))) {
+    await writeWholeToStdout(`${SHAPE_ANIMATE_HELP}\n`);
+    process.exit(0);
+  }
+  // `shape frame`: a picture of a board at one moment, through the Chrome on this computer (shape-frame.ts).
+  if (args[0] === "shape" && args[1] === "frame" && !hasHelpFlag(args.slice(2))) {
+    process.exit(
+      await runShapeFrame(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        pageGzip: shapeHtmlGzip,
+        version: getCliVersion() ?? "dev",
+      }),
+    );
+  }
+  if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
+    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
+  }
+  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
+    process.exit(
+      await runShapeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: shapeCommandFolder(process.env),
+        env: process.env,
+      }),
+    );
+  }
+}
+// `plannotator system …`: System's drawing of a project (system-command.ts;
+// unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
+// job that keeps it current. Before the strict-annotate parse: it takes its own
+// flags and its own --help. Loaded only when asked for, as t3 is.
+{
+  const args = rawArgs;
+  if (args[0] === "system") {
+    const { runSystemCommand } = await import("./system-command");
+    process.exit(
+      await runSystemCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        dataDir: getPlannotatorDataDir(),
+        env: process.env,
+        self: inboxSelfCommand(),
+      }),
+    );
+  }
+}
+// `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
+// Here, like the card command: it takes its own flags, and JSON is not ours to scan.
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "call") {
+    const callDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCallCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox steps <thread> --json '<list>'`: an agent's thread steps, sugar over `inbox call steps` (inbox-steps-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "steps") {
+    const stepsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxStepsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(stepsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator feedback --stdin`: the person's feedback about Plannotator,
+// sent to the feedback Worker (feedback-command.ts). Before the strict-annotate
+// parse: it takes its own flags, and its own --help.
+{
+  const args = rawArgs;
+  if (args[0] === "feedback") {
+    process.exit(await runFeedbackCommand(args.slice(1), { env: process.env, version: getCliVersion() ?? "dev" }));
   }
 }
 // T3 Code (opt-in, unreleased; HIDDEN_SUBCOMMANDS): `t3` is the connection's
@@ -376,6 +539,19 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
   args.splice(browserIdx, 2);
 }
 
+// Session flag: --title <text> (review / annotate / annotate-last) — the whole
+// tab title, and the annotate header's name, chosen by the caller (#2289).
+// Before the boolean flags, so a title can never be read as one of them.
+let sessionTitle: string | undefined;
+try {
+  const parsedTitle = parseTitleOption(args);
+  sessionTitle = parsedTitle.title;
+  args.splice(0, args.length, ...parsedTitle.remainingArgs);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(annotateStartupFailureExitCode({ requireApproval: requireApprovalFlag, resultFile }));
+}
+
 // Transport flag: --tailscale (review / annotate / annotate-last) — publish
 // the session over the user's tailnet via `tailscale serve`. The server stays
 // LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
@@ -387,8 +563,7 @@ const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last
 // `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
 // a long-lived, owner-only publication, never this per-session transport.
 const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
-const tailscaleFlag = tailscaleIdx !== -1;
-if (tailscaleFlag) {
+if (tailscaleIdx !== -1) {
   args.splice(tailscaleIdx, 1);
   if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
     console.error(
@@ -396,21 +571,38 @@ if (tailscaleFlag) {
     );
     process.exit(1);
   }
+}
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" make the flag the default
+// for the same subcommands (every other subcommand ignores them), so a host
+// or agent need not pass it on every call.
+const tailscaleResolved = TAILSCALE_COMMANDS.has(args[0] ?? "")
+  ? resolveSessionTailscale(loadConfig(), process.env, tailscaleIdx !== -1)
+  : { on: false, source: "default" as const };
+const tailscaleFlag = tailscaleResolved.on;
+const tailscaleOptOut = sessionTailscaleOptOut(tailscaleResolved.source);
+if (tailscaleFlag) {
+  if (tailscaleResolved.source !== "flag") {
+    process.stderr.write(
+      `[plannotator] Publishing over your tailnet (${tailscaleResolved.source === "env" ? "PLANNOTATOR_TAILSCALE" : 'config.json "tailscale"'}).\n`,
+    );
+  }
   if (isRemoteSession()) {
     process.stderr.write(
       "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
     );
   }
   process.env.PLANNOTATOR_REMOTE = "0";
-  // urlHost is irrelevant here — the advertised URL comes from tailscale
-  // serve, and the session is local-bound. An empty-but-set env var also
-  // suppresses a config-file urlHost, avoiding the misleading
+  // urlHost and publicUrl are irrelevant here — the advertised URL comes from
+  // tailscale serve, and the session is local-bound. An empty-but-set env var
+  // also suppresses the config-file key, avoiding the misleading
   // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
   process.env.PLANNOTATOR_URL_HOST = "";
+  process.env.PLANNOTATOR_PUBLIC_URL = "";
   // "Ask this session" stays ON (#2166): the host's bridge config is kept
   // (taken at the top of this file), and the servers answer it only for a tab
-  // on this machine and for the Tailscale login that owns it
-  // (packages/server/session-tailnet.ts). Everyone else on the tailnet gets
+  // on this machine and for the Tailscale login that owns it (or, where
+  // Tailscale names no owner, an inboxTailscaleAllow login;
+  // packages/server/session-tailnet.ts). Everyone else on the tailnet gets
   // the review and Ask AI through the SDKs, as before. Remote mode is
   // unchanged: it still turns the bridge off.
 }
@@ -434,19 +626,21 @@ if (tailscaleFlag) {
  * annotate subcommand, so review sessions always take the exit-1 leg).
  */
 async function handleTailscaleReady(port: number): Promise<void> {
-  // A host handed this CLI an "Ask this session" bridge: say who may use it
-  // over the tailnet (the owner of this machine) before the address exists.
-  // A plain `--tailscale` run (no bridge) asks Tailscale nothing more.
+  // Who counts as the owner over the tailnet (the owner of this machine, or
+  // the inboxTailscaleAllow logins when Tailscale names no owner), read before
+  // the address exists. Every --tailscale session needs it: hover cards
+  // (ref-cards.ts) answer the owner's tab with or without a bridge. With a
+  // host's "Ask this session" bridge, the owner may also ask it; say so.
+  const owners = readTailnetOwners();
+  setSessionTailnetOwners(owners.logins);
   const bridged = resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined;
   let askOverTailnet = false;
   if (bridged) {
-    const owner = readTailnetOwner();
-    setSessionTailnetOwner(owner.login);
-    askOverTailnet = owner.login !== null;
+    askOverTailnet = owners.logins.length > 0;
     process.stderr.write(
-      owner.login !== null
-        ? `[plannotator] Ask this session: on here, and over your tailnet for ${owner.login} only.\n`
-        : `[plannotator] Ask this session: on this computer only (${owner.reason}); other devices get Ask AI without it.\n`,
+      "reason" in owners
+        ? `[plannotator] Ask this session: on this computer only (${owners.reason}); other devices get Ask AI without it.\n`
+        : `[plannotator] Ask this session: on here, and over your tailnet for ${owners.logins.join(", ")} only${owners.source === "allowlist" ? " (inboxTailscaleAllow: Tailscale names no owner for this machine)" : ""}.\n`,
     );
   }
   let url: string;
@@ -454,6 +648,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -612,6 +807,10 @@ if (isVersionInvocation(args)) {
 
 /** The person turned the Inbox's Board on (config.json `inboxBoard`): only then does either help mention cards. */
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
+// Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
+const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
+const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
@@ -625,15 +824,34 @@ if (isTopLevelHelpInvocation(args)) {
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
-  console.log(
+  const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp() })
-      : formatSubcommandHelp(helpSubcommand),
-  );
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
+      : formatSubcommandHelp(helpSubcommand);
+  await writeWholeToStdout(`${help}\n`);
   process.exit(0);
 }
 
 exitOnUnknownSubcommand(args);
+
+// `plannotator data-dir`: print the data directory and exit, creating
+// nothing. Skills ask this instead of naming ~/.plannotator (#2305).
+if (args[0] === "data-dir") {
+  if (args.length > 1) {
+    console.error(`plannotator data-dir takes no arguments.\n\n${DATA_DIR_COMMAND_USAGE}`);
+    process.exit(2);
+  }
+  console.log(getPlannotatorDataDir());
+  const unused = getUnusedPlannotatorDataDir();
+  // Worded so no agent reads it as a folder to clean up: it may hold the
+  // person's older plans and history.
+  if (unused) {
+    console.error(
+      `Note: ${unused} also exists. It may hold older Plannotator data, so leave it alone: do not delete, move or write to it. Plannotator uses the folder above.`,
+    );
+  }
+  process.exit(0);
+}
 
 // Read a caller-supplied unified diff for static patch mode (`--patch-file`).
 /**
@@ -746,6 +964,13 @@ if (args[0] === "update") {
   process.exit(await runUpdateCommand(rawArgs.slice(rawArgs.indexOf("update") + 1), { currentVersion: getCliVersion() }));
 }
 
+// Internal: the POSIX update wrapper's download step (safe updates, step 1).
+// This binary's own fetch downloads the install script and the expected
+// checksums into a private temp dir and prints the dir (update-prepare.ts).
+if (args[0] === "update-prepare") {
+  process.exit(await runUpdatePrepareCommand(args.slice(1), { platform: process.platform }));
+}
+
 if (args[0] === "install-runtime") {
   const runtime = args[1];
   if (runtime !== "agent-terminal" && runtime !== "call-flow") {
@@ -763,7 +988,7 @@ if (args[0] === "install-runtime") {
 // (inbox/inbox.json). Dispatched before the session registry and the
 // auto-update trigger below, which belong to review sessions.
 if (args[0] === "inbox") {
-  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent() });
+  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent, json: jsonFlag });
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
@@ -811,6 +1036,11 @@ function registerCliSession(info: SessionInfo): void {
     ...(hostReviewId ? { reviewId: hostReviewId } : {}),
   });
   scheduleAutoUpdateCheck(getCliVersion());
+  // The daily ping (packages/shared/daily-ping.ts): one per tool per UTC day,
+  // in the background, never delaying the session. Archive and goal setup are
+  // not counted.
+  const pingTool = cliDailyPingTool(info.mode, args[0]);
+  if (pingTool) scheduleDailyPing({ version: getCliVersion(), tool: pingTool });
 }
 
 // Route fatal signals through process.exit() so "exit" handlers run — by
@@ -838,35 +1068,8 @@ const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
 const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 
 // Detect calling agent from environment variables set by agent runtimes.
-// Priority:
-//   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
-//   > Amp plugin wrappers (PLANNOTATOR_ORIGIN=amp)
-//   > Droid command wrappers (PLANNOTATOR_ORIGIN=droid)
-//   > Codex (CODEX_THREAD_ID)
-//   > Copilot CLI (COPILOT_CLI)
-//   > OpenCode (OPENCODE)
-//   > Gemini CLI (GEMINI_CLI)
-//   > oh-my-pi harness (OMPCODE) — checked last because OMP exports OMPCODE
-//     into every shell it spawns; runtimes launched from an OMP session must
-//     still be detected as themselves. OMPCODE still wins over the terminal
-//     fallback below.
-//
-//   > Mistral Vibe — detected from the pre_tool hook payload (hook_event_name
-//     "pre_tool" + tool_name "exit_plan_mode" is unambiguous vs Claude/Gemini),
-//     so the installer's hook command needs no env prefix. PLANNOTATOR_ORIGIN=
-//     mistral-vibe remains the manual override above.
-//
-// To add a new agent, also add an entry to AGENT_CONFIG in
-// packages/core/agents.ts (see header comment there).
-const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
-const detectedOrigin: Origin =
-  (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
-  process.env.CODEX_THREAD_ID ? "codex" :
-  process.env.COPILOT_CLI ? "copilot-cli" :
-  process.env.OPENCODE ? "opencode" :
-  process.env.GEMINI_CLI ? "gemini-cli" :
-  process.env.OMPCODE ? "oh-my-pi" :
-  "claude-code";
+// The priority chain (and how to add an agent) is documented on detectOrigin.
+const detectedOrigin: Origin = detectOrigin(process.env);
 
 type OpenCodeBridgeAgent = {
   name: string;
@@ -980,14 +1183,17 @@ if (args[0] === "sessions") {
   // SESSION DISCOVERY MODE
   // ============================================
 
+  // Both lists remove stale entries as they read. OpenCode's in-process
+  // servers are listed too, newest first with the rest.
+  const sessions = [...listSessions(), ...(await listInProcessSessions("opencode"))].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+  );
+
   if (args.includes("--clean")) {
-    // Force cleanup: list sessions (which auto-removes stale entries)
-    const sessions = listSessions();
     console.error(`Cleaned up stale sessions. ${sessions.length} active session(s) remain.`);
     process.exit(0);
   }
 
-  const sessions = listSessions();
   const sessionsJson = jsonFlag;
 
   if (sessions.length === 0) {
@@ -1113,6 +1319,7 @@ if (args[0] === "sessions") {
   // client's mount effects don't auto-switch the diff away from the flags.
   const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
   let initialBaseFromFlags: string | undefined;
+  let initialBaseExplicit = false;
 
   let rawPatch: string;
   let gitRef: string;
@@ -1409,7 +1616,7 @@ if (args[0] === "sessions") {
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -1421,7 +1628,9 @@ if (args[0] === "sessions") {
       // Forward the base the patch was actually computed against — without it
       // the server would serve this patch under the detected default: a
       // mixed-base review (wrong file-content fetches, wrong agent prompts).
-      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
+      // Evolution diff opens on the change's previous state, not the line base.
+      if (openState.requestedBase !== undefined || diffResult.diffType === "jj-evolog") initialBaseFromFlags = diffResult.base;
+      initialBaseExplicit = openState.requestedBase !== undefined;
       initialFileIdentities = diffResult.fileIdentities;
     } else {
       // Multi-repo workspace review has no base parameter — the open-state
@@ -1465,11 +1674,13 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
+    // `--title`: the tab names what the caller chose (#2289).
+    title: sessionTitle,
     includeReviewDirectory: !!reviewDirectory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
-    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    initialBaseExplicit,
     openStatePinned,
     // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
     // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
@@ -1734,7 +1945,7 @@ if (args[0] === "sessions") {
   // terminal treats tailnet publication; the server throw backstops this.
   if (liveAppResolved && tailscaleFlag) {
     exitAnnotateStartupFailure(
-      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+      `Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). To annotate it live, ${tailscaleOptOut}; or use --static to annotate a converted snapshot of the page.`,
     );
   }
 
@@ -1762,6 +1973,8 @@ if (args[0] === "sessions") {
     bundleFiles,
     sourceInfo,
     sourceConverted,
+    // `--title`: the tab and the header name what the caller chose (#2289).
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -1855,6 +2068,11 @@ if (args[0] === "sessions") {
   const isDroid = detectedOrigin === "droid";
   const isCopilot = detectedOrigin === "copilot-cli";
   const isVibe = detectedOrigin === "mistral-vibe";
+  const isDsh = detectedOrigin === "dsh";
+  // DSH_SHELL is inherited by anything started from a DSH terminal, so only an
+  // explicit PLANNOTATOR_ORIGIN=dsh skips the Copilot ancestor check below.
+  const isExplicitDsh = isDsh && process.env.PLANNOTATOR_ORIGIN === "dsh";
+  const isQwen = detectedOrigin === "qwen-code";
 
   // Collect up to N recent assistant messages so the user can pick the right
   // one — defaults to the same selection as the legacy "last message"
@@ -1871,7 +2089,7 @@ if (args[0] === "sessions") {
   // earlier branch claims the invocation.
   let copilotLockSessionDir: string | null = null;
   let copilotSessionDir: string | null = null;
-  if (!stdinFlag && !isCodex && !isDroid && !isVibe) {
+  if (!stdinFlag && !isCodex && !isDroid && !isVibe && !isExplicitDsh && !isQwen) {
     copilotLockSessionDir = findCopilotSessionByAncestorPids();
     copilotSessionDir = copilotLockSessionDir ??
       (isCopilot ? findCopilotSessionForCwd(projectRoot) : null);
@@ -1894,6 +2112,26 @@ if (args[0] === "sessions") {
     const text = (await Bun.stdin.text()).trim();
     if (text) {
       lastMessage = { messageId: "stdin", text, lineNumbers: [] };
+    }
+  } else if (isDsh && !copilotLockSessionDir) {
+    // DeepSeek Harness path: DSH_SESSION_ID names the calling agent's session;
+    // its log lives under $DSH_HOME/sessions/<project>/<session>/. Checked
+    // before Codex so PLANNOTATOR_ORIGIN=dsh wins over an inherited
+    // CODEX_THREAD_ID. A Copilot CLI among our ancestors was started from a
+    // DSH terminal and is the real caller, so its lock wins.
+    const dshSessionId = process.env.DSH_SESSION_ID;
+    const dshLog = dshSessionId ? findDshSessionLog(dshSessionId) : null;
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] DSH detected, session ID: ${dshSessionId ?? "(none)"}`);
+      console.error(`[DEBUG] DSH selected log: ${dshLog ?? "(none)"}`);
+    }
+    if (dshLog) {
+      recentMessages = getRecentDshMessages(dshLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
+    } else {
+      console.error(dshSessionId
+        ? `No DeepSeek Harness session log for DSH_SESSION_ID=${dshSessionId} under ${path.join(resolveDshHome(), "sessions")}.`
+        : "DSH_SESSION_ID is not set: run plannotator last from a DeepSeek Harness agent shell, or pass the message with --stdin.");
     }
   } else if (codexThreadId) {
     // Codex path: find rollout by thread ID
@@ -1975,6 +2213,21 @@ if (args[0] === "sessions") {
         .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
       lastMessage = recentMessages[0] ?? null;
     }
+  } else if (isQwen) {
+    // Qwen Code path: QWEN_CODE_PROJECT_DIR + QWEN_CODE_SESSION_ID (set for
+    // the shell tool that runs this) name the session's log directly; the
+    // fallback is the newest chat of the cwd's project (qwen-session.ts).
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Qwen Code detected, project root: ${projectRoot}`);
+    }
+    const qwenLog = findQwenSessionLog({ cwd: projectRoot });
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Qwen selected log: ${qwenLog ?? "(none)"}`);
+    }
+    if (qwenLog) {
+      recentMessages = getRecentQwenMessages(qwenLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
+    }
   } else {
     // Claude Code path: resolve session log
     //
@@ -2049,6 +2302,7 @@ if (args[0] === "sessions") {
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
     mode: "annotate-last",
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -2107,7 +2361,8 @@ if (args[0] === "sessions") {
   // had the annotate gate flags (`--json` included) stripped above, so hand
   // it everything after "guide" from the raw argv instead.
   const result = await runGuideCli(rawArgs.slice(rawArgs.indexOf("guide") + 1), process.env, process.env.PLANNOTATOR_CWD || process.cwd());
-  if (result.stdout) process.stdout.write(result.stdout);
+  // `guide export --out -` prints the whole Guided Review as HTML.
+  if (result.stdout) await writeWholeToStdout(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   process.exit(result.code);
 
@@ -2230,6 +2485,78 @@ if (args[0] === "sessions") {
   }));
   process.exit(0);
 
+} else if (args[0] === "dsh-plan") {
+  // ============================================
+  // DEEPSEEK HARNESS PLAN REVIEW MODE
+  // ============================================
+  //
+  // Internal CLI bridge used by the @plannotator/dsh plugin to answer DSH's
+  // exit_plan_mode review. The stdin/stdout contract and the message
+  // composition live in dsh-plan.ts.
+
+  const parsed = parseDshPlanInput(await Bun.stdin.text());
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    process.exit(1);
+  }
+  const { plan: planContent, timeoutSeconds, cwd: planCwd } = parsed.input;
+  if (planCwd) {
+    try {
+      process.chdir(planCwd);
+    } catch (error) {
+      console.error(`dsh-plan cannot use cwd ${planCwd}: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  }
+
+  const planProject = (await detectProjectName()) ?? "_unknown";
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin: "dsh",
+    // The plugin steers the approved-with-notes message dsh-plan composes
+    // into the agent after approving.
+    approvalNotesSupported: true,
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent(),
+    onReady: async (url, isRemote, port) => {
+      await handleServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerCliSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plan-${planProject}`,
+  });
+
+  let result: Awaited<ReturnType<typeof server.waitForDecision>>;
+  try {
+    result = await waitForPlanReviewDecision({
+      waitForDecision: server.waitForDecision,
+      timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1000,
+      timeoutResult: {
+        approved: false,
+        feedback: dshPlanTimeoutFeedback(timeoutSeconds ?? 0),
+      },
+    });
+    await waitForPlanReviewCloseDelay(1500);
+  } finally {
+    await server.stop();
+  }
+
+  console.log(JSON.stringify(composeDshPlanOutput(result)));
+  process.exit(0);
+
 } else if (args[0] === "opencode-review" || args[0] === "opencode-review-directory") {
   // ============================================
   // OPENCODE PLUGIN CODE REVIEW MODE
@@ -2260,6 +2587,7 @@ if (args[0] === "sessions") {
   // `review` branch.
   const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
   let initialBaseFromFlags: string | undefined;
+  let initialBaseExplicit = false;
 
   let rawPatch: string;
   let gitRef: string;
@@ -2344,7 +2672,7 @@ if (args[0] === "sessions") {
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -2353,7 +2681,9 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
-      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
+      // Evolution diff opens on the change's previous state, not the line base.
+      if (openState.requestedBase !== undefined || diffResult.diffType === "jj-evolog") initialBaseFromFlags = diffResult.base;
+      initialBaseExplicit = openState.requestedBase !== undefined;
       initialFileIdentities = diffResult.fileIdentities;
     } else {
       await resolveCliReviewOpenState(reviewArgs, {
@@ -2401,7 +2731,7 @@ if (args[0] === "sessions") {
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
-    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    initialBaseExplicit,
     openStatePinned,
     // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
     // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
@@ -2788,6 +3118,8 @@ if (args[0] === "sessions") {
     origin: "claude-code",
     planFilePath: input.planFilePath,
     permissionMode: input.permissionMode,
+    // A chain under the session root's project is continued after a shell cd (#2197).
+    historyRoot: input.projectRoot,
     planRevisions: true,
     // The mod delivers an approval's notes (planHostResult composes the
     // approved-with-notes prompt). The classic PermissionRequest hook below
@@ -2851,6 +3183,14 @@ if (args[0] === "sessions") {
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
   if (!eventJson.trim()) {
+    process.exit(0);
+  }
+
+  // An agent Plannotator's Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1): no one
+  // is there to review a plan. Every plan hook (Claude Code's ExitPlanMode,
+  // the Codex Stop hook, Qwen Code, Gemini, Mistral Vibe) passes through with
+  // no answer: no server, no browser, no Inbox.
+  if (isAskAiChild(process.env)) {
     process.exit(0);
   }
 
@@ -3036,16 +3376,30 @@ if (args[0] === "sessions") {
     process.exit(0);
   }
 
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  if (
+    event.hook_event_name === "PermissionRequest" &&
+    event.tool_name === "ExitPlanMode" &&
+    !resolvePlanReview(loadConfig(), process.env)
+  ) {
+    process.exit(0);
+  }
+
   let planContent = "";
   let permissionMode = "default";
   let isGemini = false;
   let planFilename = "";
 
+  // Qwen Code: PermissionRequest on exit_plan_mode, the plan inline (qwen-plan.ts).
+  const isQwen = isQwenPlanPermissionRequest(event);
+
   // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
-  planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
+  planFilename = isQwen ? "" : event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
   isGemini = !!planFilename;
 
-  if (isGemini) {
+  if (isQwen) {
+    planContent = qwenPlanFromEvent(event);
+  } else if (isGemini) {
     // Reconstruct full plan path from transcript_path and session_id:
     // transcript_path = <projectTempDir>/chats/session-...json
     // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
@@ -3068,12 +3422,21 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
-    origin: isGemini ? "gemini-cli" : detectedOrigin,
+    origin: isQwen ? "qwen-code" : isGemini ? "gemini-cli" : detectedOrigin,
     // No approvalNotesSupported: Claude Code's PermissionRequest allow carries
-    // no message, and Gemini CLI shows a systemMessage to the person, not the
-    // model, so notes sent with an approval would be lost.
+    // no message, Gemini CLI shows a systemMessage to the person, not the
+    // model, and Qwen Code ignores a hook's allow on exit_plan_mode, so notes
+    // sent with an approval would be lost.
     // Claude Code writes the plan to disk before the hook fires.
-    planFilePath: isGemini ? undefined : event.tool_input?.planFilePath,
+    planFilePath: isGemini || isQwen ? undefined : event.tool_input?.planFilePath,
+    // Claude Code sets CLAUDE_PROJECT_DIR (the session's project root) for
+    // hooks; a shell cd does not move it, so a chain under its project is
+    // continued (#2197). Gemini CLI and Qwen Code set the same variable as an
+    // alias: left out of the Claude Code check. Qwen's own QWEN_PROJECT_DIR
+    // (the session's working directory) plays the same part for Qwen.
+    historyRoot: isQwen
+      ? process.env.QWEN_PROJECT_DIR || undefined
+      : !isGemini && detectedOrigin === "claude-code" ? process.env.CLAUDE_PROJECT_DIR : undefined,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
@@ -3108,7 +3471,9 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output decision in the appropriate format for the harness
-  if (isGemini) {
+  if (isQwen) {
+    console.log(qwenPlanHookOutput(result));
+  } else if (isGemini) {
     if (result.approved) {
       console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
     } else {

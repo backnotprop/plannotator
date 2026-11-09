@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import serverPlugin, {
+  addInboxBriefing,
   createPlanReadyNotifier,
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
-import { commandFailureNoticeText, createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatInboxNotice, formatSessionUrlNotice, inboxNoticeText } from "./v2-client";
+import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
+import { commandFailureNoticeText, createInboxBriefings, createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatInboxNotice, formatSessionUrlNotice, inboxNoticeText } from "./v2-client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -647,5 +649,59 @@ describe("session-URL notices stay out of the model context", () => {
     await testContext.runGenerateHooks(event);
 
     expect(event.messages).toEqual([user("make a plan"), assistant("calling submit_plan"), user("[Plannotator Ask AI] why step 2?")]);
+  });
+});
+
+// /plannotator-inbox on OpenCode 2 starts no turn, so the model learns the
+// Inbox from the session's requests after it. Failure caught: the briefing
+// never reaching the model, reaching another session or a subagent, or piling
+// up once per request.
+describe("OpenCode 2 /plannotator-inbox briefing", () => {
+  const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
+  const agents = async () => [{ name: "build", mode: "primary" }, { name: "explore", mode: "subagent" }] as never;
+  const request = (sessionID: string, agent = "build", messages: unknown[] = [user("next")]) => ({
+    sessionID,
+    agent,
+    system: [{ type: "text" as const, text: "You are OpenCode." }],
+    messages,
+  });
+  const count = (event: { system: Array<{ text: string }> }) => event.system.map((part) => part.text).join("\n").split(INBOX_COMMAND_BRIEFING).length - 1;
+
+  test("a session that opened the Inbox carries the briefing once on each request; another session does not", async () => {
+    const briefings = createInboxBriefings();
+    const before = request("ses_1");
+    await addInboxBriefing(before, briefings, agents);
+    expect(count(before)).toBe(0);
+
+    briefings.mark("ses_1");
+    const after = request("ses_1");
+    await addInboxBriefing(after, briefings, agents);
+    await addInboxBriefing(after, briefings, agents);
+    expect(count(after)).toBe(1);
+
+    const other = request("ses_2");
+    await addInboxBriefing(other, briefings, agents);
+    expect(count(other)).toBe(0);
+  });
+
+  test("the command's notice in the session marks it too (after a restart); a subagent never gets it", async () => {
+    const briefings = createInboxBriefings();
+    const resumed = request("ses_3", "build", [user(inboxNoticeText("http://localhost:61234/")), user("next")]);
+    await addInboxBriefing(resumed, briefings, agents);
+    expect(count(resumed)).toBe(1);
+
+    briefings.mark("ses_4");
+    const sub = request("ses_4", "explore");
+    await addInboxBriefing(sub, briefings, agents);
+    expect(count(sub)).toBe(0);
+  });
+
+  test("wired into the plugin's context hook: read before the notice is dropped from the request", async () => {
+    const testContext = createContext({ workflow: "manual" });
+    await serverPlugin.setup(testContext.context as never);
+    const event = { ...request("ses_5", "build", [user(inboxNoticeText("http://localhost:61234/")), user("next")]), tools: {} };
+    await testContext.runContextHooks(event as never);
+    expect(count(event)).toBe(1);
+    expect(event.messages).toEqual([user("next")]);
   });
 });

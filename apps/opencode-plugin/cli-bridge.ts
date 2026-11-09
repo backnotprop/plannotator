@@ -11,6 +11,7 @@ import {
 } from "@plannotator/ai/session-bridge-pull";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { inboxOpenedText, openInboxInBrowser } from "@plannotator/shared/inbox/agent-link";
+import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
 import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   annotateInputNamesExistingTarget,
@@ -77,6 +78,8 @@ interface OpenCodeClient {
   notifyFailure?: (input: { command: string; message: string }) => unknown;
   /** OpenCode 2's slash commands: `/plannotator-inbox`'s transcript notice. */
   notifyInbox?: (input: { url: string; detail?: string }) => unknown;
+  /** OpenCode 2's slash commands: the Inbox opened, so the session's requests carry the Inbox briefing from now on. */
+  briefInbox?: () => unknown;
   session?: {
     messages?: (input: unknown) => Promise<{ data?: any[] }>;
     prompt?: (input: unknown) => Promise<unknown>;
@@ -1021,6 +1024,14 @@ export function annotateDecisionOutcome(outcome: CliAnnotateOutcome): string {
 /** `/plannotator-inbox`: opens the Inbox; never a review, never the embedded runtime. */
 export const INBOX_COMMAND = "plannotator-inbox";
 
+/**
+ * OpenCode 1's turn for `/plannotator-inbox`: the address to pass on, the
+ * command copies' ending, then the Inbox briefing.
+ */
+export function inboxCommandTurnText(opened: string): string {
+  return `${opened}\n\nTell the user this address in one sentence. This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there.\n\n${INBOX_COMMAND_BRIEFING}`;
+}
+
 export async function handleCliCommand(input: {
   command: string;
   client: OpenCodeClient;
@@ -1115,10 +1126,13 @@ export async function handleCliCommand(input: {
           // The toast is best-effort; the command's own turn below says it too.
         }
       }
-      // OpenCode 1 runs a model turn for the command's message anyway: let it
-      // carry the address (the command turn client records this prompt).
+      // The model gets the Inbox briefing (people type the command to teach
+      // their agent the Inbox): OpenCode 2 on its session's requests from now
+      // on, with no turn; OpenCode 1 in the command's own turn, which it runs
+      // anyway (the command turn client records this prompt).
+      if (typeof input.client.briefInbox === "function") input.client.briefInbox();
       if (input.commandTurn) {
-        await injectSessionPrompt(input.client, input.sessionId, `${text}\n\nTell the user this address in one sentence and stop. Do not begin any work.`);
+        await injectSessionPrompt(input.client, input.sessionId, inboxCommandTurnText(text));
       }
       return;
     }

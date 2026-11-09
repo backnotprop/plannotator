@@ -1,0 +1,81 @@
+/* The Guide tab. The reader's look comes from Plannotator's review stylesheet
+   (the same as guides.show); this file puts VS Code's colors and fonts under it
+   and fits the layout to an editor tab. */
+@import "@plannotator/review-editor/styles";
+@source "./*.tsx";
+
+html, body { margin: 0; padding: 0; min-height: 100%; }
+/* No overflow on body: the guide's viewport manager walks up for a scrolling
+   ancestor, and body/html count as the window (see guides.show portable.css). */
+#root { min-height: 100vh; }
+body { font-size: 13px; }
+
+/* VS Code's colors over the palette's (the palette still picks the syntax
+   colors). Specificity beats `.theme-<palette>.light`. */
+html.pn-vscode.pn-vscode.pn-vscode {
+  --background: var(--vscode-editor-background);
+  --foreground: var(--vscode-editor-foreground);
+  --card: color-mix(in oklab, var(--vscode-editor-foreground) 4%, var(--vscode-editor-background));
+  --card-foreground: var(--vscode-editor-foreground);
+  --popover: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  --popover-foreground: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+  --primary: var(--vscode-textLink-foreground);
+  --primary-foreground: var(--vscode-button-foreground);
+  --secondary: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  --secondary-foreground: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+  --muted: color-mix(in oklab, var(--vscode-editor-foreground) 9%, var(--vscode-editor-background));
+  --muted-foreground: var(--vscode-descriptionForeground);
+  --accent: var(--vscode-textLink-foreground);
+  --border: var(--vscode-widget-border, var(--vscode-editorWidget-border, var(--vscode-panel-border)));
+  --input: var(--vscode-input-background);
+  --ring: var(--vscode-focusBorder);
+  --destructive: var(--vscode-errorForeground);
+  --success: var(--vscode-testing-iconPassed, #89d185);
+  --warning: var(--vscode-editorWarning-foreground);
+  --font-sans: var(--vscode-font-family);
+  --font-mono: var(--vscode-editor-font-family);
+}
+html.pn-vscode body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); }
+
+/* A narrower prose column at editor-tab widths (the guide's own 440px is for a
+   browser window); the diffs get the rest. */
+@media (min-width: 768px) {
+  .pn-vscode [data-guide-section] > div:first-child { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); }
+}
+/* The prose sticks under the strip, not under the tab's top edge. */
+.pn-vscode [data-guide-section] .md\:sticky { top: var(--pn-strip-h, 40px); max-height: calc(100dvh - var(--pn-strip-h, 40px) - 8px); }
+.pn-vscode [data-guide-section] { scroll-margin-top: calc(var(--pn-strip-h, 40px) + 8px); }
+.pn-vscode [data-guide-file-shell] { scroll-margin-top: calc(var(--pn-strip-h, 40px) + 8px); }
+
+.pn-strip { font-family: var(--vscode-font-family); }
+/* A narrow tab (the real file opened beside it) keeps every chapter pill: the title gives way first, then the words. */
+@media (max-width: 760px) {
+  .pn-strip-count, .pn-strip-export, .pn-strip-back { display: none; }
+}
+@media (max-width: 520px) {
+  .pn-strip-nav > :first-child { display: none; }
+}
+.pn-pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  color: var(--foreground); font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.pn-pill:hover { background: var(--vscode-toolbar-hoverBackground, var(--muted)); }
+.pn-pill[data-current] { border-color: var(--vscode-focusBorder); background: color-mix(in oklab, var(--vscode-focusBorder) 18%, transparent); }
+.pn-pill:disabled { opacity: .6; cursor: default; }
+.pn-pill .codicon { font-size: 13px; }
+.pn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+
+.pn-file-action {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px;
+  border-radius: 4px; border: 0; background: transparent; cursor: pointer;
+  color: var(--vscode-textLink-foreground); font-size: 12px; white-space: nowrap;
+}
+.pn-file-action:hover { background: var(--vscode-toolbar-hoverBackground, var(--muted)); }
+.pn-file-action .codicon { font-size: 13px; }
+
+/* The hover card: the editor's hover widget colors. */
+[data-token-hover-card] { border-color: var(--vscode-editorHoverWidget-border, var(--border)) !important; }
+.pn-hover-code { background: transparent; }
+
+:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }

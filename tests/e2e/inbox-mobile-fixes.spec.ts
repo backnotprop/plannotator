@@ -246,8 +246,12 @@ for (const phone of PHONES) {
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);
+      // Narrower, never shorter or taller: Linux WebKit fires `resize` with the new visual viewport height while
+      // documentElement.clientHeight still holds the old one, and sends nothing once it catches up. Back from 844 px
+      // to the phone's 659, the Inbox read that as a keyboard (phone.ts trackKeyboard) and kept
+      // `data-ib-keyboard-pin`, so the radio picked next hid the reply foot (inbox.css) and Reply never showed.
       for (const width of [390, 320]) {
-        await page.setViewportSize({ width, height: 844 });
+        await page.setViewportSize({ width, height: phone.device.viewport.height });
         await page.waitForTimeout(150);
         check(await footerProblems(page), `at ${width} px`).toEqual([]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -282,14 +286,29 @@ for (const phone of PHONES) {
 
     test('the reply box: an attach button on a phone, a picked image uploads and rides the Send', async () => {
       const pane = page.locator('section.ib-pane');
-      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
-      const attach = pane.locator('[data-reply-attach]');
+      // The paperclip leads the box's row on a phone (approval "inbox-reply-box", T6; the owner: "I like attachment on
+      // left"): a 44 px button, all of it the tap area, with nothing over it.
+      const attach = box.locator('[data-reply-row] [data-reply-attach]');
       await expect(attach).toHaveCount(1);
-      const target = await pane.locator('.ib-rattach').boundingBox();
-      expect(target!.width).toBeGreaterThanOrEqual(44);
-      expect(target!.height).toBeGreaterThanOrEqual(44);
+      const clip = box.locator('[data-reply-row] .ib-rclip');
+      const target = (await clip.boundingBox())!;
+      expect(target.width).toBe(44);
+      expect(target.height).toBe(44);
+      const leads = await box.locator('[data-reply-row]').evaluate((row) => {
+        const controls = [...row.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+        const lefts = controls.map((el) => ({ clip: el.classList.contains('ib-rclip'), left: el.getBoundingClientRect().left }));
+        return lefts.sort((a, b) => a.left - b.left)[0]?.clip ?? false;
+      });
+      expect(leads).toBe(true);
+      const tapArea = await clip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = (x: number, y: number) => el.contains(document.elementFromPoint(x, y));
+        return { left: hit(r.left + 2, r.top + r.height / 2), top: hit(r.left + r.width / 2, r.top + 2), bottom: hit(r.left + r.width / 2, r.bottom - 2) };
+      });
+      expect(tapArea).toEqual({ left: true, top: true, bottom: true });
       // What the photo library hands over: a file named image.png (iOS) with no name a person chose.
       await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(1);
@@ -324,9 +343,8 @@ for (const phone of PHONES) {
       const names = await box.locator('[data-compose-file]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-file-name')!));
       await pane.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(box).toHaveCount(0);
-      const answer = await world.agent.waitForReply(threadId, 10);
-      const body = (answer.reply as { body: string }).body;
-      for (const n of names) expect(body).toContain(`Attached: ${n} (`);
+      const answer = await world.agent.nextReply(threadId, 10);
+      expect((answer.attachments as { name: string }[]).map((a) => a.name)).toEqual(names);
       expect(errors).toEqual([]);
     });
 

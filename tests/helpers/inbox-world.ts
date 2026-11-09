@@ -111,6 +111,9 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     PLANNOTATOR_UPDATE_API_URL: process.env.PLANNOTATOR_UPDATE_API_URL || "http://127.0.0.1:9/releases/latest",
     // Never the real install script: Update now in a world fails fast unless a test serves one.
     PLANNOTATOR_INSTALL_SCRIPT_URL: process.env.PLANNOTATOR_INSTALL_SCRIPT_URL || "http://127.0.0.1:9/install.sh",
+    PLANNOTATOR_RELEASE_DOWNLOAD_URL: process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL || "http://127.0.0.1:9/download",
+    // Never the live feedback Worker (append-only): a Send in a world fails fast unless a test serves a fake.
+    PLANNOTATOR_FEEDBACK_URL: process.env.PLANNOTATOR_FEEDBACK_URL || "http://127.0.0.1:9/feedback",
     // Phones are hidden until the iPhone app ships; only the phone proofs turn them on.
     PLANNOTATOR_INBOX_PHONES: w.phones ? "1" : "0",
     // Never run a real agent's CLI: a world's PATH holds the person's own (packages/server/inbox-agents.ts).

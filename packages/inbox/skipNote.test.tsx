@@ -8,7 +8,7 @@
  * a note alone with Skip them. The window
  * over a REAL Inbox (tests/helpers/inbox-dom-server.ts).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

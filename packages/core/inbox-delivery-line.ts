@@ -33,6 +33,8 @@ export interface RecipientConnection {
   send_now: boolean;
   /** It runs an older Plannotator plugin than a restart loads (packages/server/inbox-restart.ts). Absent from an older Inbox. */
   outdated?: InboxSessionOutdated | null;
+  /** Claude Code holds this session's replies until the person types there (absent: no). The line says "Stopped". */
+  held?: boolean;
   /** Claude Code's version as its poll said (absent or null: unknown). */
   engine?: string | null;
   /** `cd <folder> && claude --resume <id>`, when the Inbox knows the folder. Absent from an older Inbox. */
@@ -151,6 +153,8 @@ export interface DeliveryLine {
   text: string;
   /** The asking session ended: a clock, not a check. */
   ended?: boolean;
+  /** Its session's connection took it and stopped while delivering it: that session never gets it, so it may move. */
+  stuck?: boolean;
   /** Offer Send now: the session works and its connection can take the reply mid-turn. */
   sendNow?: boolean;
   /**
@@ -168,7 +172,7 @@ export interface DeliveryLine {
 
 /** The parts of the "Undelivered" band at `now`: "Undelivered 3 min", and what happens next. */
 export interface UndeliveredWords {
-  /** "Undelivered 3 min" (whole minutes; "Undelivered" under one). */
+  /** "Undelivered 3 min" (whole minutes, then hours, then days; "Undelivered" under a minute). */
   label: string;
   /** "goes in by itself in 2 min" / "in under a minute", or "it gets this when its turn ends". */
   next: string;
@@ -176,10 +180,30 @@ export interface UndeliveredWords {
   auto: boolean;
 }
 
-/** "Undelivered 3 min": whole minutes, never seconds. */
-export function undeliveredLabel(since: string, now: number): string {
+/**
+ * How long a reply has waited, in the Inbox's age units (a board card's "5m", "3h", "2d"): whole minutes under an
+ * hour, whole hours under a day, then whole days; never seconds. Null under a minute.
+ */
+function undeliveredAge(since: string, now: number): { short: string; long: string } | null {
   const minutes = wholeMinutes(since, now);
-  return minutes < 1 ? 'Undelivered' : `Undelivered ${minutes} min`;
+  if (minutes < 1) return null;
+  if (minutes < 60) return { short: `${minutes}m`, long: `${minutes} min` };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { short: `${hours}h`, long: `${hours} hour${hours === 1 ? '' : 's'}` };
+  const days = Math.floor(hours / 24);
+  return { short: `${days}d`, long: `${days} day${days === 1 ? '' : 's'}` };
+}
+
+/** "Undelivered 3 min", "Undelivered 2 hours", "Undelivered 1 day" ("Undelivered" under a minute). */
+export function undeliveredLabel(since: string, now: number): string {
+  const age = undeliveredAge(since, now);
+  return age ? `Undelivered ${age.long}` : 'Undelivered';
+}
+
+/** The list row's short form (approval "inbox-row-byline", option A): "Undelivered 3m", "Undelivered 2h", "Undelivered 1d". */
+export function undeliveredShort(since: string, now: number): string {
+  const age = undeliveredAge(since, now);
+  return age ? `Undelivered ${age.short}` : 'Undelivered';
 }
 
 export function undeliveredWords(wait: NonNullable<DeliveryLine['wait']>, now: number): UndeliveredWords {
@@ -211,8 +235,12 @@ export interface DeliveryLineInput {
   connection: RecipientConnection | null | undefined;
   /** The asking session ended (a reply), with the asker's name for the line. */
   askerEnded?: { name: string } | null;
+  /** Delivered, but what settled it was another agent's read: that agent's name ("Read by Claude Code, 6:25 PM"). */
+  readBy?: string | null;
   /** A message addressed to a session that stopped before it took it (compose). */
   undelivered?: { host: string } | null;
+  /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
+  stuck?: boolean;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
   /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
@@ -234,6 +262,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
   const decision = inboxDeliveryState({
     delivered: !!input.deliveredAt,
     undelivered: !!input.undelivered,
+    stuck: !!input.stuck,
     askerEnded: !!input.askerEnded,
     wakes: input.wakes,
     sendingNow: input.sendingNow,
@@ -248,6 +277,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
   const text = deliveryText(decision.reason, {
     name,
     at: input.deliveredAt,
+    readBy: input.readBy,
     time: input.time,
     undeliveredHost: input.undelivered?.host ?? name,
     endedName: input.askerEnded?.name ?? name,
@@ -260,6 +290,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     state: decision.state,
     text,
     ...(decision.reason === 'ended' ? { ended: true } : {}),
+    ...(decision.reason === 'stuck' ? { stuck: true } : {}),
     ...(decision.reason === 'working' ? { sendNow: decision.sendNow } : {}),
     ...(decision.wait ? { wait: decision.wait } : {}),
     ...(decision.autoAfterMin !== undefined && decision.reason === 'delivered' ? { autoAfterMin: decision.autoAfterMin } : {}),
@@ -275,6 +306,8 @@ export function deliveryText(
     at: string | null;
     time: (iso: string) => string;
     undeliveredHost: string;
+    /** Delivered by another agent's read: its name. */
+    readBy?: string | null;
     endedName: string;
     /** It waits on a busy session (approval "inbox-busy-agent-reply"): "Undelivered 3 min · …". */
     wait?: DeliveryLine['wait'];
@@ -288,14 +321,18 @@ export function deliveryText(
   const { name } = words;
   switch (reason) {
     case 'delivered': {
+      // Honest about a reply no connection wakes: another agent read it, which is not the agent it was for taking it.
+      if (words.readBy && words.at) return `Read by ${words.readBy}, ${words.time(words.at)}`;
       const base = words.at ? `Delivered to ${name}, ${words.time(words.at)}` : `Delivered to ${name}`;
       if (words.autoAfterMin !== undefined) return `${base} · ${autoAfterText(words.autoAfterMin)}`;
       return words.turnEnded ? `${base} · ${TURN_ENDED_TEXT}` : base;
     }
     case 'undelivered':
       return `Not delivered. That ${words.undeliveredHost} session stopped before it took this. If it is resumed, it still gets it.`;
+    case 'stuck':
+      return `Not delivered. ${name} stopped while it was taking this, so it may not have it.`;
     case 'ended':
-      return `Saved for ${words.endedName}. The session that asked has ended, so it waits here until an agent reads this thread.`;
+      return `Saved for ${words.endedName}. That session has ended; it gets this only if it's resumed.`;
     case 'reads':
       return `Saved for ${name}. It sees it when it next reads this thread.`;
     case 'sending_now':
@@ -313,6 +350,8 @@ export function deliveryText(
       return `Queued for ${name}; it gets this as its next turn.`;
     case 'ack_pending':
       return `Goes to ${name} in a few seconds`;
+    case 'stopped':
+      return INBOX_STOPPED_REPLY_TEXT;
   }
 }
 
@@ -329,6 +368,13 @@ export function reaskRowLine(name: string, checkedAt: string | null, wakes: bool
   if (checkedAt) return `Asked ${name} to re-ask; waiting for its message.`;
   return wakes === true ? `Re-ask queued for ${name}; it gets this as its next turn.` : `Re-ask saved for ${name}. It sees it when it next reads this thread.`;
 }
+
+/**
+ * A reply Claude Code refused because the person stopped that session: it
+ * goes in once they type there (approval "inbox-stopped-reply", the owner's
+ * exact words).
+ */
+export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that session';
 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */
 export const TURN_ENDED_TEXT = 'went in when its turn ended';

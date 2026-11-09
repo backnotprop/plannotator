@@ -19,7 +19,6 @@ export function createGuides(context: vscode.ExtensionContext, log: Log, host: G
     getChildren: (element?: TreeNode) => controller.getChildren(element),
     getTreeItem: (element: TreeNode) => controller.getTreeItem(element),
     getParent: (element: TreeNode) => controller.getParent(element),
-    resolveChapterView: (view: vscode.WebviewView) => controller.resolveChapterView(view),
     runCommand: (id: string, args: unknown[]) => controller.runCommand(id, args),
     dispose: () => controller.dispose(),
   };

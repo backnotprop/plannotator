@@ -1,8 +1,31 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { currentPiHost } from "./pi-host.ts";
 
 type SendUserMessageContent = Parameters<ExtensionAPI["sendUserMessage"]>[0];
 type SendUserMessageOptions = Parameters<ExtensionAPI["sendUserMessage"]>[1];
 type NotificationType = "info" | "warning" | "error";
+
+/**
+ * The delivery for a message the agent should act on. Pi reads `deliverAs`
+ * only while a run is going and starts a turn when the agent is idle. Oh My
+ * Pi only queues a message that names one, even when idle, and drains that
+ * queue only when the transcript ends in an assistant reply: in a new
+ * session, or after a `!command`, the message never starts a turn. So on Oh
+ * My Pi an idle session gets the message without `deliverAs`.
+ */
+export function resolveIdleDeliveryOptions(
+	ctx: Pick<ExtensionContext, "isIdle"> | undefined,
+	options?: SendUserMessageOptions,
+): SendUserMessageOptions | undefined {
+	if (currentPiHost() !== "oh-my-pi" || !ctx || options?.deliverAs === undefined) return options;
+	try {
+		if (!ctx.isIdle()) return options;
+	} catch {
+		return options;
+	}
+	const { deliverAs: _, ...rest } = options;
+	return Object.keys(rest).length > 0 ? rest : undefined;
+}
 
 type CurrentPiSession = {
 	token: symbol;
@@ -96,7 +119,7 @@ function setCurrentPiSession(token: symbol, pi: ExtensionAPI, ctx?: ExtensionCon
 	const current: CurrentPiSession = {
 		token,
 		sendUserMessage: (content, options) => {
-			pi.sendUserMessage(content, options);
+			pi.sendUserMessage(content, resolveIdleDeliveryOptions(ctx, options));
 		},
 	};
 	if (ctx) {

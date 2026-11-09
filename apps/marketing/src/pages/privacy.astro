@@ -5,19 +5,19 @@ import Footer from '../components/Footer.astro';
 ---
 <Base
   title="Privacy Policy - Plannotator"
-  description="How Plannotator stores local review data and when its optional features contact hosted services or third parties."
+  description="How Plannotator stores local review data, what its anonymous daily ping sends, and when its optional features contact hosted services or third parties."
 >
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
     <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
       <article class="prose">
         <h1>Privacy Policy</h1>
-        <p class="text-sm text-muted-foreground">Last updated: October 11, 2026</p>
+        <p class="text-sm text-muted-foreground">Last updated: November 2, 2026</p>
 
-        <p><strong>Plannotator does not collect usage telemetry or analytics.</strong> Plans, documents, diffs, annotations, drafts, history, and configuration stay on your machine by default. Some features contact GitHub, your Git remote, a URL you ask Plannotator to fetch, an AI provider, or a hosted sharing service. Those boundaries are described below.</p>
+        <p><strong>Plannotator sends one anonymous ping a day for each of its tools you use, and nothing else about how you use it.</strong> Each ping says which tool ran, the version, and how many weeks since this computer first used Plannotator. It sends no ID and nothing about you or your work, and you can turn it off (section 3). Plans, documents, diffs, annotations, drafts, history, and configuration stay on your machine by default. Some features contact GitHub, your Git remote, a URL you ask Plannotator to fetch, an AI provider, or a hosted sharing service. Those boundaries are described below.</p>
 
         <h2>1. What this policy covers</h2>
-        <p>This policy covers the open source Plannotator application, <a href="https://plannotator.ai">plannotator.ai</a>, <a href="https://share.plannotator.ai">share.plannotator.ai</a>, the hosted short-link service, and the Workspaces waitlist in this repository.</p>
+        <p>This policy covers the open source Plannotator application, <a href="https://plannotator.ai">plannotator.ai</a>, <a href="https://share.plannotator.ai">share.plannotator.ai</a>, the daily ping service at <code>ping.plannotator.ai</code>, the hosted short-link service, and the Workspaces waitlist in this repository.</p>
         <p>It does not control third-party AI providers, Git hosts, websites you fetch, services through which you send a share link, or self-hosted deployments. Those services apply their own terms and privacy practices.</p>
 
         <h2>2. Data that stays local by default</h2>
@@ -33,8 +33,23 @@ import Footer from '../components/Footer.astro';
 
         <h2>3. Automatic network requests</h2>
 
+        <h3>The daily ping</h3>
+        <p>Once a day, each Plannotator tool you use (Inbox, plan review, code review, annotate, last) sends one anonymous ping to <code>ping.plannotator.ai</code>. It helps us see how many people use Plannotator and where to put our effort. This is the whole message:</p>
+        <pre><code>&#123;"version":"0.28.46","age_week":2,"tool":"plan","first":1&#125;</code></pre>
+        <ul>
+          <li><code>version</code> is the Plannotator version.</li>
+          <li><code>age_week</code> is how many weeks since this computer first used Plannotator, in four groups: <code>1</code> in the first week, <code>2</code> in weeks 2 to 4, <code>3</code> in weeks 5 to 24, <code>4</code> after that.</li>
+          <li><code>tool</code> is the tool that ran: <code>inbox</code>, <code>plan</code>, <code>review</code>, <code>annotate</code>, or <code>last</code>.</li>
+          <li><code>first</code> is <code>1</code> on this computer's first ping of the day, from any tool, and <code>0</code> on the others. It lets us count how many people used Plannotator that day without an ID.</li>
+        </ul>
+        <p>So a computer sends at most five pings a day. A ping never sends an ID of any kind, your name, user name or computer name, your operating system, file names or paths, plans, documents, code, diffs, annotations, or anything else about you or your work. The request comes from the Plannotator program on your computer, never from a page in your browser.</p>
+        <p><strong>What we keep:</strong> the server adds 1 to that day's count for the version, the week group, and the tool. When <code>first</code> is <code>1</code>, it also adds 1 to that day's count of people. It keeps only those daily totals. It does not store your IP address, request headers, location, or the time of the request. Cloudflare runs the server; like any web request, Cloudflare sees your IP address while it delivers the ping and may keep security records under its own policy. Because we keep no ID and no IP address, we cannot find or delete one person's pings: there is nothing to find them by. The daily totals are public at <code>ping.plannotator.ai/totals</code>.</p>
+        <p><strong>What stays on your computer:</strong> a small file, <code>ping.json</code> in the Plannotator data folder, with the week this computer first used Plannotator, today's date (UTC), and which tools have sent their ping today.</p>
+        <p><strong>When it is sent:</strong> the ping is on by default. The app shows no message about it; this page, the release notes, and the Inbox's Settings → About describe it. The first time you use a tool on a day (UTC), that tool sends its ping in the background; the Inbox checks when it starts and then once an hour. Nothing waits for the ping. If a ping fails, for example because you are offline, that tool tries again the next time it runs. It is never sent from CI, from development builds, or from tests.</p>
+        <p><strong>To turn it off,</strong> set <code>NO_ANON_PING=1</code> (any value except <code>0</code> works) in the environment Plannotator runs in, and restart Plannotator. Off means no request at all, and nothing is written to <code>ping.json</code>.</p>
+
         <h3>GitHub release check</h3>
-        <p>Plannotator checks whether a newer version exists by sending one HEAD request to GitHub's public "latest release" page (<code>github.com/backnotprop/plannotator/releases/latest</code>), reading the version from where it redirects, at most about once every ten minutes per computer, and when the Inbox starts or its page is reloaded (at most once a minute). Only when that page cannot be reached does it ask GitHub's public latest-release API instead, at most once an hour (when GitHub answers that its rate limit is reached, Plannotator waits until the time GitHub names, up to six hours, or six hours when it names none). When it finds a newer version, the Inbox also asks the API once for that release's notes. The request comes from the Plannotator program on your computer, not from the review page in your browser. It carries no plan, document, diff, annotation, version number, or usage data, and the Plannotator project owner receives no analytics from it. GitHub receives an ordinary web request and may process information such as your IP address and user agent under GitHub's privacy practices. To turn the check off, set <code>PLANNOTATOR_UPDATE_CHECK=0</code>, add <code>&#123; "updateCheck": false &#125;</code> to <code>~/.plannotator/config.json</code>, or switch off "Tell me when a new version is out" in Settings. Running <code>plannotator update</code> always checks, because you asked it to.</p>
+        <p>Plannotator checks whether a newer version exists by sending one HEAD request to GitHub's public "latest release" page (<code>github.com/backnotprop/plannotator/releases/latest</code>), reading the version from where it redirects, at most about once every ten minutes per computer, and when the Inbox starts or its page is reloaded (at most once a minute). Only when that page cannot be reached does it ask GitHub's public latest-release API instead, at most once an hour (when GitHub answers that its rate limit is reached, Plannotator waits until the time GitHub names, up to six hours, or six hours when it names none). When it finds a newer version, the Inbox also asks the API once for that release's notes. The request comes from the Plannotator program on your computer, not from the review page in your browser. It carries no plan, document, diff, annotation, version number, or usage data, and the Plannotator project owner receives nothing from it: it goes to GitHub, not to us. GitHub receives an ordinary web request and may process information such as your IP address and user agent under GitHub's privacy practices. To turn the check off, set <code>PLANNOTATOR_UPDATE_CHECK=0</code>, add <code>&#123; "updateCheck": false &#125;</code> to <code>~/.plannotator/config.json</code>, or switch off "Tell me when a new version is out" in Settings. Running <code>plannotator update</code> always checks, because you asked it to.</p>
 
         <h3>Installer downloads</h3>
         <p>The install scripts download the selected Plannotator binary and checksum from GitHub Releases. When installing the latest version, they first query GitHub's API to resolve the release tag. If available, a token from <code>GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, or <code>gh auth token</code> is sent to that API. Pinning <code>--version</code> skips only the release-resolution API call; the binary and checksum still come from GitHub Releases.</p>
@@ -68,13 +83,14 @@ import Footer from '../components/Footer.astro';
 
         <h2>5. Website and Workspaces waitlist</h2>
         <p>Our websites and hosted services use infrastructure such as AWS, Amazon CloudFront, and Cloudflare. These providers may process IP addresses, request headers, timestamps, and similar delivery or security metadata. The marketing site loads fonts from Google Fonts, contributor avatars from GitHub's image hosts, a release badge from Shields.io, repository information through GitHub's API, and privacy-enhanced YouTube embeds on some blog posts. Opening those pages sends ordinary requests to the corresponding third parties. YouTube may also store or access data when you interact with an embedded video.</p>
-        <p>We do not operate advertising trackers, usage analytics, analytics cookies, or product telemetry on these sites. Functional cookies may remember theme, review settings, and a dismissed update notice.</p>
+        <p>We do not run advertising trackers, usage analytics, or analytics cookies on these sites. Functional cookies may remember theme, review settings, and a dismissed update notice.</p>
         <p>Workspaces is a separate hosted product and the primary team-sharing direction. The local-storage statements for the open source application do not describe Workspaces. This public repository contains the current Workspaces waitlist, not the hosted product implementation.</p>
         <p>If you join the waitlist, we store the information you submit: email address, company, team size, optional note, and whether you identify as a contributor. If you leave company blank and use a non-free email domain, the service can infer a company name from the domain and records that the value was inferred. The service also records IP address, country, user agent, and referrer for rate limiting, abuse prevention, and signup context. Cloudflare Turnstile processes a verification token and related request data. We use waitlist data to manage beta access, contact you about Workspaces, and cross-reference contributor status when requested.</p>
 
         <h2>6. Retention</h2>
         <ul>
           <li>Local Plannotator files remain on your machine until you delete them or use the applicable cleanup controls.</li>
+          <li>The daily ping's totals (day, version, week group, tool, and a count) are kept. They contain nothing that points to a person.</li>
           <li>Hosted encrypted short-link ciphertext expires after seven days. A self-hosted operator can configure a different period.</li>
           <li>Workspaces waitlist entries are retained while needed to run the waitlist, contact applicants, and keep basic signup records. You can request deletion.</li>
           <li>Support emails are retained as needed to respond and keep a record of the conversation.</li>
@@ -90,7 +106,8 @@ import Footer from '../components/Footer.astro';
           <li>Set <code>PLANNOTATOR_REVIEW_PROGRESS=0</code> to stop code review saving which files you marked viewed (records include repository file paths), or delete <code>~/.plannotator/review-progress/</code> to remove saved progress.</li>
           <li>Self-host the share portal and paste service, or do not use link sharing.</li>
           <li>Do not send a share link through a service you do not trust with the content or key in that link.</li>
-          <li>The automatic GitHub release check currently has no opt-out setting.</li>
+          <li>Turn off the daily ping: set <code>NO_ANON_PING=1</code> and restart Plannotator.</li>
+          <li>Turn off the automatic GitHub release check with <code>PLANNOTATOR_UPDATE_CHECK=0</code>, the "Tell me when a new version is out" switch in Settings, or <code>&#123; "updateCheck": false &#125;</code> in <code>~/.plannotator/config.json</code>.</li>
         </ul>
 
         <h2>8. Security</h2>
@@ -100,9 +117,9 @@ import Footer from '../components/Footer.astro';
         <h2>9. Contact and privacy requests</h2>
         <p>
           <strong>Michael Ramos</strong><br />
-          Email: <a href="mailto:backnotprop@gmail.com">backnotprop@gmail.com</a>
+          Email: <a href="mailto:ramos@plannotator.ai">ramos@plannotator.ai</a>
         </p>
-        <p>You may ask for access to, correction of, or deletion of personal information we hold about you. We generally cannot identify or recover hash-fragment content, local files, or encrypted paste content from the decryption key because we do not receive that key.</p>
+        <p>You may ask for access to, correction of, or deletion of personal information we hold about you. We generally cannot identify or recover hash-fragment content, local files, or encrypted paste content from the decryption key because we do not receive that key. We cannot find or delete one person's daily pings, because they carry no ID and we keep no IP address.</p>
 
         <h2>10. Changes to this policy</h2>
         <p>We may update this policy when Plannotator's behavior or hosted services change. The date at the top identifies the current version.</p>

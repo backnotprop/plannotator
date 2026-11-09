@@ -74,7 +74,7 @@ async function settle(times = 1): Promise<void> {
 async function mount(): Promise<HTMLIFrameElement> {
   setStorageBackend(memoryBackend);
   for (const key of ["plannotator-look-feel-announcement-seen", "plannotator-vim-mode-announcement-seen"]) memory.set(key, "2");
-  for (const key of ["plannotator-announce-tui-herdr-seen", "plannotator-plan-ai-announcement-seen", "plannotator-announce-ask-session-seen"]) memory.set(key, "1");
+  for (const key of ["plannotator-announce-tui-herdr-seen", "plannotator-announce-inbox-seen", "plannotator-plan-ai-announcement-seen", "plannotator-announce-ask-session-seen"]) memory.set(key, "1");
   globalThis.fetch = fetchImpl;
   // SAFETY: the App only uses EventSource's constructor, handlers and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;

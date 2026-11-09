@@ -25,6 +25,7 @@ import type {
   PRReviewFileComment,
   PRReviewSubmissionResult,
   PRRuntime,
+  PRTreeResult,
 } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 import {
@@ -615,6 +616,38 @@ export async function fetchBbPRContext(runtime: PRRuntime, ref: BitbucketPRRef):
 
 function srcPath(ref: BitbucketPRRef, sha: string, filePath: string): string {
   return `${refRepoPath(ref)}/src/${encodeURIComponent(sha)}/${encodePath(filePath)}`;
+}
+
+/** Pages of `/src/<sha>/?max_depth=` the tree listing follows before calling it truncated. */
+const BB_TREE_MAX_PAGES = 500;
+
+/**
+ * Every file of one commit through the source API, walking every folder in
+ * one paged listing (`max_depth`). Past the page budget the list is partial.
+ */
+export async function fetchBbTree(
+  runtime: PRRuntime,
+  ref: BitbucketPRRef,
+  sha: string,
+): Promise<PRTreeResult | null> {
+  try {
+    const ctx = context(runtime);
+    const paths: string[] = [];
+    let next: string | undefined = `${refRepoPath(ref)}/src/${encodeURIComponent(sha)}/?max_depth=1000&pagelen=100`;
+    let pages = 0;
+    while (next && pages < BB_TREE_MAX_PAGES) {
+      const body: BbPage<{ type?: unknown; path?: unknown }> = await bbJson(ctx, next, "tree");
+      for (const entry of body.values ?? []) {
+        if (entry.type === "commit_file" && typeof entry.path === "string") paths.push(entry.path);
+      }
+      next = typeof body.next === "string" && body.next ? body.next : undefined;
+      if (next && new URL(next, ctx.apiBase).origin !== ctx.apiOrigin) next = undefined;
+      pages += 1;
+    }
+    return { paths, truncated: next !== undefined };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchBbFileContent(

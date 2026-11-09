@@ -5,7 +5,8 @@
  * guards.
  *
  * A file is reached ONLY by its attachment id: there is no route that takes a
- * path. The current file is read through its record with the rules in
+ * bare path (`markdown-image` takes only an image the Markdown file itself
+ * shows, relative to its folder). The current file is read through its record with the rules in
  * packages/shared/inbox/attachments.ts; `?version=sent` reads the blob of
  * the bytes the agent sent. Raw bytes of a text kind always go out as
  * `text/plain` with a `sandbox` CSP and nosniff, so an attached HTML page
@@ -23,7 +24,8 @@
  * folder, packages/server/html-assets.ts), whose answers carry the
  * `sandbox allow-scripts allow-modals` CSP, inside Plannotator's sandboxed HtmlViewer, so
  * its relative images and frames load from the file's own folder and never
- * draw the Inbox inside itself (#1554).
+ * draw the Inbox inside itself (#1554); the pictures it names outside that
+ * folder load too (`createInboxHtmlAssets`).
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -32,16 +34,17 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, relative as relativeTo, resolve as resolvePath, sep } from "node:path";
 import { htmlAssetPathRefused, isWithinDirectory } from "@plannotator/shared/html-assets-node";
-import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
+import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, htmlAssetHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
-  checkCurrent,
+  checkCurrentAsync,
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
-import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
+import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAsync } from "@plannotator/shared/inbox/message-images";
+import { inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
@@ -92,17 +95,59 @@ function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8
  */
 export const inboxRefusesAssetPath = refusesHiddenHtmlAssetPath;
 
-/** A nested document in an attached page runs scripts but reaches no network. */
+/**
+ * A nested document in an attached page runs scripts but reaches no network
+ * (`connect-src 'none'`). It names no `img-src`, so its pictures load from
+ * anywhere, the web included; in the window the page itself is a document of
+ * its own under `INBOX_PAGE_CSP` (inbox-pages.ts: web pictures over https).
+ */
 export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
 
+/** The pictures an attached page may show from outside its folder, by name: what the bytes must then confirm. */
+const INBOX_PAGE_PICTURE_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|ico)$/i;
+
 /**
- * The page `relativePath` names in the folder of the attached HTML page at
+ * One picture an attached HTML page names outside its folder (`../shots/a.png`,
+ * `/Users/me/a.png`): read only when it is an image by its bytes, never from a
+ * path with a hidden segment or a dotenv name (`inboxRefusesAssetPath`, as named
+ * and by realpath). Served as the type its bytes sniff as, with nosniff and the
+ * asset route's sandbox CSP, so an SVG opened directly runs no script.
+ */
+async function inboxPagePictureResponse(path: string, req: Request): Promise<Response> {
+  if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+  const read = INBOX_PAGE_PICTURE_RE.test(path) ? await readInboxPictureAsync(path, inboxRefusesAssetPath) : null;
+  if (!read?.ok) {
+    // A refused picture reads as missing: the page learns nothing about the file.
+    return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  }
+  return new Response(req.method === "HEAD" ? null : new Uint8Array(read.bytes), { headers: htmlAssetHeaders(read.contentType) });
+}
+
+/**
+ * The Inbox's HTML asset registry: annotate's serving path, minus hidden paths
+ * and secret names, nested documents with no network, and pictures from
+ * anywhere on this computer (`pictures`).
+ */
+export function createInboxHtmlAssets() {
+  return createHtmlAssetRegistry({
+    refuseAssetPath: inboxRefusesAssetPath,
+    documentCsp: INBOX_HTML_DOCUMENT_CSP,
+    pictures: {
+      allows: (path) => INBOX_PAGE_PICTURE_RE.test(path) && !inboxRefusesAssetPath(path),
+      serve: inboxPagePictureResponse,
+    },
+  });
+}
+
+/**
+ * The document `relativePath` names in the folder of the attached document at
  * `attachedPath` (its realpath): its realpath and text. Refused (InboxError)
  * when the path is not a plain relative path, names a hidden segment or a
- * dotenv file (as requested or by where it leads), is not `.html`/`.htm`,
+ * dotenv file (as requested or by where it leads), has the wrong extension for `kind`
+ * (as requested or by where it leads),
  * leads outside that folder, is not a regular file, or is over 2 MB.
  */
-export async function readInboxLinkedPage(attachedPath: string, relativePath: string | null): Promise<{ path: string; text: string }> {
+export async function readInboxLinkedPage(attachedPath: string, relativePath: string | null, kind: "html" | "markdown" = "html"): Promise<{ path: string; text: string }> {
   const rel = (relativePath ?? "").replace(/\\/g, "/");
   if (!rel || rel.length > 2048 || /[\u0000-\u001f\u007f]/.test(rel) || rel.startsWith("/") || /^[a-z]:/i.test(rel)) {
     throw new InboxError("validation_error", "path: a path relative to the attached page's folder.", { field: "path" });
@@ -113,7 +158,9 @@ export async function readInboxLinkedPage(attachedPath: string, relativePath: st
   }
   const clean = segments.join("/");
   const name = segments[segments.length - 1]!;
-  if (!/\.html?$/i.test(name)) throw new InboxError("linked_page_not_html", `${name} is not an HTML page.`);
+  const extension = kind === "markdown" ? /\.mdx?$/i : /\.html?$/i;
+  const wrongKind = () => new InboxError("linked_page_not_html", `${name} is not ${kind === "markdown" ? "a Markdown document" : "an HTML page"}.`);
+  if (!extension.test(name)) throw wrongKind();
   const root = dirname(attachedPath);
   const target = resolvePath(root, clean);
   if (!isWithinDirectory(target, root)) throw new InboxError("linked_page_outside", "Only pages in the attached page's own folder open here.");
@@ -132,6 +179,8 @@ export async function readInboxLinkedPage(attachedPath: string, relativePath: st
   if (inboxRefusesAssetPath(relativeTo(root, real).split(sep).join("/"))) {
     throw new InboxError("linked_page_refused", "Plannotator does not open hidden files or .env files.");
   }
+  // And by what it is: `notes.md` linked to `data.json` is not a Markdown document.
+  if (!extension.test(basename(real))) throw wrongKind();
   // The handle is opened on the realpath without following a link. O_NOFOLLOW covers
   // only the last segment, so once open the realpath must still lead to the very
   // file the descriptor holds (dev and ino): a parent folder swapped for a symlink
@@ -236,7 +285,7 @@ async function readVersion(store: InboxStore, attachment: InboxAttachment, versi
 
 export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContext) {
   const { store, serverSession } = context;
-  const htmlAssets = createHtmlAssetRegistry({ refuseAssetPath: inboxRefusesAssetPath, documentCsp: INBOX_HTML_DOCUMENT_CSP });
+  const htmlAssets = createInboxHtmlAssets();
 
   const guardedBody = async (req: Request): Promise<Record<string, unknown> | Response> => {
     const body = await context.readBody(req);
@@ -271,7 +320,30 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         // The images the messages show, captured as files (additive: a reader that does not know it draws nothing extra).
         inline_images: await Promise.all(store.threadInlineImages(threadId).map(({ attachment, message }) => inboxAttachmentState(attachment, message.id, { hash: "small" }))),
         annotations: store.pendingAnnotations(threadId),
+        // The comments a Send already carried, for the file view's earlier comments (additive: a reader that does not know it draws nothing extra).
+        earlier_annotations: store.earlierAnnotations(threadId),
       });
+    }
+
+    // Only images referenced by the selected Markdown version or a guarded sibling document.
+    const markdownImage = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/markdown-image$/.exec(path);
+    if (markdownImage) {
+      if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET or HEAD." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const { attachment, message } = attachmentOf(markdownImage[1]!);
+      if (attachment.kind !== "markdown") throw new InboxError("validation_error", "Only Markdown attachments show inline images.");
+      const project = store.project(message.project_id);
+      if (!project) throw new InboxError("project_not_found", "The attachment's project is gone.");
+      const document = url.searchParams.get("document");
+      const page = document === null ? null : await readInboxLinkedPage(attachment.path, document, "markdown");
+      const body = page?.text ?? (await readVersion(store, attachment, versionOf(url))).toString("utf8");
+      return inboxImageResponse(req, await readInboxMessageImageAsync({
+        body,
+        root: project.root,
+        base: dirname(page?.path ?? attachment.path),
+        path: url.searchParams.get("path"),
+        anywhere: message.author.kind === "agent",
+      }));
     }
 
     const view = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/view$/.exec(path);
@@ -304,7 +376,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       }
       const version = versionOf(url);
       if (version === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
         // The file at its own folder's asset URL: relative assets, #anchors and frames
         // resolve natively, with the document CSP. A name the asset route refuses
@@ -322,20 +394,22 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // Another page an attached HTML page links to (`<a href="B-cards.html">`), not
+    // Another document an attached HTML or Markdown document links to, not
     // attached itself: shown read-only in the same pane. Reached by the attachment's
     // id plus a path relative to the attached page's own folder (never an absolute
     // path), with the asset route's rules: inside that folder by realpath, no hidden
-    // segment or dotenv name, `.html`/`.htm`, at most 2 MB.
+    // segment or dotenv name, matching document kind, at most 2 MB.
     const linked = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/linked-page$/.exec(path);
     if (linked) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment } = attachmentOf(linked[1]!);
-      if (readInboxAttachmentKind(attachment.kind) !== "html") {
-        throw new InboxError("attachment_not_html", `${attachment.name} is not an HTML page.`);
+      const kind = readInboxAttachmentKind(attachment.kind);
+      if (kind !== "html" && kind !== "markdown") {
+        throw new InboxError("attachment_not_html", `${attachment.name} is not an HTML or Markdown document.`);
       }
-      const page = await readInboxLinkedPage(attachment.path, url.searchParams.get("path"));
+      const page = await readInboxLinkedPage(attachment.path, url.searchParams.get("path"), kind);
+      if (kind === "markdown") return json({ serverSession, path: page.path, name: basename(page.path), html: null, text: page.text, url: null });
       return json({
         serverSession,
         path: page.path,
@@ -406,7 +480,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (route === "image" && kind !== "image") throw new InboxError("attachment_not_image", `${attachment.name} is not an image; download it instead.`);
       // An image a message shows: refused by its size before the image route hashes it whole.
       if ("ref" in attachment && versionOf(url) === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (check.ok && check.stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
           return json({ error: `${attachment.name} is larger than 10 MB; open the version it sent.`, code: "image_too_large" }, 413);
         }

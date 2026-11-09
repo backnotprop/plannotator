@@ -219,8 +219,7 @@ test('the guard shows once per replacement: the next Send carries the words only
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(page.locator('.ib-delivered')).toContainText('Saved for Claude Code');
-  const reply = await claude.waitForReply(first.thread_id, 10);
-  expect(reply.status).toBe('replied');
+  await claude.nextReply(first.thread_id, 10);
   // The Send also skips the questions it left open, each on the reply to its
   // own message; the words ride the last reply. No reply carries the replaced pick.
   const thread = await claude.readThread(first.thread_id);

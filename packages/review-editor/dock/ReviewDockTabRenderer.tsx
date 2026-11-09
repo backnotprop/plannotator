@@ -1,9 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
+import { useReviewStateOptional } from './ReviewStateContext';
+import { isReviewFilePreviewParams } from './reviewPanelTypes';
 
 /** Custom tab renderer with an explicit close button. */
 export const ReviewDockTabRenderer: React.FC<IDockviewPanelHeaderProps> = (props) => {
   const [title, setTitle] = useState(props.api.title ?? props.api.id);
+  const state = useReviewStateOptional();
+  // The preview tab (a file opened with a single click) is italic until kept.
+  const [preview, setPreview] = useState(() => isReviewFilePreviewParams(props.params));
+  useEffect(() => {
+    setPreview(isReviewFilePreviewParams(props.params) || isReviewFilePreviewParams(props.api.getParameters()));
+    const disposable = props.api.onDidParametersChange((next) => setPreview(isReviewFilePreviewParams(next)));
+    return () => disposable.dispose();
+  }, [props.api, props.params]);
 
   useEffect(() => {
     const titleDisposable = props.api.onDidTitleChange(() => {
@@ -20,10 +30,13 @@ export const ReviewDockTabRenderer: React.FC<IDockviewPanelHeaderProps> = (props
   return (
     <div
       className="dv-review-tab"
-      title={title}
+      title={preview ? `${title} (preview: double-click to keep it open)` : title}
+      data-preview-tab={preview || undefined}
+      onDoubleClick={preview && state?.onKeepFileTab ? () => state.onKeepFileTab!(props.api.id) : undefined}
     >
       <span
         className="dv-review-tab-label"
+        style={preview ? { fontStyle: 'italic' } : undefined}
       >
         {title}
       </span>

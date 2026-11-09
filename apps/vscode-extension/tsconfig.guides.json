@@ -3,7 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@plannotator/core/*": ["../../packages/core/*"],
-      "@plannotator/shared/*": ["../../packages/shared/*"]
+      "@plannotator/shared/*": ["../../packages/shared/*"],
+      "@plannotator/acp-client/*": ["../../packages/acp-client/*"]
     }
   },
   "include": ["src/guides/vscode/**/*.ts"],

@@ -328,6 +328,9 @@ export const CLAUDE_JOB_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(git grep *)", "Bash(git ls-remote *)", "Bash(gh api *)", "Bash(glab api *)",
   // jj: config injection (global flags, accepted anywhere) and external tools.
   "Bash(jj --config*)", "Bash(jj * --config*)", "Bash(jj * --tool*)",
+  // Plannotator's Inbox MCP server, by name, as Ask AI does (claude-agent-sdk.ts).
+  // `--strict-mcp-config` already loads no MCP server; this holds whatever the transport.
+  "mcp__plannotator-inbox",
 ];
 
 /** `--tools` / `--allowedTools` / `--disallowedTools` for a Claude agent job. */

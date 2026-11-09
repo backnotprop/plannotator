@@ -38,6 +38,7 @@ import {
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
   fetchPRFileBytes as fetchPRFileBytesCore,
+  fetchPRTree as fetchPRTreeCore,
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
@@ -153,6 +154,11 @@ export function fetchPRFileContent(
 
 export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
   return fetchPRFileBytesCore(runtime, ref, sha, filePath, maxBytes);
+}
+
+/** Every file of one commit from the platform tree API (All files without a checkout). */
+export function fetchPRTree(ref: PRRef, sha: string) {
+  return fetchPRTreeCore(runtime, ref, sha);
 }
 
 /** Submit a review through the Bun command runtime. */

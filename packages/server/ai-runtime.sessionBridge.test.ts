@@ -53,7 +53,7 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
       }));
       const hostStatus = {};
-      for (const host of ["localhost:4321", "127.0.0.1:4321", "127.9.8.7:4321", "[::1]:4321", "evil.example:4321", "localhost:9999", "localhost", "127.0.0.1.evil.example:4321"]) {
+      for (const host of ["localhost:4321", "127.0.0.1:4321", "127.9.8.7:4321", "[::1]:4321", "evil.example:4321", "localhost:9999", "localhost", "127.0.0.1.evil.example:4321", "plannotator.localhost:4321"]) {
         hostStatus[host] = (await createWithHost(host)).status;
       }
       const created = await (await runtime.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
@@ -78,6 +78,17 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
       while (asks.length === 0) await new Promise((r) => setTimeout(r, 2));
       runtime.dispose();
       await new Promise((r) => setTimeout(r, 10));
+      // A session advertised at a localhost subdomain (#2184) accepts that one name too.
+      const named = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, sessionBridge: bridge, getServerPort: () => 4321, localHostname: "plannotator.localhost" });
+      const namedStatus = {};
+      for (const host of ["plannotator.localhost:4321", "other.localhost:4321", "localhost:4321"]) {
+        namedStatus[host] = (await named.endpoints["/api/ai/session"](new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { host },
+          body: JSON.stringify({ providerId: "session-bridge", context: { mode: "code-review", review: { patch: "" } } }),
+        }))).status;
+      }
+      named.dispose();
       const bridgeEntry = caps.providers.find((p) => p.id === "session-bridge");
       const { existsSync } = await import("node:fs");
       console.log(JSON.stringify({
@@ -92,11 +103,13 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         hostStatus,
         reboundStatus,
         asksFromRebound: asks.length,
+        namedStatus,
       }));
     `);
     const proc = Bun.spawn([process.execPath, runner], {
       cwd: import.meta.dir,
-      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin` },
+      // No url host: without one, no localhost subdomain counts (#2184).
+      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin`, PLANNOTATOR_URL_HOST: "" },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -129,9 +142,11 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
         "localhost:9999": 403,
         localhost: 403,
         "127.0.0.1.evil.example:4321": 403,
+        "plannotator.localhost:4321": 403,
       },
       reboundStatus: 403,
       asksFromRebound: 1,
+      namedStatus: { "plannotator.localhost:4321": 200, "other.localhost:4321": 403, "localhost:4321": 200 },
     });
   }, 15_000);
 

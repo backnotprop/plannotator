@@ -53,6 +53,11 @@ import '../styles/global.css';
       // Read theme cookies and set classes before paint to prevent FOUC
       (function() {
         var root = document.documentElement;
+        // Desktop Linux: theme.css keeps Inter's feature tags off other fonts there
+        // (#1961). The same test as rootPlatform in packages/ui/utils/platform.ts.
+        var n = navigator;
+        var p = ((n.userAgentData && n.userAgentData.platform) || '') + ' ' + (n.platform || '') + ' ' + (n.userAgent || '');
+        if (!/Android|CrOS|Chrome OS|Mac|iPhone|iPad|iPod|Win/i.test(p) && /Linux|X11|BSD/i.test(p)) root.classList.add('pn-os-linux');
         // Color theme (palette) — marketing uses whatever the user set in the app
         var colorMatch = document.cookie.match(/(?:^|; )plannotator-color-theme=([^;]*)/);
         var colorTheme = colorMatch ? decodeURIComponent(colorMatch[1]) : 'plannotator';

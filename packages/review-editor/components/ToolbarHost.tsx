@@ -16,6 +16,7 @@ import { ExpandedCommentDialog } from './ExpandedCommentDialog';
 import { getEnabledLabels } from './ConventionalLabelPicker';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { formatLineRange, formatTokenContext } from '../utils/formatLineRange';
+import { SelectionChooser, type DiffSelectionActions } from './SelectionChooser';
 
 export interface ToolbarHostHandle {
   handleLineSelectionEnd: (range: SelectedLineRange | null) => void;
@@ -52,6 +53,10 @@ interface ToolbarHostProps {
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
   aiHistoryMessages?: AIChatEntry[];
+  /** Selected lines can only be asked about (no comments): the toolbar is the Ask box. */
+  askOnly?: boolean;
+  /** A host's choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  selectionActions?: DiffSelectionActions;
 }
 
 /**
@@ -71,6 +76,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     isAILoading,
     onViewAIResponse,
     aiHistoryMessages,
+    askOnly = false,
+    selectionActions,
   },
   ref,
 ) {
@@ -81,6 +88,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     onLineSelection,
     onAddAnnotation,
     onEditAnnotation,
+    askOnly,
+    chooser: !!selectionActions && !askOnly,
   });
 
   const conventionalCommentsEnabled = useConfigValue('conventionalComments');
@@ -150,9 +159,38 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
 
   const canSubmitAnnotation = toolbar.commentText.trim().length > 0 || toolbar.suggestedCode.trim().length > 0;
 
+  const takeSelection = useCallback(
+    (act: ((selection: { filePath: string; lineStart: number; lineEnd: number; side: 'old' | 'new' }) => void) | undefined) => {
+      const range = toolbar.toolbarState?.range;
+      if (!range || !act) return;
+      act({ filePath, lineStart: Math.min(range.start, range.end), lineEnd: Math.max(range.start, range.end), side: range.side === 'deletions' ? 'old' : 'new' });
+      toolbar.handleHide();
+    },
+    [filePath, toolbar.toolbarState, toolbar.handleHide],
+  );
+
+  if (toolbar.toolbarState && toolbar.choosing && selectionActions) {
+    return (
+      <SelectionChooser
+        toolbarRef={toolbar.toolbarRef}
+        position={toolbar.toolbarState.position}
+        range={toolbar.toolbarState.range}
+        // A picture is of the code as it is now: Show me only when both ends are on the new side (added or unchanged lines).
+        actions={
+          toolbar.toolbarState.range.side === 'deletions' || (toolbar.toolbarState.range.endSide ?? toolbar.toolbarState.range.side) === 'deletions'
+            ? { ...selectionActions, onShowMe: undefined }
+            : selectionActions
+        }
+        onComment={toolbar.chooseComment}
+        onAsk={() => takeSelection(selectionActions.onAsk)}
+        onShowMe={() => takeSelection(selectionActions.onShowMe)}
+      />
+    );
+  }
+
   return (
     <>
-      {toolbar.toolbarState && !toolbar.showCodeModal && !toolbar.showCommentModal && (
+      {toolbar.toolbarState && !toolbar.showCodeModal && (askOnly || !toolbar.showCommentModal) && (
         <AnnotationToolbar
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
@@ -182,10 +220,11 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
           isAILoading={isAILoading}
           onViewAIResponse={onViewAIResponse}
           aiHistoryMessages={aiHistoryMessages}
+          askOnly={askOnly}
         />
       )}
 
-      {toolbar.toolbarState && toolbar.showCommentModal && (
+      {toolbar.toolbarState && toolbar.showCommentModal && !askOnly && (
         <ExpandedCommentDialog
           title={expandedCommentTitle}
           commentText={toolbar.commentText}

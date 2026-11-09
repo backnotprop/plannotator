@@ -15,6 +15,7 @@ import {
   isNewAgentThread,
   notifiableItems,
   NOTIFICATION_TAG,
+  returnedItems,
   startsNewBurst,
   threadNotificationText,
   type NotifyItem,
@@ -22,10 +23,24 @@ import {
 
 const saved = (allowed_origin: string | null) => ({ enabled: true, dismissed: false, allowed_origin });
 
+// Snooze (approval "inbox-snooze"): a question asked during a snooze waits; the return asks it, once per return.
+describe('a return from a snooze', () => {
+  test('a returned thread with a question open notifies once, keyed by that return; without one, or not seen snoozed, it does not', () => {
+    const row = (id: string, open: number, back: string | null) => ({ thread_id: id, author: { name: 'Codex' }, questions: { open }, snooze_back: back }) as unknown as Parameters<typeof returnedItems>[0][number];
+    const rows = [row('a', 1, '2026-11-04T13:00:00.000Z'), row('b', 0, '2026-11-04T13:00:00.000Z'), row('c', 1, null), row('d', 1, '2026-11-04T13:00:00.000Z')];
+    const items = returnedItems(rows, new Set(['a', 'b', 'c']));
+    expect(items.map((item) => [item.threadId, item.asks, item.keys])).toEqual([['a', true, ['back:a:2026-11-04T13:00:00.000Z']]]);
+  });
+});
+
 describe('askKind', () => {
   test('a port change on this computer reads as moved', () => {
     expect(askKind(saved('http://localhost:52817'), 'default', 'http://localhost:61000')).toBe('moved');
     expect(askKind(saved('http://127.0.0.1:52817'), 'default', 'http://localhost:61000')).toBe('moved');
+  });
+  test('moving to plannotator.localhost (the cookie switch, #2184) reads as moved, at once', () => {
+    expect(askKind(saved('http://localhost:52817'), 'default', 'http://plannotator.localhost:52817', false)).toBe('moved');
+    expect(askKind(saved('http://plannotator.localhost:52817'), 'default', 'http://localhost:61000')).toBe('moved');
   });
   test('the tailnet address and back again are each a plain ask, not "moved"', () => {
     expect(askKind(saved('http://localhost:52817'), 'default', 'https://studio.tail0000.ts.net:52817')).toBe('ask');

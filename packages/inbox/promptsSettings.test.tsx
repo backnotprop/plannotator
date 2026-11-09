@@ -8,7 +8,7 @@
  * read-only prompts folded into one row. Requests go to a recording fetch
  * that answers like the server.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -258,7 +258,7 @@ test.skipIf(!hasDom)('text over the limit in config.json: the default stays mark
 });
 
 test.skipIf(!hasDom)("OpenCode 1: its row shows the default it really gets (the no-wake line), and Edit starts from it; a shared text replaces it", async () => {
-  const NO_WAKE = 'Plannotator Inbox is on: … Call wait_for_reply when you need their answer.';
+  const NO_WAKE = 'Plannotator Inbox is on: … Read the thread later with read_thread.';
   const start: InboxPromptsSettings = {
     ...model({ wakes: { 'claude-code': true, pi: true, opencode: false } }),
   };

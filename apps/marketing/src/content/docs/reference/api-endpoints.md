@@ -22,7 +22,7 @@ Used during plan review (`ExitPlanMode` hook).
 | `/api/image` | GET | Serve a local image by path query param |
 | `/api/upload` | POST | Upload an image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults` | GET | Detect available Obsidian vaults |
-| `/api/save-notes` | POST | Save plan to Obsidian/Bear on demand |
+| `/api/save-notes` | POST | Save plan to Obsidian/Bear/Octarine/Notion on demand |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch) |
@@ -54,6 +54,7 @@ Body:
   "planSave": { "enabled": true, "customPath": null },
   "obsidian": { "vaultPath": "/path/to/vault", "folder": "plannotator", "plan": "..." },
   "bear": { "plan": "..." },
+  "notion": { "parentPageId": "01234567-89ab-cdef-0123-456789abcdef", "plan": "..." },
   "feedback": "optional annotations if present"
 }
 ```
@@ -80,7 +81,7 @@ Used during code review (`/plannotator-review`).
 | `/api/diff` | GET | Returns the diff and session info |
 | `/api/semantic-diff` | GET | Returns optional semantic analysis for the active patch |
 | `/api/call-flow` | GET | Returns snapshot-bound CallDiff trees, raw output, per-file impacts, and skipped-language metadata (`?snapshot=<id>`) |
-| `/api/call-flow/install` | POST | Starts or joins the selective core/pack install; the consented UI calls it once per target per review session, while Retry/install-ahead use the same route. Body `{ languageIds?: [...] }`; omission uses the current review plan (Node 22+ preflight; same-origin only) |
+| `/api/call-flow/install` | POST | Starts or joins the selective core/pack install; the consented UI calls it once per target per review session, while Retry/install-ahead use the same route. Body `{ languageIds?: [...] }`; omission uses the current review plan (Node 22.18+ preflight; same-origin only) |
 | `/api/call-flow/install-status` | GET | Polls `{ state, stage?, languageIds?, currentLanguageId?, error? }` across `downloading`, `verifying`, `installing-deps`, `building` |
 | `/api/review-analysis` | GET / POST | GET refreshes adverts without mutation; POST persists independent `{ semanticDiff, callFlow }` flags and returns adverts |
 | `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress; writes carry the scope key and per-file fingerprints, and stale snapshots return 409 |

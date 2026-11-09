@@ -59,4 +59,19 @@ describe.if(hasDom)('ImageAnnotator compact toolbar layout', () => {
       expect(scroller?.contains(control ?? null)).toBe(true);
     }
   });
+
+  test('every toolbar button has a name a screen reader can say, and the picked tool and colour say so', async () => {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(<ImageAnnotator imageSrc="data:image/png;base64," isOpen onAccept={async () => {}} onClose={() => {}} />);
+    });
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>('[data-pn-image-annotator-toolbar] button')];
+    expect(buttons.length).toBeGreaterThan(10);
+    // Icon and swatch buttons have no words of their own: each needs aria-label.
+    expect(buttons.filter((button) => !button.getAttribute('aria-label')?.trim()).map((button) => button.outerHTML.slice(0, 80))).toEqual([]);
+    const pressed = buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').map((button) => button.getAttribute('aria-label'));
+    expect(pressed).toEqual(['Pen (1)', 'Colour: Red']);
+  });
 });

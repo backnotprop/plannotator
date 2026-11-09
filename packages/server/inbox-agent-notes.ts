@@ -2,30 +2,46 @@
  * The Inbox note in each agent's own instructions file (the approved
  * "inbox-agent-awareness" design, decision 5; HOOKS.md section 6.2).
  *
- * Written only with the person's yes: the window's one-time question, a
- * Settings switch, or `plannotator inbox --notes <ids>` (the install prompt,
- * after the person agreed in chat). Never added by a start, the shim or a
- * connection. A note already installed is brought up to the current version
- * by the Inbox's start, only while it is byte for byte an earlier version
- * Plannotator wrote (refreshInboxNotes).
+ * Written by itself (approval "inbox-agent-note-auto", which superseded the
+ * one-time dialog) for every connected agent proven to load it
+ * (INBOX_NOTE_AUTO_AGENT_IDS: Claude Code, Codex, Gemini CLI, Pi, OpenCode),
+ * once per agent, at the Inbox's start and after each connecting run
+ * (autoAddInboxNotes). Never for an agent already asked (an old dialog's Not
+ * now or Don't add a note), one the person turned off in Settings, or with
+ * PLANNOTATOR_INBOX_NOTES=0. Qwen Code's note is still offered by the window's
+ * one-time question, Cursor's copied by hand. A Settings switch and
+ * `plannotator inbox --notes <ids>` add one too. A note already installed is
+ * brought up to the current version by the Inbox's start, only while it is
+ * byte for byte an earlier version Plannotator wrote (refreshInboxNotes).
  *
  * Where (honouring CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG_DIR /
- * XDG_CONFIG_HOME, PI_CODING_AGENT_DIR and Gemini's `context.fileName`):
+ * XDG_CONFIG_HOME, PI_CODING_AGENT_DIR, QWEN_HOME and Gemini's and Qwen's
+ * `context.fileName`):
  *  - Claude Code: `~/.claude/rules/plannotator-inbox.md`, a file Plannotator owns.
- *  - Codex: `AGENTS.override.md` when it exists, else `AGENTS.md` (created only without an override).
+ *  - Codex: `AGENTS.override.md` when Codex reads it (a file with text other than
+ *    whitespace), else `AGENTS.md` (created when missing). An empty override is
+ *    skipped by Codex; writing into it would hide the person's AGENTS.md.
  *  - OpenCode: `~/.config/opencode/AGENTS.md`, ONLY when it exists: creating it
  *    would stop OpenCode 1 reading the person's `~/.claude/CLAUDE.md`.
  *  - Pi: the first that exists of `AGENTS.override.md`, `AGENTS.md`,
  *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
  *    created only when none does.
  *  - Gemini CLI: `~/.gemini/<context.fileName>`, default `GEMINI.md`.
- *  - Cursor: manual copy to Settings → Rules; Cursor documents no supported global rules file.
+ *  - Qwen Code: `$QWEN_HOME/<context.fileName>` (default folder `~/.qwen`), default `QWEN.md`.
+ *  - Cursor: copied by hand into Customize → Rules in the app; Cursor documents no global rules file, so nothing is written.
  *
- * The block sits between markers at the END of the file. Exactly one start
+ * The block sits between markers at the END of the file, or right above a
+ * Gemini CLI or Qwen Code memory section (`## Gemini Added Memories`, `## Qwen
+ * Added Memories`): their memory tools add to that section up to the next `## `
+ * heading, which would otherwise be the note's own. Exactly one start
  * before exactly one end: the block is ours; none: appended; anything else:
  * damaged, nothing is written. `inbox/agent-notes.json` keeps each block's
  * SHA-256, so a block the person edited is theirs and never overwritten (a
- * newer note version is written only over an untouched block). Writes keep
+ * newer note version is written only over an untouched block). The one
+ * exception: in an edited block that has a record, refreshInboxNotes swaps the
+ * exact retired sentence "otherwise call `wait_for_reply`" for "otherwise read
+ * the thread later with `read_thread`", touching no other byte and no record.
+ * Writes keep
  * line endings and mode, follow symlinks, are atomic, and are skipped when
  * nothing changes (agent-files.ts).
  */
@@ -36,12 +52,14 @@ import { basename, dirname, join } from "node:path";
 import {
   INBOX_AGENT_LABELS,
   INBOX_NOTE_AGENT_IDS,
+  INBOX_NOTE_AUTO_AGENT_IDS,
   type InboxAgentNoteStatus,
   type InboxNoteAgentId,
+  type InboxNoteAutoAdd,
 } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
-import { describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
+import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
   agentSpec,
@@ -49,6 +67,7 @@ import {
   codexHome,
   displayPath,
   geminiDir,
+  qwenDir,
   openCodeConfigDir,
   inboxAgentReach,
   piAgentDir,
@@ -62,14 +81,33 @@ import {
  * they are here, ask in this chat instead") replaced by the chat-or-Inbox rule,
  * plus the check before a reply_to into a thread not read in this context
  * window and where a question's recommendation goes (v2, never released, had
- * those two lines after v1's). An earlier block Plannotator wrote is brought
+ * those two lines after v1's). v4 (2026-10-27): v3 plus the follow-through
+ * line (INBOX_FOLLOW_THROUGH_RULE) after the reply line; v3 shipped in
+ * 0.28.34 and is on users' disks. v5 (2026-10-29): v4 plus the work-stream
+ * line (INBOX_THREAD_RULE) after the follow-through line; v4 shipped in
+ * 0.28.36 and is on users' disks. v6 (2026-10-31): v5 with the question line
+ * reworded to keep the choices in their natural order (the owner: agents moved
+ * their recommendation first) and, right after the ask line, one line that a
+ * decision inside a report or summary still goes in a `:::question` block, one
+ * per decision (the owner: agents hand decisions over as prose); v5 is on
+ * users' disks, v6 was on no tag when this line went in, so it was amended in
+ * place. v7 (2026-11-01): v6 with the reply line naming read_thread, since
+ * wait_for_reply is gone from the Inbox; v6 is on users' disks. v8
+ * (2026-11-02): v7 with the hand-over clause putting a summary's pictures in
+ * place in the body (the owner: agents left them at the bottom as
+ * attachments); v7 is on users' disks. v9 (2026-11-08): v8 plus one line
+ * after the decision line, that an issue or PR outside the repo the session
+ * started in is written owner/repo#123 or its URL (the owner, after a
+ * chief-of-staff agent's bare refs linked into its own repo); v8 shipped in
+ * 0.28.47 and is on users' disks. An earlier
+ * block Plannotator wrote is brought
  * up to date at the Inbox's next start (refreshInboxNotes) or when the note
  * is added again (`--notes`, the Settings switch); a block the person edited
- * never is. Every version's text is frozen as literals and its block's hash
+ * never is (bar the one retired sentence, above). Every version's text is frozen as literals and its block's hash
  * pinned (inbox-agent-notes-refresh.test.ts): a released note's bytes never
  * change without a new version, or the notes on disk would read as edited.
  */
-export const INBOX_NOTE_VERSION = 3;
+export const INBOX_NOTE_VERSION = 9;
 const noteStart = (version: number) =>
   `<!-- plannotator-inbox:start v${version} · added by Plannotator. Remove it in the Inbox's Settings or with \`plannotator uninstall\` -->`;
 export const INBOX_NOTE_START = noteStart(INBOX_NOTE_VERSION);
@@ -91,14 +129,8 @@ const INBOX_NOTE_BODY_V2 = [
   'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
 ].join("\n");
 
-/**
- * The note (DESIGN.md section 2.3): true with or without the tool, so a
- * session without it is not misled. Loaded in every session of the agent, so
- * every line earns its place. v3 (the owner, 2026-10-27): chat or Inbox is
- * never a guess at whether the person is here; a decision in the Inbox stays
- * there, the chat only says what waits.
- */
-export const INBOX_NOTE_BODY = [
+/** v3's body, exactly as 0.28.34 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V3 = [
   "## Plannotator Inbox",
   "",
   "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
@@ -109,12 +141,127 @@ export const INBOX_NOTE_BODY = [
   'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
 ].join("\n");
 
+/** v4's body, exactly as 0.28.36 through 0.28.38 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V4 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
+].join("\n");
+
+/** v5's body, exactly as builds before v6 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V5 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
+].join("\n");
+
+/** v6's body, exactly as builds before v7 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V6 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
+/** v7's body, exactly as builds before v8 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V7 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
+/** v8's body, exactly as 0.28.47 through 0.28.53 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V8 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (a short summary with its pictures in place, `![alt](path)` in the body, and the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
+/**
+ * The note (DESIGN.md section 2.3): true with or without the tool, so a
+ * session without it is not misled. Loaded in every session of the agent, so
+ * every line earns its place. v3 (the owner, 2026-10-27): chat or Inbox is
+ * never a guess at whether the person is here; a decision in the Inbox stays
+ * there, the chat only says what waits. v4 (the owner, 2026-10-27): be
+ * proactive in the Inbox, the one wording of INBOX_FOLLOW_THROUGH_RULE
+ * (kept a literal here; tests/inbox-guidance-parity.test.ts holds it equal).
+ * v5 (the owner, 2026-10-29): one thread per work stream, the one wording of
+ * INBOX_THREAD_RULE (a literal too, held equal by the same test). v6 (the
+ * owner, 2026-10-31): choices stay in their natural order; only the
+ * `Recommended:` line marks the pick, never its place; a decision inside a
+ * report still goes in its own `:::question` block. v7 (2026-11-01): the reply
+ * line says to read the thread later, wait_for_reply being gone. v8
+ * (2026-11-02): a hand-over's pictures sit in place in the body, the files
+ * to read in `attachments`. v9 (the owner, 2026-11-08, the chief-of-staff
+ * report): an issue or PR outside the starting repo is written owner/repo#123
+ * or its URL every time; the tool's INBOX_REF_LINK_RULE says the same at length.
+ */
+export const INBOX_NOTE_BODY = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (a short summary with its pictures in place, `![alt](path)` in the body, and the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "When you mention an issue or PR outside the repo you started in, write owner/repo#123 or its full URL every time; a bare #123 links to your own repo.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
+/** Cursor keeps its global rules in the app, so its note is copied by hand (the body only, never the markers). */
+export const CURSOR_NOTE_REASON = "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy.";
+
 export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBOX_NOTE_END}`;
 
 /** Every block an earlier Plannotator wrote, untouched (LF): read as Plannotator's own when no record names it. */
 export const INBOX_NOTE_EARLIER_BLOCKS: readonly string[] = [
   `${noteStart(1)}\n${INBOX_NOTE_BODY_V1}\n${INBOX_NOTE_END}`,
   `${noteStart(2)}\n${INBOX_NOTE_BODY_V2}\n${INBOX_NOTE_END}`,
+  `${noteStart(3)}\n${INBOX_NOTE_BODY_V3}\n${INBOX_NOTE_END}`,
+  `${noteStart(4)}\n${INBOX_NOTE_BODY_V4}\n${INBOX_NOTE_END}`,
+  `${noteStart(5)}\n${INBOX_NOTE_BODY_V5}\n${INBOX_NOTE_END}`,
+  `${noteStart(6)}\n${INBOX_NOTE_BODY_V6}\n${INBOX_NOTE_END}`,
+  `${noteStart(7)}\n${INBOX_NOTE_BODY_V7}\n${INBOX_NOTE_END}`,
+  `${noteStart(8)}\n${INBOX_NOTE_BODY_V8}\n${INBOX_NOTE_END}`,
 ];
 
 export const INBOX_AGENT_NOTES_FILE = "agent-notes.json";
@@ -123,7 +270,7 @@ export const INBOX_AGENT_NOTES_FILE = "agent-notes.json";
 const START_LINE = /^<!-- plannotator-inbox:start\b[^\r\n]*-->[ \t]*\r?$/gm;
 const END_LINE = /^<!-- plannotator-inbox:end -->[ \t]*\r?$/gm;
 
-/** `PLANNOTATOR_INBOX_NOTES=0` hides the offer and the note rows and refuses new notes; notes already written stay until switched off or uninstalled. */
+/** `PLANNOTATOR_INBOX_NOTES=0` writes no note by itself, hides the offer and the note rows and refuses new notes; notes already written stay until switched off or uninstalled. */
 export const INBOX_NOTES_ENV = "PLANNOTATOR_INBOX_NOTES";
 export function inboxNotesDisabled(env: Readonly<Record<string, string | undefined>>): boolean {
   const value = env[INBOX_NOTES_ENV]?.trim().toLowerCase();
@@ -214,9 +361,13 @@ interface NoteTarget {
   reason: string | null;
 }
 
-/** Gemini's instruction file name (`context.fileName`, a string or a list; the first), default GEMINI.md. */
-function geminiContextFile(e: AgentEnvironment): string {
-  const read = readAgentFile(join(geminiDir(e), "settings.json"));
+/**
+ * The instruction file name an agent's settings.json names (`context.fileName`,
+ * a string or a list; the first), else `fallback`. Gemini CLI and Qwen Code
+ * (a Gemini CLI fork) read it the same way.
+ */
+function contextFileName(settingsPath: string, fallback: string): string {
+  const read = readAgentFile(settingsPath);
   if (read.kind === "file") {
     try {
       const context = (JSON.parse(stripJsonComments(read.text)) as { context?: { fileName?: unknown } }).context;
@@ -226,7 +377,7 @@ function geminiContextFile(e: AgentEnvironment): string {
       // The default.
     }
   }
-  return "GEMINI.md";
+  return fallback;
 }
 
 /** Claude Code's rules file: Plannotator's own (it holds only the note). */
@@ -234,16 +385,41 @@ function claudeRulesFile(e: AgentEnvironment): string {
   return join(claudeConfigDir(e), "rules", "plannotator-inbox.md");
 }
 
+/**
+ * Whether Codex reads its `AGENTS.override.md` (codex-rs codex-home
+ * instructions: the first of `AGENTS.override.md`, `AGENTS.md` that is a
+ * regular file, can be read, and holds text once trimmed). An empty or
+ * whitespace-only override is skipped, so Codex reads `AGENTS.md`; a note
+ * written into it would make Codex read only the override from then on.
+ * Trimmed as Rust's `str::trim` does (Unicode White_Space; a BOM is text),
+ * after a lossy UTF-8 decode, as Codex reads it.
+ */
+function codexReadsOverride(path: string): boolean {
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return false;
+    // Far larger than any file of only whitespace: read as text by Codex.
+    if (stat.size > 1024 * 1024) return true;
+    const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(readFileSync(path));
+    return text.replace(RUST_WHITESPACE, "") !== "";
+  } catch {
+    return false;
+  }
+}
+
+/** Rust's `char::is_whitespace` (the Unicode White_Space property), which `str::trim` removes. */
+const RUST_WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g;
+
 export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTarget {
   const exists = (path: string) => existsSync(path);
   switch (agent) {
     case "cursor":
-      return { path: null, create: false, reason: "Cursor User Rules are managed in Settings → Rules; Plannotator cannot install, update or remove a copied rule." };
+      return { path: null, create: false, reason: CURSOR_NOTE_REASON };
     case "claude-code":
       return { path: claudeRulesFile(e), create: !exists(claudeRulesFile(e)), reason: null };
     case "codex": {
       const override = join(codexHome(e), "AGENTS.override.md");
-      if (exists(override)) return { path: override, create: false, reason: null };
+      if (codexReadsOverride(override)) return { path: override, create: false, reason: null };
       const file = join(codexHome(e), "AGENTS.md");
       return { path: file, create: !exists(file), reason: null };
     }
@@ -260,7 +436,11 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
       return { path: join(dir, "AGENTS.md"), create: true, reason: null };
     }
     case "gemini": {
-      const file = join(geminiDir(e), geminiContextFile(e));
+      const file = join(geminiDir(e), contextFileName(join(geminiDir(e), "settings.json"), "GEMINI.md"));
+      return { path: file, create: !exists(file), reason: null };
+    }
+    case "qwen": {
+      const file = join(qwenDir(e), contextFileName(join(qwenDir(e), "settings.json"), "QWEN.md"));
       return { path: file, create: !exists(file), reason: null };
     }
   }
@@ -307,6 +487,60 @@ function appendBlock(text: string, nl: string): string {
   if (!text.trim()) return text && !/\r?\n$/.test(text) ? `${text}${nl}${blockIn(nl)}` : `${text}${blockIn(nl)}${nl}`;
   if (/\r?\n$/.test(text)) return `${text}${nl}${blockIn(nl)}${nl}`;
   return `${text}${nl}${nl}${blockIn(nl)}`;
+}
+
+/**
+ * The memory sections Gemini CLI's `save_memory` and Qwen Code's global memory
+ * write add to. Both find the header as the first occurrence of this text
+ * anywhere in the file and add the new item at the end of the section, which
+ * runs to the next `\n## `. A note after such a section would be that next
+ * heading, so a remembered fact would land inside the note's markers (the note
+ * would then read as the person's edit, and turning it off would take the fact
+ * with it). The note goes above the section instead.
+ */
+const MEMORY_SECTION_HEADERS = ["## Gemini Added Memories", "## Qwen Added Memories"] as const;
+
+/** Where the line that holds the first memory section header starts (found as the memory tools find it), or -1. */
+function memorySectionLine(text: string): number {
+  let at = -1;
+  for (const header of MEMORY_SECTION_HEADERS) {
+    const index = text.indexOf(header);
+    if (index !== -1 && (at === -1 || index < at)) at = index;
+  }
+  return at === -1 ? -1 : text.lastIndexOf("\n", at - 1) + 1;
+}
+
+/** Whether the block at `start` sits after a memory section header (where the memory tool could write into it). */
+function afterMemorySection(text: string, start: number): boolean {
+  const line = memorySectionLine(text);
+  return line !== -1 && line < start;
+}
+
+/**
+ * `block` put above the memory section of `text` (which has one): one blank
+ * line before it (none when only whitespace is before it) and its line break
+ * after it, at the start of the header's line, or of the blank line right
+ * above the header when there is one (so a blank line stays between the
+ * block and the header). stripBlock takes it out byte for byte: the block,
+ * its line break, and the blank line before it.
+ */
+function placeAboveMemory(text: string, block: string, nl: string): string {
+  let at = memorySectionLine(text);
+  // The line before the header's ends at `at - ended`; it is blank when another line break ends right before it.
+  const ended = breakBefore(text, at);
+  if (ended && breakBefore(text, at - ended)) at -= ended;
+  const head = text.slice(0, at);
+  return `${head}${head.trim() ? nl : ""}${block}${nl}${text.slice(at)}`;
+}
+
+/** `text` with the block added: above a memory section when the file has one, else at the end (appendBlock). */
+function insertBlock(text: string, nl: string): string {
+  return memorySectionLine(text) === -1 ? appendBlock(text, nl) : placeAboveMemory(text, blockIn(nl), nl);
+}
+
+/** The block at [start, end) moved above the memory section, as `block` (the note in the line ending given). */
+function moveAboveMemory(text: string, start: number, end: number, block: string, nl: string): string {
+  return placeAboveMemory(stripBlock(text, start, end), block, nl);
 }
 
 /** The length of the line break that ends just before `i` (2 for CRLF, 1 for LF), or 0. */
@@ -395,7 +629,35 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
 
 export type NoteChange =
   | { ok: true; agent: InboxNoteAgentId; action: "added" | "created" | "updated" | "unchanged" | "shared" | "removed" | "deleted" | "kept-edited" | "kept-shared"; path: string }
-  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
+  /** `skipped` (only with `auto`): left alone on purpose, never to be tried again by itself (read-only, hard-linked, the note pasted without markers). */
+  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null; skipped?: true };
+
+/** How an add may write. */
+export interface AddNoteOptions {
+  /**
+   * Written by itself (autoAddInboxNotes), with nobody's yes: the file is left alone, as the start's
+   * refresh leaves it, when it is read-only (no owner write bit) or has other hard links (the atomic
+   * rename would split them), and when it already holds the note pasted by hand without markers.
+   */
+  auto?: boolean;
+  /** Tests: runs between the read and the write, to change the file under the add. */
+  beforeWrite?: (target: string) => void;
+}
+
+/** The note pasted by hand without markers (as Cursor's copy, or an older prompt showed it): its heading on a line of its own. */
+const UNMARKED_NOTE = /^[ \t]{0,3}#{1,6}[ \t]+Plannotator Inbox[ \t]*#*[ \t]*\r?$/m;
+
+/** The file is still as `read` found it (the bytes and the mode, or still missing): compare before the write. */
+function unchangedSince(read: AgentFileRead): boolean {
+  try {
+    if (read.kind === "missing") return !existsSync(read.target);
+    if (read.kind !== "file") return false;
+    if ((statSync(read.target).mode & 0o777) !== read.mode) return false;
+    return readFileSync(read.target).equals(Buffer.from(withBom(read.text, read.bom), "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgentNoteRecord | null): void {
   const file = readInboxAgentNotes(dataDir);
@@ -405,7 +667,7 @@ function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgent
 }
 
 /** Add (or bring up to date) the note for one agent. Never overwrites a block the person edited. */
-export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date()): NoteChange {
+export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date(), options: AddNoteOptions = {}): NoteChange {
   const target = noteTarget(agent, e);
   const shown = displayPath(target.path, e);
   if (!agentHomeAllowed(e)) return { ok: false, agent, reason: "not in a test's scratch home", path: shown };
@@ -429,22 +691,38 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   if (found.kind === "one") {
     const hash = sha256(found.block);
     before = hash;
+    // A note Plannotator wrote after a Gemini or Qwen memory section moves above it (the memory tool would write into it).
+    const moves = afterMemorySection(original, found.start);
     if (hash === sha256(INBOX_NOTE_BLOCK)) {
-      next = original;
-      action = notes[agent] || !owner ? "unchanged" : "shared";
+      next = moves ? moveAboveMemory(original, found.start, found.end, found.block, nl) : original;
+      action = moves ? "updated" : notes[agent] || !owner ? "unchanged" : "shared";
     } else if (owner ? ownedBy(owner.block_sha256, hash) : EARLIER_BLOCK_HASHES.has(hash)) {
       // An older note Plannotator wrote (its record, or with the record lost, a block exactly as an earlier version wrote it).
-      next = original.slice(0, found.start) + blockIn(nl) + original.slice(found.end);
+      next = moves ? moveAboveMemory(original, found.start, found.end, blockIn(nl), nl) : original.slice(0, found.start) + blockIn(nl) + original.slice(found.end);
       action = "updated";
     } else {
       // The person's edit: theirs to keep.
       return { ok: true, agent, action: "kept-edited", path: shown! };
     }
   } else {
-    next = appendBlock(original, nl);
+    if (options.auto && UNMARKED_NOTE.test(original)) {
+      return { ok: false, agent, reason: `${shown} already has the note, pasted without markers`, path: shown, skipped: true };
+    }
+    next = insertBlock(original, nl);
     action = read.kind === "missing" ? "created" : "added";
   }
   if (read.kind !== "file" || next !== original) {
+    if (options.auto && read.kind === "file") {
+      if ((read.mode & 0o200) === 0) return { ok: false, agent, reason: `${shown} is read-only`, path: shown, skipped: true };
+      try {
+        if (statSync(read.target).nlink > 1) return { ok: false, agent, reason: `${shown} has other hard links`, path: shown, skipped: true };
+      } catch (error) {
+        return { ok: false, agent, reason: `${shown} can't be read (${describeFsError(error)})`, path: shown };
+      }
+    }
+    // Compare and write, as the refresh does: a memory Gemini saved or an edit made since the read is never lost.
+    options.beforeWrite?.(read.target);
+    if (!unchangedSince(read)) return { ok: false, agent, reason: `${shown} changed while the note was being added; try again`, path: shown };
     try {
       writeAgentFileAtomic(read.target, withBom(next, read.kind === "file" && read.bom), read.kind === "file" ? read.mode : 0o644);
     } catch (error) {
@@ -483,7 +761,9 @@ export interface NoteRefresh {
   path: string;
   /**
    * `refreshed`: the block was an earlier version, untouched, and now is this
-   * one; `shared`: another agent's record named the same file, refreshed for
+   * one (moved above a Gemini or Qwen memory section when it was after one);
+   * `moved`: already this version, untouched, and moved above such a section;
+   * `shared`: another agent's record named the same file, refreshed for
    * it; `current`: already this version; `edited`: not byte for byte a version
    * Plannotator wrote, or not the one its record names (the person's, left
    * alone); `none`: no block (the person removed it; never put back);
@@ -494,7 +774,7 @@ export interface NoteRefresh {
    * the file changed after it was read (left for the next start); `refused`:
    * not readable or writable, or agent-notes.json could not be written.
    */
-  result: "refreshed" | "shared" | "current" | "edited" | "none" | "damaged" | "missing" | "read-only" | "hard-linked" | "changed" | "refused";
+  result: "refreshed" | "moved" | "shared" | "current" | "edited" | "none" | "damaged" | "missing" | "read-only" | "hard-linked" | "changed" | "refused";
 }
 
 export interface RefreshInboxNotesOptions {
@@ -511,8 +791,13 @@ export interface RefreshInboxNotesOptions {
  *    line (findBlock); any other markers are damaged and nothing is written;
  *  - it is replaced only when it is byte for byte (line endings aside) a block
  *    an earlier Plannotator wrote AND the one its record names (the hash):
- *    a block the person edited is never touched, nor a file without a record;
+ *    a block the person edited is never rewritten, nor a file without a record;
+ *    the one exception is the retired reply sentence (RETIRED_REPLY_PHRASE),
+ *    swapped in place inside an edited block, the record left as it is;
  *  - a note the person removed (no block) is never put back;
+ *  - an untouched note after a Gemini or Qwen memory section's header is moved
+ *    above it (the memory tool writes up to the next `## ` heading, the note's
+ *    own); an edited one stays where it is;
  *  - a read-only file (no owner write bit) is left alone, and so is a file
  *    with other hard links (the atomic rename would split them);
  *  - the file is read again right before the write and left alone when it
@@ -533,6 +818,8 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   const current = sha256(INBOX_NOTE_BLOCK);
   const byPath = new Map<string, InboxNoteAgentId[]>();
   for (const agent of INBOX_NOTE_AGENT_IDS) {
+    // Cursor's note is copied by hand into the app: never Plannotator's to rewrite, whatever a record says.
+    if (agent === "cursor") continue;
     const record = file.notes[agent];
     if (record) byPath.set(record.path, [...(byPath.get(record.path) ?? []), agent]);
   }
@@ -592,7 +879,11 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   return results;
 }
 
-/** One file of refreshInboxNotes: its outcome, the file written only for `refreshed`. */
+/** The reply sentence of v1 to v6 (wait_for_reply is gone from the Inbox) and what replaces it inside a block the person edited. */
+const RETIRED_REPLY_PHRASE = "otherwise call `wait_for_reply`";
+const CURRENT_REPLY_PHRASE = "otherwise read the thread later with `read_thread`";
+
+/** One file of refreshInboxNotes: its outcome, the file written for `refreshed`, and for `edited` only when the retired reply sentence was swapped. */
 function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: RefreshInboxNotesOptions, commitRecords: () => () => void): NoteRefresh["result"] {
   const read = readAgentFile(path);
   if (read.kind === "missing") return "missing";
@@ -601,13 +892,26 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
   if (found.kind === "none") return "none";
   if (found.kind === "damaged") return "damaged";
   const hash = sha256(found.block);
-  if (hash === sha256(INBOX_NOTE_BLOCK)) return "current";
-  if (!EARLIER_BLOCK_HASHES.has(hash) || ![...recorded].some((r) => ownedBy(r, hash))) return "edited";
-  if ((read.mode & 0o200) === 0) return "read-only";
-  if (statSync(read.target).nlink > 1) return "hard-linked";
+  // A note after a Gemini or Qwen memory section moves above it, only while it is the very block its record names.
+  const moves = afterMemorySection(read.text, found.start);
+  const current = hash === sha256(INBOX_NOTE_BLOCK);
+  if (current && (!moves || !recorded.has(hash))) return "current";
+  const untouched = (current || EARLIER_BLOCK_HASHES.has(hash)) && [...recorded].some((r) => ownedBy(r, hash));
+  // The one exception for a block the person edited: the exact retired sentence inside the block is
+  // swapped, every other byte and the record kept (so it still reads as edited, and a second run finds nothing).
+  const patchedBlock = untouched ? null : found.block.split(RETIRED_REPLY_PHRASE).join(CURRENT_REPLY_PHRASE);
+  const patching = patchedBlock !== null && patchedBlock !== found.block;
+  if (!untouched && !patching) return "edited";
+  const kept: NoteRefresh["result"] = untouched ? "read-only" : "edited";
+  if ((read.mode & 0o200) === 0) return kept;
+  if (statSync(read.target).nlink > 1) return untouched ? "hard-linked" : "edited";
   // The block's own line ending, so the bytes around it never change their ending.
   const nl = found.block.includes("\r\n") ? "\r\n" : "\n";
-  const next = read.text.slice(0, found.start) + blockIn(nl) + read.text.slice(found.end);
+  const next = patching
+    ? read.text.slice(0, found.start) + patchedBlock! + read.text.slice(found.end)
+    : moves
+      ? moveAboveMemory(read.text, found.start, found.end, blockIn(nl), nl)
+      : read.text.slice(0, found.start) + blockIn(nl) + read.text.slice(found.end);
   options.beforeWrite?.(read.target);
   // Compare and write: the bytes on disk must still be the ones this read (and the mode the same).
   const before = Buffer.from(withBom(read.text, read.bom), "utf8");
@@ -619,6 +923,15 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
     return "changed";
   }
   if (!now.equals(before)) return "changed";
+  if (patching) {
+    // Only the file changes: the record keeps the hash of what Plannotator wrote, so the block stays the person's.
+    try {
+      writeAgentFileAtomic(read.target, withBom(next, read.bom), read.mode, false);
+    } catch {
+      return "refused";
+    }
+    return "edited";
+  }
   let rollback: () => void;
   try {
     rollback = commitRecords();
@@ -635,7 +948,7 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
     }
     return "refused";
   }
-  return "refreshed";
+  return current ? "moved" : "refreshed";
 }
 
 /**
@@ -855,4 +1168,68 @@ export async function markNotesAsked(ids: readonly InboxNoteAgentId[], options: 
   const before = await notesAsked(options);
   const asked = INBOX_NOTE_AGENT_IDS.filter((id) => before.includes(id) || ids.includes(id));
   saveConfig({ inboxAgentNotes: { ...(loadConfig().inboxAgentNotes ?? {}), offered: true, asked } });
+}
+
+// ---------------------------------------------------------------------------
+// Written by itself (approval "inbox-agent-note-auto", which superseded the
+// one-time dialog for the agents proven to load the note)
+
+/**
+ * Write the note for every connected agent proven to load it
+ * (INBOX_NOTE_AUTO_AGENT_IDS) that can take one now (`noteCandidateIds`: found,
+ * reaching the Inbox, no note yet, a file to put it in, not failed by the last
+ * connecting run) and was never asked about it (`notesAsked`: an old dialog's
+ * Add, Not now or Don't add a note, `--notes`, a Settings switch on or off, or
+ * a note already written). Each one written is recorded as asked, so it is
+ * written once: a note the person removes, by hand or in Settings, never comes
+ * back by itself. One that cannot be written is left unasked and tried again
+ * next time, said nowhere (Settings → Agents shows its state). Nothing with
+ * PLANNOTATOR_INBOX_NOTES=0, or in a test whose home is not a scratch folder.
+ * Returns the notes written (paths with `~`).
+ */
+export async function autoAddInboxNotes(options: ConnectOptions): Promise<InboxNoteAutoAdd[]> {
+  const e = options.environment;
+  if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env)) return [];
+  const asked = new Set(await notesAsked(options));
+  const candidates = (await noteCandidateIds(options)).filter((id) => INBOX_NOTE_AUTO_AGENT_IDS.includes(id) && !asked.has(id));
+  const written: InboxNoteAgentId[] = [];
+  const added: InboxNoteAutoAdd[] = [];
+  for (const agent of candidates) {
+    const change = addInboxNote(agent, options.dataDir, e, options.now?.(), { auto: true });
+    // Left alone on purpose (read-only, hard-linked, pasted without markers): answered, never tried again by itself.
+    if (!change.ok && change.skipped) written.push(agent);
+    if (!change.ok || change.action === "kept-edited") continue;
+    written.push(agent);
+    if (change.action !== "unchanged") added.push({ agent, path: change.path });
+  }
+  await markNotesAsked(written, options);
+  if (added.length > 0) {
+    // Said once in the window (its quiet line); a later run's adds join the ones not said yet.
+    const saved = loadConfig().inboxAgentNotes ?? {};
+    const unsaid = (saved.auto ?? []).filter((entry) => !added.some((next) => next.agent === entry.agent));
+    saveConfig({ inboxAgentNotes: { ...saved, auto: [...unsaid, ...added] } });
+  }
+  return added;
+}
+
+/** The notes written by themselves that the window has not said yet. */
+export function unsaidAutoNotes(): InboxNoteAutoAdd[] {
+  const auto = loadConfig().inboxAgentNotes?.auto;
+  if (!Array.isArray(auto)) return [];
+  return auto.filter(
+    (entry): entry is InboxNoteAutoAdd =>
+      !!entry && typeof entry.path === "string" && (INBOX_NOTE_AGENT_IDS as readonly string[]).includes(entry.agent),
+  );
+}
+
+/**
+ * The window said them (POST /api/inbox/agents/seen): the notes its line showed, so one written by a pass
+ * that ended after the window read the agents is still said next time. `shown` absent (an older window): all.
+ */
+export function markAutoNotesSaid(shown?: readonly InboxNoteAutoAdd[]): void {
+  const saved = loadConfig().inboxAgentNotes;
+  if (!saved?.auto) return;
+  const { auto, ...rest } = saved;
+  const left = shown ? auto.filter((entry) => !shown.some((said) => said.agent === entry.agent && said.path === entry.path)) : [];
+  saveConfig({ inboxAgentNotes: left.length > 0 ? { ...rest, auto: left } : rest });
 }

@@ -72,42 +72,6 @@ export interface GeneratingViewState {
   bottlenecks: Array<{ key: string; title: string; detail: string | null; action: "approveRun" | "resumeWithApproval" | null }>;
 }
 
-export interface OverviewData {
-  text: string;
-  diagram?: { kind: "mermaid" | "html"; source: string };
-}
-
-export interface GuideViewState {
-  mode: "guide";
-  guideId: string;
-  kicker: string;
-  title: string;
-  intent: string;
-  overview: OverviewData | null;
-  chapters: Array<{ n: number; title: string; files: string[]; reviewed: boolean; color: string }>;
-  reviewed: number;
-  moved: boolean;
-}
-
-export interface ChapterViewState {
-  mode: "chapter";
-  empty: boolean;
-  n?: number;
-  total?: number;
-  title?: string;
-  overview?: string;
-  files?: Array<{ path: string; name: string; summary: string; reviewed: boolean }>;
-  reviewed?: boolean;
-  hasNext?: boolean;
-  footer?: string;
-  /** The ask box: which agent answers ("Ask Claude Code about this chapter…"). */
-  ask?: { agent: string; busy: boolean };
-  /** Answers about this chapter, newest first. */
-  answers?: AnswerListItem[];
-  /** "Claude Code · Sonnet · low · answers $0.05". */
-  answersFooter?: string;
-}
-
 export interface AnswerListItem {
   id: string;
   question: string;
@@ -154,7 +118,7 @@ export interface AnswerViewState {
   signIn: string[] | null;
 }
 
-export type ViewState = HomeViewState | GeneratingViewState | GuideViewState | ChapterViewState | AnswerViewState;
+export type ViewState = HomeViewState | GeneratingViewState | AnswerViewState;
 
 /** What the code-intelligence popover shows for a link (SPEC 3.5, "Hover"). */
 export interface LinkInfo {
@@ -176,7 +140,7 @@ export type ToExtension =
   | { type: "command"; command: string; args?: unknown[] }
   | { type: "link"; link: string; action: "open" | "definition" | "references" }
   | { type: "linkInfo"; reqId: number; link: string }
-  | { type: "mermaidResult"; reqId: number; ok: boolean; message?: string; line?: number };
+  | { type: "mermaidResult"; reqId: number; ok: boolean; message?: string; line?: number; unavailable?: boolean };
 
 export type ToWebview =
   | { type: "state"; state: ViewState }
@@ -197,9 +161,6 @@ export const WEBVIEW_COMMANDS = [
   "runInBackground",
   "openLocation",
   "openChapter",
-  "markChapterReviewed",
-  "nextChapter",
-  "openFile",
   "changeDefaults",
   "openExternal",
   "refresh",
@@ -209,7 +170,6 @@ export const WEBVIEW_COMMANDS = [
   "approveRun",
   "approveAlways",
   "resumeWithApproval",
-  "ask",
   "openAnswer",
   "followUp",
   "stopAnswer",

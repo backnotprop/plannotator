@@ -14,7 +14,7 @@
  * a question the agent replaces while it is on screen; closing with an agent
  * half answered.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -83,7 +83,7 @@ async function agentSends(send: Record<string, unknown>): Promise<string> {
 }
 
 /** One seeded world per test (and one to spare): raise it with each test added. */
-const TESTS = 33;
+const TESTS = 34;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -230,9 +230,9 @@ async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLE
     });
   }
   const trigger = () => el.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
-  // A thread with a reply draft opens with its reply box, which takes the foot: Cancel keeps the draft and
-  // brings the foot's buttons back, as the person would.
-  const cancel = () => [...el.querySelectorAll<HTMLButtonElement>('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Cancel') ?? null;
+  // A thread with a reply draft opens with its reply box, which takes the foot: its close chevron keeps the draft
+  // and brings the foot's buttons back, as the person would.
+  const cancel = () => el.querySelector<HTMLButtonElement>('section.ib-pane .ib-pfoot [data-reply-close]');
   await until(() => window.location.hash.includes(`thread=${threadId}`) && (trigger() !== null || cancel() !== null), 'the thread foot');
   await settle();
   if (cancel()) act(() => cancel()!.click());
@@ -282,7 +282,7 @@ test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, w
     host?.remove();
     const settings = await renderApp('#settings/capabilities');
     await until(() => settings.querySelector('[data-settings-experimental]') !== null, 'the Experimental group');
-    const sw = settings.querySelector('[data-settings-experimental] [role="switch"]') as HTMLButtonElement;
+    const sw = settings.querySelector('[data-settings-experimental] [data-settings-decision-mode] [role="switch"]') as HTMLButtonElement;
     expect(sw.getAttribute('aria-checked')).toBe('false');
     act(() => sw.click());
     await until(async () => (await loopback('/api/inbox/decisions')).status === 200, 'the switch to turn it on');
@@ -376,6 +376,28 @@ test.skipIf(!hasDom)('walks the queue: Stopped first, a pick saves at once, the 
   expect(replies[0]!.body.words).toBe('');
   expect((await questionsOf(world.decide.b))[0]!.state).toBe('open');
   await until(() => prompt() === 'Ship the new flag off by default?', "Codex's card");
+}, 30_000);
+
+test.skipIf(!hasDom)('words typed in "Your own answer" stay on the card until Answer: one save, however many changes, so no backlog of saves can build here', async () => {
+  const el = await renderApp();
+  await openDecide(el);
+  act(() => (dialog()!.querySelector('[data-decision-other]') as HTMLButtonElement).click());
+  await settle();
+  const field = dialog()!.querySelector('.ib-dm-field textarea') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  for (let i = 1; i <= 40; i += 1) {
+    act(() => {
+      setter.call(field, `step ${i}`);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  await settle();
+  const picks = () => posted.filter((p) => p.path.endsWith('/picks'));
+  expect(picks()).toHaveLength(0);
+  act(() => (dialog()!.querySelector('[data-decision-other-answer]') as HTMLButtonElement).click());
+  await until(() => picks().length === 1, 'the save');
+  await until(async () => (await questionsOf(world.decide.a))[0]?.answer?.other === 'step 40', 'the answer saved');
+  expect(picks()).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('Undo puts the last pick back and returns to its card; Previous goes back a card', async () => {
@@ -936,6 +958,33 @@ test.skipIf(!hasDom)('H2: an unchanged retry replays its key; a changed answer t
   const third = replies().at(-1)!;
   expect(third.body.idempotency_key).not.toBe(first!.body.idempotency_key);
   expect((await questionsOf(world.decide.b))[0]!.answer?.selected).toEqual(['No']);
+}, 30_000);
+
+test.skipIf(!hasDom)("a Done waiting in the thread's reply draft goes with the session's reply from here: one reply, not two", async () => {
+  const action = await agentSends({
+    project: world.project,
+    session: world.decide.sessionB,
+    host: 'codex',
+    reply_to: world.decide.b,
+    body: [':::action', 'Approve the staging deploy', ':::'].join('\n'),
+  });
+  const key = (await questionsOf(action))[0]!.key;
+  await apiPost(`/api/inbox/messages/${action}/actions/${key}`, { outcome: 'done', note: 'Approved.', staged: true });
+  const el = await renderApp();
+  await openDecide(el);
+  await goTo('Ship the new flag off by default?');
+  choose('Yes');
+  await until(() => chipB().querySelector('[data-decision-hold]') !== null, "Codex's Hold");
+  act(() => button(chipB().querySelector('[data-decision-hold]')!, 'Hold').click());
+  act(() => button(chipB().querySelector('[data-decision-held]')!, 'Send').click());
+  await until(async () => (await questionsOf(world.decide.b))[0]?.state === 'sent', 'the reply');
+  // One reply for Codex's session (it answers its latest message), carrying the answer and the Done.
+  const sent = replies();
+  expect(sent).toHaveLength(1);
+  expect((sent[0]!.body.questions as { key: string }[]).map((q) => q.key)).toEqual([(await questionsOf(world.decide.b))[0]!.key]);
+  expect(sent[0]!.body.actions).toEqual(sent[0]!.path.includes(action) ? [{ key }] : [{ message_id: action, key }]);
+  // The staged Done went with it: nothing of it is left in the thread's draft for a second Send.
+  expect((await questionsOf(action))[0]!.state).toBe('sent');
 }, 30_000);
 
 test.skipIf(!hasDom)('M1: a Hold starts for an answer given in this sitting, and Undo takes that back', async () => {

@@ -119,6 +119,42 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode 2: the installer updates a running service's plugin
+
+The OpenCode 2 service keeps the plugin it loaded. When it is running with an
+unpinned `@plannotator/opencode` spec, `install.sh` runs `opencode2 plugin
+update <spec>` (`update_opencode2_service_plugin`), which loads the new plugin
+without cancelling a turn, a pending permission, a question form or an open
+Plannotator review (measured on OpenCode 2.0.22, 5 of 5; `opencode2 reload`
+cancels the permission and the form, so nothing automatic uses it). The step
+only asks the service, bounds every call, reads the result back from `plugin
+list`, never fails the install, and keeps the OpenCode 2 cache while the
+service has the plugin. There is no "reload when every session is idle"
+action in the Inbox: idleness cannot be held between the check and the
+reload, and `plugin update` needs no idle gate. Details and knobs:
+`PLANNOTATOR_OPENCODE2_TIMEOUT` in [environment.md](environment.md).
+`install.ps1` / `install.cmd` have no OpenCode 2 step yet.
+
+### OpenCode: in-process servers in `plannotator sessions` (#1567)
+
+The plugin's own servers (submit_plan's plan review, `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`) run inside OpenCode's process, so
+the plugin lists them itself (`apps/opencode-plugin/session-registry.ts`):
+`registerInProcessSession` in `packages/server/sessions.ts` writes
+`sessions/opencode/<pid>-<port>.json` with `host: "opencode"`, and the
+`plannotator sessions` table marks the row `(in OpenCode)` (`--json`: `host`).
+They do not run the binary, so they must never hold back its update: the
+entries live in a subfolder that `listSessions` / `listLiveSessions` never
+read, as no released binary does (every reader lists only the top folder's
+`*.json`), and `otherOpenSessions` and the Inbox update dialog also skip any
+entry with `host`. Removal: the decision or a throw (`decideListed`, before
+`stop()`), submit_plan's abort and timeout (`finally`), and process exit. No
+SIGINT/SIGTERM listener is added (it would change OpenCode's own signal
+handling); instead each registration deletes entries whose pid is dead, and
+`listInProcessSessions` drops and deletes an entry whose pid is dead, whose
+loopback port no longer accepts a connection, or that cannot be read. Commands
+list the project they detected (or `unknown`); only the plan review detects it.
+
 ### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
@@ -129,6 +165,12 @@ decision arrives as a T3 message. It uses T3's existing MCP API as a client
 (no T3 change, no provider-side MCP server, no skill change). Nothing of it
 runs for anyone who did not opt in.
 
+The same grant (`plannotator t3 login`) also lets the Plannotator Inbox put a
+reply into a T3 Claude thread as a turn, with a `plannotator inbox mcp --t3`
+entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
+`plannotator t3` is listed (`plannotator --help` points at it, the skill
+documents it); its help leads with that setup.
+
 - **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
   into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
   `packages/t3-code/install-hook.ts`: other hooks and settings kept, a
@@ -138,8 +180,8 @@ runs for anyone who did not opt in.
   `--minimal`; a failing step warns and never aborts the install. Without a
   flag the installer touches nothing T3. `plannotator t3 login --url <T3 MCP
   URL>` authorizes once (OAuth, PKCE); `plannotator t3 logout --url …` stops
-  that endpoint's workers and deletes the saved grant. `t3` and `t3-hook` are
-  in `HIDDEN_SUBCOMMANDS`.
+  that endpoint's workers and deletes the saved grant. `t3-hook` is in
+  `HIDDEN_SUBCOMMANDS`; `t3` is not.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
   `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`

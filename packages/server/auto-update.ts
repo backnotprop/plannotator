@@ -29,6 +29,8 @@
  * immediately and every failure ends in a log line, never a thrown error.
  */
 
+import { UPDATE_EXIT_CHECKSUM_MISMATCH, UPDATE_EXIT_DOWNLOAD_FAILED } from "@plannotator/core/update-exit-codes";
+import { lastRunLog, stagingFailureIn } from "./update-log";
 import { spawn } from "node:child_process";
 import {
   closeSync,
@@ -44,7 +46,7 @@ import {
   writeFileSync,
   appendFileSync,
 } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir, hostname, uptime } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { loadConfig, resolveAutoUpdate, resolveUpdateCheck } from "@plannotator/shared/config";
@@ -102,8 +104,28 @@ export {
 } from "@plannotator/shared/update-check";
 
 export const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * The wrapper's exit code when the running binary could not download the
+ * install script or the checksums (update-prepare.ts): nothing ran, nothing
+ * changed, try again later (sysexits EX_TEMPFAIL; curl, whose exit codes
+ * install.sh can pass on, never uses it).
+ */
+export const UPDATE_PREPARE_FAILED = UPDATE_EXIT_DOWNLOAD_FAILED;
+/**
+ * The recorded result when install.sh stopped because the binary did not
+ * match PLANNOTATOR_EXPECTED_SHA256, before it replaced anything. install.sh
+ * exits with it AND first writes the wrapper's marker file; the wrapper
+ * records it only when that marker exists and turns any other exit with this
+ * number into 1, so "nothing was changed" is never claimed for another error
+ * (install.sh runs under `set -e`; curl's own codes stay below 100).
+ */
+export const UPDATE_CHECKSUM_MISMATCH = UPDATE_EXIT_CHECKSUM_MISMATCH;
+/** Auto-update's wait before retrying a version whose download did not match: 1, 3, then 7 days. */
+export const MISMATCH_BACKOFF_DAYS: readonly number[] = [1, 3, 7];
 /** A lock older than this is from a run that died without cleaning up. */
 export const AUTO_UPDATE_LOCK_STALE_MS = 60 * 60 * 1000;
+/** A lock whose installer still runs holds past the hour, up to this (a hung install never holds for good). */
+export const AUTO_UPDATE_LOCK_LIVE_MAX_MS = 24 * 60 * 60 * 1000;
 
 /** auto-update's view of update-state.json (the shared state file). */
 export type AutoUpdateState = UpdateState;
@@ -114,12 +136,19 @@ export interface AutoUpdateResult {
 }
 
 export interface AutoUpdateNotice {
-  /** Stable per install attempt, so a client can remember it was shown. */
+  /** Stable per install attempt (per version for a mismatch), so a client can remember it was shown. */
   id: string;
   kind: "updated" | "failed";
   version: string;
   releaseUrl: string;
   logPath?: string;
+  /**
+   * Why a failed install failed, when it is one of the safe-update outcomes:
+   * `mismatch` (the download did not match the checksum Plannotator fetched)
+   * or `download` (Plannotator could not download the update), or `prepare`
+   * (downloaded, but the temp folder could not hold it). Additive.
+   */
+  reason?: "mismatch" | "download" | "prepare";
 }
 
 export function autoUpdatePaths(dataDir: string = getPlannotatorDataDir()) {
@@ -144,9 +173,13 @@ export function isCheckDue(state: AutoUpdateState, now: number): boolean {
   return now - last >= AUTO_UPDATE_INTERVAL_MS;
 }
 
-/** Live sessions that belong to some other Plannotator process. */
+/**
+ * Live sessions that belong to some other Plannotator process. A server inside
+ * a host's process (`host`, OpenCode) does not run the binary, so it never
+ * holds an update back.
+ */
 export function otherOpenSessions(sessions: SessionInfo[], ownPid: number): SessionInfo[] {
-  return sessions.filter((s) => s.pid !== ownPid);
+  return sessions.filter((s) => s.pid !== ownPid && !s.host);
 }
 
 export function deriveAutoUpdateNotice(
@@ -164,9 +197,60 @@ export function deriveAutoUpdateNotice(
     return { id, kind: "updated", version, releaseUrl: releaseUrlFor(version) };
   }
   if (result && result.version.replace(/^v/, "") === version && result.exitCode !== 0) {
-    return { id, kind: "failed", version, releaseUrl: releaseUrlFor(version), logPath };
+    // A background run that could not download anything changed nothing:
+    // update.log only, and the next window tries again. Never a notice.
+    if (result.exitCode === UPDATE_PREPARE_FAILED && pending.by !== "person") return undefined;
+    // A 75 whose download worked but whose temp folder could not hold it
+    // (update-prepare's staging line in this run's log) is `prepare`.
+    const reason =
+      result.exitCode === UPDATE_CHECKSUM_MISMATCH
+        ? "mismatch"
+        : result.exitCode === UPDATE_PREPARE_FAILED
+          ? stagingFailureIn(lastRunLog(logPath))
+            ? "prepare"
+            : "download"
+          : undefined;
+    return {
+      // A mismatch shows once per version, however many retries the back-off makes.
+      id: reason === "mismatch" ? `${version}@mismatch` : id,
+      kind: "failed",
+      version,
+      releaseUrl: releaseUrlFor(version),
+      logPath,
+      ...(reason && { reason }),
+    };
   }
   return undefined;
+}
+
+/** How long auto-update waits after the `attempts`-th mismatching download of one version. */
+export function mismatchBackoffMs(attempts: number): number {
+  const days = MISMATCH_BACKOFF_DAYS[Math.min(Math.max(attempts, 1), MISMATCH_BACKOFF_DAYS.length) - 1]!;
+  return days * AUTO_UPDATE_INTERVAL_MS;
+}
+
+/**
+ * Count a finished install whose download did not match (UPDATE_CHECKSUM_MISMATCH) into
+ * `mismatchBackoff`, once per install attempt (`pending.startedAt`). Returns
+ * the back-off as it stands. Pure.
+ */
+export function noteMismatchResult(state: AutoUpdateState, result: AutoUpdateResult | null): AutoUpdateState["mismatchBackoff"] {
+  const backoff = state.mismatchBackoff;
+  if (!result || result.exitCode !== UPDATE_CHECKSUM_MISMATCH) return backoff;
+  const version = result.version.replace(/^v/, "");
+  const pending = state.pending;
+  if (!pending || pending.version.replace(/^v/, "") !== version) return backoff;
+  if (backoff && backoff.version === version && backoff.lastAttemptAt === pending.startedAt) return backoff;
+  const attempts = backoff && backoff.version === version && Number.isFinite(backoff.attempts) ? backoff.attempts + 1 : 1;
+  return { version, attempts, lastAttemptAt: pending.startedAt };
+}
+
+/** Whether background auto-update holds back `latest` for now. Pure. */
+export function isMismatchBackedOff(backoff: AutoUpdateState["mismatchBackoff"], latest: string, now: number): boolean {
+  if (!backoff || backoff.version !== latest.replace(/^v/, "")) return false;
+  const at = backoff.lastAttemptAt;
+  if (typeof at !== "number" || !Number.isFinite(at) || at > now) return false;
+  return now - at < mismatchBackoffMs(backoff.attempts);
 }
 
 /**
@@ -252,12 +336,13 @@ function lockExpired(mtimeMs: number, now: number = Date.now()): boolean {
 }
 
 /**
- * Who holds a lock, as the detached POSIX wrapper writes it first thing
- * (POSIX_WRAPPER): its pid, its process group (it is the group's leader, so
- * the installer it runs and that installer's children are in it too), and
- * the machine it runs on. A lock in any other form (the bare pid the taker
- * writes, a wrapper from before this, the foreground `plannotator update`,
- * Windows) keeps the hour's rule only.
+ * Who holds a lock, as launchInstaller writes it right after the spawn and
+ * the detached POSIX wrapper again first thing (POSIX_WRAPPER): the wrapper's
+ * pid, its process group (it is the group's leader, so the installer it runs
+ * and that installer's children are in it too; Windows judges the pid only),
+ * and the machine it runs on. A lock in any other form (the bare pid the
+ * taker writes, the foreground `plannotator update`, an older binary) keeps
+ * the hour's rule only.
  */
 export interface UpdateLockHolder {
   pid: number;
@@ -294,25 +379,48 @@ export function thisLockMachine(): { host: string; boot: string; pidns: string }
 }
 
 /**
- * The holder is certainly gone: written by a wrapper on this machine (same
- * host, boot and pid namespace; anything else, or anything unreadable, is
- * unknown and keeps the hour's rule), and no process is left in its group.
- * A wrapper killed alone leaves its installer in the group: still held.
+ * A holder line written on this machine (same host, boot and pid namespace)
+ * is "alive" while a process is left in its group (Windows: while its pid
+ * runs) and "gone" when none is. Anything else, or anything unreadable, is
+ * "unknown" and keeps the hour's rule. A wrapper killed alone leaves its
+ * installer in the group: still alive.
  */
-function lockHolderGone(content: string, mtimeMs: number, now: number = Date.now(), machine = thisLockMachine()): boolean {
-  if (process.platform === "win32") return false;
-  if (now - mtimeMs < UPDATE_LOCK_HANDOFF_MS) return false;
+function judgeLockHolder(content: string): "alive" | "gone" | "unknown" {
   const holder = parseUpdateLockHolder(content);
-  if (!holder || !holder.host) return false;
-  if (holder.host.toLowerCase() !== machine.host.toLowerCase()) return false;
-  if (holder.boot !== machine.boot || holder.pidns !== machine.pidns) return false;
+  if (!holder || !holder.host) return "unknown";
+  const machine = thisLockMachine();
+  if (holder.host.toLowerCase() !== machine.host.toLowerCase()) return "unknown";
+  if (holder.boot !== machine.boot || holder.pidns !== machine.pidns) return "unknown";
   try {
-    process.kill(-holder.group, 0);
-    return false;
+    process.kill(process.platform === "win32" ? holder.pid : -holder.group, 0);
+    return "alive";
   } catch (err) {
     // EPERM: the group exists, under another user.
-    return (err as NodeJS.ErrnoException)?.code === "ESRCH";
+    const code = (err as NodeJS.ErrnoException)?.code;
+    return code === "ESRCH" ? "gone" : code === "EPERM" ? "alive" : "unknown";
   }
+}
+
+/** The holder is certainly gone (judgeLockHolder), past the handoff grace. */
+function lockHolderGone(content: string, mtimeMs: number, now: number = Date.now()): boolean {
+  if (now - mtimeMs < UPDATE_LOCK_HANDOFF_MS) return false;
+  return judgeLockHolder(content) === "gone";
+}
+
+/**
+ * Whether a lock still holds: its holder is not certainly gone, and it is
+ * within its hour, or past it while its installer still runs (a slow
+ * download), so a second installer never starts beside the first. Past the
+ * hour, that ends at AUTO_UPDATE_LOCK_LIVE_MAX_MS, and a lock with no boot id
+ * (macOS) must be from this boot (its group id may be reused since). Windows
+ * keeps the hour: it reuses a bare pid too soon to trust it for longer.
+ */
+function lockHeld(lock: { mtimeMs: number; content: string }, now: number = Date.now()): boolean {
+  if (lockHolderGone(lock.content, lock.mtimeMs, now)) return false;
+  if (!lockExpired(lock.mtimeMs, now)) return true;
+  if (process.platform === "win32" || Math.abs(now - lock.mtimeMs) >= AUTO_UPDATE_LOCK_LIVE_MAX_MS) return false;
+  if (!parseUpdateLockHolder(lock.content)?.boot && lock.mtimeMs <= now - uptime() * 1000) return false;
+  return judgeLockHolder(lock.content) === "alive";
 }
 
 /**
@@ -353,15 +461,15 @@ function readLock(lockPath: string): { ino: number; mtimeMs: number; content: st
 }
 
 /**
- * A lock whose holder is gone (lockHolderGone): record the install it was
- * running as failed (exit -1, unless the wrapper recorded a result for it)
- * and release it, so the Inbox shows Failed with the log and Try again at once
- * instead of "Updating…" for the rest of the hour. True when it reaped one.
+ * A lock that no longer holds (its holder is gone, or it expired): record the
+ * install it was running as failed (exit -1, unless the wrapper recorded a
+ * result for it) and release it, so the Inbox shows Failed with the log and
+ * Try again, never "Updating…" and then nothing. True when it reaped one.
  */
 export function reapDeadUpdateLock(dataDir?: string): boolean {
   const paths = autoUpdatePaths(dataDir);
   const lock = readLock(paths.lock);
-  if (!lock || !lockHolderGone(lock.content, lock.mtimeMs)) return false;
+  if (!lock || lockHeld(lock)) return false;
   if (!removeJudgedLock(paths.lock, lock)) return false;
   const pending = normalizeStableVersion(readAutoUpdateState(dataDir).pending?.version);
   const result = readAutoUpdateResult(dataDir);
@@ -370,7 +478,7 @@ export function reapDeadUpdateLock(dataDir?: string): boolean {
       writeFileSync(paths.result, JSON.stringify({ version: pending, exitCode: -1 }) + "\n");
     } catch {}
   }
-  log("the update stopped without finishing (its process group is gone); the lock is released", dataDir);
+  log("the update stopped without finishing; the lock is released", dataDir);
   return true;
 }
 
@@ -380,7 +488,7 @@ export function acquireUpdateLock(lockPath: string): boolean {
     const lock = readLock(lockPath);
     if (lock) {
       // Wall clock, not the injected clock: this compares against a file mtime.
-      if (!lockExpired(lock.mtimeMs) && !lockHolderGone(lock.content, lock.mtimeMs)) return false;
+      if (lockHeld(lock)) return false;
       if (!removeJudgedLock(lockPath, lock)) return false;
     }
     const fd = openSync(lockPath, "wx");
@@ -392,13 +500,10 @@ export function acquireUpdateLock(lockPath: string): boolean {
   }
 }
 
-/**
- * True while an install holds update.lock: not past its hour (either way, see
- * lockExpired), and its holder not certainly gone.
- */
+/** True while an install holds update.lock (lockHeld). */
 export function isUpdateLockHeld(dataDir?: string): boolean {
   const lock = readLock(autoUpdatePaths(dataDir).lock);
-  return !!lock && !lockExpired(lock.mtimeMs) && !lockHolderGone(lock.content, lock.mtimeMs);
+  return !!lock && lockHeld(lock);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +518,8 @@ export interface InstallerLaunch {
   platform: NodeJS.Platform;
   /** Validated remembered install flags (see readInstallFlags). */
   flags: InstallFlagId[];
+  /** Who runs `update-prepare` (POSIX). Default: this process (updatePrepareInvocation). Tests point it at a source entry. */
+  prepare?: { binary: string; entry: string };
 }
 
 export interface AutoUpdateDeps {
@@ -447,6 +554,7 @@ export type AutoUpdateOutcome =
   | "up-to-date"
   | "sessions-open"
   | "locked"
+  | "backed-off"
   | "launched"
   | "launch-failed";
 
@@ -514,6 +622,19 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     }
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
+
+  // Safe updates: a version whose download did not match the checksum
+  // Plannotator fetched waits 1, 3, then 7 days before the background tries
+  // it again (the 24 h window is spent: one check a day, never a loop).
+  const backoff = noteMismatchResult(state, readAutoUpdateResult(deps.dataDir));
+  if (backoff !== state.mismatchBackoff) patchUpdateState((s) => ({ ...s, mismatchBackoff: backoff }), deps.dataDir);
+  if (isMismatchBackedOff(backoff, latest, now)) {
+    log(
+      `v${latest} is held back until ${new Date(backoff!.lastAttemptAt + mismatchBackoffMs(backoff!.attempts)).toISOString()}: its last download did not match the checksum Plannotator fetched`,
+      deps.dataDir,
+    );
+    return "backed-off";
+  }
 
   const others = otherOpenSessions(deps.listSessions(), deps.pid);
   if (others.length > 0) {
@@ -669,12 +790,21 @@ export function startManualUpdateForThisBinary(currentVersion: string | undefine
 }
 
 /**
- * The detached wrapper. It downloads the same script a user pipes by hand,
- * runs it for exactly `version` without prompts plus the remembered install
- * flags, records the exit code, and releases the lock. Inputs travel as
- * environment variables or argv entries, never interpolated into the command
- * text: on POSIX the flags are the wrapper's own positional parameters
- * (`"$@"`).
+ * The detached POSIX wrapper (safe updates, step 1). It never downloads with
+ * the shell's curl: it asks the running Plannotator (`update-prepare`, its own
+ * fetch, update-prepare.ts) to download the install script and the expected
+ * checksums into a private temp dir, then runs that script for exactly
+ * `version` without prompts plus the remembered install flags, with
+ * PLANNOTATOR_EXPECTED_SHA256 so the script refuses a binary that does not
+ * match (UPDATE_CHECKSUM_MISMATCH, before it replaces anything). It records the exit code,
+ * removes the temp dir and releases the lock. When the download step fails
+ * nothing runs and the result is UPDATE_PREPARE_FAILED (75).
+ *
+ * Inputs travel as environment variables or argv entries, never interpolated
+ * into the command text: the flags are the wrapper's own positional
+ * parameters (`"$@"`). The staged dir comes from our own binary's stdout and
+ * is only used (or removed) when it is a single absolute path whose last part
+ * is plannotator-update-*.
  */
 const POSIX_WRAPPER = `
 # Detached (auto-update, Update now): the lock names this wrapper's process
@@ -682,33 +812,82 @@ const POSIX_WRAPPER = `
 # machine, so an install that is gone shows as failed at once instead of
 # "Updating…" for the lock's hour. The foreground \`plannotator update\` keeps
 # the lock its own process wrote.
+own_lock=""
 if [ "\${PLANNOTATOR_UPDATE_DETACHED:-}" = 1 ]; then
   printf 'pid=%s group=%s host=%s boot=%s pidns=%s\\n' "$$" "$$" "$(uname -n 2>/dev/null)" \
     "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(readlink /proc/$$/ns/pid 2>/dev/null)" > "$PLANNOTATOR_UPDATE_LOCK"
+else
+  own_lock=$(cat "$PLANNOTATOR_UPDATE_LOCK" 2>/dev/null)
 fi
-tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
+# Remove the lock only while it is still this run's: its line names this
+# wrapper, or it is what the lock held when this wrapper started. Never a lock
+# another install took.
+release_lock() {
+  lock_now=$(cat "$PLANNOTATOR_UPDATE_LOCK" 2>/dev/null)
+  case "$lock_now" in
+    "pid=$$ "*) rm -f "$PLANNOTATOR_UPDATE_LOCK" ;;
+    *) if [ -n "$own_lock" ] && [ "$lock_now" = "$own_lock" ]; then rm -f "$PLANNOTATOR_UPDATE_LOCK"; fi ;;
+  esac
+}
+update_dir=""
 code=1
+cleanup() {
+  [ -n "$update_dir" ] && rm -rf "$update_dir"
+}
+record() {
+  printf '{"version":"%s","exitCode":%d}\\n' "$PLANNOTATOR_UPDATE_VERSION" "$1" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+}
 # Interrupted (Ctrl-C on plannotator update, a TERM): record 130 and release
 # the lock now, so the next update does not wait an hour for a stale lock.
 on_signal() {
   trap '' INT TERM HUP
-  rm -f "$tmp"
-  printf '{"version":"%s","exitCode":130}\\n' "$PLANNOTATOR_UPDATE_VERSION" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+  cleanup
+  record 130
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: interrupted"
-  rm -f "$PLANNOTATOR_UPDATE_LOCK"
+  release_lock
   exit 130
 }
 trap on_signal INT TERM HUP
-if curl -fsSL --connect-timeout 30 --speed-limit 1 --speed-time 60 "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
-  bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
-  code=$?
+if [ -n "$PLANNOTATOR_UPDATE_ENTRY" ]; then
+  prepared=$("$PLANNOTATOR_UPDATE_BINARY" "$PLANNOTATOR_UPDATE_ENTRY" update-prepare "$PLANNOTATOR_UPDATE_VERSION" </dev/null) || prepared=""
 else
-  echo "update: could not download $PLANNOTATOR_UPDATE_SCRIPT_URL"
+  prepared=$("$PLANNOTATOR_UPDATE_BINARY" update-prepare "$PLANNOTATOR_UPDATE_VERSION" </dev/null) || prepared=""
 fi
-rm -f "$tmp"
-printf '{"version":"%s","exitCode":%d}\\n' "$PLANNOTATOR_UPDATE_VERSION" "$code" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+# Used (and later removed) only when it is an absolute path on one line whose
+# last part is plannotator-update-* (a case pattern's * crosses slashes, so
+# the last part is checked on its own).
+case "$prepared" in
+  *"
+"*|*/) ;;
+  /*) case "\${prepared##*/}" in
+        plannotator-update-?*) update_dir="$prepared" ;;
+      esac ;;
+esac
+if [ -n "$update_dir" ] && [ -f "$update_dir/install.sh" ]; then
+  # Written only when NODE_EXTRA_CA_CERTS is set: curl's own roots plus that
+  # certificate, so install.sh's curl trusts what Plannotator's fetch did.
+  if [ -f "$update_dir/curl-ca-bundle.pem" ]; then
+    export CURL_CA_BUNDLE="$update_dir/curl-ca-bundle.pem"
+  fi
+  PLANNOTATOR_EXPECTED_SHA256=$(cat "$update_dir/expected-sha256" 2>/dev/null) PLANNOTATOR_UPDATE_MISMATCH_FILE="$update_dir/checksum-mismatch" bash "$update_dir/install.sh" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
+  code=$?
+  # A mismatch is only what install.sh's pin check marked as one.
+  if [ -f "$update_dir/checksum-mismatch" ]; then
+    code=113
+  elif [ "$code" -eq 113 ]; then
+    code=1
+  fi
+else
+  code=75
+  # update-prepare already said why (download, certificate, temp folder).
+  echo "update: nothing ran; nothing was changed"
+fi
+cleanup
+# The log line first: a reader that sees the new result also finds this run's
+# part of update.log (deriveAutoUpdateNotice tells "prepare" from "download" there).
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: install.sh exited $code"
-rm -f "$PLANNOTATOR_UPDATE_LOCK"
+record "$code"
+release_lock
 `;
 
 // The allowlist the Windows wrapper re-checks each flag against. Built from the
@@ -733,6 +912,10 @@ if ($env:PLANNOTATOR_UPDATE_FLAGS) {
     if ($allowedFlags -ccontains $f) { $installFlags += $f }
   }
 }
+# The lock is removed at the end only while it is still this run's: a line
+# naming this process (launchInstaller writes it), or what it held when this
+# run started. Never a lock another install took.
+$ownLock = [string](Get-Content -Raw -ErrorAction SilentlyContinue -LiteralPath $env:PLANNOTATOR_UPDATE_LOCK)
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("plannotator-install-" + [guid]::NewGuid().ToString('N') + ".ps1")
 try {
   Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri $env:PLANNOTATOR_UPDATE_SCRIPT_URL -OutFile $tmp
@@ -745,7 +928,10 @@ try {
   Remove-Item -Force -ErrorAction SilentlyContinue $tmp
   [System.IO.File]::WriteAllText($env:PLANNOTATOR_UPDATE_RESULT, ('{"version":"' + $env:PLANNOTATOR_UPDATE_VERSION + '","exitCode":' + [int]$code + '}'))
   Write-Output ("[" + (Get-Date).ToUniversalTime().ToString('o') + "] update: install.ps1 exited " + $code)
-  Remove-Item -Force -ErrorAction SilentlyContinue $env:PLANNOTATOR_UPDATE_LOCK
+  $lockNow = [string](Get-Content -Raw -ErrorAction SilentlyContinue -LiteralPath $env:PLANNOTATOR_UPDATE_LOCK)
+  if ($lockNow.StartsWith("pid=$PID ") -or ($ownLock -ne '' -and $lockNow -ceq $ownLock)) {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $env:PLANNOTATOR_UPDATE_LOCK
+  }
 }
 `;
 
@@ -788,8 +974,23 @@ export function installScriptUrl(platform: NodeJS.Platform, env: NodeJS.ProcessE
   return platform === "win32" ? INSTALL_PS1_URL : INSTALL_SH_URL;
 }
 
+/**
+ * How the POSIX wrapper reaches `update-prepare`: the compiled binary is its
+ * own entry; a source run (`bun …/index.ts`, the process tests' entries)
+ * passes its script as the first argument.
+ */
+export function updatePrepareInvocation(main: string = typeof Bun !== "undefined" ? Bun.main : process.argv[1] ?? ""): {
+  binary: string;
+  entry: string;
+} {
+  const normalized = main.replace(/\\/g, "/");
+  const compiled = normalized.startsWith("/$bunfs/") || /^\/?[A-Za-z]:\/(?:\$bunfs|~BUN)\//i.test(normalized);
+  return { binary: process.execPath, entry: compiled ? "" : main };
+}
+
 function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
+  const prepare = launch.prepare ?? updatePrepareInvocation();
   return {
     file,
     args,
@@ -798,7 +999,16 @@ function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; 
       PLANNOTATOR_UPDATE_VERSION: launch.version,
       PLANNOTATOR_UPDATE_RESULT: launch.resultPath,
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,
+      // Windows only: its wrapper still downloads install.ps1 itself (Windows
+      // blocks the leaked eMudhra keys in its own certificate store).
       PLANNOTATOR_UPDATE_SCRIPT_URL: installScriptUrl(launch.platform),
+      // POSIX: the binary that runs `update-prepare` (this one).
+      PLANNOTATOR_UPDATE_BINARY: prepare.binary,
+      PLANNOTATOR_UPDATE_ENTRY: prepare.entry,
+      // A stalled skills clone gives up after a minute instead of holding the
+      // lock (a live install holds it past the hour; the person's own values win).
+      GIT_HTTP_LOW_SPEED_LIMIT: process.env.GIT_HTTP_LOW_SPEED_LIMIT || "1",
+      GIT_HTTP_LOW_SPEED_TIME: process.env.GIT_HTTP_LOW_SPEED_TIME || "60",
       ...commandEnv,
     },
   };
@@ -815,7 +1025,19 @@ export function launchInstaller(launch: InstallerLaunch): void {
       env: { ...env, PLANNOTATOR_UPDATE_DETACHED: "1" },
       windowsHide: true,
     });
-    child.on("error", () => {});
+    // A spawn that fails after returning (no pid): Failed with Try again at once.
+    child.on("error", (err) => {
+      if (child.pid === undefined) abortLaunch(launch.version, err, join(launch.logPath, ".."));
+    });
+    if (child.pid !== undefined) {
+      // Name the wrapper in the lock from the first moment (its group on
+      // POSIX, its pid on Windows), so an install killed at any point is
+      // judged gone at once (reapDeadUpdateLock) instead of after the hour.
+      const m = thisLockMachine();
+      try {
+        writeFileSync(launch.lockPath, `pid=${child.pid} group=${child.pid} host=${m.host} boot=${m.boot} pidns=${m.pidns}\n`);
+      } catch {}
+    }
     child.unref();
   } finally {
     closeSync(logFd);
@@ -1080,12 +1302,12 @@ export function getUpdateAdvert(
 export function handleUpdateRoute(
   req: Request,
   url: URL,
-  ctx: { port: number | null | undefined; exposed: boolean; serverSession: string },
+  ctx: { port: number | null | undefined; exposed: boolean; serverSession: string; localHostname?: string | null },
 ): Promise<Response> | null {
   if (url.pathname !== "/api/update") return null;
   return (async () => {
     if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
-    if (!isLoopbackHostHeader(req.headers.get("host"), ctx.port)) {
+    if (!isLoopbackHostHeader(req.headers.get("host"), ctx.port, ctx.localHostname)) {
       return Response.json({ error: "Update answers only this computer.", code: "forbidden_host" }, { status: 403 });
     }
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {

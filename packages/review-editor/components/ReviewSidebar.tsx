@@ -24,6 +24,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
+import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 
@@ -40,15 +41,18 @@ interface ReviewSidebarProps {
   /** Sidebar row click → select AND scroll the diff to the comment. */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
+  agentFindingSources?: ReadonlySet<string>;
   /** Edit an annotation's text from its sidebar card. Offered only on
    *  outdated comments (#1590), which are not drawn on the diff and so have
    *  no inline editor. */
   onEditAnnotationText?: (id: string, text: string) => void;
-  /** "+ General comment": commit a durable scope:'general' review-level
+  /** "+ Global comment": commit a durable scope:'general' review-level
    *  comment to the session (spec §3.3). When present, the affordance renders
    *  in the General section header AND in the all-empty state — the state it
-   *  is most useful in. */
-  onAddGeneralComment?: (text: string) => void;
+   *  is most useful in. Returns false when the comment was not added: the
+   *  words stay in the box. */
+  onAddGeneralComment?: (text: string) => boolean | void;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -131,7 +135,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
 };
 
 /**
- * "+ General comment" — the human producer for a durable review-level comment
+ * "+ Global comment" — the human producer for a durable review-level comment
  * (the sole producer before this was Call Flow). The SAME button renders in
  * both placements (General section header, all-empty state); the composer is
  * the shared `DecisionNoteField` in a small anchored popover — the third
@@ -147,7 +151,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
  * field, the same contract as the decision composers.
  */
 const GeneralCommentComposer: React.FC<{
-  onAdd: (text: string) => void;
+  onAdd: (text: string) => boolean | void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   text: string;
@@ -170,7 +174,7 @@ const GeneralCommentComposer: React.FC<{
       ref.current?.querySelector<HTMLTextAreaElement>('[data-decision-note-input]')?.focus();
       return;
     }
-    onAdd(trimmed);
+    if (onAdd(trimmed) === false) return;
     onTextChange('');
     onOpenChange(false);
   };
@@ -195,10 +199,10 @@ const GeneralCommentComposer: React.FC<{
         onClick={() => onOpenChange(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Add a review-level comment"
+        title="Add global comment"
         className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
-        + General comment
+        + Global comment
       </button>
       {open && (
         <div
@@ -212,7 +216,7 @@ const GeneralCommentComposer: React.FC<{
             onTextChange={onTextChange}
             onSubmit={submit}
             onCancel={() => onOpenChange(false)}
-            placeholder="Add a general comment..."
+            placeholder="Add a global comment..."
             enterSubmits={enterSavesComment}
           />
           <div className="mt-2 flex items-center justify-end gap-2">
@@ -257,6 +261,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectAnnotation,
   onNavigateToAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
+  agentFindingSources,
   onEditAnnotationText,
   onAddGeneralComment,
   feedbackMarkdown,
@@ -406,7 +412,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               </span>
             ) : isGeneralScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                general
+                global
               </span>
             ) : isFileScope ? (
               <span className="inline-flex items-center gap-1.5">
@@ -446,6 +452,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                     title="The code changed after this comment was written; its line numbers refer to an earlier version"
                   >
                     Outdated
+                  </span>
+                )}
+                {annotation.outsideDiff && (
+                  <span
+                    data-annotation-outside-diff="true"
+                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
+                    title="To the agent: sent with the file, lines and code. On a PR: goes in the review's main comment with the code quoted and a link, since the platform cannot post a comment outside the diff."
+                  >
+                    not in the diff
                   </span>
                 )}
               </span>
@@ -500,6 +515,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             onEdit={annotation.outdated && onEditAnnotationText
               ? () => setEditingOutdated({ id: annotation.id, draft: annotation.text ?? '' })
               : undefined}
+            onExplain={isAgentGeneratedFinding(annotation, agentFindingSources) && onExplainAnnotation
+              ? () => onExplainAnnotation(annotation.id)
+              : undefined}
+            explainDisabled={isAICreatingSession || isAIStreaming}
             copyText={annotation.text ? commentCopyText(annotation, scope) : undefined}
             onDelete={() => onDeleteAnnotation(annotation.id)}
             selected={isSelected}
@@ -682,7 +701,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                           anchored composer popover is never painted under a
                           later section's header. */}
                       <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">General</span>
+                        <span className="text-xs font-medium text-muted-foreground">Global comments</span>
                         {onAddGeneralComment && (
                           <GeneralCommentComposer
                             onAdd={onAddGeneralComment}

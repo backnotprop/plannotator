@@ -32,13 +32,18 @@ function world(
     store?: Record<string, unknown>
     /** Prompts the bottom drops (as a settings hook's block would), by their text. */
     dropPrompt?: (text: string) => boolean
+    /** Holds the engine's own session start (the mod decides after it) until it settles. */
+    sessionStarted?: Promise<void>
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
-  on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+  on('session.start', async ($: any, e: any) => {
+    await options.sessionStarted
+    return { cwd: e.cwd }
+  })
   on('session.id', () => ({ value: options.sessionId?.() ?? 'session-1' }))
   on('session.cwd', () => ({ value: '/work' }))
   on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
@@ -216,6 +221,30 @@ describe('register', () => {
     expect(seen[0].tool_input).toEqual({ command: 'ls' })
   })
 
+  // CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS (skip-rm-prompts.ts),
+  // with the engine's own `$`: the call's verdict reaches the mod's tool.check
+  // hook, and its removal prompt in bypass mode is answered with allow, unless
+  // the person's settings hold an ask rule for rm.
+  for (const [name, settings, answered] of [
+    ['answered with allow', {}, true],
+    ["left to the person's ask rule", { permissions: { ask: ['Bash(rm *)'] } }, false],
+  ] as const) {
+    test(`the variable set, in bypass mode: a removal prompt is ${name}`, async ($: any, on: any) => {
+      world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+      on('settings.read', () => ({ value: settings }))
+      const command = 'rm -rf t/logs/*/*'
+      on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+      on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
+      await $.session.start(SESSION)
+
+      const verdict = await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+      const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
+
+      expect(verdict.decision).toBe('ask')
+      expect(answer.decision).toEqual(answered ? { behavior: 'allow' } : { behavior: 'deny', message: 'beneath' })
+    })
+  }
+
   test('the decision arrives later as a plugin turn', async ($: any, on: any) => {
     const w = world(on)
     await $.session.start(SESSION)
@@ -270,6 +299,8 @@ describe('register', () => {
     const inboxAnswer = await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
     expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
     expect(inboxAnswer.text).toContain('http://localhost:5555/')
+    // Opened: the model gets the Inbox briefing as the answer's hidden context (no turn).
+    expect(inboxAnswer.context?.[0]).toContain('plannotator inbox --help')
     const other = await $.command.run({ command: 'frontend-status', args: '', origin: { kind: 'composer' } })
 
     expect(other.text).toBe('frontend-status ran beneath')
@@ -525,7 +556,6 @@ describe('register', () => {
   const TOOLS = [
     tool('send_message', { body: { type: 'string', description: 'The message.' }, project_path: { type: 'string' }, agent_session: { type: 'string' }, agent_host: { type: 'string' }, agent_name: { type: 'string' }, reply_to: { type: 'string' } }),
     tool('read_thread', { thread_id: { type: 'string' }, project_path: { type: 'string' }, agent_session: { type: 'string' } }),
-    tool('wait_for_reply', { thread_id: { type: 'string' }, timeout_seconds: { type: 'number' }, agent_session: { type: 'string' } }),
     tool('resolve_message', { message_id: { type: 'string' } }),
   ]
   const GUIDE_TOOL = tool('submit_guide', { patch: { type: 'string' }, project_path: { type: 'string' } })
@@ -557,7 +587,7 @@ describe('register', () => {
     expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'wait_for_reply', 'resolve_message', 'submit_guide', 'get_guide_brief'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
     expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
@@ -581,167 +611,108 @@ describe('register', () => {
     expect(calls.some((c) => c.body?.method === 'tools/call')).toBe(true)
   })
 
-  test('the reminder: one fixed block in the first message, only with plannotator_inbox and the switch on', async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    const base = [{ name: 'currentDate', text: '2026-10-12' }]
-    const first = await $.prompt.context({ blocks: base })
-    const again = await $.prompt.context({ blocks: base })
-    expect(first.blocks.map((b: any) => b.name)).toEqual(['currentDate', 'plannotatorInbox'])
-    // The tool by the full name the engine registered: tool search finds the deferred tool by it.
-    expect(first.blocks[1].text).toBe(inboxReminderText(INBOX_TOOL))
-    expect(first.blocks[1].text).toContain(`${INBOX_TOOL} send_message`)
-    expect(again).toEqual(first)
-    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(true)
-  })
-
-  test('no reminder with { "inboxReminder": false }, and none without the tool', async ($: any, on: any) => {
-    const files = withRegistry()
-    files.set('/home/me/.plannotator/config.json', JSON.stringify({ inboxReminder: { 'claude-code': false } }))
-    world(on, { files, fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
-  })
-
-  // #2194: config.json `prompts.inbox`. Without a usable one, the bytes are today's.
-  test('prompts.inbox unset (other prompts set, a blank reminder, another agent\'s own): the block and the variable are today\'s, byte for byte', async ($: any, on: any) => {
-    const files = withRegistry()
-    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { review: { denied: 'Check.' }, inbox: { reminder: '  ', runtimes: { pi: { reminder: 'Pi only.' } } } } }))
-    const w = world(on, { files, fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    const today = inboxReminderText(INBOX_TOOL)
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([{ name: 'plannotatorInbox', text: today }])
-    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(today)
-  })
-
-  test('prompts.inbox set: Claude Code\'s own text replaces the block, plannotator_inbox in it named as the engine registered it', async ($: any, on: any) => {
-    const files = withRegistry()
-    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { inbox: { reminder: 'Shared.', runtimes: { 'claude-code': { reminder: 'Ask your upstream session first; plannotator_inbox only when it is gone.' } } } } }))
-    const w = world(on, { files, fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    const own = `Ask your upstream session first; ${INBOX_TOOL} only when it is gone.`
-    const first = await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-26' }] })
-    expect(first.blocks).toEqual([{ name: 'currentDate', text: '2026-10-26' }, { name: 'plannotatorInbox', text: own }])
-    expect(await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-26' }] })).toEqual(first)
-    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(own)
-  })
-
-  test('no inbox/inbox.json yet: the tool, but no reminder (it speaks only for an Inbox that has run here)', async ($: any, on: any) => {
-    const w = world(on, { fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(true)
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
-  })
-
-  test('a -p (non-interactive) session: no tool and no reminder', async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
-    expect(w.tools).toEqual([])
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
-  })
-
-  test('$.tool.register refused plannotator_inbox: no reminder naming a tool the session lacks', async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), refuseTools: ['plannotator_inbox'] })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(false)
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
-    expect(w.logs.some((line) => line.includes('plannotator_inbox tool is not available'))).toBe(true)
-  })
-
-  test('PLANNOTATOR_INBOX_TOOL=0: no tool and no reminder', async ($: any, on: any) => {
-    world(on, { files: withRegistry(), env: { PLANNOTATOR_INBOX_TOOL: '0' }, fetch: inbox(TOOLS, []) })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    await $.session.start(SESSION)
-    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
-  })
-
-  // --- The reminder where a guard plugin skips prompt.context (#2159) ---
+  // --- The Inbox reminder: the first prompt's context (#2243) ---
   //
-  // Claude Code's cc-plugin-sec-default (Team/Enterprise) sits in the prepend
-  // tier and sends prompt.context (and classic.*) past every user-tier hook.
-  // The stand-in below does the same, so the mod's prompt.context hook never
-  // runs; the reminder then goes as the first prompt's context.
+  // Claude Code 2.1.314's built-in cc-plugin-sec-default (Team/Enterprise
+  // accounts, managed settings) sits in the prepend tier and sends events past
+  // every user-tier hook; read from the 2.1.314 binary: classic.*,
+  // prompt.context, session.compact (the three the mod could hook), and also
+  // prompt.section, prompt.attachment, prompt.compose, skill.prompt,
+  // attribution.text and settings.read. For every hook of ours the engine
+  // passes by that way, Claude Code prints "plannotator: its <event> hook was
+  // skipped. ..." once per session, even for a hook whose matcher does not
+  // match the event. The stand-in reports each such link through the test's
+  // ui.log, from the trace the engine reports from.
   const GUARD = {
     name: 'sec-default-standin',
     tier: 'prepend' as const,
     register(on: any) {
-      on('prompt.context', ($: any, e: any, next: any) => next.to(e, 'append'))
-      on('classic.*', ($: any, e: any, next: any) => next.to(e, 'append'))
+      on('classic.*', async ($: any, e: any, next: any) => {
+        const result = await next.to(e, 'append')
+        for (const link of next.trace) if (link.plugin === 'plannotator' && link.outcome === 'skipped') await $.ui.log(`skipped: ${next.event}`)
+        return result
+      })
+      on('prompt.context', async ($: any, e: any, next: any) => {
+        const result = await next.to(e, 'append')
+        for (const link of next.trace) if (link.plugin === 'plannotator' && link.outcome === 'skipped') await $.ui.log(`skipped: ${next.event}`)
+        return result
+      })
+      on('session.compact', async ($: any, e: any, next: any) => {
+        const result = await next.to(e, 'append')
+        for (const link of next.trace) if (link.plugin === 'plannotator' && link.outcome === 'skipped') await $.ui.log(`skipped: ${next.event}`)
+        return result
+      })
     },
   }
   const REMINDER = inboxReminderText(INBOX_TOOL)
   const firstTurn = { answer: 'done', durationMs: 5, isAborted: false, reason: 'answer' as const }
+  const SUMMARY_ROWS = [{ role: 'user', text: 'Summary: the handler is refactored.', toolUses: [] }]
+  const skippedOf = (logs: string[]) => logs.filter((line) => line.startsWith('skipped: '))
 
-  test('standard, prompt.context known to work: the block as today, no prompt.submit copy, the variable set', async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: true } })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
+  // Under the guard the mod's Bash permission hook is passed by like every
+  // classic.* hook: the removal prompt stays exactly as it is today.
+  test('under the guard, a removal prompt in bypass mode with the variable set is left to the dialog', { plugins: [GUARD] }, async ($: any, on: any) => {
+    world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+    on('settings.read', () => ({ value: {} }))
+    const command = 'rm -rf t/logs/*/*'
+    on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+    on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
     await $.session.start(SESSION)
 
-    await $.prompt.submit({ text: 'Refactor the handler.' })
-    const context = await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-25' }] })
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
-    await $.prompt.submit({ text: 'And the tests.' })
+    await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+    const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
 
-    expect(context.blocks).toEqual([{ name: 'currentDate', text: '2026-10-25' }, { name: 'plannotatorInbox', text: REMINDER }])
-    expect(w.contexts).toEqual([null, null])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
-    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+    expect(answer.decision).toEqual({ behavior: 'deny', message: 'beneath' })
   })
 
-  test('standard, nothing learned yet: the first prompt carries the copy once, prompt.context then teaches true, and the next conversation has none', async ($: any, on: any) => {
-    let sessionId = 'session-1'
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), sessionId: () => sessionId })
+  test('under the guard, the mod has no prompt.context or classic.SessionStart hook for Claude Code to report skipped', { plugins: [GUARD] }, async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
     on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    on('classic.SessionStart', () => ({}))
+    await $.session.start(SESSION)
+
+    await $.classic.SessionStart({ source: 'startup' })
+    await $.prompt.context({ blocks: [] })
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    await $.classic.SessionStart({ source: 'resume' })
+    await $.classic.SessionStart({ source: 'clear' })
+
+    expect(skippedOf(w.logs)).toEqual([])
+  })
+
+  test('a standard machine: the first prompt carries the reminder once; no context block, nothing learned, and a compaction adds no second copy (its command hook prints the variable)', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    on('session.compact', () => ({ messages: SUMMARY_ROWS }))
     on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
     await $.session.start(SESSION)
 
     await $.prompt.submit({ text: 'Refactor the handler.' })
-    const context = await $.prompt.context({ blocks: [] })
+    const context = await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-30' }] })
     await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
     await $.prompt.submit({ text: 'And the tests.' })
-    // /clear: the same process goes on under a new session id.
-    sessionId = 'session-2'
-    await $.prompt.submit({ text: 'Something else.' })
-    await $.prompt.context({ blocks: [] })
+    await $.session.compact({ trigger: 'auto', messages: SUMMARY_ROWS })
+    // The engine computes the context again after a compaction.
+    const afterCompaction = await $.prompt.context({ blocks: [] })
+    await $.prompt.submit({ text: 'Go on.' })
 
+    // The exact text, naming the tool as the engine registered it (tool search finds the deferred tool by it).
     expect(w.contexts).toEqual([[REMINDER], null, null])
-    expect(context.blocks.map((b: any) => b.name)).toEqual(['plannotatorInbox'])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
+    expect(REMINDER).toContain(`${INBOX_TOOL} send_message`)
+    expect(context.blocks).toEqual([{ name: 'currentDate', text: '2026-10-30' }])
+    expect(afterCompaction.blocks).toEqual([])
+    // What the SessionStart compact command hook prints: the one copy after a compaction.
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+    expect(w.store.has('inboxReminderContextWorks')).toBe(false)
+    // The record a resume reads: this session's first prompt had the reminder.
+    expect(Object.keys(w.store.get('inboxReminderSessions') as object)).toEqual(['session-1'])
   })
 
-  test('guarded: prompt.context is skipped, the first prompt carries the exact reminder, the first turn teaches false, and every new conversation gets it on its first prompt', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a guarded machine: the same, the reminder once per conversation, again after /clear, and the plain reminder for the compact hook', { plugins: [GUARD] }, async ($: any, on: any) => {
     let sessionId = 'session-1'
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), sessionId: () => sessionId })
     on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
-    await $.session.start(SESSION)
-
-    await $.prompt.submit({ text: 'Refactor the handler.' })
-    const context = await $.prompt.context({ blocks: [] })
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
-    await $.prompt.submit({ text: 'And the tests.' })
-    sessionId = 'session-2'
-    await $.prompt.submit({ text: 'Something else.' })
-
-    // The guard sent prompt.context past the mod: no block.
-    expect(context.blocks).toEqual([])
-    expect(w.contexts).toEqual([[REMINDER], null, [REMINDER]])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(false)
-    // env.set is not guarded: the compaction hook has the text too.
-    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
-  })
-
-  test('a machine that becomes guarded after learning true: the first prompt has none, the first turn teaches false, the second prompt carries it', { plugins: [GUARD] }, async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: true } })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    on('session.compact', () => ({ messages: SUMMARY_ROWS }))
     on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
     await $.session.start(SESSION)
 
@@ -749,30 +720,91 @@ describe('register', () => {
     await $.prompt.context({ blocks: [] })
     await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
     await $.prompt.submit({ text: 'And the tests.' })
-    await $.prompt.submit({ text: 'And the docs.' })
+    await $.session.compact({ trigger: 'auto', messages: SUMMARY_ROWS })
+    await $.prompt.submit({ text: 'Go on.' })
+    // /clear: the same process goes on under a new session id, with no history.
+    sessionId = 'session-2'
+    await $.prompt.submit({ text: 'Something else.' })
+    await $.prompt.submit({ text: 'And more.' })
 
-    expect(w.contexts).toEqual([null, [REMINDER], null])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(false)
+    expect(w.contexts).toEqual([[REMINDER], null, null, [REMINDER], null])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+    expect(w.store.has('inboxReminderContextWorks')).toBe(false)
   })
 
-  test('guarded: an aborted first turn and a subagent turn teach nothing; the next completed main turn does', { plugins: [GUARD] }, async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: true } })
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
+  test('a fresh conversation that opened with a slash command (a model turn of its own): the first typed prompt still carries the reminder', async ($: any, on: any) => {
+    let rows: unknown[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    on('session.messages', () => ({ value: rows }))
     await $.session.start(SESSION)
 
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn, isAborted: true, reason: 'aborted' })
-    await $.turn.complete({ turnId: 'sub-1', ...firstTurn, agentId: 'agent-1' })
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
-    await $.turn.complete({ turnId: 'turn-2', ...firstTurn })
-    expect(w.store.get('inboxReminderContextWorks')).toBe(false)
+    await $.prompt.submit({ text: '/simplify', command: { name: 'simplify', args: '' } })
+    rows = [{ role: 'user', text: '/simplify' }, { role: 'assistant', text: 'Simplified.' }]
+    await $.prompt.submit({ text: 'Thanks. Now the tests.' })
+
+    expect(w.contexts).toEqual([null, [REMINDER]])
   })
 
-  // Live on 2.1.310 the engine ran prompt.context BEFORE the mod's
-  // session.start had registered plannotator_inbox (#2167 review): the block
-  // was missing from every process's first conversation, and the first turn
-  // then taught false on a standard machine. prompt.context waits for
-  // session.start's decision now.
-  test('prompt.context while session.start is still registering the tool (a slow Inbox /mcp): the block lands and the store learns true', async ($: any, on: any) => {
+  test("a fresh conversation whose first turn was this plugin's own prompt: the person's first prompt still carries the reminder", async ($: any, on: any) => {
+    let rows: unknown[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    on('session.messages', () => ({ value: rows }))
+    on('turn.start', (_$: any, e: any) => ({ turnId: e.turnId }))
+    await $.session.start(SESSION)
+
+    // A turn our own $.prompt.submit started: our prompt.submit hook never sees it, turn.start does.
+    await $.turn.start({ text: 'The plannotator plugin sent a message: …', turnId: 'turn-1' })
+    rows = [{ role: 'user', text: 'The plannotator plugin sent a message: …' }, { role: 'assistant', text: 'Read it.' }]
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([[REMINDER]])
+  })
+
+  test('no reminder with { "inboxReminder": false }', async ($: any, on: any) => {
+    const files = withRegistry()
+    files.set('/home/me/.plannotator/config.json', JSON.stringify({ inboxReminder: { 'claude-code': false } }))
+    const w = world(on, { files, fetch: inbox(TOOLS, []) })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    expect(w.contexts).toEqual([null])
+  })
+
+  // #2194: config.json `prompts.inbox`. Without a usable one, the bytes are today's.
+  test('prompts.inbox unset (other prompts set, a blank reminder, another agent\'s own): the context and the variable are today\'s, byte for byte', async ($: any, on: any) => {
+    const files = withRegistry()
+    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { review: { denied: 'Check.' }, inbox: { reminder: '  ', runtimes: { pi: { reminder: 'Pi only.' } } } } }))
+    const w = world(on, { files, fetch: inbox(TOOLS, []) })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    expect(w.contexts).toEqual([[REMINDER]])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+  })
+
+  test('prompts.inbox set: Claude Code\'s own text replaces the line, plannotator_inbox in it named as the engine registered it', async ($: any, on: any) => {
+    const files = withRegistry()
+    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { inbox: { reminder: 'Shared.', runtimes: { 'claude-code': { reminder: 'Ask your upstream session first; plannotator_inbox only when it is gone.' } } } } }))
+    const w = world(on, { files, fetch: inbox(TOOLS, []) })
+    await $.session.start(SESSION)
+    const own = `Ask your upstream session first; ${INBOX_TOOL} only when it is gone.`
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    await $.prompt.submit({ text: 'And the tests.' })
+    expect(w.contexts).toEqual([[own], null])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(own)
+  })
+
+  test('$.tool.register refused plannotator_inbox: no reminder naming a tool the session lacks', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), refuseTools: ['plannotator_inbox'] })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(false)
+    expect(w.contexts).toEqual([null])
+    expect(w.logs.some((line) => line.includes('plannotator_inbox tool is not available'))).toBe(true)
+  })
+
+  // Live on 2.1.310 the engine raised the first prompt.context BEFORE the
+  // mod's session.start had registered plannotator_inbox (#2167 review). A
+  // first prompt that early waits for session.start's decision.
+  test('a first prompt while session.start is still registering the tool (a slow Inbox /mcp): it waits and carries the reminder', async ($: any, on: any) => {
     let release: () => void = () => undefined
     const held = new Promise<void>((resolve) => {
       release = resolve
@@ -785,61 +817,45 @@ describe('register', () => {
         return answer(e)
       },
     })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
 
     const starting = $.session.start(SESSION)
-    const context = $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-25' }] })
-    // Neither can finish while the Inbox has not answered.
+    const submitted = $.prompt.submit({ text: 'Refactor the handler.' })
     await w.clock.settle()
     expect(w.tools.some((t) => t.name === 'plannotator_inbox')).toBe(false)
+    expect(w.contexts).toEqual([])
     release()
     await starting
-    const blocks = (await context).blocks
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
+    await submitted
 
-    expect(blocks).toEqual([{ name: 'currentDate', text: '2026-10-25' }, { name: 'plannotatorInbox', text: REMINDER }])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
-  })
-
-  test('a machine wrongly learned false by an older build: the next working prompt.context sets it back to true', async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: false } })
-    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
-    await $.session.start(SESSION)
-
-    await $.prompt.submit({ text: 'Refactor the handler.' })
-    await $.prompt.context({ blocks: [] })
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
-
-    // One accepted duplicate (the copy on the first prompt), then today's path.
     expect(w.contexts).toEqual([[REMINDER]])
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
   })
 
-  test('a resumed session (started long before this process) teaches nothing from its first turn here', { plugins: [GUARD] }, async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: true } })
-    on('session.usage', () => ({ value: { startedAt: w.clock.now() - 3_600_000, context: { window: 200_000 }, rateLimits: [] } }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
-    await $.session.start(SESSION)
+  // A session.start slower than the first prompt's wait: that prompt goes on
+  // without context, but the conversation is classed then, as fresh. Its
+  // first answer must not make the next prompt think it resumed one.
+  test('a session.start slower than the wait: the first prompt goes on bare, and the next one carries the reminder', async ($: any, on: any) => {
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let rows: unknown[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), sessionStarted: held })
+    on('session.messages', () => ({ value: rows }))
 
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
+    const starting = $.session.start(SESSION)
+    const submitted = $.prompt.submit({ text: 'Refactor the handler.' })
+    await w.clock.settle()
+    await w.clock.advance(2_500)
+    await submitted
+    release()
+    await starting
+    rows = [{ role: 'user', text: 'Refactor the handler.' }, { role: 'assistant', text: 'Done.' }]
+    await $.prompt.submit({ text: 'And the tests.' })
 
-    expect(w.store.get('inboxReminderContextWorks')).toBe(true)
+    expect(w.contexts).toEqual([null, [REMINDER]])
   })
 
-  test('a session started by this process (startedAt just before its first session.start) still teaches false', { plugins: [GUARD] }, async ($: any, on: any) => {
-    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: { inboxReminderContextWorks: true } })
-    on('session.usage', () => ({ value: { startedAt: w.clock.now() - 2_000, context: { window: 200_000 }, rateLimits: [] } }))
-    on('turn.complete', ($: any, e: any) => ({ text: e.answer }))
-    await $.session.start(SESSION)
-
-    await $.turn.complete({ turnId: 'turn-1', ...firstTurn })
-
-    expect(w.store.get('inboxReminderContextWorks')).toBe(false)
-  })
-
-  test('a dropped prompt is not counted as reached: the next prompt carries the copy again', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a dropped prompt is not counted as reached: the next prompt carries the reminder again', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), dropPrompt: (text) => text === 'refused' })
     await $.session.start(SESSION)
 
@@ -850,13 +866,23 @@ describe('register', () => {
     expect(w.contexts).toEqual([[REMINDER], [REMINDER], null])
   })
 
+  test('a meta prompt does not take the reminder: the next typed prompt does', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'A background task finished.', isMeta: true })
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    expect(w.contexts).toEqual([null, [REMINDER]])
+  })
+
   for (const [name, setup] of [
     ['{ "inboxReminder": false }', { config: { inboxReminder: { 'claude-code': false } } }],
     ['no inbox/inbox.json yet', { noRegistry: true }],
     ['plannotator_inbox refused by $.tool.register', { refuse: true }],
     ['PLANNOTATOR_INBOX_TOOL=0', { env: { PLANNOTATOR_INBOX_TOOL: '0' } }],
   ] as const) {
-    test(`reminder off (${name}): no copy anywhere, even guarded, and the variable unset`, { plugins: [GUARD] }, async ($: any, on: any) => {
+    test(`reminder off (${name}): no context anywhere, even guarded, and the variable unset`, { plugins: [GUARD] }, async ($: any, on: any) => {
       const files = (setup as any).noRegistry ? new Map<string, string>() : withRegistry()
       if ((setup as any).config) files.set('/home/me/.plannotator/config.json', JSON.stringify((setup as any).config))
       const w = world(on, {
@@ -873,13 +899,12 @@ describe('register', () => {
       await $.prompt.submit({ text: 'And the tests.' })
 
       expect(w.contexts).toEqual([null, null])
-      expect(w.store.has('inboxReminderContextWorks')).toBe(false)
       expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(true)
       expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBeUndefined()
     })
   }
 
-  test('the mod turned off (PLANNOTATOR_CLAUDE_MOD=0): no copy and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('the mod turned off (PLANNOTATOR_CLAUDE_MOD=0): no context and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), modEnv: '0' })
     await $.session.start(SESSION)
     await $.prompt.submit({ text: 'Refactor the handler.' })
@@ -887,10 +912,11 @@ describe('register', () => {
     expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
   })
 
-  test('a -p session: no copy and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a -p session: no tool, no context and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
     await $.prompt.submit({ text: 'Refactor the handler.' })
+    expect(w.tools).toEqual([])
     expect(w.contexts).toEqual([null])
     expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
   })
@@ -912,6 +938,13 @@ describe('register', () => {
     },
   }
   const THREADS = `Your open Plannotator Inbox threads in this project (1). Before reply_to into a thread you have not read in this context window, call ${INBOX_TOOL} read_thread with no id and match the subject. Their decisions stay in these threads: when the person writes in the chat, say what waits and link the thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar).\n- ${THREAD_ID} · "ML team journey" · 2 open questions · the person wrote something you have not read · last the person 2026-10-27 06:24Z\nMore: read_thread with no id lists every thread (asked_by "anyone", include_resolved); search finds older ones by words (all_projects).`
+  /** The mod's record that session-1's first prompt had the reminder. */
+  const RECORDED = { inboxReminderSessions: { 'session-1': 1 } }
+  /** What `$.session.messages()` holds for a resumed conversation before its first prompt here. */
+  const RESUMED_ROWS = [
+    { role: 'user', text: 'Ship the journey fixes.' },
+    { role: 'assistant', text: 'Shipped; asked the person in the Inbox about the ML team journey.' },
+  ]
   /**
    * The Inbox of `inbox()`, whose read_thread list answers LIST (once `listed`
    * is true) and records the peeks; `old`: an Inbox from before the peek mark
@@ -969,7 +1002,7 @@ describe('register', () => {
     expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
   })
 
-  test('a precompute and a subagent compaction leave the variable alone; a guard that skips classic.* does not stop the list', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a precompute and a subagent compaction leave the variable alone', async ($: any, on: any) => {
     const peeks: any[] = []
     const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks) })
     on('session.compact', () => ({ messages: SUMMARY }))
@@ -982,15 +1015,28 @@ describe('register', () => {
     expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(`${REMINDER}\n\n${THREADS}`)
   })
 
-  test('an Inbox from before the peek mark (no peek in its health): the list is never asked for, so it makes no project', async ($: any, on: any) => {
+  // 2.1.314's guard sends session.compact past the mod too (a known gap, #2243):
+  // the command hook still prints the plain reminder session.start set, once.
+  test('under the guard, a compaction leaves the plain reminder for the compact hook (the list is skipped with session.compact)', { plugins: [GUARD] }, async ($: any, on: any) => {
     const peeks: any[] = []
-    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks, { listed: true, up: true, old: true }) })
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks) })
     on('session.compact', () => ({ messages: SUMMARY }))
-    on('classic.SessionStart', () => ({}))
     await $.session.start(SESSION)
     await $.session.compact({ trigger: 'auto', messages: TRANSCRIPT })
     expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
-    expect((await $.classic.SessionStart({ source: 'resume' })).additionalContext).toBeUndefined()
+    expect(peeks).toEqual([])
+  })
+
+  test('an Inbox from before the peek mark (no peek in its health): the list is never asked for, so it makes no project', async ($: any, on: any) => {
+    const peeks: any[] = []
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks, { listed: true, up: true, old: true }), store: RECORDED })
+    on('session.compact', () => ({ messages: SUMMARY }))
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+    await $.session.compact({ trigger: 'auto', messages: TRANSCRIPT })
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+    await $.prompt.submit({ text: 'Where were we?' })
+    expect(w.contexts).toEqual([null])
     expect(peeks).toEqual([])
   })
 
@@ -1006,33 +1052,124 @@ describe('register', () => {
     expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBeUndefined()
   })
 
-  test("a resume gets the session's open threads as SessionStart context; a startup or /clear asks nothing", async ($: any, on: any) => {
+  // A resumed conversation (`--resume`, `--continue`, an in-process
+  // `/resume`): its history is there before its first prompt here. That
+  // prompt carries the session's open threads, and the reminder only when no
+  // record says the session's first prompt had it.
+  test("a resumed conversation whose first prompt had the reminder: its first prompt here carries the open threads once, no second reminder", async ($: any, on: any) => {
     const peeks: any[] = []
-    world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks) })
-    on('classic.SessionStart', () => ({ additionalContext: ['beneath'] }))
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks), store: RECORDED })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
     await $.session.start(SESSION)
 
-    const startup = await $.classic.SessionStart({ source: 'startup' })
-    const cleared = await $.classic.SessionStart({ source: 'clear' })
-    expect(peeks).toEqual([])
-    expect(startup.additionalContext).toEqual(['beneath'])
-    expect(cleared.additionalContext).toEqual(['beneath'])
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+    await $.prompt.submit({ text: 'And then.' })
 
-    const resumed = await $.classic.SessionStart({ source: 'resume', session_id: 'session-9', cwd: '/work' })
-    expect(resumed.additionalContext).toEqual(['beneath', THREADS])
-    expect(peeks[0].arguments.agent_session).toBe('session-9')
+    expect(w.contexts).toEqual([[THREADS], null, null])
+    expect(peeks).toHaveLength(1)
+    expect(peeks[0]).toEqual({ name: 'read_thread', arguments: { project_path: '/work', agent_session: 'session-1', limit: 5 }, _meta: { 'ai.plannotator/inbox-peek': true } })
   })
 
-  test('a resume with no Inbox running, or no open thread: the context is left as it was', async ($: any, on: any) => {
+  // An unguarded machine's old reminder was a prompt.context block, rebuilt
+  // per process and never in the transcript: a conversation from before this
+  // mod, resumed, has no reminder unless its first prompt here brings one.
+  test('a conversation from before the record (assistant rows, no record), resumed: the reminder once, with its threads, and recorded from then on', async ($: any, on: any) => {
     const peeks: any[] = []
-    const state = { listed: false, up: true }
-    world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks, state) })
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks) })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([[REMINDER, THREADS], null])
+    expect(Object.keys(w.store.get('inboxReminderSessions') as object)).toEqual(['session-1'])
+  })
+
+  test('a recorded conversation resumed with no open thread: no reminder and nothing else', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), store: RECORDED })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([null, null])
+  })
+
+  test('an unrecorded conversation resumed with no open thread: the reminder alone, once', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([[REMINDER], null])
+  })
+
+  test('under the guard, a resumed conversation gets its threads too, and the guard has nothing of ours to skip', { plugins: [GUARD] }, async ($: any, on: any) => {
+    const peeks: any[] = []
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks), store: RECORDED })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
     on('classic.SessionStart', () => ({}))
     await $.session.start(SESSION)
-    expect((await $.classic.SessionStart({ source: 'resume' })).additionalContext).toBeUndefined()
-    state.up = false
+
+    await $.classic.SessionStart({ source: 'resume' })
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([[THREADS], null])
+    expect(skippedOf(w.logs)).toEqual([])
+  })
+
+  test("an in-process /resume: the new id's first prompt carries that session's threads; a /clear gets the reminder; back to an earlier session, its threads again", async ($: any, on: any) => {
+    const peeks: any[] = []
+    let sessionId = 'session-1'
+    let rows: unknown[] = []
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks), sessionId: () => sessionId, store: { inboxReminderSessions: { 'session-9': 1 } } })
+    on('session.messages', () => ({ value: rows }))
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    sessionId = 'session-9'
+    rows = RESUMED_ROWS
+    await $.prompt.submit({ text: 'Back to the journey fixes.' })
+    sessionId = 'session-10'
+    rows = []
+    await $.prompt.submit({ text: 'Something new.' })
+    // /resume back to session-9, which this process already saw.
+    sessionId = 'session-9'
+    rows = RESUMED_ROWS
+    await $.prompt.submit({ text: 'And the journey again.' })
+    await $.prompt.submit({ text: 'Go on.' })
+
+    expect(w.contexts).toEqual([[REMINDER], [THREADS], [REMINDER], [THREADS], null])
+    expect(peeks.map((peek) => peek.arguments.agent_session)).toEqual(['session-9', 'session-9'])
+  })
+
+  test('a recorded conversation resumed with no open thread: the Inbox is asked once, not on every prompt', async ($: any, on: any) => {
+    const peeks: any[] = []
+    const state = { listed: false, up: true }
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks, state), store: RECORDED })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Where were we?' })
     state.listed = true
-    expect((await $.classic.SessionStart({ source: 'resume' })).additionalContext).toBeUndefined()
+    await $.prompt.submit({ text: 'Go on.' })
+    expect(w.contexts).toEqual([null, null])
+    expect(peeks).toHaveLength(1)
+  })
+
+  test('a recorded conversation resumed while the Inbox is not running: no context, and the prompt goes on', async ($: any, on: any) => {
+    const peeks: any[] = []
+    const w = world(on, { files: withRegistry(), fetch: inboxWithThreads(peeks, { listed: true, up: false }), store: RECORDED })
+    on('session.messages', () => ({ value: RESUMED_ROWS }))
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Where were we?' })
+    expect(w.contexts).toEqual([null])
+    expect(peeks).toEqual([])
   })
 
   test('an Inbox found: plannotator_inbox carries exactly the tools its /mcp offers, filled arguments left out', async ($: any, on: any) => {
@@ -1041,7 +1178,7 @@ describe('register', () => {
     await $.session.start(SESSION)
 
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message', 'submit_guide'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message', 'submit_guide'])
     expect(Object.keys(registered?.inputSchema.properties)).not.toContain('agent_session')
     // project_path is the one filled argument the agent may set (optional): the folder a call is about.
     expect(registered?.inputSchema.properties.project_path?.type).toBe('string')
@@ -1053,9 +1190,21 @@ describe('register', () => {
     await $.session.start(SESSION)
 
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message'])
     const refused = await $.tool.call({ tool: INBOX_TOOL, action: 'submit_guide', patch: 'x' })
     expect(refused.deny).toContain('update Plannotator')
+  })
+
+  test('an older Inbox whose /mcp still lists wait_for_reply: the tool does not offer it, and a call that names it is told what to do, reaching nothing', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox([...TOOLS, tool('wait_for_reply', { thread_id: { type: 'string' } })], calls) })
+    await $.session.start(SESSION)
+
+    const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message'])
+    const refused = await $.tool.call({ tool: INBOX_TOOL, action: 'wait_for_reply', thread_id: 'msg_1' })
+    expect(refused.deny).toStartWith('action_removed: ')
+    expect(calls.filter((c) => c.body?.method === 'tools/call')).toEqual([])
   })
 
   test('PLANNOTATOR_INBOX_TOOL=0: no plannotator_inbox even with an Inbox found', async ($: any, on: any) => {
@@ -1081,7 +1230,7 @@ describe('register', () => {
       name: 'send_message',
       arguments: { body: 'Ship it?', project_path: '/work', agent_session: 'session-1', agent_host: 'claude-code', agent_name: 'Claude Code' },
       // The mod's wake delivers the reply as a turn, so it marks the call (#1771):
-      // the send tools then say to end the turn instead of waiting with wait_for_reply.
+      // the send tools then say to end the turn instead of reading the thread later.
       _meta: { 'ai.plannotator/inbox-wakes': true },
     })
 
@@ -1108,9 +1257,8 @@ describe('register', () => {
     for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
 
     expect(w.submits).toEqual([
-      'Plannotator Inbox: Ship it? (msg_reply)\nThe person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.' +
-        // The closing line names the tool by the full name $.tool.register answered.
-        `\n\n[thread msg_1 · more: ${INBOX_TOOL} read_thread · how it works: plannotator inbox --help]`,
+      'Plannotator Inbox: Ship it? (msg_reply)\nThis is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.' +
+        `\n\n[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]`,
     ])
     expect(delivered).toBe(true)
     const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))

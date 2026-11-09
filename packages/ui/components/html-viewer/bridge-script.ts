@@ -6,8 +6,10 @@
  * "plannotator-bridge-*" message protocol.
  *
  * This is a string constant — it gets prepended to the iframe's srcdoc.
- * No external dependencies.
+ * Its one import, ./sandboxShim, is a dependency-free string constant as well;
+ * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
+import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -59,6 +61,10 @@ export const ANNOTATION_HIGHLIGHT_CSS = `
 body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
+}
+/* Armed, body listens for clicks so a tap pins (setTapTarget): no grey flash over the whole page on each tap. */
+body[data-plannotator-pinpoint-cursor] {
+  -webkit-tap-highlight-color: transparent;
 }
 /* A plain click on a link with a real destination follows it while armed
  * (Cmd/Ctrl-click pins it), so such a link keeps the pointer that says so,
@@ -291,6 +297,12 @@ export const BRIDGE_SCRIPT = `(function() {
   // no proxy port) is the grandparent; everywhere else it is the parent.
   var EDITOR = LIVE && LIVE.nested ? parent.parent : parent;
   if (LIVE && (window === window.parent || (LIVE.nested ? window.parent.parent : window.parent) !== window.top || (LIVE.nested && window.parent === window.top))) return;
+  // The sandboxed frame's history and storage, made safe for a page that uses
+  // them as it builds itself (sandboxShim.ts). A no-op when the inline path
+  // already ran it first in <head>.
+  if (!LIVE) {
+${SANDBOX_SHIM_SCRIPT}
+  }
   // The server cannot know which origin form (localhost or 127.0.0.1) the
   // editor tab was opened on, so live outbound messages are posted once per
   // listed editor origin: the browser delivers only the post whose
@@ -461,6 +473,98 @@ export const BRIDGE_SCRIPT = `(function() {
   // The frame resizing is what tells the guard its last grow was applied.
   window.addEventListener('resize', postResize, { passive: true });
 
+  // Reports for a host's own controls (HtmlViewer onContentWidth,
+  // onPageScrollUp, onPageTap; the Inbox's size icon on a phone). Opt-in:
+  // nothing here listens or posts until the host asks with set-page-reports,
+  // so a host that never asks gets exactly what it got before.
+  var pageReports = { contentWidth: false, scrollUp: false, tap: false, scale: 1 };
+  var pageReportListeners = { contentWidth: false, motion: false };
+
+  // How wide the page lays out against the frame's own width: a host that can
+  // show the page at another width (the Inbox on a phone: "Desktop size") reads
+  // a page wider than its frame as one made for a wider screen. Posted when
+  // either number changes.
+  var lastContentWidth = '';
+  function postContentWidth() {
+    if (LIVE || !pageReports.contentWidth) return;
+    var root = document.documentElement;
+    if (!root) return;
+    var width = Math.max(root.scrollWidth || 0, document.body ? document.body.scrollWidth || 0 : 0);
+    var viewport = root.clientWidth || window.innerWidth || 0;
+    var key = width + 'x' + viewport;
+    if (key === lastContentWidth) return;
+    lastContentWidth = key;
+    postToParent({ type: PREFIX + 'content-width', width: Math.ceil(width), viewport: Math.ceil(viewport) });
+  }
+
+  // The person scrolling back up, and a tap: a host with a control that fades
+  // over the page shows it again on either. Distances are the person's: on
+  // screen, through the host's scale (a page drawn at 0.3 moves 3 screen px
+  // for 10 of its own). The page or any scroller in it, at least 16 px up in
+  // one go, at most every 200 ms. A tap is a press and a lift within 10 px and
+  // 600 ms, posted with where it landed (the page's own pixels).
+  var scrollTops = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var scrollUpRun = 0;
+  var lastScrollUpPost = 0;
+  function noteScrollForHost(e) {
+    if (LIVE || !pageReports.scrollUp || !scrollTops) return;
+    var t = e.target;
+    var el = t && t.nodeType === 1 ? t : (document.scrollingElement || document.documentElement);
+    if (!el) return;
+    var top = el.scrollTop || 0;
+    var prev = scrollTops.get(el);
+    scrollTops.set(el, top);
+    if (prev === undefined) return;
+    if (top >= prev) { scrollUpRun = 0; return; }
+    scrollUpRun += prev - top;
+    var now = Date.now();
+    if (scrollUpRun * pageReports.scale < 16 || now - lastScrollUpPost < 200) return;
+    scrollUpRun = 0;
+    lastScrollUpPost = now;
+    postToParent({ type: PREFIX + 'page-scroll-up' });
+  }
+  var tapStart = null;
+  function noteTapStart(e) {
+    tapStart = e.isPrimary === false ? null : { x: e.clientX, y: e.clientY, t: Date.now() };
+  }
+  function noteTapEnd(e) {
+    var s = tapStart;
+    tapStart = null;
+    if (LIVE || !pageReports.tap || !s || !e) return;
+    var k = pageReports.scale;
+    if (Math.abs(e.clientX - s.x) * k > 10 || Math.abs(e.clientY - s.y) * k > 10 || Date.now() - s.t > 600) return;
+    postToParent({ type: PREFIX + 'page-tap', y: Math.round(e.clientY) });
+  }
+
+  // The host's set-page-reports: which reports it wants, and how much it
+  // scales the frame on screen. Listeners go on at the first ask and stay
+  // (each report checks its flag), so a repeated ask never stacks them.
+  function setPageReports(data) {
+    var scale = data && data.scale;
+    pageReports.contentWidth = !!data && data.contentWidth === true;
+    pageReports.scrollUp = !!data && data.scrollUp === true;
+    pageReports.tap = !!data && data.tap === true;
+    pageReports.scale = typeof scale === 'number' && isFinite(scale) && scale > 0 ? Math.min(Math.max(scale, 0.05), 20) : 1;
+    if (LIVE) return;
+    if (pageReports.contentWidth && !pageReportListeners.contentWidth) {
+      pageReportListeners.contentWidth = true;
+      window.addEventListener('load', postContentWidth);
+      window.addEventListener('resize', postContentWidth, { passive: true });
+    }
+    if ((pageReports.scrollUp || pageReports.tap) && !pageReportListeners.motion) {
+      pageReportListeners.motion = true;
+      window.addEventListener('scroll', noteScrollForHost, { passive: true, capture: true });
+      window.addEventListener('pointerdown', noteTapStart, { passive: true, capture: true });
+      window.addEventListener('pointercancel', function() { tapStart = null; }, { passive: true, capture: true });
+      window.addEventListener('pointerup', noteTapEnd, { passive: true, capture: true });
+    }
+    if (pageReports.contentWidth) {
+      // A fresh ask always hears the current width, even if it has not changed.
+      lastContentWidth = '';
+      postContentWidth();
+    }
+  }
+
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
@@ -473,6 +577,9 @@ export const BRIDGE_SCRIPT = `(function() {
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
   var pendingPinLabel = null; // semantic label captured for the primary target
   var pendingPinPoint = null; // normalized {x,y} click point inside the pinned element's rect
+  // A host's restore-draft in flight: stamped on the one selection it posts, so
+  // the parent opens its composer for that draft and no other selection.
+  var restoreDraftId = null;
   var pendingPinContext = null; // agent-facing element context for the primary target (see buildElementContext)
   var pendingPinViaPinpoint = false; // pinpoint drafts survive scroll-out (see postSelectionRect)
   // Multi-select is ARMED EXPLICITLY by the parent (arm-multi-select), and only
@@ -512,14 +619,31 @@ export const BRIDGE_SCRIPT = `(function() {
   var annotateModeActive = true;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
+  // WebKit's touch model (iOS, and Playwright's WebKit on Linux) turns a tap
+  // into mouse events and a click only when the tapped element or an ancestor
+  // up to <body> listens for a click; listeners on document and window (all
+  // of the bridge's) do not count. Without this, a tap on plain text while
+  // armed sends no click and pins nothing. So while armed in pinpoint, body
+  // listens (a no-op), and its tap highlight is off: the pin draws its own box.
+  var tapTargetBody = null;
+  function noteTap() {}
+  function setTapTarget(on) {
+    var body = on ? document.body : null;
+    if (body === tapTargetBody) return;
+    if (tapTargetBody) tapTargetBody.removeEventListener('click', noteTap);
+    tapTargetBody = body;
+    if (body) body.addEventListener('click', noteTap);
+  }
   function updatePinpointCursor() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
+      setTapTarget(true);
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
       document.body.removeAttribute('data-plannotator-frame-inert');
+      setTapTarget(false);
     }
   }
   var pinpointHover = null;
@@ -614,6 +738,7 @@ export const BRIDGE_SCRIPT = `(function() {
       // The quote above was cut to MAX_SELECTION_TEXT: a plain-text copy made
       // from it alone (no answer to rich-copy-request) says so.
       textCut: text.length < fullText.length ? true : undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -661,6 +786,13 @@ export const BRIDGE_SCRIPT = `(function() {
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
+
+    // Print this document, not the host's viewport-sized iframe. Live apps
+    // keep their own print behavior; no parent DOM access or sandbox change.
+    if (!LIVE && type === PREFIX + 'print') {
+      window.print();
+      return;
+    }
 
     // Copy (rich text) was pressed in the parent: build the pending text
     // range's markup now (never on selection). A throw or an oversized range
@@ -866,6 +998,10 @@ export const BRIDGE_SCRIPT = `(function() {
       flashMultiTarget(typeof e.data.key === 'string' ? e.data.key : '');
     }
 
+    else if (type === PREFIX + 'restore-draft') {
+      restoreDraft(e.data);
+    }
+
     else if (type === PREFIX + 'step-pin') {
       // A host's Parent or Child (a phone's comment sheet): move the pinned
       // draft to the element around it, or back in. Re-pins through
@@ -876,9 +1012,19 @@ export const BRIDGE_SCRIPT = `(function() {
     else if (type === PREFIX + 'reveal-pin') {
       // A host whose own panel covers the page's lower part (a phone's comment
       // sheet) shrank the frame: bring the pinned draft back into view.
+      // clearBottom: the panel floats over the frame instead (the Inbox's card).
       if (pendingPinEl && pendingPinEl.isConnected) {
-        try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        var clearBottom = e.data.clearBottom;
+        if (typeof clearBottom === 'number' && isFinite(clearBottom) && clearBottom > 0) {
+          revealAbove(pendingPinEl, Math.min(clearBottom, window.innerHeight));
+        } else {
+          try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        }
       }
+    }
+
+    else if (type === PREFIX + 'set-touch-selection') {
+      setTouchSelection(e.data.active === true);
     }
 
     else if (type === PREFIX + 'scroll-to') {
@@ -888,7 +1034,9 @@ export const BRIDGE_SCRIPT = `(function() {
       // first fragment of a multi-paragraph selection. The optional
       // behavior lets the parent pass its reduced-motion preference across
       // the boundary; absent means smooth, as before.
-      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth');
+      // clear: a host panel floats over the frame's right side (HtmlViewer
+      // scrollClear); a mark under it goes below it where the page scrolls.
+      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth', panelClear(e.data.clear));
     }
 
     else if (type === PREFIX + 'scroll-to-fragment') {
@@ -926,6 +1074,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
     else if (type === PREFIX + 'set-host-navigates') {
       hostNavigates = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-page-reports') {
+      setPageReports(e.data);
     }
 
     else if (type === PREFIX + 'set-annotate-mode') {
@@ -2822,25 +2974,71 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
-  function scrollToAnnotation(id, behavior) {
+  function scrollToAnnotation(id, behavior, clear) {
     var record = findAnnRecord(id);
     if (!record) return;
     beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
     refreshRecordTargets(record);
     var scrollEl = null;
+    var box = null;
     for (var i = 0; i < record.targets.length && !scrollEl; i++) {
       var target = record.targets[i];
       if (target.kind === 'element' && target.element && target.element.isConnected) {
         scrollEl = target.element;
+        box = scrollEl.getBoundingClientRect();
       } else if (target.kind === 'range' && rangeAlive(target.range)) {
         var node = target.range.startContainer;
         scrollEl = node.nodeType === 1 ? node : node.parentElement;
+        try { box = target.range.getBoundingClientRect(); } catch (ex) { box = null; }
       }
     }
     if (scrollEl) {
-      try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      var by = clear && box ? clearOfPanelBy(box, clear) : null;
+      if (by === null) {
+        try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      } else if (by !== 0) {
+        scrollPageBy(scrollEl, by, behavior || 'smooth');
+      }
     }
     focusAnnotationRecord(id, true);
+  }
+
+  // A host's panel over the frame's right side: { left, top, bottom } in frame
+  // pixels, or null when the message carries none (or a malformed one).
+  function panelClear(value) {
+    if (!value || typeof value !== 'object') return null;
+    var left = value.left, top = value.top, bottom = value.bottom;
+    if (typeof left !== 'number' || typeof top !== 'number' || typeof bottom !== 'number') return null;
+    if (!isFinite(left) || !isFinite(top) || !isFinite(bottom) || bottom <= top) return null;
+    return { left: left, top: top, bottom: bottom };
+  }
+
+  // How far to scroll so a mark is not under the host's panel: null to
+  // centre it as before (it is clear of the panel there, or there is no room
+  // below the panel), 0 to leave it where it is (on screen and clear), else
+  // the distance that puts it just below the panel.
+  function clearOfPanelBy(box, clear) {
+    var shown = window.innerHeight;
+    var under = function (top) { return top < clear.bottom && top + box.height > clear.top; };
+    if (box.right <= clear.left) return null;
+    if (!under((shown - box.height) / 2)) return null;
+    if (box.top >= 0 && box.bottom <= shown && !under(box.top)) return 0;
+    var below = clear.bottom + 16;
+    if (below + box.height > shown - 16) return null;
+    return box.top - below;
+  }
+
+  // Scroll the mark's scrolling ancestors by that distance, as far as each can go.
+  function scrollPageBy(el, by, behavior) {
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      var to = Math.max(0, Math.min(node.scrollHeight - node.clientHeight, before + by));
+      if (to === before) continue;
+      try { node.scrollTo({ top: to, behavior: behavior }); } catch (ex) { node.scrollTop = to; }
+      by -= to - before;
+    }
   }
 
   // --- Element anchors: verified-unique CSS selectors for restoration ---
@@ -4124,8 +4322,107 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: pendingPinKey || undefined,
       targetLabel: pendingPinLabel || undefined,
       context: pendingPinContext || undefined,
+      restoreId: restoreDraftId || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // A host putting back a comment it kept when its file closed (HtmlViewer
+  // reopenComment): pin the element again by its anchor, else select the
+  // quoted words again (their first match), so the parent sees an ordinary
+  // selection carrying this id. Nothing found: restore-draft-missing.
+  function restoreDraft(data) {
+    var id = typeof data.id === 'string' && data.id.length > 0 && data.id.length <= 64 ? data.id : '';
+    if (!id) return;
+    var done = false;
+    restoreDraftId = id;
+    try {
+      var anchor = data.anchor && typeof data.anchor === 'object' ? data.anchor : null;
+      var el = anchor ? resolveAnchorElement(anchor) : null;
+      if (el) {
+        var point = anchor.point;
+        var clickPoint = null;
+        if (point && typeof point.x === 'number' && typeof point.y === 'number' && isFinite(point.x) && isFinite(point.y)) {
+          var box = el.getBoundingClientRect();
+          clickPoint = { x: box.left + point.x * box.width, y: box.top + point.y * box.height };
+        }
+        done = annotateElement(el, undefined, true, clickPoint) === true;
+      }
+      if (!done && typeof data.text === 'string' && data.text) {
+        var range = findTextRange(data.text, null);
+        if (range) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          done = handleSelection(undefined, null) === true;
+        }
+      }
+    } catch (ex) {
+      done = false;
+    }
+    restoreDraftId = null;
+    if (!done) postToParent({ type: PREFIX + 'restore-draft-missing', id: id });
+  }
+
+  // The pinned element in the frame's top part, a host's panel over the last
+  // covered pixels: its middle in the middle of what shows, or its top when it
+  // is taller. Already in sight, nothing moves.
+  function revealAbove(el, covered) {
+    var shown = window.innerHeight - covered;
+    var box = el.getBoundingClientRect();
+    if (box.top >= 0 && box.bottom <= shown) return;
+    var by = box.height > shown ? box.top : box.top + box.height / 2 - shown / 2;
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      node.scrollTop = before + by;
+      by -= node.scrollTop - before;
+    }
+  }
+
+  // --- Touch: a selection made with a finger ---
+  // A long press and its handles send no mouseup, so the capture-phase mouseup
+  // listener above never sees them. Where the host asks for it (HtmlViewer
+  // touchSelection) and the main pointer is a finger, the selection is read
+  // from selectionchange once it rests, as the Markdown viewer does. A collapsed
+  // selection is not taken: moving focus out of the frame can collapse it, and
+  // a tap on the page already closes the draft through mouseup. What the bridge
+  // reported already (a pin's own selection, a draft that did not change) is
+  // not reported again. The query and the wait are utils/touchSelection.ts's
+  // (this file is vendored whole and imports nothing; a test keeps them equal).
+  var touchSelectionOn = false;
+  var touchSelectionTimer = 0;
+  function isReportedRange(range) {
+    if (!pendingRange) return false;
+    try {
+      return pendingRange.compareBoundaryPoints(Range.START_TO_START, range) === 0
+        && pendingRange.compareBoundaryPoints(Range.END_TO_END, range) === 0;
+    } catch (ex) {
+      return false;
+    }
+  }
+  function takeTouchSelection() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    if (isReportedRange(sel.getRangeAt(0))) return;
+    if (!(sel.toString() || '').trim()) return;
+    // New words chosen over a pin: the selection is the draft now.
+    clearMultiTargets();
+    clearPendingPin();
+    handleSelection();
+  }
+  function onTouchSelectionChange() {
+    clearTimeout(touchSelectionTimer);
+    touchSelectionTimer = setTimeout(takeTouchSelection, 400);
+  }
+  function setTouchSelection(active) {
+    var on = active && window.matchMedia('(pointer: coarse)').matches;
+    if (on === touchSelectionOn) return;
+    touchSelectionOn = on;
+    clearTimeout(touchSelectionTimer);
+    if (on) document.addEventListener('selectionchange', onTouchSelectionChange);
+    else document.removeEventListener('selectionchange', onTouchSelectionChange);
   }
 
   // --- Touch: a tap on a link follows it, press-and-hold pins it ---
@@ -6047,6 +6344,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
       var resizeObserver = new ResizeObserver(function() {
         postResize();
+        postContentWidth();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
       });

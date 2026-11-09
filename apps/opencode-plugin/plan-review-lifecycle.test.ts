@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import { closeServer, occupyConsecutivePorts } from "../../tests/helpers/ports";
 import { runEmbeddedPlanReview } from "./embedded";
@@ -55,6 +57,15 @@ async function expectRejectedWith(
   }
 }
 
+/** The `plannotator sessions` entries this process's in-process servers hold. */
+function listedEntries(): string[] {
+  try {
+    return readdirSync(join(process.env.PLANNOTATOR_DATA_DIR!, "sessions", "opencode"));
+  } catch {
+    return [];
+  }
+}
+
 async function expectPortReusable(port: number): Promise<void> {
   const replacement = Bun.serve({
     hostname: "127.0.0.1",
@@ -86,9 +97,12 @@ describe("OpenCode embedded plan-review lifetime", () => {
     expect(shownPlan.status).toBe(200);
     // #1057: submit_plan delivers an approval's notes, so the tab offers them.
     expect(((await shownPlan.json()) as { approvalNotesSupported?: boolean }).approvalNotesSupported).toBe(true);
+    for (let i = 0; i < 100 && listedEntries().length === 0; i++) await Bun.sleep(20);
+    expect(listedEntries()).toEqual([`${process.pid}-${port}.json`]);
     const abortReason = new DOMException("Cancelled by OpenCode", "AbortError");
     firstController.abort(abortReason);
     await expectRejectedWith(firstReview, abortReason);
+    expect(listedEntries()).toEqual([]);
 
     const secondReady = readyObserver();
     const secondController = new AbortController();
@@ -147,6 +161,7 @@ describe("OpenCode embedded plan-review lifetime", () => {
     });
     expect(response.status).toBe(200);
     await expect(review).resolves.toEqual({ approved: true });
+    expect(listedEntries()).toEqual([]);
     await expectPortReusable(port);
   });
 
@@ -169,6 +184,7 @@ describe("OpenCode embedded plan-review lifetime", () => {
       approved: false,
       feedback: "[Plannotator] No response within 0.01 seconds. Port released automatically. Please call submit_plan again.",
     });
+    expect(listedEntries()).toEqual([]);
     await expectPortReusable(port);
   });
 

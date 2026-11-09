@@ -156,6 +156,135 @@ describe.if(hasDom)('ImageLightbox: the light version (plan review and annotate)
   });
 });
 
+// A touch screen's swipe (`swipe`, approval "inbox-image-swipe": the Inbox's decision mode passes it, with each
+// picture named by its choice). The swipe's numbers are the Inbox phone viewer's (useSwipeStep).
+describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
+  const NAMED = [
+    { src: '/api/inbox/messages/m/image?src=a', alt: 'Option A', name: 'A · Gmail-style ⋯' },
+    { src: '/api/inbox/messages/m/image?src=b', alt: 'Option B', name: 'B · Quiet hover menu' },
+  ];
+  async function mountNamed(onClose: () => void, swipe = true, images: { src: string; alt: string; name: string }[] = NAMED) {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const { ImageLightbox } = lightboxModule!;
+    await act(async () => {
+      root.render(<ImageLightbox src={images[0]!.src} alt={images[0]!.alt} images={images} onClose={onClose} swipe={swipe} />);
+    });
+    cleanups.push(() => root.unmount());
+    // The area the swipe is heard on: the framed viewer's image area, or the one-image overlay.
+    const area = host.querySelector<HTMLElement>('[data-lightbox-swipe]') ?? host.querySelector<HTMLElement>('[data-image-lightbox]')!;
+    area.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 600, right: 390, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    return { host, area };
+  }
+  const fire = (target: EventTarget, type: string, x: number, y: number) => {
+    const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+    const point = [{ identifier: 1, clientX: x, clientY: y, target }];
+    Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : point });
+    Object.defineProperty(event, 'changedTouches', { value: point });
+    target.dispatchEvent(event);
+  };
+  const wait = (ms: number) =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+  async function finger(area: HTMLElement, dx: number, dy: number, { lift = true, rest = 260 } = {}) {
+    const target = area.querySelector('[data-lightbox-stage]') ?? area;
+    await act(async () => {
+      fire(target, 'touchstart', 200, 300);
+      for (let i = 1; i <= 6; i++) fire(target, 'touchmove', 200 + (dx * i) / 6, 300 + (dy * i) / 6);
+      if (lift) fire(target, 'touchend', 200 + dx, 300 + dy);
+    });
+    if (lift) await wait(rest);
+  }
+
+  test('each picture is called by its name, not the last segment of its URL', async () => {
+    const { host } = await mountNamed(() => {});
+    const dialog = host.querySelector('[data-image-lightbox]')!;
+    expect(dialog.getAttribute('aria-label')).toBe('A · Gmail-style ⋯, image 1 of 2');
+    expect(host.querySelector('[data-lightbox-pill]')!.textContent).toContain('A · Gmail-style ⋯');
+    expect(lightboxModule!.lightboxImageName({ src: '/x/image?src=a', alt: 'Option A' })).toBe('image');
+  });
+
+  test('a finger steps to the next picture and stops at the last; a drag down at Fit closes', async () => {
+    let closed = 0;
+    const { host, area } = await mountNamed(() => closed++);
+    const count = () => host.querySelector('[data-lightbox-count]')!.textContent;
+    await finger(area, -200, 0);
+    expect(count()).toBe('2 of 2');
+    expect(host.querySelector('[data-image-lightbox]')!.getAttribute('aria-label')).toBe('B · Quiet hover menu, image 2 of 2');
+    await finger(area, -200, 0);
+    expect(count()).toBe('2 of 2');
+    expect(host.querySelector('[data-lightbox-end-note]')!.textContent).toBe('Last image in this document');
+    await finger(area, 0, 220);
+    expect(closed).toBe(1);
+  });
+
+  test('only the picture follows the finger: the image area (and the region strip over it) stays put', async () => {
+    const { host, area } = await mountNamed(() => {});
+    await finger(area, -120, 0, { lift: false });
+    expect(host.querySelector<HTMLElement>('[data-lightbox-track]')!.style.transform).toBe('translateX(-120px)');
+    expect(area.style.transform).toBe('');
+    await act(async () => fire(area.querySelector('[data-lightbox-stage]')!, 'touchend', 80, 300));
+    await wait(300);
+    expect(host.querySelector<HTMLElement>('[data-lightbox-track]')!.style.transform).toBe('');
+  });
+
+  test('a second flick while the first is still sliding is not lost: two quick flicks step twice', async () => {
+    const THREE = [...NAMED, { src: '/api/inbox/messages/m/image?src=c', alt: 'Option C', name: 'C · Header menu only' }];
+    const { host, area } = await mountNamed(() => {}, true, THREE);
+    const count = () => host.querySelector('[data-lightbox-count]')!.textContent;
+    const flick = async () => {
+      const target = area.querySelector('[data-lightbox-stage]')!;
+      await act(async () => fire(target, 'touchstart', 200, 300));
+      await act(async () => {
+        fire(target, 'touchmove', 170, 300);
+        fire(target, 'touchmove', 140, 300);
+        fire(target, 'touchend', 140, 300);
+      });
+    };
+    await flick();
+    // Still sliding: nothing stepped yet.
+    expect(count()).toBe('1 of 3');
+    await flick();
+    expect(count()).toBe('2 of 3');
+    await wait(260);
+    expect(count()).toBe('3 of 3');
+  });
+
+  test('one picture alone: a drag down still closes; a sideways drag is the picture\'s own', async () => {
+    let closed = 0;
+    const { host, area } = await mountNamed(() => closed++, true, [NAMED[0]!]);
+    await finger(area, -200, 0, { lift: false });
+    expect(host.querySelector<HTMLElement>('[data-lightbox-track]')!.style.transform).toBe('');
+    await act(async () => fire(area.querySelector('[data-lightbox-stage]')!, 'touchend', 0, 300));
+    await finger(area, 0, 220);
+    expect(closed).toBe(1);
+  });
+
+  test('without `swipe` the viewer draws as before: no track around the zoom stage, stepping or single', async () => {
+    for (const images of [NAMED, [NAMED[0]!]]) {
+      const { host } = await mountNamed(() => {}, false, images);
+      const stage = host.querySelector('[data-lightbox-stage]')!;
+      expect(host.querySelector('[data-lightbox-track]')).toBeNull();
+      // The stage sits where it always did: straight in the image area, or straight in the one-image overlay.
+      expect(stage.parentElement!.matches(images.length > 1 ? '[data-lightbox-swipe], .relative.flex-1' : '[data-image-lightbox]')).toBe(true);
+    }
+    // With `swipe`, the track is there for the finger to move.
+    const { host } = await mountNamed(() => {});
+    expect(host.querySelector('[data-lightbox-track] [data-lightbox-stage]')).not.toBeNull();
+  });
+
+  test('without `swipe` a finger does nothing (plan review and annotate keep their viewer)', async () => {
+    let closed = 0;
+    const { host, area } = await mountNamed(() => closed++, false);
+    await finger(area, -200, 0);
+    await finger(area, 0, 220);
+    expect(host.querySelector('[data-lightbox-count]')!.textContent).toBe('1 of 2');
+    expect(closed).toBe(0);
+  });
+});
+
 // Zoom (#2067). happy-dom lays nothing out, so the stage's box and the image's
 // own size are given here; tests/e2e/inbox-image-viewer.spec.ts measures the
 // real thing in Chromium.

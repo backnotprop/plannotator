@@ -54,9 +54,19 @@ test.beforeAll(async () => {
   );
   writeFileSync(join(dataDir, 'install-flags.json'), '{"v":1,"flags":["skip-gemini"]}');
 
-  // The fake install script: records its arguments, then takes a moment so Updating… shows.
-  installer = createServer((_req, res) => {
-    res.end(`printf '%s\\n' "$@" > "$HOME/installer-args"\nsleep 3\nexit 0\n`);
+  // The fake release (safe updates): the install script, which records its
+  // arguments and takes a moment so Updating… shows, and the .sha256 files the
+  // running Plannotator downloads itself before it runs the script.
+  installer = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    if (path === '/install.sh') {
+      res.end(`#!/bin/bash\nREPO="backnotprop/plannotator"\nprintf '%s\\n' "$@" > "$HOME/installer-args"\nsleep 3\nexit 0\n`);
+    } else if (/^\/download\/v0\.28\.12\/plannotator-(darwin|linux)-(arm64|x64)\.sha256$/.test(path)) {
+      res.end(`${'c'.repeat(64)}  x\n`);
+    } else {
+      res.statusCode = 404;
+      res.end('not found');
+    }
   });
   await new Promise<void>((r) => installer.listen(0, '127.0.0.1', () => r()));
   installerPort = (installer.address() as { port: number }).port;
@@ -67,6 +77,8 @@ test.beforeAll(async () => {
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
+      // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+      NO_ANON_PING: '1',
       PLANNOTATOR_BROWSER: NO_BROWSER,
       PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_INBOX_PHONES: '0',
@@ -74,7 +86,9 @@ test.beforeAll(async () => {
       PLANNOTATOR_INBOX_CONNECT: '0',
       // Never GitHub (the seeded cache answers), never the real install script.
       PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
+      PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
       PLANNOTATOR_INSTALL_SCRIPT_URL: `http://127.0.0.1:${installerPort}/install.sh`,
+      PLANNOTATOR_RELEASE_DOWNLOAD_URL: `http://127.0.0.1:${installerPort}/download`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

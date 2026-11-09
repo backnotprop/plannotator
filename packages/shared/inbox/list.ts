@@ -86,12 +86,20 @@ export { inboxHasUnsent };
 export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
   if (row.resolved_at !== null && row.back_from_archive !== true) return "quiet";
   const unsent = inboxHasUnsent(row.unsent);
+  // Mark unread took the look back from a Mark read that still stands (store.markUnread): its news is new again.
+  if (row.read_at != null && row.unseen > 0) return "new";
   // Re-ask first: while its note waits on the agent, unsent work never moves the row (approval "inbox-reask").
   if (row.read_at != null) return unsent && row.reask_pending !== true ? "new" : "quiet";
   // The person's Re-ask note is the last message: it waits on the agent (approval "inbox-reask").
   if (row.reask_pending === true) return "sent";
   if (row.questions.open > 0) {
     // The urgency rule decision mode orders by (core inboxUrgencyOf).
+    const urgency = inboxUrgencyOf(row.questions);
+    return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
+  }
+  // An action item's Done or Can't do it waits in the draft: the agent still waits on the person's Send, so the
+  // row stays where the item put it (approval "inbox-action-items-in-reply", Q2: a Stopped item keeps "Stopped on you").
+  if ((row.questions.staged ?? 0) > 0) {
     const urgency = inboxUrgencyOf(row.questions);
     return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
   }
@@ -102,13 +110,18 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
 }
 
 /**
- * Bold in the list: something waits on the person, or is new to them. A row in
- * New only for the person's own unsent words or comments (`draftOnly`) is not
- * bold: nothing new arrived, and its "Draft" label says what is there.
+ * Bold in the list: something is new to the person. A row in Stopped, Holding
+ * up work or Waiting on you is bold until the person has seen its latest agent
+ * message (`unseen` 0: they opened the thread), then reads as read where it is:
+ * it keeps its group and its chips, and an agent's next message makes it bold
+ * again (the owner, 2026-11-08: "if they could unbolden after I at least read
+ * the latest message ... Then they just stay where they are"). A row in New is
+ * bold, except one there only for the person's own unsent words or comments
+ * (`draftOnly`): nothing new arrived, and its "Draft" label says what is there.
  */
-export function inboxRowUnread(section: InboxSectionId, draftOnly = false): boolean {
-  if (section === "new" && draftOnly) return false;
-  return section === "stopped" || section === "holding" || section === "waiting" || section === "new";
+export function inboxRowUnread(section: InboxSectionId, unseen: number, draftOnly: boolean): boolean {
+  if (section === "stopped" || section === "holding" || section === "waiting") return unseen > 0;
+  return section === "new" && !draftOnly;
 }
 
 function byId(left: InboxListRow, right: InboxListRow): number {

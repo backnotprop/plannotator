@@ -4,9 +4,9 @@
  * with a live agent session polling the bridge as a connection does. What is
  * proved, with the window's own code (BoardPage) doing the calls:
  *
- *  - Start on an agent's Backlog card sends that agent ONE message in the
- *    card's thread naming the card, and marks the card sent; the card does
- *    not move. When the answer to the send is lost, pressing Start again
+ *  - Start on an agent's Todo card sends that agent ONE message in the
+ *    card's thread naming the card, and marks the card sent; the card stays
+ *    in Todo. When the answer to the send is lost, pressing Start again
  *    sends nothing more: the message and the send replay.
  *  - New card, Send to an agent: the card is made first (so the message can
  *    name it), then a thread to the session, then the send. When the answer
@@ -17,7 +17,7 @@
  * card, a message that says "it is yours now" for a card that does not
  * exist, or a Start that moves the card.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -193,7 +193,7 @@ const cardsTitled = async (title: string) => (await get<{ cards: InboxCardWire[]
 
 test.if(hasDom)('Start tells the card’s live agent once, in the card’s thread, naming the card; a retry after a lost answer sends nothing more', async () => {
   const session = `ses_a${index - 1}`;
-  // The agent's connection polls: it is live. It makes a card in Backlog, linked to its thread.
+  // The agent's connection polls: it is live. It makes a card (Todo, an agent's default), linked to its thread.
   await ask({ poll: { session, body: {} } });
   const { carded } = (await ask({ card: { project: world.project, session, title: 'Retry budget', say: 'Not started', thread: world.stopped } })) as { carded: string };
   await drawBoard(carded);
@@ -208,7 +208,7 @@ test.if(hasDom)('Start tells the card’s live agent once, in the card’s threa
   await act(async () => document.querySelector<HTMLButtonElement>('[data-card-start]')?.click());
   await until(async () => (await cardsTitled('Retry budget'))[0]?.sent !== null, 'the card sent');
   const [card] = await cardsTitled('Retry budget');
-  expect(card!.column).toBe('backlog');
+  expect(card!.column).toBe('todo');
   expect(card!.sent).toMatchObject({ to: { session }, thread_id: world.stopped });
   const thread = await get<{ thread: { messages: { author: { kind: string }; body: string; to?: { session: string } | null }[] } }>(`/api/inbox/threads/${world.stopped}`);
   const mine = thread.thread.messages.filter((m) => m.author.kind === 'person');

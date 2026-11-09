@@ -93,7 +93,17 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   const root = inboxScratch('plannotator-inbox-picks-composing-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = {
+    PATH: process.env.PATH ?? '',
+    HOME: root,
+    PLANNOTATOR_DATA_DIR: dataDir,
+    CLAUDE_CONFIG_DIR: join(root, 'claude'),
+    CODEX_HOME: join(root, 'codex'),
+    OPENCODE_CONFIG_DIR: join(root, 'opencode'),
+    PLANNOTATOR_BROWSER: NO_BROWSER,
+    PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+  };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -179,13 +189,45 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
 
   // Send: the words once, every answer once, no summary line in the words.
   await pane.locator('.ib-rbox').scrollIntoViewIfNeeded();
-  await pane.locator('.ib-acts').getByRole('button', { name: 'Send', exact: true }).last().click();
+  await pane.locator('.ib-rbox [data-reply-send]').click();
   await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
   const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
   expect(reply.split('Cards: the list is short').length).toBe(2);
   expect(reply).toContain('Answer: A dense table');
   expect(reply).toContain('Answer: Header');
   expect(reply).not.toContain('Which layout should the invoice list use: ');
+  expect(world.errors).toEqual([]);
+});
+
+test('a long "Other" answer behind slow saves: a few saves, and Send carries the final words right after them', async () => {
+  test.skip(legacy, 'the collapsed saves are new');
+  const { page } = world;
+  const threadId = await ask('Billing screens: a long answer', 'billing-long-answer');
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  const cards = pane.locator('fieldset[data-question-key]');
+  await expect(cards).toHaveCount(6);
+  await cards.nth(0).locator('[data-question-option]').filter({ hasText: 'Cards' }).click();
+  await expect.poll(() => states(threadId)).toEqual(['picked', 'open', 'open', 'open', 'open', 'open']);
+
+  // The owner's phone over a tailnet: each save takes a while, and the answer changes faster than that.
+  let saves = 0;
+  await page.route('**/picks', async (route) => {
+    saves += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  const words = 'The header, beside the filters, where the eye already goes when it wants the numbers out.';
+  const other = cards.nth(1).getByRole('textbox', { name: /Other answer/ });
+  await other.pressSequentially(words, { delay: 10 });
+  const send = pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true });
+  await send.click();
+  await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
+  await page.unroute('**/picks');
+  const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
+  expect(reply).toContain(`Answer: Other: ${words}`);
+  // One save per key would be about 90, a Send 27 s behind them. A slow runner types slower, so not an exact count.
+  expect(saves).toBeLessThan(45);
   expect(world.errors).toEqual([]);
 });
 
@@ -218,12 +260,11 @@ test.describe('a phone (iPhone 15 screen)', () => {
     await expect(box).toHaveValue('Cards: the list is short.');
     // More answers than fit: the list holds about two and a half rows and scrolls, so the box
     // never eats the thread with the keyboard up.
-    // One tap at a time, each seen saved (two taps close together read as a double tap in Chromium's touch emulation).
-    await page.waitForTimeout(600);
+    // Quick taps, as a thumb makes them: the browser counts a tap near the last one as its second click, and a tap
+    // on another card's answer still picks (only a second tap on the same answer is a double tap).
     await choice(2, 'Code after').tap();
-    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'open', 'picked', 'open']);
-    await page.waitForTimeout(600);
     await choice(3, 'Footer').tap();
+    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'picked', 'picked', 'open']);
     await expect(list).toContainText('Your 5 answers go with this reply');
     const rows = list.locator('.ib-ranswers-l');
     const [shown, whole] = await rows.evaluate((el) => [el.clientHeight, el.scrollHeight]);

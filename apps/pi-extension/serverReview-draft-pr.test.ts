@@ -180,8 +180,8 @@ describe('platform commands', () => {
   });
 });
 
-describe('local reviews are unchanged', () => {
-  test('a changed local diff still misses the draft, and only the content-hash file is written', async () => {
+describe('reviews without a Git identity', () => {
+  test('a changed static diff still misses the draft, and only the content-hash file is written', async () => {
     const dataDir = sandbox();
     await withSession(PATCH_BEFORE_PUSH, undefined, (url) => saveDraft(url, 3));
     const files = readdirSync(join(dataDir, 'drafts'));

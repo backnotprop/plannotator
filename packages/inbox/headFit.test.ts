@@ -1,0 +1,48 @@
+import { describe, expect, test } from 'bun:test';
+import { BACK_LABEL_FLOOR, PHONE_HEAD_FITS, phoneHeadFits, subjectHasRoom, SUBJECT_FLOOR } from './headFit';
+
+describe("a phone's thread header", () => {
+  test('"Inbox" fits only whole: one pixel short of its words is "I…" on an iPhone', () => {
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 } })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 33, whole: 42 } })).toBe(false);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 18, whole: 42 } })).toBe(false);
+  });
+
+  test("a long project name may end in … once it shows its floor, and not before", () => {
+    expect(phoneHeadFits({ overflow: 0, label: { shown: BACK_LABEL_FLOOR, whole: 228 } })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 120, whole: 228 } })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: BACK_LABEL_FLOOR - 4, whole: 228 } })).toBe(false);
+  });
+
+  test('a control past the edge never fits, whatever the label shows', () => {
+    expect(phoneHeadFits({ overflow: 6, label: { shown: 42, whole: 42 } })).toBe(false);
+    expect(phoneHeadFits({ overflow: 6, label: null })).toBe(false);
+    // The chevron alone fits once nothing is past the edge.
+    expect(phoneHeadFits({ overflow: 0, label: null })).toBe(true);
+  });
+
+  test("the count goes before the way back's label, which goes last", () => {
+    const first = (step: string) => PHONE_HEAD_FITS.findIndex((fit) => fit.includes(step as never));
+    expect(first('count')).toBeGreaterThan(-1);
+    expect(first('count')).toBeLessThan(first('back'));
+    // The way back keeps its label in every way but the last.
+    expect(PHONE_HEAD_FITS.filter((fit) => fit.includes('back'))).toHaveLength(1);
+    expect(PHONE_HEAD_FITS.at(-1)).toContain('back');
+  });
+
+  // The approval "inbox-thread-header": the subject is in the bar at every width with room, so a way that leaves it
+  // a sliver does not fit, and the header gives way further (the subject used to vanish on a phone).
+  test('a way that leaves the subject less than its floor does not fit; the bar with no subject is judged without it', () => {
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR - 10 })).toBe(false);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: null, subject: 140 })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: null })).toBe(true);
+  });
+
+  test('the subject is drawn only with room to read it', () => {
+    expect(subjectHasRoom(8)).toBe(false);
+    expect(subjectHasRoom(54)).toBe(false);
+    expect(subjectHasRoom(SUBJECT_FLOOR)).toBe(true);
+    expect(subjectHasRoom(200)).toBe(true);
+  });
+});

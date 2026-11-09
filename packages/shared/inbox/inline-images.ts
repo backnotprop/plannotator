@@ -7,8 +7,8 @@
  * (`inboxMessageImageRefsInOrder`: markdown `![alt](src)` and `<img src>`,
  * outside code, in text order, each once) is read under the message-image
  * route's own rules (`readInboxMessageImageAsync`: referenced in the body, an
- * image by extension and by its magic bytes, anywhere but a hidden folder or
- * a hidden or dotenv file, at most 10 MB and 50 megapixels, one
+ * image by extension and by its magic bytes, anywhere but a hidden folder of
+ * the home folder (`~/.ssh`) or a dotenv file, at most 10 MB and 50 megapixels, one
  * `O_NOFOLLOW | O_NONBLOCK` descriptor checked by dev and ino). Its bytes go
  * to `inbox/blobs/<sha256>` and the message keeps an attachment record for it
  * plus `ref`, the src as written (`InboxInlineImage`). An image that cannot be

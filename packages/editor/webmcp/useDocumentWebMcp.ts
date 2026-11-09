@@ -11,7 +11,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import type { RefObject } from 'react';
-import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { blocksForDocument } from '../feedbackDocuments';
 import { getDocPreviewFetcher } from '@plannotator/ui/components/InlineMarkdown';
 import type { ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { CachedDocState } from '@plannotator/ui/hooks/useLinkedDoc';
@@ -260,7 +260,7 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
         if (!i.isApiMode) return null;
         const cached = i.linkedDoc.getDocAnnotations().get(path);
         if (cached && typeof cached.markdown === 'string') {
-          return { path, text: cached.markdown, blocks: parseMarkdownToBlocks(cached.markdown), annotations: cached.annotations };
+          return { path, text: cached.markdown, blocks: blocksForDocument(path, cached.markdown), annotations: cached.annotations };
         }
         if (i.annotateSource !== 'folder' && !cached) return null;
         try {
@@ -269,7 +269,7 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
           const result = (await getDocPreviewFetcher()(path, dirFor(path) ?? undefined)) as { contents?: string; markdown?: string } | null;
           const text = typeof result?.markdown === 'string' ? result.markdown : typeof result?.contents === 'string' ? result.contents : null;
           if (text === null) return null;
-          return { path, text, blocks: parseMarkdownToBlocks(text), annotations: cached?.annotations ?? [] };
+          return { path, text, blocks: blocksForDocument(path, text), annotations: cached?.annotations ?? [] };
         } catch {
           return null;
         }

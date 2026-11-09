@@ -14,7 +14,7 @@
  * nothing until its button, which saves what the card's own Skip saves.
  *
  * The pure rules (openQuestions.ts) run everywhere; the window's parts are
- * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -22,11 +22,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { openQuestionsShown, openQuestionState, placeOf, reaskItemLabel, skipAllCandidates, skipSelection, skipToggledAnswer, threadOpenQuestions } from './openQuestions';
-import { footFitCandidates, footRowOpenQuestionsForm, footRowTokens, onOneLine, onOneRow, openQuestionsFormText, pillHitsButtons } from './footFit';
+import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
+import { openActionState, openItemsHeading, openItemsLabel, openQuestionsShown, openQuestionState, placeOf, reaskItemLabel, skipAllCandidates, skipSelection, skipToggledAnswer, threadOpenActions, threadOpenQuestions } from './openQuestions';
+import { footFitCandidates, footFitCandidatesWithSteps, footRowOpenQuestionsForm, footRowTokens, onOneLine, onOneRow, openQuestionsFormText, pillHitsButtons } from './footFit';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { FullScreenComposer } = (hasDom ? await import('./components/FullScreenComposer') : {}) as typeof import('./components/FullScreenComposer');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing-svc', root: '/work/billing', created_at: '2026-10-22T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
@@ -155,6 +157,86 @@ describe('the rules (openQuestions.ts)', () => {
   });
 });
 
+/** An agent's message whose body holds `:::action` blocks, its records in `actions` as the window keeps them. */
+function actionMessage(n: number, body: string, seq: number, patch: (a: InboxQuestion, index: number) => Partial<InboxQuestion> = () => ({}), extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
+  const messageId = id(n);
+  const actions = parseInboxActionBlocks(body).map(
+    (p, index): InboxQuestion => ({
+      ...ACTION,
+      key: p.key,
+      position: index,
+      prompt: p.prompt,
+      context: p.why,
+      stopped: p.stopped,
+      holds_up: p.holds_up,
+      message_id: messageId,
+      action: p.action,
+      ...patch(ACTION, index),
+    }),
+  );
+  return agent(n, body, seq, () => ({}), { actions, ...extra });
+}
+
+const actionBlock = (task: string, extra: string[] = []) => [':::action', task, 'Why it matters, in a line.', ...extra, ':::'].join('\n');
+
+describe('open action items beside the questions (owner, 2026-10-30)', () => {
+  test('the label: one kind keeps "open"; both drop it and name each, singular at 1', () => {
+    expect(openItemsLabel(1, 0)).toBe('1 open question');
+    expect(openItemsLabel(3, 0)).toBe('3 open questions');
+    expect(openItemsLabel(0, 1)).toBe('1 open action item');
+    expect(openItemsLabel(0, 4)).toBe('4 open action items');
+    expect(openItemsLabel(1, 2)).toBe('1 question, 2 action items');
+    expect(openItemsLabel(2, 1)).toBe('2 questions, 1 action item');
+    expect(openItemsLabel(1, 1)).toBe('1 question, 1 action item');
+    expect(openItemsLabel(12, 10)).toBe('12 questions, 10 action items');
+    expect(openItemsHeading(2, 1)).toBe('2 questions, 1 action item in this thread');
+  });
+
+  test('listed: the open action items of live agent messages, in thread order; marked, sent, replaced, closed and orphaned ones are not', () => {
+    const body = [actionBlock('Approve the deploy'), '', actionBlock('Sign in to npm'), '', actionBlock('Merge the PR'), '', actionBlock('Rotate the key'), '', actionBlock('Old task'), '', actionBlock('Lost task')].join('\n');
+    const states: Partial<InboxQuestion>[] = [
+      {},
+      // Marked Done in the draft (inside its Undo window): waits on nobody.
+      { state: 'picked', action_result: { outcome: 'done', note: null, by: 'person', at: '2026-10-22T16:40:00.000Z' } },
+      { state: 'sent' },
+      { state: 'closed' },
+      { state: 'superseded', superseded_by: { message_id: M6, key: null } },
+      { orphaned: true },
+    ];
+    const m2 = actionMessage(2, body, 2, (_, index) => states[index]!);
+    const m3 = actionMessage(3, actionBlock('Touch the security key', ['Stopped: the publish']), 3);
+    const m5 = actionMessage(5, actionBlock('Click Approve in Okta', ['Holds up: the release; the notes']), 5);
+    const items = threadOpenActions([agent(1, block('Ship it?'), 1), m2, m3, m5]);
+    expect(items.map((a) => a.prompt)).toEqual(['Approve the deploy', 'Touch the security key', 'Click Approve in Okta']);
+    expect(items.map((a) => a.messageId)).toEqual([M2, M3, M5]);
+    expect(items[0]!.id).toBe(`${M2}/${m2.actions![0]!.key}`);
+    // Questions stay out of it, and a message the archive closed is not listed.
+    expect(threadOpenActions([m2, m3, m5], (m) => m.id !== M3).map((a) => a.messageId)).toEqual([M2, M5]);
+    // Each row's state, as a question's: Stopped, else Holds up.
+    expect(items.map(openActionState)).toEqual([null, { kind: 'stopped' }, { kind: 'holds', count: 2 }]);
+  });
+
+  test('the server\'s form (action items still in `questions`) counts the same as the window\'s (`actions`)', () => {
+    const split = actionMessage(2, actionBlock('Approve the deploy'), 2);
+    const { actions, ...rest } = split;
+    const asServed: InboxMessageWire = { ...rest, questions: [...(split.questions ?? []), ...actions!] };
+    expect(threadOpenActions([asServed]).map((a) => a.key)).toEqual(threadOpenActions([split]).map((a) => a.key));
+    expect(threadOpenActions([asServed])).toHaveLength(1);
+    // And the questions list still leaves it out.
+    expect(threadOpenQuestions([asServed]).questions).toHaveLength(0);
+  });
+
+  test('a person\'s message is never listed', () => {
+    const own = actionMessage(2, actionBlock('Approve the deploy'), 2);
+    expect(threadOpenActions([{ ...own, author: { kind: 'person' } as InboxAuthor }])).toHaveLength(0);
+  });
+
+  test('shown with only action items open, no question and no Re-ask', () => {
+    expect(openQuestionsShown([], false, 1)).toBe(true);
+    expect(openQuestionsShown([], false, 0)).toBe(false);
+  });
+});
+
 describe('fitting the foot on one line (footFit.ts)', () => {
   test('the forms read "6 open questions", "6 open", "6"', () => {
     expect(openQuestionsFormText(6, 'full')).toBe('6 open questions');
@@ -163,7 +245,30 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(openQuestionsFormText(12, 'count')).toBe('12');
   });
 
-  test('each form is tried on the usual spacing, then tightened, longest first; a phone starts at "6 open"', () => {
+  test('after Skip them every form with words reads "N to skip", N being what Skip them counted (a question that came after stays open; action items are never skipped); nothing to count reads "Questions", or nothing at all when every question is answered in the draft, never "0"', () => {
+    expect(openQuestionsFormText(6, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'short', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'count', 0, false, 6)).toBe('6');
+    expect(openQuestionsFormText(6, 'short', 2, false, 6)).toBe('6 to skip');
+    // A seventh question landed after Skip them: this Send still skips the six.
+    expect(openQuestionsFormText(7, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(7, 'count', 0, false, 6)).toBe('6');
+    expect(openQuestionsFormText(0, 'full')).toBe('Questions');
+    expect(openQuestionsFormText(0, 'count')).toBe('Questions');
+    expect(openQuestionsFormText(0, 'full', 0, false, null, true)).toBe('');
+    expect(openQuestionsFormText(0, 'count', 0, false, null, true)).toBe('');
+  });
+
+  test('with action items: the long form names each kind; the short forms count both (the fallback the row already had)', () => {
+    expect(openQuestionsFormText(0, 'full', 1)).toBe('1 open action item');
+    expect(openQuestionsFormText(0, 'full', 3)).toBe('3 open action items');
+    expect(openQuestionsFormText(12, 'full', 10)).toBe('12 questions, 10 action items');
+    expect(openQuestionsFormText(12, 'short', 10)).toBe('22 open');
+    expect(openQuestionsFormText(12, 'count', 10)).toBe('22');
+    expect(openQuestionsFormText(0, 'short', 2)).toBe('2 open');
+  });
+
+  test('each form is tried on the usual spacing, then tightened, longest first; from the short form, "6 open" first', () => {
     const order = (max: Parameters<typeof footFitCandidates>[0]) => footFitCandidates(max).map((f) => `${f.form}${f.tight ? '+tight' : ''}`);
     expect(order('full')).toEqual(['full', 'full+tight', 'short', 'short+tight', 'count', 'count+tight']);
     expect(order('short')).toEqual(['short', 'short+tight', 'count', 'count+tight']);
@@ -174,14 +279,18 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(onOneLine([553, 553, 605])).toBe(false);
   });
 
-  test('the whole row shortens in the owner\'s order before the status wraps: skip, Edit, the count, the draft words, tight', () => {
-    expect([0, 1, 2, 3, 4, 5].map((level) => footRowTokens(level))).toEqual(['', 'skip', 'skip edit', 'skip edit oq', 'skip edit oq draft', 'skip edit oq draft tight']);
-    // A phone has one more step: Edit draft as its pencil. Other windows stop at tight.
-    expect(footRowTokens(6, true)).toBe('skip edit oq draft tight icon');
-    expect(footRowTokens(6)).toBe('skip edit oq draft tight');
-    // The open questions button keeps its longest form until the third step, then shows its count.
-    expect([0, 1, 2, 3, 5].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'count', 'count']);
+  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, Edit, the checklist, the count, the draft words, tight', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys edit', 'keys edit steps', 'keys edit steps oq', 'keys edit steps oq draft', 'keys edit steps oq draft tight']);
+    // No step for a skip chip (it lives in the open questions list) and none past tight.
+    expect(footRowTokens(9)).toBe('keys edit steps oq draft tight');
+    // The open questions button keeps its longest form until the oq step (after the checklist gave way), then shows its count.
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'full', 'count', 'count', 'count']);
     expect(footRowOpenQuestionsForm(0, 'short')).toBe('short');
+  });
+
+  test('beside the checklist, the buttons\' own fit narrows the checklist before the open questions\' words change at all', () => {
+    const order = footFitCandidatesWithSteps('full').map((f) => `${f.form}${f.tight ? '+tight' : ''}${f.steps ? '+steps' : ''}`);
+    expect(order).toEqual(['full', 'full+steps', 'full+tight+steps', 'short+steps', 'short+tight+steps', 'count+steps', 'count+tight+steps']);
   });
 
   test('one row: the middles of buttons and status parts of different heights line up; a wrapped status does not', () => {
@@ -245,7 +354,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(t: InboxThread, options: { phone?: boolean } = {}) {
+async function render(t: InboxThread, options: { phone?: boolean; covered?: boolean } = {}) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -257,13 +366,14 @@ async function render(t: InboxThread, options: { phone?: boolean } = {}) {
   return host;
 }
 
-function pane(t: InboxThread, options: { phone?: boolean } = {}) {
+function pane(t: InboxThread, options: { phone?: boolean; covered?: boolean } = {}) {
   return (
     <ThreadPane
       thread={t}
       sent={null}
       lookSeq={6}
       phone={options.phone === true}
+      covered={options.covered === true}
       onQuestions={() => {}}
       onChanged={async () => {}}
       onClose={() => {}}
@@ -276,7 +386,9 @@ function pane(t: InboxThread, options: { phone?: boolean } = {}) {
 
 const button = () => document.querySelector<HTMLButtonElement>('[data-open-questions]');
 const list = () => document.querySelector<HTMLElement>('[data-open-questions-list]');
-const rows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row') ?? [])];
+/** The question rows (an action item's row is `actionRows`). */
+const rows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row[data-open-question]') ?? [])];
+const actionRows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row[data-open-action]') ?? [])];
 const reaskItem = () => list()?.querySelector<HTMLElement>('[data-reask]') ?? null;
 
 /** Base UI opens on the pointer's press, as a person's click does. */
@@ -295,21 +407,23 @@ async function openList() {
   await until(() => !!list(), 'the list');
 }
 
-test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts 4 (no replaced question, no action item), and opens a menu', async () => {
+test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts the 3 unanswered questions (no replaced one, not the one in the draft) and the action item, and opens a menu', async () => {
   const el = await render(thread(sample()));
   const b = button()!;
-  expect(b.textContent?.trim()).toBe('4 open questions');
+  // Both kinds wait: "open" goes and each is named (owner, 2026-10-30). The picked question is the draft's to count
+  // (approval "reply-bar-pairs"): its row stays in the list.
+  expect(b.textContent?.trim()).toBe('3 questions, 1 action item');
   const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.trim());
   expect(foot).not.toContain('Re-ask');
   expect(el.querySelector('[data-foot-buttons] [data-reask]')).toBeNull();
-  expect(foot.indexOf('4 open questions')).toBe(foot.indexOf('Edit draft') + 1);
+  expect(foot.indexOf('3 questions, 1 action item')).toBe(foot.indexOf('Edit draft') + 1);
   expect(b.getAttribute('aria-haspopup')).toBe('menu');
   expect(b.getAttribute('aria-expanded')).toBe('false');
   expect(b.hasAttribute('title')).toBe(false);
   await openList();
   expect(b.getAttribute('aria-expanded')).toBe('true');
   expect(list()!.getAttribute('role')).toBe('menu');
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   // No drawn heading, count line or foot line: the name carries the count.
   expect(list()!.textContent).not.toContain('in this thread');
   expect(list()!.querySelector('.ib-oq-head, .ib-oq-sub, .ib-oq-foot')).toBeNull();
@@ -326,6 +440,12 @@ test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), count
   expect(rows()[1]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· in a folded message$/);
   expect(rows()[3]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· (below|above)$/);
   expect(list()!.textContent).not.toContain('Choose one');
+  // The action item after the questions, with its box where a question has its number, and no Skip of its own.
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the 2FA prompt']);
+  const all = [...list()!.querySelectorAll('.ib-oq-row')];
+  expect(all.indexOf(actionRows()[0]!)).toBe(4);
+  expect(actionRows()[0]!.querySelector('.ib-oq-n.ib-oq-act svg')).not.toBeNull();
+  expect(actionRows()[0]!.getAttribute('aria-label')).toMatch(/^Approve the 2FA prompt\. Action item\. /);
   // Re-ask on the list's last row, a menu item after the rows, then "Skip…" (approval "oq-skip-select").
   const item = reaskItem()!;
   expect(item.getAttribute('role')).toBe('menuitem');
@@ -368,9 +488,15 @@ test.skipIf(!hasDom)('arrow keys move through the rows; Escape closes the list a
     b.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   });
   await until(() => !!list(), 'the list from the keyboard');
+  // The list's first item is the skip row's toggle (approval "reply-bar-pairs"), then the rows.
+  await until(() => !!list()?.querySelector('[data-skip-toggle][data-highlighted]'), 'the skip toggle highlighted');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  });
   await until(() => rows().some((r) => r.hasAttribute('data-highlighted')), 'a highlighted row');
   const highlighted = () => rows().findIndex((r) => r.hasAttribute('data-highlighted'));
   const start = highlighted();
+  expect(start).toBe(0);
   // No per-row Skip (approval "oq-skip-select"): one step to the next row.
   await act(async () => {
     (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -384,11 +510,165 @@ test.skipIf(!hasDom)('arrow keys move through the rows; Escape closes the list a
   expect(b.getAttribute('aria-expanded')).toBe('false');
 });
 
-test.skipIf(!hasDom)('on a phone: "4 open" named in full, and the list is a bottom sheet with a scrim and a close', async () => {
+describe('Q opens the list (shortcuts/thread.shortcuts.ts openItems)', () => {
+  /** A bare key as the browser sends it: from `from` (the page by default). */
+  async function pressKey(key: string, from: EventTarget = document.body) {
+    await act(async () => {
+      from.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    });
+    await settle();
+  }
+
+  test.skipIf(!hasDom)("Q opens the list with focus on its first row; Q again is the menu's type-ahead, not a toggle", async () => {
+    await render(thread(sample()));
+    expect(list()).toBeNull();
+    await pressKey('q');
+    await until(() => !!list(), 'the list from Q');
+    await until(() => document.activeElement === rows()[0], 'focus on the first row');
+    expect(button()!.getAttribute('aria-expanded')).toBe('true');
+    await pressKey('q', document.activeElement!);
+    expect(list()).not.toBeNull();
+    // The arrows work at once.
+    await pressKey('ArrowDown', document.activeElement!);
+    await until(() => document.activeElement === rows()[1], 'the second row');
+  });
+
+  const sendButton = () => document.querySelector<HTMLButtonElement>('.ib-footbtns .ib-pri');
+  async function modEnter(from: EventTarget, extra: KeyboardEventInit = {}) {
+    await act(async () => {
+      from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true, ...extra }));
+    });
+    await settle();
+  }
+  /** Counts the Send's clicks (what the foot's button does), without posting anything. */
+  function countSends() {
+    const b = sendButton()!;
+    let n = 0;
+    b.addEventListener('click', (e) => {
+      n += 1;
+      e.stopImmediatePropagation();
+    }, true);
+    return () => n;
+  }
+
+  test.skipIf(!hasDom)('Mod+Enter presses the closed foot\'s Send from the page and a field; not repeated, not under a menu', async () => {
+    const el = await render(thread(sample()));
+    expect(sendButton()).not.toBeNull();
+    const sends = countSends();
+    await modEnter(document.body);
+    expect(sends()).toBe(1);
+    // From a field inside the thread (a question's note, say): typing is no reason to stand down.
+    const field = document.createElement('textarea');
+    el.querySelector('section')!.appendChild(field);
+    await act(async () => field.focus());
+    await modEnter(field);
+    expect(sends()).toBe(2);
+    // A held key sends once.
+    await modEnter(field, { repeat: true });
+    expect(sends()).toBe(2);
+    // With a menu open the keys are the menu's.
+    await openList();
+    await modEnter(document.activeElement!);
+    expect(sends()).toBe(2);
+  });
+
+  test.skipIf(!hasDom)('under a guide, a full-screen file or Artifacts (the pane is covered) Mod+Enter and Q do nothing; a focused link keeps the chord', async () => {
+    const el = await render(thread(sample()), { covered: true });
+    expect(sendButton()).not.toBeNull();
+    const sends = countSends();
+    await modEnter(document.body);
+    await pressKey('q');
+    expect(sends()).toBe(0);
+    expect(list()).toBeNull();
+    // Uncovered, the same thread sends from the page, but never from a link: ⌘Enter there opens it in a tab.
+    act(() => root?.unmount());
+    host?.remove();
+    const uncovered = await render(thread(sample()));
+    const again = countSends();
+    const link = document.createElement('a');
+    link.href = 'https://example.com/';
+    link.textContent = 'docs';
+    uncovered.querySelector('section')!.appendChild(link);
+    await act(async () => link.focus());
+    await modEnter(link);
+    expect(again()).toBe(0);
+    await modEnter(document.body);
+    expect(again()).toBe(1);
+    void el;
+  });
+
+  test.skipIf(!hasDom)('with the reply box open, Mod+Enter from a question\'s choice sends the box\'s Send once', async () => {
+    await render(thread(sample()));
+    await pressKey('r');
+    const box = document.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Reply to"]');
+    expect(box).not.toBeNull();
+    let clicks = 0;
+    const count = (e: Event) => {
+      if ((e.target as HTMLElement).closest('button.ib-pri')) {
+        clicks += 1;
+        e.stopImmediatePropagation();
+      }
+    };
+    document.addEventListener('click', count, true);
+    try {
+      const choice = document.createElement('input');
+      choice.type = 'radio';
+      document.querySelector('section')!.appendChild(choice);
+      await act(async () => choice.focus());
+      await modEnter(choice);
+      expect(clicks).toBe(1);
+    } finally {
+      document.removeEventListener('click', count, true);
+    }
+  });
+
+  test.skipIf(!hasDom)('Mod+Enter does nothing where no Send shows', async () => {
+    await render(thread(allSent(false)));
+    expect(sendButton()).toBeNull();
+    await modEnter(document.body);
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q does nothing with nothing open', async () => {
+    await render(thread(allSent(false)));
+    await pressKey('q');
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q is typed, not a shortcut, in a field', async () => {
+    const el = await render(thread(sample()));
+    const field = document.createElement('textarea');
+    el.appendChild(field);
+    await act(async () => field.focus());
+    await pressKey('q', field);
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q does nothing with single-key shortcuts off, and works again when they come back', async () => {
+    const prefs = await import('./shortcuts/prefs');
+    await render(thread(sample()));
+    act(() => prefs.setSingleKeys(false));
+    try {
+      await pressKey('q');
+      expect(list()).toBeNull();
+      expect(button()!.hasAttribute('aria-keyshortcuts')).toBe(false);
+      expect(button()!.querySelector('[data-shortcut-hint]')).toBeNull();
+    } finally {
+      act(() => prefs.setSingleKeys(true));
+    }
+    expect(button()!.getAttribute('aria-keyshortcuts')).toBe('Q');
+    expect(button()!.querySelector('[data-shortcut-hint="inbox-thread.openItems"]')).not.toBeNull();
+    await pressKey('q');
+    await until(() => !!list(), 'the list once keys are back');
+  });
+});
+
+test.skipIf(!hasDom)('on a phone: the long form first, and the list is a bottom sheet with a scrim and a close', async () => {
   await render(thread(sample()), { phone: true });
   const b = button()!;
-  expect(b.textContent?.trim()).toBe('4 open');
-  expect(b.getAttribute('aria-label')).toBe('4 open questions');
+  // The owner's words on a phone too (no layout here, so nothing is shortened): "it should say both".
+  expect(b.textContent?.trim()).toBe('3 questions, 1 action item');
+  expect(b.getAttribute('data-label-form')).toBe('full');
   await openList();
   const positioner = list()!.closest('.ib-oq-pos')!;
   expect(positioner.hasAttribute('data-phone')).toBe(true);
@@ -409,16 +689,215 @@ const allSent = (keepAction: boolean) =>
 
 test.skipIf(!hasDom)('no button when nothing is open', async () => {
   await render(thread(allSent(false)));
-  expect(button()).toBeNull();
+  expect(button() === null).toBe(true);
 });
 
-test.skipIf(!hasDom)('only an action item open: the button counts it, and its list is Re-ask alone', async () => {
+/** Every question answered in the draft (picked, not sent), the action item done: nothing is left unanswered. */
+const allPicked = () =>
+  sample().map((m) => ({
+    ...m,
+    ...(m.questions ? { questions: m.questions.map((q) => (q.state === 'open' ? { ...q, state: 'picked' as const, revision: 1, answer: answerFor(q, ['Yes']) } : q)) } : {}),
+    ...(m.actions ? { actions: m.actions.map((a) => ({ ...a, state: 'sent' as const })) } : {}),
+  }));
+
+test.skipIf(!hasDom)('every question answered in the draft: the button is its icon alone ("? ⌄", no count, never "0"), named "Questions, all answered in your draft"; its list stays; the draft counts them', async () => {
+  const el = await render(thread(allPicked()));
+  const b = button();
+  expect(b === null).toBe(false);
+  expect(b!.querySelector('[data-oq-words]')!.textContent).toBe('');
+  expect(/\d/.test(b!.textContent ?? '')).toBe(false);
+  expect(b!.getAttribute('aria-label')).toBe('Questions, all answered in your draft');
+  expect(b!.getAttribute('aria-keyshortcuts')).toBe('Q');
+  // The draft holds them: Send and Edit draft, and on a computer the status says how many.
+  const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.replace(/\s+/g, ' ').trim());
+  expect(foot[0]).toBe('Send');
+  expect(el.querySelector('[data-foot-status] [data-draft-foot]')!.textContent).toContain('4 picks');
+  // The list still opens on its rows, each a draft answer (so Unskip stays in reach).
+  await openList();
+  expect(rows().length).toBe(4);
+  expect(rows().every((r) => (r.textContent ?? '').includes('Draft'))).toBe(true);
+});
+
+test.skipIf(!hasDom)('on a phone: Send first, then one Draft button carrying the count (picks and comments), then the unanswered questions; no status; the keys stay', async () => {
+  const el = await render(thread(sample()), { phone: true });
+  const buttons = [...el.querySelectorAll<HTMLButtonElement>('[data-foot-buttons] > button')];
+  expect(buttons[0]!.textContent?.trim()).toBe('Send');
+  const draft = buttons[1]!;
+  expect(draft.hasAttribute('data-edit-draft')).toBe(true);
+  // "✎ Draft 1": the one pick, once. Its name says what the count holds.
+  expect(draft.querySelector('[data-draft-count]')!.textContent).toBe('1');
+  // Its name starts with what it shows ("Draft 1"), then what the count holds, then what it does.
+  expect(draft.getAttribute('aria-label')).toBe('Draft 1: 1 pick. Edit draft');
+  expect(draft.getAttribute('aria-keyshortcuts')).toBe('R');
+  expect(buttons[2]!.matches('[data-open-questions]')).toBe(true);
+  expect(buttons[2]!.getAttribute('aria-keyshortcuts')).toBe('Q');
+  // No pill or chip beside them: the counts live on the buttons.
+  expect(el.querySelector('[data-foot-status], [data-skip-chip], [data-draft-foot]') === null).toBe(true);
+  // Send is still described by the draft and the skip, as hidden text.
+  const text = buttons[0]!.getAttribute('aria-describedby')!.split(' ').map((i) => document.getElementById(i)?.textContent ?? '').join(' ');
+  expect(text).toContain('Draft, 1 pick');
+  expect(text).toContain('3 questions stay open');
+});
+
+test.skipIf(!hasDom)('after Skip them the button counts what Skip them counted, not the unanswered questions now (one that came after stays open); its name keeps the action items apart', async () => {
+  const { OpenQuestionsButton } = await import('./components/OpenQuestions');
+  const { questions } = threadOpenQuestions(sample());
+  const actions = threadOpenActions(sample());
+  const unanswered = questions.filter((q) => !q.picked).length;
+  expect(unanswered).toBe(3);
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div data-foot-row="">
+        <div data-foot-buttons="">
+          <OpenQuestionsButton questions={questions} actions={actions} phone={false} measure={() => new Map()} onPick={() => {}} skip={{ count: 2, keepOpen: false, onToggle: () => {} }} />
+        </div>
+      </div>,
+    );
+  });
+  await settle();
+  const b = host.querySelector<HTMLElement>('[data-open-questions]')!;
+  expect(b.querySelector('[data-oq-words]')!.textContent).toBe('2 to skip');
+  expect(b.getAttribute('aria-label')).toBe('2 questions skipped when you send, 1 open action item');
+});
+
+test.skipIf(!hasDom)('only an action item open: the button counts it, and its list holds that item, then Re-ask', async () => {
   await render(thread(allSent(true)));
   expect(button()!.textContent?.trim()).toBe('1 open action item');
   await openList();
   expect(list()!.getAttribute('aria-label')).toBe('1 open action item in this thread');
   expect(rows()).toHaveLength(0);
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the 2FA prompt']);
   expect(reaskItem()!.textContent?.trim()).toBe('Re-ask in a new message');
+  // Skip is for questions: no "Skip…" with only an action item.
+  expect(list()!.querySelector('[data-open-questions-skip-mode]')).toBeNull();
+});
+
+/**
+ * Two action items in M2, folded behind the middle fold (six messages, all read), and one question in M6:
+ * the list's action row opens M2 and takes the person to that checklist row, as a question row does.
+ */
+function actionsSample(): InboxMessageWire[] {
+  return [
+    agent(1, 'Starting on the release.', 1),
+    actionMessage(2, ['Two things only you can do.', '', actionBlock('Approve the production deploy on Vercel'), '', actionBlock('Sign in to npm in your terminal', ['Holds up: the 0.29 publish'])].join('\n'), 2),
+    agent(3, 'Built.', 3),
+    agent(4, 'Tested.', 4),
+    agent(5, 'Tagged.', 5),
+    agent(6, `Last one.\n\n${block('Publish 0.29 as latest?')}`, 6),
+  ];
+}
+
+test.skipIf(!hasDom)("choosing an action item's row opens its folded message, scrolls to its checklist row, focuses and rings it", async () => {
+  const el = await render(thread(actionsSample()));
+  expect(button()!.textContent?.trim()).toBe('1 question, 2 action items');
+  const rowIn = (key: string) => el.querySelector<HTMLElement>(`[data-message-id="${M2}"] [data-action-card="${key}"]`);
+  const second = actionsSample()[1]!.actions![1]!.key;
+  // M2 is hidden behind the fold: its checklist is not drawn.
+  expect(rowIn(second)).toBeNull();
+  await openList();
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the production deploy on Vercel', 'Sign in to npm in your terminal']);
+  expect(actionRows()[1]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· in a folded message$/);
+  expect(actionRows()[1]!.querySelector('.ib-b-hold')!.textContent).toBe('Holds up 1');
+  await act(async () => actionRows()[1]!.click());
+  await until(() => !list(), 'the list to close');
+  await until(() => !!rowIn(second), 'the folded message to open');
+  await until(() => rowIn(second)!.classList.contains('ib-q-target'), 'the ring on the checklist row');
+  // Focus went to that row, not back to the button.
+  expect(document.activeElement).toBe(rowIn(second));
+});
+
+test.skipIf(!hasDom)('Escape closing the list never runs the jump a row would: nothing unfolds or rings, focus goes back to the button', async () => {
+  const el = await render(thread(actionsSample()));
+  const b = button()!;
+  await act(async () => b.focus());
+  await act(async () => {
+    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  });
+  await until(() => !!list(), 'the list from the keyboard');
+  // A row is highlighted (Enter would choose it): Escape instead.
+  await until(() => [...rows(), ...actionRows()].some((r) => r.hasAttribute('data-highlighted')), 'a highlighted row');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !list(), 'the list to close on Escape');
+  // Frames for a jump to have run, had one been scheduled.
+  for (let i = 0; i < 5; i += 1) await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await settle();
+  expect(el.querySelector(`[data-message-id="${M2}"] [data-action-card]`)).toBeNull();
+  expect(el.querySelector('.ib-q-target')).toBeNull();
+  expect(document.activeElement).toBe(b);
+});
+
+test.skipIf(!hasDom)('select mode chooses questions only: the action rows leave while it is on', async () => {
+  await render(thread(sample()));
+  await openList();
+  expect(actionRows()).toHaveLength(1);
+  await press(list()!.querySelector<HTMLElement>('[data-open-questions-skip-mode]')!);
+  await until(() => !!list()?.querySelector('[data-open-questions-select-head]'), 'select mode');
+  expect(actionRows()).toHaveLength(0);
+  expect(rows().length).toBe(4);
+});
+
+describe('the full-screen composer counts as the foot does', () => {
+  const composer = (threadId: string, openQuestions: number, openActions: number) => (
+    <FullScreenComposer
+      noun="image"
+      comment={null}
+      value={{
+        threadId,
+        phone: false,
+        reply: {
+          to: 'Claude Code',
+          value: '',
+          onChange: () => {},
+          onLateVoice: () => {},
+          onSend: () => {},
+          sending: false,
+          canSend: false,
+          picks: 0,
+          annotations: 0,
+        comments: { records: [], attachments: [], onEdit: async () => {}, onRemove: async () => {}, onOpen: () => {}, editing: null, onEditing: () => {}, list: null, onList: () => {} },
+          actions: 0,
+          files: [],
+          onFiles: () => {},
+          onDropFiles: () => {},
+          onPaste: () => {},
+          onRemoveFile: () => {},
+          onPutBack: () => {},
+          openQuestions,
+          openActions,
+          conflict: false,
+          error: null,
+          sentAt: null,
+          onOpenThread: () => {},
+        },
+      }}
+    />
+  );
+  test.skipIf(!hasDom)('"1 open question", "2 open action items", "3 questions, 1 action item"; nothing with none', async () => {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.appendChild(host);
+    const count = () => host!.querySelector('[data-fcomp-questions]')?.textContent?.trim() ?? null;
+    const cases: [number, number, string | null][] = [
+      [1, 0, '1 open question'],
+      [0, 2, '2 open action items'],
+      [3, 1, '3 questions, 1 action item'],
+      [0, 0, null],
+    ];
+    act(() => {
+      root = createRoot(host!);
+    });
+    for (const [i, [q, a, words]] of cases.entries()) {
+      act(() => root!.render(composer(`${M1}-${i}`, q, a)));
+      await settle();
+      expect(count()).toBe(words);
+    }
+  });
 });
 
 test.skipIf(!hasDom)('one open question in a short, unfolded thread: the button shows, with Re-ask in the singular', async () => {
@@ -571,9 +1050,12 @@ test.skipIf(!hasDom)('at rest: no Skip on any row; the last row is Re-ask and "S
   await renderLive({ initial: withM2Skipped(sample()) });
   await openList();
   expect(list()!.querySelector('[data-open-question-skip], .ib-oq-skip')).toBeNull();
-  // Every menu item: the four rows, then Re-ask and "Skip…" on one last row.
+  // Every menu item: the four question rows, the action item's row, then Re-ask and "Skip…" on one last row.
   const items = [...list()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  expect(items.map((n) => (n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : 'row'))).toEqual(['row', 'row', 'row', 'row', 'reask', 'skip…']);
+  const kindOf = (n: HTMLElement) =>
+    n.hasAttribute('data-skip-toggle') ? 'skip them' : n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : n.hasAttribute('data-open-action') ? 'action' : 'row';
+  // First the skip row this Send's toggle (approval "reply-bar-pairs"), when picks wait and a question is unanswered.
+  expect(items.map(kindOf)).toEqual(['skip them', 'row', 'row', 'row', 'row', 'action', 'reask', 'skip…']);
   expect(skipMode()!.textContent).toBe('Skip…');
   expect(skipMode()!.closest('.ib-oq-last') === reaskItem()!.closest('.ib-oq-last')).toBe(true);
   expect(document.getElementById(skipMode()!.getAttribute('aria-describedby')!)?.textContent).toBe('Choose questions to skip. Skips ride your next Send.');
@@ -640,7 +1122,9 @@ test.skipIf(!hasDom)('"Skip…" enters select mode; ticks save nothing; "Skip 2"
   // The card ends as its own Skip leaves it; nothing was sent.
   await until(() => cardState(el).skip === 'Unskip', 'the card skipped from the list');
   expect(cardState(el)).toEqual(byCard.card);
-  expect(button()!.textContent?.trim()).toBe('4 open questions');
+  // A saved skip is an answer in the draft: the button counts only the question still unanswered (approval
+  // "reply-bar-pairs"); the skipped rows stay listed, quiet.
+  expect(button()!.textContent?.trim()).toBe('1 question, 1 action item');
 });
 
 test.skipIf(!hasDom)('Cancel and Escape drop the ticks; Escape leaves select mode before it closes the list', async () => {
@@ -796,7 +1280,7 @@ test.skipIf(!hasDom)('on a phone: Close leaves select mode; the list opens again
   expect(list()!.querySelector('[data-open-questions-select-head]')).toBeNull();
   expect(rows().some((r) => r.getAttribute('aria-checked') === 'true')).toBe(false);
   expect(skipMode()).not.toBeNull();
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   // Into select mode again: nothing is ticked.
   await press(skipMode()!);
   await until(selecting, 'select mode again');
@@ -839,7 +1323,7 @@ test.skipIf(!hasDom)('screen readers: the menu is named for select mode, and the
   await until(() => live()!.textContent === '2 selected', 'two selected, said');
   await press(cancelButton()!);
   await until(() => !selecting(), 'back at rest');
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   expect(live()!.textContent).toBe('');
 });
 
@@ -871,13 +1355,13 @@ function spokenText(el: Element): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
-async function renderDraftFoot(unsent: { reply: boolean; picks: number; comments: number }) {
+async function renderDraftFoot(unsent: { reply: boolean; picks: number; comments: number }, onComments?: () => void) {
   const { DraftFootNote } = await import('./components/DraftLabel');
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<DraftFootNote id="draft-note" unsent={unsent} />);
+    root.render(<DraftFootNote id="draft-note" unsent={unsent} onComments={onComments} />);
   });
   return host.querySelector<HTMLElement>('[data-draft-foot]')!;
 }
@@ -893,6 +1377,23 @@ test.skipIf(!hasDom)('the draft status keeps its pick words and its comment coun
   expect(count.querySelector('svg')).not.toBeNull();
   // What Send and Edit draft are described by says everything, whatever step 4 hides.
   expect(spokenText(foot)).toBe('Draft, 1 pick, 3 comments');
+});
+
+test.skipIf(!hasDom)('with a way to the list, the words and the pill are buttons that open it and say the count; with no comments there is no button', async () => {
+  let opened = 0;
+  const foot = await renderDraftFoot({ reply: false, picks: 1, comments: 3 }, () => opened++);
+  const words = foot.querySelector<HTMLButtonElement>('button[data-draft-comments]')!;
+  const pill = foot.querySelector<HTMLButtonElement>('button[data-draft-pill-count]')!;
+  expect(words.textContent).toBe('3 comments');
+  expect(pill.getAttribute('aria-label')).toBe('3 comments');
+  expect(pill.hasAttribute('aria-hidden')).toBe(false);
+  act(() => words.click());
+  act(() => pill.click());
+  expect(opened).toBe(2);
+  act(() => root!.unmount());
+  host!.remove();
+  const none = await renderDraftFoot({ reply: true, picks: 2, comments: 0 }, () => opened++);
+  expect(none.querySelector('button')).toBeNull();
 });
 
 test.skipIf(!hasDom)('with no comments the pill carries no count: step 4 shows "Draft" alone', async () => {

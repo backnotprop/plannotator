@@ -7,7 +7,8 @@
  * session), agents reached through MCP after (Codex's replies wake it too:
  * the Inbox runs `codex queue`). Pure.
  */
-import { INBOX_AGENT_IDS, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_HOST_NAMES, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { INBOX_CLAUDE_PLUGIN_INSTALL } from '@plannotator/core/inbox-launch-ready';
+import { INBOX_AGENT_IDS, INBOX_HOST_NAMES, INBOX_MCP_WAKE_MIN_VERSIONS, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { HarnessId } from './harnesses';
 
 /** Plannotator's own connections, in the order the screen offers them. */
@@ -80,6 +81,11 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
     return { ...base, state: 'missing' };
   }
   if (!row.detected) return null;
+  // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
+  if (row.reach.kind === 'tool') {
+    if (live || row.reach.on) return { ...base, state: 'ready' };
+    return { ...base, state: 'tool-off', locked: row.reach.locked, chosenOff: row.tool?.chosen_off === true };
+  }
   if (row.reach.on) return { ...base, state: 'mcp' };
   if (row.reach.kind === 'manual') return { ...base, state: 'manual' };
   // Not connected yet; one the person turned off, removed, or holds an entry of their own is theirs to decide.
@@ -167,7 +173,7 @@ export function stepTitle(row: ConnectRow): string {
     case 'connect':
       return `Connect ${row.label}`;
     case 'manual':
-      return `Connect ${row.label} by hand`;
+      return `Connect ${row.label} yourself`;
     default:
       return row.label;
   }
@@ -241,11 +247,15 @@ export function blockedText(plan: ConnectPlan, opts: { skipped: readonly string[
 const andList = (names: readonly string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 /** A waking host as the wake line names it: OpenCode 2 (OpenCode 1 has no wake). */
 const wakeName = (host: string) => (host === 'opencode' ? 'OpenCode 2' : (INBOX_HOST_NAMES[host] ?? host));
-/** An agent MCP alone wakes, from the version that can be: "Codex 0.149 or later". */
+/** An agent MCP alone wakes, from the version that can be: "Codex 0.149 or later", "Qwen Code 0.24 or later". */
 export function mcpWakeName(host: string): string {
-  return `${INBOX_HOST_NAMES[host] ?? host} ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, '')} or later`;
+  const min = INBOX_MCP_WAKE_MIN_VERSIONS[host];
+  return min ? `${INBOX_HOST_NAMES[host] ?? host} ${min.replace(/\.0$/, '')} or later` : (INBOX_HOST_NAMES[host] ?? host);
 }
-const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host));
+// The first-run line names no DeepSeek Harness (the owner, #2529): it keeps its words whether DSH is here or not,
+// though a reply does wake a DSH session through Plannotator's plugin. Cline likewise (its plugin; words unchanged).
+const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh', 'cline']);
+const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host) && !WAKE_LINE_UNNAMED.has(host));
 
 /**
  * Which agents a reply wakes, built from the one list (INBOX_WAKING_HOSTS).
@@ -262,7 +272,8 @@ export function wakeLine(mcpHosts: readonly string[] = []): string {
 export function mcpWakeLine(mcpHosts: readonly string[] = []): string {
   const mcp = INBOX_MCP_WAKING_HOSTS.filter((host) => mcpHosts.includes(host));
   if (mcp.length === 0) return "These reach the Inbox through MCP: they see your reply the next time they check it, and can't be woken.";
-  return `These reach the Inbox through MCP: ${andList(mcp.map(mcpWakeName))} gets your reply as a new turn on its own; the others see it the next time they check the Inbox, and can't be woken.`;
+  const gets = mcp.length === 1 ? 'gets your reply as a new turn on its own' : 'get your reply as a new turn on their own';
+  return `These reach the Inbox through MCP: ${andList(mcp.map(mcpWakeName))} ${gets}; the others see it the next time they check the Inbox, and can't be woken.`;
 }
 
 /** The agents MCP alone wakes whose row is on this computer (detected): the wake lines name only those. */
@@ -288,7 +299,7 @@ export function mcpFoldHint(label: string): string {
 /** What the "Already connected" line says after the name. */
 export function doneNote(row: ConnectRow, opts: { live: boolean; turnedOn: boolean }): string {
   if (row.state === 'ready') {
-    if (opts.turnedOn) return 'next session';
+    if (opts.turnedOn) return row.id === 'dsh' ? 'when DeepSeek Harness next starts' : 'next session';
     const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
     return opts.live ? `${word} · running now` : word;
   }
@@ -306,7 +317,7 @@ export function laterNote(row: ConnectRow, opts: { skipped: boolean; toolEnv: bo
   if (opts.skipped) return 'later';
   if (row.state === 'tool-off') return 'turn on';
   if (row.state === 'connect') return 'connect';
-  if (row.state === 'manual') return 'by hand';
+  if (row.state === 'manual') return 'yourself';
   return 'install';
 }
 
@@ -316,7 +327,7 @@ export function harnessOf(id: InboxAgentId): HarnessId {
 }
 
 /** The commands that install Plannotator's own connection. */
-export const CLAUDE_PLUGIN_INSTALL = 'claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator';
+export const CLAUDE_PLUGIN_INSTALL = INBOX_CLAUDE_PLUGIN_INSTALL;
 export const PI_EXTENSION_INSTALL = 'pi install npm:@plannotator/pi-extension';
 export const OPENCODE_PLUGIN_LINES = {
   '2': '"plugins": [{ "package": "@plannotator/opencode@latest" }]',

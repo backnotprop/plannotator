@@ -33,7 +33,8 @@ import {
 	parseChecklist,
 	renderCompletedChecklist,
 } from "./generated/checklist.ts";
-import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveAgentTool, resolveAutoReload, resolveUseJina } from "./generated/config.ts";
+import { setupAutoReload } from "./auto-reload.ts";
 import { detectPiHost, setPiHost } from "./pi-host.ts";
 import { warnRuntimeTlsOnce } from "./runtime-tls.ts";
 import { importFresh, isPlannotatorUpdatedError, launchFailureText } from "./package-version.ts";
@@ -67,6 +68,7 @@ import {
 	notifyCurrentPiSession,
 	type PiSessionIdentity,
 	registerCurrentPiSession,
+	resolveIdleDeliveryOptions,
 	sendUserMessageToCurrentPiSession,
 	withCurrentPiSessionFallbackHeader,
 } from "./current-pi-session.ts";
@@ -95,7 +97,7 @@ import { checklistWindow } from "./checklist-window.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 import { classifyReviewOutcome } from "./review-outcome.ts";
-import { createPiSessionBridgeHub } from "./pi-session-bridge.ts";
+import { createPiSessionBridgeHub, PI_INBOX_BRIEFING_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 import { setupPiInbox } from "./inbox.ts";
 import type { BrowserDecisionSession, PlanReviewBrowserSession, PlanReviewDecision } from "./plannotator-browser.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
@@ -319,15 +321,24 @@ function trySendUserMessageToDifferentCurrentSession(
 
 function sendUserMessageWithCurrentSessionFallback(
 	pi: ExtensionAPI,
+	ctx: ExtensionContext,
 	content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
 	options: Parameters<ExtensionAPI["sendUserMessage"]>[1],
 	errorMessage: string,
 	origin: PiSessionIdentity,
+	/** The opener's `sessionAlive` latch: false once its `session_shutdown` ran. */
+	openerAlive: () => boolean,
 ): void {
-	if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
-
+	// A known-dead opener (/new, /resume: its session_shutdown ran, or its ctx
+	// throws) goes straight to the current session. A host whose replaced `pi`
+	// never throws would otherwise take the feedback into the dead session.
+	if (!openerAlive() || !isCtxAlive(ctx)) {
+		if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
+	}
+	// OMP subagents share the current-session slot while the opener is still live.
+	// Only redirect feedback if the opener can no longer accept it.
 	try {
-		pi.sendUserMessage(content, options);
+		pi.sendUserMessage(content, resolveIdleDeliveryOptions(ctx, options));
 		return;
 	} catch (err) {
 		if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
@@ -1080,10 +1091,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 					const label = result.feedback ? `Approved with notes${commentCountSuffix(result.annotations)}` : "Approved";
 					sendUserMessageWithCurrentSessionFallback(
 						pi,
+						ctx,
 						withDecisionHeading(tracked, label, composeReviewApprovedMessage("pi", result.feedback, loadConfig())),
 						{ deliverAs: "followUp" },
 						errors.send,
 						origin,
+						() => sessionAlive,
 					);
 					return;
 				}
@@ -1104,10 +1117,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 					: `Changes requested${commentCountSuffix(result.annotations)}`;
 				sendUserMessageWithCurrentSessionFallback(
 					pi,
+					ctx,
 					withDecisionHeading(tracked, label, reviewFeedback),
 					{ deliverAs: "followUp" },
 					errors.send,
 					origin,
+					() => sessionAlive,
 				);
 			});
 			return { ok: true, review };
@@ -1412,6 +1427,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				sessionBridgeFor(ctx, origin),
 				bundleFiles,
 				true,
+				// Returns at once: tab loss must not dismiss the review.
+				false,
 			);
 			ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 			const errors = {
@@ -1434,10 +1451,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 							const { getAnnotateApprovedPrompt } = await loadPlannotatorPrompts();
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
+								ctx,
 								withDecisionHeading(tracked, "Approved", getAnnotateApprovedPrompt("pi", loadConfig())),
 								{ deliverAs: "followUp" },
 								errors.send,
 								origin,
+								() => sessionAlive,
 							);
 						}
 						safeNotify(ctx, "Annotation approved.", "info", origin);
@@ -1467,10 +1486,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				const label = `${outcome.promptKind === "approved-with-notes" ? "Approved with notes" : "Feedback"}${commentCountSuffix(result.annotations)}`;
 				sendUserMessageWithCurrentSessionFallback(
 					pi,
+					ctx,
 					withDecisionHeading(tracked, label, prompt),
 					{ deliverAs: "followUp" },
 					errors.send,
 					origin,
+					() => sessionAlive,
 				);
 				if (outcome.notification === "approved") {
 					safeNotify(ctx, "Annotation approved.", "info", origin);
@@ -1514,6 +1535,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				pickerMessages,
 				sessionBridgeFor(ctx, origin),
 				true,
+				// Returns at once: tab loss must not dismiss the review.
+				false,
 			);
 			ctx.ui.notify(sessionOpenedMessage("Last-message annotation opened", session.url), "info");
 			const errors = {
@@ -1533,10 +1556,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 							const { getAnnotateApprovedPrompt } = await loadPlannotatorPrompts();
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
+								ctx,
 								withDecisionHeading(tracked, "Approved", getAnnotateApprovedPrompt("pi", loadConfig())),
 								{ deliverAs: "followUp" },
 								errors.send,
 								origin,
+								() => sessionAlive,
 							);
 						}
 						safeNotify(ctx, "Message approved.", "info", origin);
@@ -1567,10 +1592,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				const label = `${outcome.promptKind === "approved-with-notes" ? "Approved with notes" : "Feedback"}${commentCountSuffix(result.annotations)}`;
 				sendUserMessageWithCurrentSessionFallback(
 					pi,
+					ctx,
 					withDecisionHeading(tracked, label, prompt),
 					{ deliverAs: "followUp" },
 					errors.send,
 					origin,
+					() => sessionAlive,
 				);
 				if (outcome.notification === "approved") {
 					safeNotify(ctx, "Message approved.", "info", origin);
@@ -1629,17 +1656,36 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	// The person closed the Inbox's tab, or asks where it is: open it again
 	// (`plannotator inbox --open` starts a stopped one detached, so the session
 	// never waits on it) and show its address. The Inbox is the CLI's, never
-	// this extension's: Pi is its client.
+	// this extension's: Pi is its client. Opened, the model also gets the
+	// Inbox briefing (INBOX_COMMAND_BRIEFING) as a hidden message with the
+	// next prompt (`nextTurn`, no turn of its own): people type the command
+	// to teach their agent the Inbox. One copy waits at a time: the command
+	// run twice before the next prompt queues it once. Pi hands every pending
+	// `nextTurn` message to that prompt, and its agent loop emits
+	// `message_start` for each: that is when the copy was delivered. (Not a
+	// `before_agent_start` handler: that event's results are the phase
+	// framing's, and an extra handler there only adds an empty result.)
+	let inboxBriefingQueued = false;
+	pi.on("message_start", (event: { message?: { role?: string; customType?: string } }) => {
+		if (event?.message?.role === "custom" && event.message.customType === PI_INBOX_BRIEFING_CUSTOM_TYPE) inboxBriefingQueued = false;
+	});
 	pi.registerCommand("plannotator-inbox", {
-		description: "Open the Plannotator Inbox in the browser and show its address",
+		description: "Open the Plannotator Inbox in the browser, show its address, and brief the agent on it",
 		handler: async (_args, ctx) => {
 			try {
-				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }] = await importFresh(() =>
-					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts")]),
+				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }, { inboxCommandBriefing }] = await importFresh(() =>
+					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts"), import("./generated/inbox/connection.ts")]),
 				);
 				const opened = await openInboxInBrowser({ dataDir: getPlannotatorDataDir() });
-				if ("url" in opened) ctx.ui.notify(inboxOpenedText(opened.url), "info");
-				else ctx.ui.notify(opened.error, "error");
+				if ("url" in opened) {
+					ctx.ui.notify(inboxOpenedText(opened.url), "info");
+					if (inboxBriefingQueued) return;
+					inboxBriefingQueued = true;
+					pi.sendMessage(
+						{ customType: PI_INBOX_BRIEFING_CUSTOM_TYPE, content: inboxCommandBriefing(), display: false },
+						{ deliverAs: "nextTurn" },
+					);
+				} else ctx.ui.notify(opened.error, "error");
 			} catch (err) {
 				if (!isPlannotatorUpdatedError(err)) throw err;
 				ctx.ui.notify(err.message, "error");
@@ -2142,7 +2188,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 		const send = (text: string) => {
 			try {
-				pi.sendUserMessage(text, { deliverAs: "followUp" });
+				pi.sendUserMessage(text, resolveIdleDeliveryOptions(ctx, { deliverAs: "followUp" }));
 			} catch (err) {
 				reportBackgroundError(ctx, "Plannotator could not deliver the plan decision", err);
 			}
@@ -2683,9 +2729,34 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		});
 	});
 
-	// The Plannotator Inbox (`plannotator_inbox` and the reply wake, inbox.ts):
-	// only where the inbox tool switch allows it for Pi and an Inbox was found.
-	// Pi awaits the extension factory, so the tool list is read (bounded) before
-	// the session's first request; otherwise this returns nothing.
-	return setupPiInbox(pi, { isAskActive: () => sessionBridgeHub.hasActiveAsk });
+	// Pi reloads itself, when nothing can be lost, to load an updated Plannotator
+	// (auto-reload.ts); off, an older Pi and Oh My Pi get the note once per version.
+	const autoReload = setupAutoReload(pi, {
+		host: piHost,
+		enabled: resolveAutoReload(loadConfig(), process.env),
+		plannotatorBusy: () => {
+			if (pendingPlanReview) return "a plan review";
+			if (openReviews.openAll().length > 0) return "an open review";
+			if (sessionBridgeHub.hasActiveAsk) return "an Ask question";
+			return null;
+		},
+		piVersion: async () => {
+			try {
+				const sdk = (await import("@earendil-works/pi-coding-agent")) as { VERSION?: unknown };
+				return typeof sdk.VERSION === "string" ? sdk.VERSION : null;
+			} catch {
+				return null;
+			}
+		},
+	});
+	// The Plannotator Inbox (inbox.ts): where an Inbox was found, the session
+	// claim (which session this Pi runs, the tool on or off); and the
+	// `plannotator_inbox` tool and the reply wake only where the inbox tool
+	// switch allows it for Pi. Pi awaits the extension factory, so the tool list
+	// is read (bounded) before the session's first request; otherwise this
+	// returns nothing.
+	return setupPiInbox(pi, {
+		isAskActive: () => sessionBridgeHub.hasActiveAsk,
+		claimUpdateNotice: (version) => autoReload.claimNotice(version),
+	});
 }

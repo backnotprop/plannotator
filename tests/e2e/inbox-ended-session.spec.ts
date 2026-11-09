@@ -8,12 +8,13 @@
  * connection drives them (inbox-new-message.spec.ts has the same harness).
  *
  * Two sessions: the one that asked polls once and stops; a second one keeps
- * polling. The person replies, chooses the second session at Send, and the
- * reply reaches it with the line saying the asker ended. Then the second one
+ * polling. The person replies; Send opens the recipient pill's list once
+ * (approval "inbox-reply-recipient"), the person picks the second session,
+ * and the reply reaches it with the line saying the asker ended. Then the second one
  * stops too, and a reply with nothing live is saved for the next agent.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs, light and dark at 1440 by 900, land in .local/proof/ended-session/.
+ * PNGs, light and dark at 1440 and 390, land in .local/proof/ended-session/.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -79,6 +80,7 @@ class Connection {
   constructor(
     readonly session: string,
     readonly startedAt: number,
+    readonly label?: string,
   ) {
     this.loop = this.run();
   }
@@ -96,10 +98,12 @@ class Connection {
     while (!this.stopped) {
       const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
         waitMs: 1_000,
+        tags: true,
         project_path: world.ledger,
         started_at: this.startedAt,
         busy: false,
         idle_since: this.startedAt,
+        ...(this.label ? { label: this.label } : {}),
       }).catch(() => null);
       if (!response) continue;
       for (const command of parseInboxBridgeCommands(await response.text())) {
@@ -120,11 +124,19 @@ class Connection {
 
 async function shot(name: string): Promise<void> {
   const page = world.page;
-  for (const scheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    // A resize moves the thread's scroll: its end is where the note, the form or the latest reply is.
+    await page.locator('section.ib-pane').evaluate((pane) => {
+      for (const el of [pane, ...pane.querySelectorAll('*')]) if (el.scrollHeight > el.clientHeight + 1 && getComputedStyle(el).overflowY !== 'visible') el.scrollTop = el.scrollHeight;
+    });
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(proofDir, `${name}-${width}-${scheme}.png`) });
+    }
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
@@ -199,7 +211,20 @@ test('the asking session stopped and another is live: the thread says so, Send a
   // Ended means 60 s with no poll (the grace), read on the window's 10 s refresh.
   const note = pane.locator('[data-asker-ended="live"]');
   await expect(note).toBeVisible({ timeout: 100_000 });
-  await expect(note).toHaveText('The Pi session that asked has ended. When you send, you can pick a live session in ledger to take your reply.');
+  await expect(note).toHaveText("This Pi session has ended. Send your reply to another session, or archive it if it's done.");
+  const foot = pane.locator('[data-foot-buttons]');
+  await expect(foot.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await expect(foot.getByRole('button', { name: 'Send to another session' })).toBeVisible();
+  await expect(foot.getByRole('button', { name: 'Archive', exact: true })).toBeVisible();
+  // The list says so too, without being told again: the row reads the same session's state.
+  await expect(page.locator(`[data-row-ended]`).first()).toHaveText('Session ended');
+  // A phone keeps the open questions' words: the two extra buttons take a line of their own under Reply.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const replyBox = (await foot.getByRole('button', { name: 'Reply', exact: true }).boundingBox())!;
+  const sendBox = (await foot.getByRole('button', { name: 'Send to another session' }).boundingBox())!;
+  expect(sendBox.y).toBeGreaterThan(replyBox.y + replyBox.height - 1);
+  await expect(foot.locator('[data-open-questions]')).toHaveAttribute('data-label-form', 'full');
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(pane.locator('article.ib-message[data-author="agent"] .ib-to').first()).toHaveText('to you · session ended');
   // "session ended" is drawn whole in the head row in a narrow thread too (inbox-polish, item 5): a thread of
   // about 568 px (a 1180 px window beside the list) and one of 440 px (the width beside an open file).
@@ -226,46 +251,38 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  // The note sits in one always-mounted status region, which describes the box.
-  const region = pane.locator('[data-asker-note]');
-  await expect(region).toHaveAttribute('role', 'status');
-  await expect(box).toHaveAttribute('aria-describedby', (await region.getAttribute('id'))!);
+  // The box open: the recipient pill under it names the asker, ended, in the note's place (approval
+  // "inbox-reply-recipient"); the note's always-mounted status region stays.
+  const pill = pane.locator('[data-recipient]');
+  await expect(pill).toHaveAttribute('aria-label', 'To Pi, ended. Change who gets this reply');
+  await expect(pane.locator('[data-asker-note]')).toHaveAttribute('role', 'status');
+  await expect(pane.locator('[data-asker-ended]')).toHaveCount(0);
   await shot('1-ended');
 
-  // Send does not send: the choice, the first live session selected and focused.
+  // Send does not send: the pill's list opens once, the live session first and the asker, ended, last.
+  // "Where should this reply go?" is gone.
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  const choice = pane.locator('[data-route-choice]');
-  await expect(choice.getByRole('group', { name: 'Where should this reply go?' })).toBeVisible();
-  const taking = choice.locator('[data-route-session="pi-session-taker"] input');
-  await expect(taking).toBeChecked();
-  await expect(taking).toBeFocused();
-  const primary = choice.locator('[data-route-send]');
-  await expect(primary).toHaveText('Send to Pi');
+  const list = pane.locator('[data-recipient-list]');
+  await expect(list).toBeVisible();
+  await expect(list.locator('[data-recipient-row]')).toHaveText([/^Pi 2/, /^Pi\s*ended$/]);
+  await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
   await expect(box).toHaveValue(words);
   await shot('2-choose');
   expect((await threadMessages()).filter((m) => m.author.kind === 'person')).toHaveLength(0);
 
-  // Esc with focus on a button of the choice goes back to the reply; the thread stays open.
-  await primary.focus();
+  // Esc closes the list; the thread stays open with the words.
   await page.keyboard.press('Escape');
-  await expect(choice).toHaveCount(0);
+  await expect(list).toHaveCount(0);
   await expect(pane.getByRole('heading', { name: 'Retry policy for the nightly ledger sync' })).toBeVisible();
-  await expect(box).toBeFocused();
-  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(taking).toBeFocused();
-
-  // Arrow keys move the selection and the button follows; Esc goes back with the draft and its choice.
-  await page.keyboard.press('ArrowDown');
-  await expect(primary).toHaveText('Leave it for the next agent');
-  await page.keyboard.press('ArrowUp');
-  await expect(primary).toHaveText('Send to Pi');
-  await page.keyboard.press('Escape');
-  await expect(choice).toHaveCount(0);
-  await expect(box).toBeFocused();
   await expect(box).toHaveValue(words);
+
+  // The live session picked by name: the pill names it, and Mod+Enter sends to it.
+  await pill.click();
+  await list.locator('[data-recipient-row="pi-session-taker"] .ib-rpick-name').click();
+  await expect(list).toHaveCount(0);
+  await expect(pill).toHaveAttribute('aria-label', 'To Pi 2. Change who gets this reply');
+  await box.focus();
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(pane.locator('[data-route-session="pi-session-taker"] input')).toBeFocused();
-  await page.keyboard.press('Enter');
 
   // The reply, addressed to the picked session, and its wake.
   const command = await waitFor('the redirected reply handed to the second session', () => taker.commands[0]);
@@ -297,18 +314,145 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
   const note = pane.locator('[data-asker-ended="none-live"]');
   // The send itself is presence (an MCP call naming the session): ended again 60 s after it.
   await expect(note).toBeVisible({ timeout: 100_000 });
-  await expect(note).toHaveText('The Pi session that asked has ended, and no agent is running in ledger now. Your reply will wait here until an agent reads this thread.');
+  await expect(note).toHaveText('This Pi session has ended, and no agent is running in ledger now. A reply waits here until that session is resumed.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Reply to Pi' }).fill('Only on the second failure.');
   await shot('3-none-live');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
   await expect(pane.locator('[data-delivery="saved"]')).toHaveText(
-    'Saved for Pi. The session that asked has ended, so it waits here until an agent reads this thread.',
+    "Saved for Pi. That session has ended; it gets this only if it's resumed.",
   );
   const last = (await threadMessages()).at(-1)!;
   expect(last.author.kind).toBe('person');
   expect(last.to ?? null).toBeNull();
   await shot('3b-none-live-saved');
+  expect(world.errors).toEqual([]);
+});
+
+test('a saved reply moves to a session that started later, which then keeps the thread: the next reply goes to it without asking', async () => {
+  const { page } = world;
+  const pane = page.locator('section.ib-pane');
+  const late = new Connection('pi-session-late', Date.now() - 60_000, 'Nightly ledger sync retry budget and backoff');
+  world.connections.push(late);
+  const saved = (await threadMessages()).at(-1)!;
+
+  await pane.locator('[data-readdress-open]').click();
+  await pane.locator('[data-readdress-session="pi-session-late"]').click();
+  await shot('5-move');
+  // On a phone a long session name wraps the buttons, and Cancel stays on the screen.
+  await page.setViewportSize({ width: 320, height: 700 });
+  const form = pane.locator('[data-readdress-choice]');
+  await form.getByRole('button', { name: 'Cancel' }).scrollIntoViewIfNeeded();
+  // Against the form, which a sideways scroll moves with its buttons: a row too wide for it runs off the screen.
+  const inside = await form.evaluate((el) => {
+    const edge = el.getBoundingClientRect().right;
+    return [...el.querySelectorAll('.ib-route-acts .ib-btn')].map((button) => button.getBoundingClientRect().right <= edge + 0.5);
+  });
+  expect(inside).toEqual([true, true]);
+  await page.screenshot({ path: join(proofDir, '5-move-phone.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await pane.locator('[data-readdress-send]').click();
+  const moved = await waitFor('the moved reply handed to the later session', () => late.commands[0]);
+  expect(moved).toMatchObject({ id: saved.id, redirected_from: 'Pi' });
+  await late.deliver(moved.id);
+  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi \(another session\), /);
+  await expect(page.locator('[data-row-ended]')).toHaveCount(0);
+
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /ended/);
+  await pane.locator('textarea').first().fill('And log each retry.');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(pane.locator('[data-recipient-list]')).toHaveCount(0);
+  const next = await waitFor('the next reply handed to the later session', () => late.commands[1]);
+  expect((await threadMessages()).at(-1)).toMatchObject({ id: next.id, to: { host: 'pi', session: 'pi-session-late' } });
+  await shot('6-after-move');
+  expect(world.errors).toEqual([]);
+});
+
+test('handed on, the new owner took it and ended without writing: a later reply moved to another session keeps the thread there', async () => {
+  test.setTimeout(240_000);
+  const { page } = world;
+  const pane = page.locator('section.ib-pane');
+  const late = world.connections.find((c) => c.session === 'pi-session-late')!;
+  const gone = new Connection('pi-session-gone', Date.now() - 30_000, 'Ledger retry follow-up');
+  world.connections.push(gone);
+  await page.waitForTimeout(1_500);
+  const { port } = registry();
+  const { serverSession } = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string };
+  const handOff = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${(await threadMessages()).at(-1)!.id}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverSession, idempotency_key: 'hand-on', words: 'Yours now.', tags: [{ host: 'pi', session: 'pi-session-gone', mode: 'handoff' }] }),
+  });
+  expect(handOff.status, await handOff.clone().text()).toBe(200);
+  const handed = (await handOff.json()) as { reply: { id: string } };
+  const taken = await waitFor('the hand-off to reach the new owner', () => gone.commands.find((c) => c.id === handed.reply.id), 30_000);
+  await gone.deliver(taken.id);
+  await gone.stop();
+
+  // Words for the new owner, saved once it has ended (60 s with no poll).
+  await page.reload();
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await pane.locator('textarea').first().fill('Also cap the retries at five.');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(pane.locator('[data-readdress-open]')).toBeVisible({ timeout: 100_000 });
+  const moving = (await threadMessages()).at(-1)!;
+  await pane.locator('[data-readdress-open]').click();
+  await pane.locator('[data-readdress-session="pi-session-late"]').click();
+  await shot('7-later-reply-move');
+  await pane.locator('[data-readdress-send]').click();
+  const moved = await waitFor('the moved reply handed to the other session', () => late.commands.find((c) => c.id === moving.id));
+  await late.deliver(moved.id);
+
+  // Its answer does not hand the thread back to the session that ended, and the header no longer says it did.
+  await world.pi.send({ project_path: world.ledger, reply_to: moved.id, agent_session: 'pi-session-late', body: 'Capped at five.' } as never, { wakes: true });
+  await expect(pane.locator('[data-thread-owner]')).toHaveCount(0);
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /Ledger retry follow-up/);
+  await pane.locator('textarea').first().fill('Thanks, ship it.');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  const next = await waitFor('the next reply handed to the other session', () => late.commands.find((c) => c.body.includes('Thanks, ship it.')));
+  expect(gone.commands.some((c) => c.id === next.id)).toBe(false);
+  await shot('8-next-reply-after-move');
+  expect(world.errors).toEqual([]);
+});
+
+test('handed on, the new owner still there, the asker ended: a reply to the asker aimed at a third session stays one reply, and the next goes to the new owner', async () => {
+  test.setTimeout(240_000);
+  const { page } = world;
+  const pane = page.locator('section.ib-pane');
+  const third = world.connections.find((c) => c.session === 'pi-session-late')!;
+  const asker = new Connection('pi-session-asker-2', Date.now() - 30_000);
+  const owner = new Connection('pi-session-owner', Date.now() - 30_000, 'Ledger retry owner');
+  world.connections.push(owner);
+  await page.waitForTimeout(1_500);
+  const asked = await world.pi.send({ project_path: world.ledger, agent_session: asker.session, subject: 'Who keeps the ledger sync', body: 'Who should keep this?' } as never, { wakes: true });
+  const { port } = registry();
+  const inbox = `http://127.0.0.1:${port}/api/inbox`;
+  const { serverSession } = (await (await fetch(`${inbox}/health`)).json()) as { serverSession: string };
+  const post = async (path: string, body: unknown) => {
+    const response = await fetch(`${inbox}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, ...(body as object) }) });
+    expect(response.status, await response.clone().text()).toBe(200);
+    return response.json() as Promise<{ reply: { id: string; took_over?: boolean } }>;
+  };
+  const handed = await post(`/messages/${asked.message_id}/reply`, { idempotency_key: 'keep-1', words: 'Yours now.', tags: [{ host: 'pi', session: owner.session, mode: 'handoff', label: 'Ledger retry owner' }] });
+  await owner.deliver((await waitFor('the hand-off to reach the new owner', () => owner.commands.find((c) => c.id === handed.reply.id), 30_000)).id);
+  await asker.stop();
+  await expect.poll(async () => ((await (await fetch(`${inbox}/sessions?session=${asker.session}`)).json()) as { session: { live: boolean } }).session.live, { timeout: 100_000, intervals: [2_000] }).toBe(false);
+
+  const aimed = await post(`/messages/${asked.message_id}/reply`, { idempotency_key: 'keep-2', words: 'A word for the third session.', to: { host: 'pi', session: third.session } });
+  expect(aimed.reply.took_over).toBeUndefined();
+  await waitFor('the aimed reply handed to the third session', () => third.commands.find((c) => c.id === aimed.reply.id));
+
+  await page.goto(`${world.url}#thread=${asked.thread_id as string}`);
+  await page.reload();
+  await expect(pane.locator('[data-thread-owner]')).toContainText('Ledger retry owner');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await pane.locator('textarea').first().fill('Thanks, carry on.');
+  await shot('9-owner-keeps-it');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await waitFor('the next reply handed to the new owner', () => owner.commands.find((c) => c.body.includes('Thanks, carry on.')));
+  expect(third.commands.some((c) => c.body.includes('Thanks, carry on.'))).toBe(false);
   expect(world.errors).toEqual([]);
 });

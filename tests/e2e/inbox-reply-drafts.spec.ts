@@ -3,7 +3,7 @@
  * Label), proved in a real browser against the compiled binary: words typed
  * in a thread's reply box are kept as a server draft while typing, and come
  * back when the person leaves the thread and opens it again, reloads the
- * page, or restarts the Inbox. The list row says "Draft · Your reply" and
+ * page, or restarts the Inbox. The list row says "Draft · Your reply" ("Draft" beside a thread or on a phone) and
  * the thread stays out of Quiet after it is looked at; a thread holding only
  * a pick not sent stays out of Quiet too ("Draft · 1 pick"). The sidebar's
  * Drafts row counts them and its page lists them above the messages.
@@ -49,6 +49,9 @@ const row = (page: Page, threadId: string) => page.locator(`.ib-lbody [data-thre
 const sectionOf = (page: Page, threadId: string) => row(page, threadId).getAttribute('data-section');
 const pane = (page: Page) => page.locator('section.ib-pane');
 const box = (page: Page) => pane(page).locator('textarea');
+/** The thread's reply draft as the Inbox holds it: its words, or null. (`world.url` ends in `/`: a `//api/…` path is the page's 404.) */
+const draftWords = async (threadId: string) =>
+  ((await (await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url))).json()) as { draft: { body: string } | null }).draft?.body ?? null;
 
 function startInbox(): string {
   const started = spawnSync(binary, ['inbox', '--background'], { env: world?.env ?? {}, encoding: 'utf8', timeout: 60_000 });
@@ -107,20 +110,25 @@ test('type, leave: the words are kept, the row says "Draft · Your reply", and t
   await row(page, threads.news).click();
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await box(page).fill(WORDS);
-  // The soft pill with when it was saved, and Discard.
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-pill')).toHaveText('Draft');
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-saved')).toHaveText(/^Saved \d{1,2}:\d{2} [AP]M$/);
-  await expect(pane(page).locator('[data-draft-discard]')).toHaveText('Discard');
+  // Saved, silently on a computer (approval "inbox-reply-box", T6): no Draft pill or Saved time in the box; Discard is
+  // the bin in the box's row.
+  await expect.poll(() => draftWords(threads.news)).toBe(WORDS);
+  await expect(pane(page).locator('[data-draft-head]')).toHaveCount(0);
+  await expect(pane(page).locator('[data-reply-row] [data-reply-discard]')).toHaveAccessibleName('Discard draft');
   await page.setViewportSize({ width: 1280, height: 860 });
   await shot(page, 'inside-thread-draft-1280');
   // Leave the thread: the row it settles in says what waits.
   await pane(page).getByRole('button', { name: 'Close the thread' }).click();
   await expect(pane(page)).toHaveCount(0);
-  await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft · Your reply');
+  // A wide row in a list of 1150px or more draws the full words (the owner, 2026-10-29); a narrower one (1280's list
+  // is about 1030px), a two-line or a phone row "Draft" (option A).
+  await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft');
+  await expect(row(page, threads.news).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · Your reply');
   expect(await sectionOf(page, threads.news)).toBe('new');
   // Not bold: nothing new arrived; the label says what is there.
   await expect(row(page, threads.news)).not.toHaveClass(/\bib-u\b/);
   await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft · Your reply');
   await shot(page, 'list-1440');
 });
 
@@ -156,14 +164,14 @@ test('a pick not sent: "Draft" on the card and the foot; the thread stays out of
   await expect(pane(page).getByText(/^Picked \d{1,2}:\d{2} [AP]M · in your draft$/)).toBeVisible();
   await expect(pane(page).locator('[data-draft-foot]')).toHaveText('Draft, 1 pick');
   await expect(pane(page).locator('.ib-pfoot')).not.toContainText('Not sent');
-  await expect(row(page, threads.picks).locator('[data-draft-label]')).toHaveText('Draft · 1 pick');
+  await expect(row(page, threads.picks).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · 1 pick');
   await page.setViewportSize({ width: 1280, height: 860 });
   await shot(page, 'inside-thread-picks-1280');
   // Beside another thread: both drafts' rows in the narrow list.
   await row(page, threads.asks).click();
   await expect(pane(page).getByRole('heading', { name: 'Skip the tour for returning users?' })).toBeVisible();
-  await expect(row(page, threads.picks).locator('[data-draft-label]')).toHaveText('Draft · 1 pick');
-  await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft · Your reply');
+  await expect(row(page, threads.picks).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · 1 pick');
+  await expect(row(page, threads.news).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · Your reply');
   await shot(page, 'beside-thread-1280');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(world.url);
@@ -198,8 +206,8 @@ test('dark and a phone: the label and the pill read', async () => {
   try {
     const p = await phone.newPage();
     await p.goto(world.url);
-    await expect(p.locator(`[data-thread-id="${threads.news}"] [data-draft-label]`)).toHaveText('Draft · Your reply');
-    await expect(p.locator(`[data-thread-id="${threads.picks}"] [data-draft-label]`)).toHaveText('Draft · 1 pick');
+    await expect(p.locator(`[data-thread-id="${threads.news}"] .ib-c .ib-sr`)).toHaveText('Draft · Your reply');
+    await expect(p.locator(`[data-thread-id="${threads.picks}"] .ib-c .ib-sr`)).toHaveText('Draft · 1 pick');
     await shot(p, 'phone-list');
     await p.locator(`[data-thread-id="${threads.news}"]`).tap();
     await expect(p.locator('section.ib-pane textarea')).toHaveValue(WORDS);
@@ -219,12 +227,12 @@ test('Discard drops the words; typing again and Send clears them, and the row go
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.news}`);
   await expect(box(page)).toHaveValue(WORDS);
-  await pane(page).locator('[data-draft-discard]').click();
+  await pane(page).locator('[data-reply-discard]').click();
   await expect(box(page)).toHaveCount(0);
   await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveCount(0);
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await box(page).fill('Ship it as cards.');
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-pill')).toHaveText('Draft');
+  await expect.poll(() => draftWords(threads.news)).toBe('Ship it as cards.');
   await pane(page).getByRole('button', { name: 'Send', exact: true }).click();
   await expect(box(page)).toHaveCount(0);
   await page.goto(world.url);

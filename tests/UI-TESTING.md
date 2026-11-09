@@ -419,8 +419,9 @@ which is the regression class this control exists to fix).
 7. **Compact/touch** (real phone or DevTools device mode, both apps). The header menu carries a
    visible positive decision row in every state; composer rows open the note dialog
    (`DecisionNoteDialog`), not an inline textarea.
-8. **Sidebar general comment** (review). "+ General comment" is reachable at zero annotations
-   (empty state) and from the General section header; creating one flips the header control to
+8. **Global comment** (review). "+ Global comment" is reachable at zero annotations (empty
+   state) and from the Global comments section header in the sidebar, and from the "Global
+   comment" button in a guided review's header; creating one flips the header control to
    `Send Feedback`.
 
 ## HTML Surface Header Manual Checklist
@@ -514,7 +515,8 @@ not hand the turn to an earlier dialog.
 ## Ask This Session Announcement Manual Checklist
 
 Not CI. The gate is one cookie, `plannotator-announce-ask-session-seen`. Seed
-`plannotator-announce-tui-herdr-seen=1` (and the other first-run keys) so the chain reaches it.
+`plannotator-announce-tui-herdr-seen=1` and `plannotator-announce-inbox-seen=1` (and the other
+first-run keys) so the chain reaches it.
 
 1. **Who sees it.** Open a review from Claude Code (`/plannotator-review`), Pi or OpenCode 2 and
    don't touch anything: the announcement opens within a few seconds, its headline names that

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyForgeHost, forgeRefLinks, normalizeForgeHost } from "./forge-refs";
+import { classifyForgeHost, findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, normalizeForgeHost } from "./forge-refs";
 
 describe("forgeRefLinks", () => {
   const cases: Array<{
@@ -101,5 +101,27 @@ describe("classifyForgeHost", () => {
     expect(classifyForgeHost("sub.gitlab.example.io")).toBe("gitlab");
     expect(classifyForgeHost("mygitlabproxy.example.com")).toBeNull();
     expect(classifyForgeHost("notgithub.com")).toBeNull();
+  });
+});
+
+describe("matchCrossRepoRef", () => {
+  test("links on the project's forge host: GitHub Enterprise keeps its host", () => {
+    expect(matchCrossRepoRef("team/app#9 done", "", { host: "github.acme.com" })).toEqual({
+      label: "team/app#9",
+      path: "team/app",
+      href: "https://github.acme.com/team/app/issues/9",
+    });
+  });
+
+  test("never continues a word, path or URL", () => {
+    for (const prev of ["a", "/", ".", "-", "_"]) {
+      expect(matchCrossRepoRef("owner/repo#1", prev, {})).toBeNull();
+    }
+    expect(matchCrossRepoRef("owner/repo#1", "(", {})?.href).toBe("https://github.com/owner/repo/issues/1");
+  });
+
+  test("findCrossRepoRef skips a ref that starts inside a path", () => {
+    expect(findCrossRepoRef("see a/owner/repo#1", 18, {})).toBe(-1);
+    expect(findCrossRepoRef("see owner/repo#1", 14, {})).toBe(4);
   });
 });

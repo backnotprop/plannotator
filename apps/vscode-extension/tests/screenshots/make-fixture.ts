@@ -2,7 +2,7 @@
  * A scratch world for driving the Guides view in a real VS Code (headless,
  * through `code serve-web`): a git repository with a realistic change on a
  * branch, a FAKE `gh` that answers from canned JSON, and a script for the
- * FAKE ACP agent (tests/fake-acp-agent.ts). Nothing here talks to GitHub or
+ * FAKE ACP agent (tests/helpers/fake-acp-agent.ts). Nothing here talks to GitHub or
  * runs a real agent.
  *
  *   bun tests/screenshots/make-fixture.ts <scratch dir>

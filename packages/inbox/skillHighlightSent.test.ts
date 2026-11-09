@@ -8,7 +8,7 @@
  * other feedback headings. The failure this catches: a `$name` an agent wrote
  * in a prompt, a choice or a quoted message painted as if the person typed it.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { expect, test } from 'bun:test';
 import type { InboxSkillReference } from '@plannotator/core/skill-reference-block';

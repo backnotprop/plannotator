@@ -137,7 +137,7 @@ async function wordRect(on: Page, text: string, word: string): Promise<{ x: numb
  */
 async function openReply(on: Page): Promise<Locator> {
   const box = on.locator('section.ib-pane .ib-rbox textarea');
-  const button = on.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const button = on.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await button.click({ timeout: 1_000 }).catch(() => {});
   }
@@ -177,11 +177,51 @@ test('the reply box: after a pick, after a click on the message, after a chip', 
   await dictate(page, 'After reading. ');
   await expectLanded(box, 'After reading.');
 
-  await page.locator('section.ib-pane .ib-rfoot button').first().click();
+  await page.locator('section.ib-pane .ib-rbox [data-reply-row] .ib-rchips button').first().click();
   await expect(box).not.toBeFocused();
   await dictate(page, 'After a chip. ');
   await expectLanded(box, 'After a chip.');
   expect(await box.inputValue()).toBe('Focused dictation. After a pick. After reading. After a chip. ');
+});
+
+test('a press in the reply box beside its text (the row of chips) puts the caret in the reply: typing and a dictation with Option held first land', async () => {
+  const p = await context.newPage();
+  try {
+    await p.goto(`${url}#thread=${threadId}`);
+    // Earlier tests leave a reply draft, which reopens the box by itself (see openReply).
+    await openReply(p);
+    const rbox = p.locator('section.ib-pane .ib-rbox');
+    const box = rbox.locator('textarea');
+    await expect(box).toBeFocused();
+    // An earlier test's picks may have drafted a reply: start from the person's own words.
+    await box.fill('Typed first. ');
+    // The box is drawn as one field (its focus ring is always on); its lower part is its row (Send, the tools, the chips),
+    // not the textarea.
+    const text = (await box.boundingBox())!;
+    const row = (await rbox.locator('[data-reply-row]').boundingBox())!;
+    expect(row.y).toBeGreaterThanOrEqual(text.y + text.height - 1);
+    // The row's middle cell, right of the chips (the bin is past it, at the far right).
+    const chips = (await rbox.locator('[data-reply-row] .ib-rmid').boundingBox())!;
+    // Leave the box (a click on the message), then press inside it, right of the chips, as a person clicks into a field.
+    await p.getByText('I checked the 409 row.').click();
+    await expect(box).not.toBeFocused();
+    await p.mouse.click(chips.x + chips.width - 8, chips.y + chips.height / 2);
+    await expect(box).toBeFocused();
+    await p.keyboard.type('Then typed. ');
+    // Hex starts on Option (held, then released), then pastes with ⌘V.
+    await p.keyboard.down('Alt');
+    await p.waitForTimeout(400);
+    await p.keyboard.up('Alt');
+    await dictate(p, 'Then dictated.');
+    await expect(box).toHaveValue('Typed first. Then typed. Then dictated.');
+    // A press on a control in the box keeps its own meaning: the chip's button is pressed, not stolen.
+    const chip = rbox.locator('[data-skip-chip]');
+    const before = await chip.getAttribute('data-skip-chip');
+    await rbox.locator('[data-skip-toggle]').click();
+    await expect(chip).toHaveAttribute('data-skip-chip', before === 'keep' ? 'skip' : 'keep');
+  } finally {
+    await p.close();
+  }
 });
 
 test('a word double-clicked in the message (selected, nothing to comment on) does not keep the dictation out of the reply box', async () => {
@@ -353,20 +393,32 @@ test('text selected in a file to comment on: the paste is not taken to the reply
     await p.locator('section.ib-pane .ib-atts [data-attachment-id]').first().click();
     const text = p.locator('.ib-view').getByText('Retry with the same key');
     await expect(text).toBeVisible();
-    // The pane may still be sliding in: measure once it stands still.
-    await p.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
     // Drag across the words, as a person selects text to comment on (the rect of the words themselves).
-    const rect = await p.evaluate(() => {
-      const walker = document.createTreeWalker(document.querySelector('.ib-view')!, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.includes('Retry with the same key')) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        const r = range.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
-      }
-      return null;
-    });
+    const wordsRect = () =>
+      p.evaluate(() => {
+        const walker = document.createTreeWalker(document.querySelector('.ib-view')!, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.includes('Retry with the same key')) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const r = range.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }
+        return null;
+      });
+    // The pane may still be sliding in and widening after the text shows (not every step of it is
+    // a running animation, and on a loaded runner it ends late): measure once the words stand
+    // still, two reads 250 ms apart in the same place. A drag measured mid-slide can miss the words
+    // (the pane moves under the mouse) and select nothing, so no toolbar comes.
+    let rect = await wordsRect();
+    await expect
+      .poll(async () => {
+        const before = rect;
+        await p.waitForTimeout(250);
+        rect = await wordsRect();
+        return before !== null && JSON.stringify(before) === JSON.stringify(rect);
+      })
+      .toBe(true);
     expect(rect).not.toBeNull();
     await p.mouse.move(rect!.x + 2, rect!.y + rect!.height / 2);
     await p.mouse.down();
@@ -562,7 +614,7 @@ test('with image paste (#1953): an image pasted after a pick attaches once to th
 test('WebKit: after a pick, the paste goes back to the reply box', async () => {
   let browser: Browser | null = null;
   try {
-    browser = await webkit.launch();
+    browser = await webkit.launch({ args: [] });
   } catch (error) {
     test.skip(true, `WebKit is not installed here: ${(error as Error).message.split('\n')[0]}`);
     return;

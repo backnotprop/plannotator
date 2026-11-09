@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { File, type LineAnnotation } from '@pierre/diffs/react';
 import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps } from '@pierre/diffs';
+import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import { PopoutDialog } from './PopoutDialog';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
-import { useTheme } from './ThemeProvider';
-import { CommentPopover } from './CommentPopover';
+import { extendThemeSwitch, useTheme } from './ThemeProvider';
+import { CommentPopover, type CommentExtraAction } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { whenCodeLineRendered } from '../utils/codeLineScroll';
+import { hashDraftScope } from '../utils/draftScopeHash';
 
 export interface CodeFileAnnotationInput {
   filePath: string;
@@ -39,14 +42,20 @@ interface CodeFilePopoutProps {
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
   container?: HTMLElement | null;
+  /** A host's control in the header, before the line count (Shape's "open in"). */
+  headerAction?: React.ReactNode;
 }
 
 interface PendingComment {
   range: { start: number; end: number };
   contextText: string;
   originalCode: string;
+  /** The composer's kept-draft key: this file (its path and a hash of its contents) and these lines. */
+  draftKey: string;
   anchorEl?: HTMLElement;
   anchorRect?: DOMRect;
+  /** The words it opens with: a comment the host kept and put back (`reopenComment`). */
+  initialText?: string;
 }
 
 const gutterButtonStyle: React.CSSProperties = {
@@ -148,20 +157,37 @@ const CodeInlineAnnotation: React.FC<{
   onSelect?: (id: string | null) => void;
   onEdit?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDelete?: (id: string) => void;
-}> = ({ annotation, isSelected, onSelect, onEdit, onDelete }) => {
+  /** An edit the host kept and put back (`CodeFileViewProps.reopenEdit`): for this card, its edit box opens holding those words. */
+  reopenEdit?: { id: string; text: string } | null;
+}> = ({ annotation, isSelected, onSelect, onEdit, onDelete, reopenEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text ?? '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const enterSavesComment = useConfigValue('enterSavesComment');
+  const reopenedRef = useRef<{ id: string; text: string } | null>(null);
+  const caretAtEndRef = useRef(false);
 
   useEffect(() => {
     if (!isEditing) setEditText(annotation.text ?? '');
   }, [annotation.text, isEditing]);
 
+  // Each put-back edit opens once, on its own card.
+  useEffect(() => {
+    if (!reopenEdit || !onEdit || reopenEdit.id !== annotation.id || reopenedRef.current === reopenEdit) return;
+    reopenedRef.current = reopenEdit;
+    caretAtEndRef.current = true;
+    setEditText(reopenEdit.text);
+    setIsEditing(true);
+  }, [annotation.id, onEdit, reopenEdit]);
+
   useEffect(() => {
     if (isEditing) {
-      textareaRef.current?.focus();
-      textareaRef.current?.select();
+      const area = textareaRef.current;
+      area?.focus();
+      // Words put back: the caret after them (selecting them would let one key replace them all).
+      if (caretAtEndRef.current && area) area.setSelectionRange(area.value.length, area.value.length);
+      else area?.select();
+      caretAtEndRef.current = false;
     }
   }, [isEditing]);
 
@@ -189,6 +215,16 @@ const CodeInlineAnnotation: React.FC<{
           {lineLabel(annotation.lineStart, annotation.lineEnd)}
         </span>
         {annotation.author && <span className="truncate normal-case">by <bdi>{annotation.author}</bdi></span>}
+        {annotation.outsideDiff && (
+          <span
+            className="rounded px-1.5 py-0.5 normal-case font-medium"
+            style={{ background: 'color-mix(in oklab, var(--warning) 18%, transparent)', color: 'var(--warning)' }}
+            data-code-annotation-outside-diff=""
+            title="A comment on lines outside the diff"
+          >
+            not in the diff
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && !isEditing && (
             <button
@@ -302,6 +338,13 @@ export interface CodeFileViewProps {
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
   onAddAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: an Ask action in the line composer, beside Save (Shape's "Ask"). Absent → Save only, as always. */
+  onAskAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: the line composer's labels (Shape: "Change it" / "Ask"). Absent → "Save" / "Ask AI". */
+  commentSubmitLabel?: string;
+  commentAskLabel?: string;
+  /** The comment box's third action (Shape's Show me): these lines, and the words typed. */
+  commentExtraAction?: (lines: { filePath: string; lineStart: number; lineEnd: number; originalCode: string }) => CommentExtraAction | undefined;
   onEditAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -313,6 +356,45 @@ export interface CodeFileViewProps {
   lang?: string;
   /** Long lines: `'scroll'` sideways (the default) or `'wrap'` onto the next row, for a minified file. */
   overflow?: 'scroll' | 'wrap';
+  /** CSS added inside the file's shadow root after the theme (a host's line
+   *  marks, e.g. code review's change bars on `[data-column-number="12"]`). */
+  extraCss?: string;
+  /** Scroll this line to the middle and mark it, once per `token` (a jump to
+   *  a definition, a reference or a line). */
+  revealLine?: { line: number; token: number };
+  /** The token under the pointer (`enter` / `leave`) and the last one clicked
+   *  (`click`): a host's "go to definition" looks there. Turning it on wraps
+   *  the file's tokens (Pierre's token transformer). */
+  onTokenTarget?: (kind: 'enter' | 'leave' | 'click', target: CodeFileTokenTarget) => void;
+  /** Cmd/Ctrl-click (or Alt-click) on a token: a host's references. */
+  onTokenNavigate?: (target: CodeFileTokenTarget) => void;
+  /**
+   * Opt-in: a line comment being written that the host kept (its file
+   * closed) and puts back. Each new object opens the line composer once on
+   * those lines, holding those words, when Pierre has drawn the first line.
+   * Nothing is saved until the person saves. Absent: nothing changes.
+   */
+  reopenComment?: { lineStart: number; lineEnd: number; text: string } | null;
+  /**
+   * Opt-in: an edit of a saved comment that the host kept and puts back. Each
+   * new object opens that inline comment's edit box once, holding those
+   * words (not saved). Absent: nothing changes.
+   */
+  reopenEdit?: { id: string; text: string } | null;
+  /**
+   * Opt-in: told which lines the line comment being written is on as its
+   * composer opens, and null as it closes, so a host can keep its words
+   * (read from the box) if the view is taken away. Absent: nothing changes.
+   */
+  onComposerLines?: (lines: { lineStart: number; lineEnd: number; originalCode: string } | null) => void;
+}
+
+/** A token of a file drawn by `CodeFileView` (Pierre's token event, file mode). */
+export interface CodeFileTokenTarget {
+  tokenText: string;
+  tokenElement: HTMLElement;
+  lineNumber: number;
+  lineCharStart: number;
 }
 
 /**
@@ -331,6 +413,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   annotations = [],
   selectedAnnotationId,
   onAddAnnotation,
+  onAskAnnotation,
+  commentSubmitLabel,
+  commentAskLabel,
+  commentExtraAction,
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
@@ -338,6 +424,13 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   className = 'flex-1 min-h-0',
   lang,
   overflow = 'scroll',
+  extraCss,
+  revealLine,
+  onTokenTarget,
+  onTokenNavigate,
+  reopenComment,
+  reopenEdit,
+  onComposerLines,
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -347,6 +440,15 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     css: buildPierreCSS(mode, colors.bg, colors.fg),
   }));
   const [pendingComment, setPendingComment] = useState<PendingComment | null>(null);
+  const onComposerLinesRef = useRef(onComposerLines);
+  onComposerLinesRef.current = onComposerLines;
+  useEffect(() => {
+    onComposerLinesRef.current?.(
+      pendingComment
+        ? { lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode }
+        : null,
+    );
+  }, [pendingComment]);
   const fileAreaRef = useRef<HTMLDivElement>(null);
   const lastPointerRectRef = useRef<DOMRect | null>(null);
   const suppressLineClickUntilRef = useRef(0);
@@ -354,6 +456,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   useEffect(() => {
     requestAnimationFrame(() => {
       const c = getThemeColors();
+      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
+      extendThemeSwitch();
       setPierreTheme({
         type: mode,
         css: buildPierreCSS(mode, c.bg, c.fg),
@@ -365,8 +469,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     setPendingComment(null);
   }, [filepath]);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const selectedCodeAnnotation = useMemo(
     () => annotations.find((ann) => ann.id === selectedAnnotationId),
     [annotations, selectedAnnotationId],
@@ -382,6 +486,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
       }));
   }, [annotations]);
 
+  // The line a host jumped to stays marked until a comment or a selection
+  // takes the mark (or the next jump moves it).
+  const [revealedLine, setRevealedLine] = useState<number | null>(null);
   const selectedLines = useMemo((): PierreSelectedLineRange | null => {
     if (pendingComment) {
       return { start: pendingComment.range.start, end: pendingComment.range.end };
@@ -389,11 +496,49 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (selectedCodeAnnotation) {
       return { start: selectedCodeAnnotation.lineStart, end: selectedCodeAnnotation.lineEnd };
     }
+    // A jump (Go to Definition, a reference) marks its line until a comment
+    // or a selection takes the mark; otherwise the host's line, if any.
+    if (revealedLine != null) return { start: revealedLine, end: revealedLine };
     if (line != null) {
       return { start: line, end: lineEnd ?? line };
     }
     return null;
-  }, [pendingComment, selectedCodeAnnotation, line, lineEnd]);
+  }, [pendingComment, selectedCodeAnnotation, revealedLine, line, lineEnd]);
+
+  useEffect(() => {
+    if (!revealLine) return;
+    setRevealedLine(revealLine.line);
+    // Pierre renders after mount (and again after highlighting): look for the
+    // line for a moment.
+    let frame = 0;
+    let attempts = 0;
+    const find = () => {
+      const root = fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot;
+      const row = root?.querySelector(`[data-line="${revealLine.line}"]`);
+      if (row) {
+        // Vertically only: scrollIntoView would also scroll a long line sideways.
+        let node: Element | null = fileAreaRef.current;
+        while (node) {
+          if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+            const box = node.getBoundingClientRect();
+            const rect = row.getBoundingClientRect();
+            node.scrollTop += rect.top - (box.top + box.height / 2) + rect.height / 2;
+            return;
+          }
+          node = node.parentElement;
+        }
+        row.scrollIntoView({ block: 'center', inline: 'nearest' });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) frame = requestAnimationFrame(find);
+    };
+    frame = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealLine?.token, revealLine?.line]);
+  // Another file drops the mark (cleanups run before the next jump sets one).
+  useEffect(() => () => setRevealedLine(null), [filepath]);
   const effectivePrerenderedHTML = lineAnnotations.length === 0 ? prerenderedHTML : undefined;
 
   useEffect(() => {
@@ -423,17 +568,39 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     range: { start: number; end: number },
     anchorEl?: HTMLElement,
     anchorRect?: DOMRect,
+    initialText?: string,
   ) => {
     const start = Math.min(range.start, range.end);
     const end = Math.max(range.start, range.end);
     setPendingComment({
       range: { start, end },
+      ...(initialText !== undefined ? { initialText } : {}),
       anchorEl,
       anchorRect: anchorRect ?? anchorEl?.getBoundingClientRect() ?? lastPointerRectRef.current ?? undefined,
       contextText: `${relativePath} ${lineLabel(start, end)}`,
       originalCode: getLineSlice(contents, start, end),
+      // The path alone is not the file: the Inbox passes a basename, so two
+      // threads' `index.ts` would share a draft. The contents hash, taken only
+      // when the composer opens, keeps one draft per file and range.
+      draftKey: `code-file:${filepath}:${hashDraftScope(contents)}:${start}-${end}`,
     });
-  }, [contents, relativePath]);
+  }, [contents, filepath, relativePath]);
+
+  // A comment put back by the host: the composer opens on its lines once the
+  // first of them is drawn (each request once).
+  const reopenedCommentRef = useRef<CodeFileViewProps['reopenComment']>(null);
+  useEffect(() => {
+    const area = fileAreaRef.current;
+    if (!reopenComment || !area || !onAddAnnotation || reopenedCommentRef.current === reopenComment) return;
+    const start = Math.min(reopenComment.lineStart, reopenComment.lineEnd);
+    const end = Math.max(reopenComment.lineStart, reopenComment.lineEnd);
+    if (start < 1 || end > lineCount) return;
+    const request = reopenComment;
+    return whenCodeLineRendered(area, start, (lineEl) => {
+      reopenedCommentRef.current = request;
+      openCommentForRange({ start, end }, undefined, lineEl.getBoundingClientRect(), request.text);
+    }, { lineCount });
+  }, [reopenComment, onAddAnnotation, openCommentForRange, lineCount]);
 
   const openCommentForBrowserSelection = useCallback(() => {
     if (!onAddAnnotation) return;
@@ -464,9 +631,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
         onSelect={onSelectAnnotation}
         onEdit={onEditAnnotation}
         onDelete={onDeleteAnnotation}
+        reopenEdit={reopenEdit}
       />
     );
-  }, [onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId]);
+  }, [onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, reopenEdit, selectedAnnotationId]);
 
   const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
     return (
@@ -500,6 +668,28 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     }
     openCommentForRange({ start: range.start, end: range.end }, undefined, lastPointerRectRef.current ?? undefined);
   }, [onAddAnnotation, openCommentForRange]);
+
+  const tokenTargetOf = (props: { tokenText: string; tokenElement: HTMLElement; lineNumber: number; lineCharStart: number }): CodeFileTokenTarget => ({
+    tokenText: props.tokenText,
+    tokenElement: props.tokenElement,
+    lineNumber: props.lineNumber,
+    lineCharStart: props.lineCharStart,
+  });
+  const tokenOptions = onTokenTarget || onTokenNavigate
+    ? {
+        useTokenTransformer: true,
+        onTokenEnter: (props: CodeFileTokenTarget) => onTokenTarget?.('enter', tokenTargetOf(props)),
+        onTokenLeave: (props: CodeFileTokenTarget) => onTokenTarget?.('leave', tokenTargetOf(props)),
+        onTokenClick: (props: CodeFileTokenTarget, event: MouseEvent) => {
+          const target = tokenTargetOf(props);
+          onTokenTarget?.('click', target);
+          if (onTokenNavigate && (event.metaKey || event.ctrlKey || event.altKey)) {
+            suppressLineClickUntilRef.current = Date.now() + 300;
+            onTokenNavigate(target);
+          }
+        },
+      }
+    : {};
 
   const handleLineClick = useCallback((props: LineEventBaseProps & { event: PointerEvent }) => {
     if (!onAddAnnotation) return;
@@ -540,7 +730,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           } as React.CSSProperties}
           options={{
             themeType: pierreTheme.type,
-            unsafeCSS: pierreTheme.css,
+            unsafeCSS: extraCss ? `${pierreTheme.css}\n${extraCss}` : pierreTheme.css,
             overflow,
             disableFileHeader: true,
             enableLineSelection: true,
@@ -548,6 +738,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             lineHoverHighlight: onAddAnnotation ? 'line' : 'disabled',
             onLineClick: handleLineClick,
             onLineSelectionEnd: handleLineSelectionEnd,
+            ...tokenOptions,
           }}
         />
       </div>
@@ -559,6 +750,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           isGlobal={false}
           skillReferences
           allowImages={allowImages}
+          // The words typed for these lines survive a close (Escape, X) and come back when they are chosen again.
+          draftKey={pendingComment.draftKey}
+          initialText={pendingComment.initialText}
           onSubmit={(text, images) => {
             onAddAnnotation({
               filePath: filepath,
@@ -570,6 +764,21 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             });
             setPendingComment(null);
           }}
+          submitLabel={commentSubmitLabel}
+          askAILabel={commentAskLabel}
+          extraAction={commentExtraAction?.({ filePath: filepath, lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode })}
+          onAskAI={onAskAnnotation ? (question) => {
+            onAskAnnotation({
+              filePath: filepath,
+              lineStart: pendingComment.range.start,
+              lineEnd: pendingComment.range.end,
+              text: question,
+              originalCode: pendingComment.originalCode,
+            });
+            setPendingComment(null);
+            return true;
+          } : undefined}
+          askAIContext={onAskAnnotation ? { kind: 'selection', label: pendingComment.contextText, text: pendingComment.originalCode } : undefined}
           onClose={() => setPendingComment(null)}
         />
       )}
@@ -595,11 +804,12 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   onDeleteAnnotation,
   onSelectAnnotation,
   container,
+  headerAction,
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const lineCount = useMemo(() => contents.split('\n').length, [contents]);
 
   const handleCopy = async () => {
@@ -660,6 +870,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {headerAction}
           <span className="text-xs text-muted-foreground tabular-nums">
             {lineCount} lines
           </span>

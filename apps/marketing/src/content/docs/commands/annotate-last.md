@@ -77,6 +77,8 @@ The annotation UI in `annotate-last` mode works the same as `/plannotator-annota
 
 `plannotator annotate-last` accepts the same `--gate`, `--json`, and `--hook` flags as `plannotator annotate`. See [Annotate → Flags](/docs/commands/annotate/#flags) for the full matrix.
 
+`--title <text>` names the tab and the header in place of "Last message". See [Annotate → Naming the tab](/docs/commands/annotate/#naming-the-tab---title).
+
 The common use case for `--gate` on annotate-last is a turn-by-turn review gate wired to a Stop hook:
 
 ```bash

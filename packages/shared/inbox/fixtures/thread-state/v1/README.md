@@ -35,7 +35,7 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 | `send` | `message`, `words`, `skip_unanswered` | The person's Send on that message: every picked question on it, plus the words; `skip_unanswered: true` means the person pressed "Skip them", so a kit sends that message's question keys as the request's `skip` list and the server sends its open ones as skips (`false`, the default, skips nothing). The field keeps its name in the traces; the server ignores a request's `skip_unanswered` since approval "inbox-explicit-skip" (2026-10-21). Each Send uses its own idempotency key |
 | `mark_read`, `unread` | `thread` | Mark read, and its Undo |
 | `archive`, `unarchive` | `thread` | Resolve `true` and `false` |
-| `agent_read` | `thread` | An agent read the thread (`read_thread`, or `wait_for_reply` handed it the reply) |
+| `agent_read` | `thread` | An agent read the thread (`read_thread`) |
 | `set_aside_note` | `thread` | The Undo window passed: the Inbox writes its set-aside notes to the asking agent (it does this by itself 10 s after a Mark read) |
 | `person_thread` | `project`, `session` (`ses_a` or `ses_b`), `body` | The person starts a thread from the Inbox, addressed to that live session (compose, `POST /api/inbox/messages`). Its root is the person's message; it is in Sent until the session takes it. It is no session's default thread: an agent message without `reply_to` never joins it. Each uses its own idempotency key. Only `hand-19-person-started-thread` uses it |
 | `delivered` | `thread` | The addressed session's connection delivered what the person sent it in that thread (bridge `delivered`): it counts as the agent having read the thread up to that message, so a Sent row moves to Quiet |
@@ -47,7 +47,7 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 | `sections` | The default list (`GET /api/inbox/threads`): the six sections in order, each with its thread labels in order. Archived threads are in `quiet` |
 | `sections_exclude_archived` | The window's list (`?archived=exclude`): archived threads are left out |
 | `archived` | The archived list (`GET /api/inbox/threads/archived`), newest archived first |
-| `counts` | `waiting`: the sidebar count (rows in Stopped, Holding, Waiting). `unread`: rows drawn bold (Stopped, Holding, Waiting, New). Files written before Decisions were removed (2026-10) also had `decisions_waiting`; it is gone, so a kit that read it should drop it |
+| `counts` | `waiting`: the sidebar count (rows in Stopped, Holding, Waiting). `unread`: rows drawn bold (a row in Stopped, Holding or Waiting with an unseen agent message, and a row in New except one there only for the person's own draft; since 2026-11-08 a row in Stopped, Holding or Waiting the person has seen is not bold). Files written before Decisions were removed (2026-10) also had `decisions_waiting`; it is gone, so a kit that read it should drop it |
 | `threads` | Per thread: `section`, `unread`, `unseen`, `read` (Mark read stands), `archived`, `agent_after_archive`, `back_from_archive`, `last` (its latest message) and `questions` (each question's state: `open`, `picked`, `sent`, `closed`, `superseded`) |
 
 ## Where they come from

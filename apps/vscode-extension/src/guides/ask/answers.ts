@@ -10,6 +10,7 @@
  * No `vscode` here.
  */
 
+import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -23,12 +24,16 @@ export interface AskAbout {
   chapter: number;
   chapterTitle: string;
   path?: string;
+  /** The file's path in the old version, when the question is about it there and the change renamed it. */
+  oldPath?: string;
   side?: "head" | "base";
   lines?: { start: number; end: number };
   /** The selected code, as it was when asked (capped). */
   code?: string;
-  /** SHA-1 of the head file when asked, to tell later that it changed. */
+  /** SHA-1 of the head file when asked (a question about the whole file), to tell later that it changed. */
   fileHash?: string;
+  /** SHA-1 of the lines asked about (`linesHash`), as they were asked: the stale note compares the same lines now. */
+  codeHash?: string;
 }
 
 export type AnswerStatus = "answering" | "answered" | "text" | "stopped" | "failed";
@@ -143,14 +148,38 @@ export function deleteGuideAnswers(repoKey: string, guideId: string): void {
   rmSync(answersDir(repoKey, guideId), { recursive: true, force: true });
 }
 
-/** "Written for 9b07e4d; the file has changed since." when the answer's file or head moved. */
-export function staleNote(record: AnswerRecord, current: { fileHash?: string | null; headSha?: string | null }): string | null {
+/** SHA-1 of some lines of text, line endings and a final line break ignored (`codeHash`). */
+export function linesHash(text: string): string {
+  return createHash("sha1").update(text.replace(/\r\n?/g, "\n").replace(/\n$/, "")).digest("hex");
+}
+
+/** `linesHash` of lines `start`–`end` (1-based) of a file's text; null when the file is shorter. */
+export function fileLinesHash(fileText: string, start: number, end: number): string | null {
+  const lines = fileText.replace(/\r\n?/g, "\n").split("\n");
+  if (end > lines.length || start < 1 || end < start) return null;
+  return linesHash(lines.slice(start - 1, end).join("\n"));
+}
+
+/**
+ * "Written for 9b07e4d; these lines have changed since." when what the
+ * question was about is no longer what it was: the lines asked about (their
+ * text then and now), the whole file for a question about a file, else the
+ * change's head. `current` gives the same things now (`undefined`: not known;
+ * `null`: gone). The base side never moves.
+ */
+export function staleNote(record: AnswerRecord, current: { fileHash?: string | null; codeHash?: string | null; headSha?: string | null }): string | null {
   const sha = record.headSha?.slice(0, 7);
-  if (record.about.fileHash && current.fileHash !== undefined && current.fileHash !== record.about.fileHash) {
-    return `Written for ${sha ?? "an earlier version"}; the file has changed since.`;
+  const about = record.about;
+  if (about.codeHash) {
+    if (current.codeHash !== undefined && current.codeHash !== about.codeHash) return `Written for ${sha ?? "an earlier version"}; these lines have changed since.`;
+    return null;
   }
-  if (!record.about.fileHash && record.headSha && current.headSha && current.headSha !== record.headSha) {
-    return `Written for ${sha}; the change has moved since.`;
+  // A base-side question of an older record carried the head's hash: it says nothing about the old lines.
+  if (about.fileHash && about.side !== "base") {
+    if (current.fileHash !== undefined && current.fileHash !== about.fileHash) return `Written for ${sha ?? "an earlier version"}; the file has changed since.`;
+    return null;
   }
+  if (about.side === "base") return null;
+  if (record.headSha && current.headSha && current.headSha !== record.headSha) return `Written for ${sha}; the change has moved since.`;
   return null;
 }

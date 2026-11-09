@@ -9,7 +9,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactMessageCount, artifactOfFile, artifactsNewestFirst, threadArtifacts } from './artifacts';
+import { artifactKey, artifactOfFile, artifactsNewestFirst, threadArtifacts } from './artifacts';
 import { attachmentSequence, stepIndexOf, stepsOf } from './stepping';
 import { artifactChanged, artifactDetail, artifactLabel } from './components/ArtifactsView';
 
@@ -73,7 +73,6 @@ test('every kind counts: attachments of every kind, images in the text, the pers
   expect(mine.fromPerson).toBe(true);
   expect(mine.host).toBeNull();
   expect(ARTIFACTS[0]!.host).toBe('claude-code');
-  expect(artifactMessageCount(ARTIFACTS)).toBe(4);
 });
 
 test('an image shown in the text and attached to the same message is one artifact, opened by either record', () => {

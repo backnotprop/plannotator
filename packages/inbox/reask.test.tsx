@@ -7,7 +7,7 @@
  * and the ended-session choice ("Who should ask again?").
  *
  * The pure rules (reask.ts) run everywhere; the window's parts are
- * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -209,6 +209,18 @@ describe('the rules (reask.ts)', () => {
     const answered = agent(M5, `${block('Backfill ledger first?')}\n\n${block('Keep the old webhook?')}`, '2026-10-20T10:55:00.000Z', A, { reply_to: NOTE });
     const old = msgs.map((m) => ({ ...m, questions: m.questions!.map((q) => ({ ...q, state: 'superseded' as const })) }));
     expect(reaskTargets([...old, note(openIds(msgs)), answered])).toEqual([]);
+  });
+
+  test('right after the answer only: once the session writes again (no questions), its open questions can be asked again', () => {
+    const msgs = base();
+    const old = msgs.map((m) => ({ ...m, questions: m.questions!.map((q) => ({ ...q, state: 'superseded' as const })) }));
+    const answered = agent(M5, `${block('Backfill ledger first?')}\n\n${block('Keep the old webhook?')}`, '2026-10-20T10:55:00.000Z', A, { reply_to: NOTE });
+    expect(reaskTargets([...old, note(openIds(msgs)), answered])).toEqual([]);
+    const later = agent('msg_01M5DA00000000000000000006', 'Migrated the first table.', '2026-10-20T11:30:00.000Z');
+    const thread = [...old, note(openIds(msgs)), answered, later];
+    const targets = reaskTargets(thread);
+    expect(targets.map((t) => [t.kind, t.session, t.message.id, t.open])).toEqual([['reask', 'ses_a', M5, 2]]);
+    expect(reaskOffered(targets, thread)).toBe(true);
   });
 
   test('rule 2a: a note stops hiding its session once nothing it lists is open, even if that session never wrote', () => {

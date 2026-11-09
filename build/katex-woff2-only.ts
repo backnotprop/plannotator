@@ -36,5 +36,13 @@ export function katexWoff2Only(): Plugin {
       const next = stripKatexFontFallbacks(code);
       return next === code ? null : { code: next, map: null };
     },
+    // A build that keeps assets as files (the packed hook and review builds)
+    // has already emitted the fallbacks by the time the CSS loses its last
+    // reference to them, so drop the now unreferenced files too.
+    generateBundle(_options, bundle) {
+      for (const name of Object.keys(bundle)) {
+        if (/(^|\/)KaTeX_[^/]*\.(?:woff|ttf)$/.test(name)) delete bundle[name];
+      }
+    },
   };
 }

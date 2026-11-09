@@ -4,6 +4,9 @@ import type {
   SemanticDiffBinaryChange,
   SemanticDiffChange,
 } from '@plannotator/shared/semantic-diff-types';
+import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
+import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
+import type { ReviewFileSource, ReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
 
 // `renamed`/`moved` are handled by the early return in getChangeSymbol, so they
 // intentionally have no entry here.
@@ -101,35 +104,89 @@ export function groupSemanticChangesByFile(
   return groups;
 }
 
+/**
+ * One entity row. With a `loadSource`, resting the pointer on (or focusing)
+ * the row opens the entity's source: its line range on the side it lives on
+ * (the old file for a deletion), through the shared code hover preview.
+ */
+function SemanticDiffChangeRow({
+  change,
+  onOpenChange,
+  loadSource,
+}: {
+  change: SemanticDiffChange;
+  onOpenChange: (change: SemanticDiffChange) => void;
+  loadSource?: ReviewFileSourceLoader;
+}) {
+  const range = lineSelectionForChange(change);
+  const sourcePath = change.changeType === 'deleted' ? change.oldFilePath ?? change.filePath : change.filePath;
+  const sourcePreview = useHoverPreview<ReviewFileSource>(
+    () => (loadSource && range ? loadSource(sourcePath, range.side === 'deletions' ? 'old' : 'new') : Promise.resolve(null)),
+    Boolean(loadSource && range),
+  );
+  return (
+    <>
+      <button
+        type="button"
+        className="semantic-diff-row"
+        ref={(element) => { sourcePreview.anchorRef.current = element; }}
+        onMouseEnter={sourcePreview.onEnter}
+        onMouseLeave={sourcePreview.onLeave}
+        onFocus={sourcePreview.onEnter}
+        onBlur={sourcePreview.onLeave}
+        onClick={() => {
+          sourcePreview.dismiss();
+          onOpenChange(change);
+        }}
+        title={`${change.filePath}${change.startLine ? `:${change.startLine}` : ''}`}
+      >
+        <span className={`semantic-diff-symbol semantic-diff-symbol-${getChangeClass(change.changeType)}`}>
+          {getChangeSymbol(change.changeType)}
+        </span>
+        <span className="semantic-diff-kind">{change.entityType}</span>
+        <span className="semantic-diff-name">{getDisplayName(change)}</span>
+        <span className="semantic-diff-status">{change.changeType}</span>
+      </button>
+      {sourcePreview.preview && range && (
+        <CodeSnippetPreview
+          anchorEl={sourcePreview.anchorRef.current}
+          contents={sourcePreview.preview.contents}
+          filepath={sourcePreview.preview.filepath}
+          title={sourcePreview.preview.filepath}
+          line={range.start}
+          lineEnd={range.end > range.start ? range.end : undefined}
+          onDismiss={sourcePreview.dismiss}
+          {...sourcePreview.previewHandlers}
+        />
+      )}
+    </>
+  );
+}
+
 /** The terminal-style entity rows, shared by the semantic panel and the file-header popover. */
 export function SemanticDiffRows({
   changes,
   binaryChanges,
   onOpenChange,
   onOpenBinary,
+  loadSource,
 }: {
   changes: SemanticDiffChange[];
   binaryChanges: SemanticDiffBinaryChange[];
   onOpenChange: (change: SemanticDiffChange) => void;
   onOpenBinary: (change: SemanticDiffBinaryChange) => void;
+  /** Loads an entity's source for its hover preview; absent, rows have no preview (the file-header popover). */
+  loadSource?: ReviewFileSourceLoader;
 }) {
   return (
     <>
       {changes.map((change, index) => (
-        <button
-          type="button"
-          className="semantic-diff-row"
+        <SemanticDiffChangeRow
           key={change.entityId ?? `${change.filePath}:${change.entityType}:${change.entityName}:${index}`}
-          onClick={() => onOpenChange(change)}
-          title={`${change.filePath}${change.startLine ? `:${change.startLine}` : ''}`}
-        >
-          <span className={`semantic-diff-symbol semantic-diff-symbol-${getChangeClass(change.changeType)}`}>
-            {getChangeSymbol(change.changeType)}
-          </span>
-          <span className="semantic-diff-kind">{change.entityType}</span>
-          <span className="semantic-diff-name">{getDisplayName(change)}</span>
-          <span className="semantic-diff-status">{change.changeType}</span>
-        </button>
+          change={change}
+          onOpenChange={onOpenChange}
+          loadSource={loadSource}
+        />
       ))}
       {binaryChanges.map((change, index) => {
         const status = getBinaryStatus(change);

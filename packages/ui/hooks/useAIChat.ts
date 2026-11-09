@@ -30,6 +30,9 @@ export interface AIChatThread {
 
 export interface AskAIParams {
   prompt: string;
+  /** What the chat shows as the question when it differs from `prompt`, which
+   *  is what the agent gets (e.g. a short "Explain this finding: …"). */
+  displayPrompt?: string;
   filePath?: string;
   lineStart?: number;
   lineEnd?: number;
@@ -381,7 +384,7 @@ export function useAIChat({
     paramsByQuestionRef.current.set(questionId, params);
     const question: AIQuestion = {
       id: questionId,
-      prompt: params.prompt,
+      prompt: params.displayPrompt ?? params.prompt,
       scope: params.scope,
       filePath: params.filePath,
       lineStart: params.lineStart,

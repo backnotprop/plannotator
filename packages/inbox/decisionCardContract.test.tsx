@@ -12,7 +12,7 @@
  * cancelling, a one-way or picture question swipes, or Stakes /
  * Why / Shows stop showing.
  *
- * DOM-gated (DOM_TESTS=1, happy-dom), from the test.yml DOM list.
+ * DOM-gated (DOM_TESTS=1, happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -157,6 +157,38 @@ function press(el: Element) {
   });
 }
 
+describe.skipIf(!hasDom)('decision mode: refs link into the thread repo', () => {
+  const REFS = question({
+    key: 'q-refs',
+    prompt: 'Ship team/app#12 before #3?',
+    stakes: 'acme/web#9 waits on it.',
+    choices: [
+      { label: 'Yes, ship team/app#12', description: 'Then close #3', recommended: false, settled: false },
+      { label: 'No', description: null, recommended: false, settled: false },
+    ],
+  });
+  const withRepo = (repo: { display: string; host: string | null } | null): InboxDecision => {
+    const d = decision(REFS);
+    return { ...d, thread: { ...d.thread, project: { ...d.thread.project, repo } } };
+  };
+  const hrefs = () => $$<HTMLAnchorElement>('a[href]').map((a) => a.getAttribute('href'));
+
+  test('a GitLab project links refs on its own host, never on github.com', () => {
+    render(withRepo({ display: 'group/web', host: 'gitlab.example.com' }));
+    const links = hrefs();
+    expect(links).toContain('https://gitlab.example.com/team/app/-/issues/12');
+    expect(links).toContain('https://gitlab.example.com/group/web/-/issues/3');
+    expect(links).toContain('https://gitlab.example.com/acme/web/-/issues/9');
+    expect(links.some((h) => h?.includes('github.com'))).toBe(false);
+  });
+
+  test('without the thread repo, refs stay plain text', () => {
+    render(withRepo(null));
+    expect(hrefs().filter((h) => h?.includes('/issues/'))).toEqual([]);
+    expect($('[data-decision-prompt]')!.textContent).toBe('Ship team/app#12 before #3?');
+  });
+});
+
 describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
   test('Stakes under the prompt, Why under the answers, the tiles as the thread card draws them', () => {
     render(decision(DRAWERS, DRAWER_PICTURES));
@@ -185,7 +217,8 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     const seen = render(decision(DRAWERS, DRAWER_PICTURES));
     press($$('[data-question-zoom]')[2]!);
     expect(seen.answers).toHaveLength(0);
-    expect(seen.images).toEqual([{ names: ['Drawer A', 'Drawer B', 'Drawer C'], index: 2 }]);
+    // The viewer names each picture by its choice (letter and label), not the picture's alt text.
+    expect(seen.images).toEqual([{ names: ['A · Total on top', 'B · Total pinned with Pay', 'C · Three steps'], index: 2 }]);
     press($$('[data-question-picture]')[1]!);
     expect(seen.images).toHaveLength(1);
     expect(seen.answers.map((a) => a.selected)).toEqual([['B · Total pinned with Pay']]);

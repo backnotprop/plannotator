@@ -11,13 +11,12 @@ import {
   exportEditorAnnotations,
   exportLinkedDocAnnotations,
   exportMessageAnnotations,
-  parseMarkdownToBlocks,
   type LinkedDocAnnotationEntry,
   type LinkedDocExportHeading,
   type MessageAnnotationEntry,
 } from "@plannotator/ui/utils/parser";
-import { shouldStripFrontmatter } from "@plannotator/shared/annotatable";
 import { composeFeedbackWithEditSections } from "./directEdits";
+import { blocksForDocument } from "./feedbackDocuments";
 
 export interface AnnotateApprovalBodyInput {
   supported: boolean;
@@ -141,12 +140,7 @@ export function buildCompleteAnnotateFeedback(
           // Blocks the caller already derived (resolveFeedbackSections, which
           // is also diagram-aware) are kept as they are.
           enriched.set(filepath, entry.markdown && !entry.blocks
-            ? {
-                ...entry,
-                blocks: parseMarkdownToBlocks(entry.markdown, {
-                  frontmatter: shouldStripFrontmatter(filepath),
-                }),
-              }
+            ? { ...entry, blocks: blocksForDocument(filepath, entry.markdown) }
             : entry);
         }
         annotationsText += exportLinkedDocAnnotations(enriched, input.linkedDocumentsHeading);

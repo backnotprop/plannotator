@@ -15,6 +15,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -22,7 +23,7 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactMessageCount, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
+import { artifactKey, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
 import { readableVersion } from '../attachments';
 import { attachmentFramePolicy } from '../framePolicy';
 import { prependSrcdocPolicy } from '@plannotator/ui/components/html-viewer';
@@ -32,8 +33,12 @@ import { HostMark, Icon, type IconName } from '../icons';
 import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { opensInWindow, sizeLine } from './AttachmentTiles';
 import { FileName } from './FileName';
+import { ReuseButton } from '../reuse';
 import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
+import { gridStep, isGridKey, type GridKey } from '../gridMove';
+import { inboxArtifactsShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 
 /** The words under a tile's name: "PNG image, 1280 × 800, 38.4 KB", "Code (.sql), 331 B", "WebM video · 0:03 · 48.2 KB". */
 export function artifactDetail(artifact: Artifact): string {
@@ -114,8 +119,9 @@ function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
     const load = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) setNear(true);
     }, { rootMargin: LOAD_MARGIN });
+    // Hidden (the grid under the view's Links side) is not far away: a tile keeps its preview for the way back.
     const unload = new IntersectionObserver((entries) => {
-      if (entries.every((e) => !e.isIntersecting)) setNear(false);
+      if (entries.every((e) => !e.isIntersecting && (e.boundingClientRect.width > 0 || e.boundingClientRect.height > 0))) setNear(false);
     }, { rootMargin: UNLOAD_MARGIN });
     load.observe(el);
     unload.observe(el);
@@ -418,8 +424,9 @@ function Tile({
   }
   return (
     <li className="ib-art-cell" ref={ref}>
-      <div className="ib-art-w">
+      <div className={`ib-art-w${openIn === 'apps' ? ' ib-art-w-more' : ''}`}>
         {tile}
+        {artifact.type === 'file' && <ReuseButton file={artifact.attachment} surface="card" />}
         {/* The tile's ⋯ "Open in" is its sibling (a button in a button is invalid): the next tab stop after the tile. */}
         {artifact.type === 'file' && openIn === 'apps' && (
           <OpenInTileMenu
@@ -444,16 +451,14 @@ export interface ArtifactsViewProps {
   onOpenGuide: (artifact: GuideArtifact) => void;
   /** A tile's ⋯ "Open side by side" / "Open full screen" (absent on a phone or a stacked window). */
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
-  /** "Back to the thread" (desktop; a phone's header has its own Back). */
-  onBack?: () => void;
   openIn?: OpenInSurface;
-  /** A phone: the header names the view, so the heading here is for a screen reader only. */
+  /** A phone: a tile has no "Open in". */
   phone?: boolean;
 }
 
 /** The grid itself, with its heading ("Artifacts") as the region's name and the focus target when it opens. */
 export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(function ArtifactsView(
-  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, onBack, openIn, phone = false },
+  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, openIn, phone = false },
   headingRef,
 ) {
   const ordered = artifacts ? artifactsNewestFirst(artifacts) : [];
@@ -464,25 +469,36 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
     if (openId === null) return;
     section.current?.querySelector<HTMLElement>('.ib-art-current')?.scrollIntoView?.({ block: 'nearest' });
   }, [openId, count]);
+  // Arrow keys between the tiles (approval "inbox-keyboard-keys-2026-11-07", item 1; gridMove.ts), while a tile has
+  // focus: ← → the tile before or after, ↑ ↓ the one above or below, Home End the first or last. Enter opens. From the
+  // heading (where Shift+O lands), ↓ → Home go into the grid at its first tile and End at its last.
+  const HEADING_ID = 'ib-art-h';
+  const fromHeading = (event: KeyboardEvent) => event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End';
+  const tileKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      if (!target || !section.current?.contains(target)) return false;
+      if (target.id === HEADING_ID) return fromHeading(event) && !!section.current.querySelector('[data-artifact-tile]');
+      return target.matches('[data-artifact-tile]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const tiles = [...(section.current?.querySelectorAll<HTMLElement>('[data-artifact-tile]') ?? [])];
+      const target = keyTarget(event);
+      const from = tiles.indexOf(target as HTMLElement);
+      const to = target?.id === HEADING_ID ? (event.key === 'End' ? tiles.length - 1 : 0) : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+      const next = to === null ? null : tiles[to];
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxArtifactsShortcuts, handlers: { move: tileKey, ends: tileKey } });
   return (
     <section ref={section} className="ib-art" aria-labelledby="ib-art-h" data-artifacts-view="">
-      <div className="ib-art-top">
-        {onBack && (
-          <button type="button" className="ib-art-back" onClick={onBack} data-artifacts-back="">
-            <Icon name="chevL" size={15} />
-            <span>Back to the thread</span>
-          </button>
-        )}
-        <h2 id="ib-art-h" ref={headingRef} className={phone ? 'ib-sr' : 'ib-art-h'} tabIndex={-1}>
-          Artifacts
-        </h2>
-        {artifacts !== null && count > 0 && (
-          <span className="ib-art-sum" data-artifacts-summary="">
-            {count === 1 ? '1 artifact' : `${formatCount(count)} from ${plural(artifactMessageCount(ordered), 'message')}`}
-            {count > 1 ? ' · newest first' : ''}
-          </span>
-        )}
-      </div>
+      {/* For a screen reader and for focus: the view's switch is what the eye reads. */}
+      <h2 id="ib-art-h" ref={headingRef} className="ib-sr" tabIndex={-1}>
+        Artifacts
+      </h2>
       {artifacts === null ? (
         <p className="ib-art-load" aria-busy="true">
           Loading the artifacts…

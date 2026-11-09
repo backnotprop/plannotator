@@ -6,12 +6,18 @@
  * not change what that process serves.
  *
  * usage: node scripts/smoke-pages.mjs --binary <cli> --replacement <other file>
- *          --digests <sha256 list from the build job> [--bun <bun>] [--port-base <n>]
+ *          --digests <scripts/page-digests.ts output from the build job>
+ *          [--bun <bun>] [--port-base <n>]
  *
- * 1. review and annotate answer `/` with the built review.html / index.html,
- *    byte for byte, and only `Content-Type: text/html` (a local session);
- *    in remote mode a gzip answer decompresses to the same bytes. Review's
- *    diagram engine files are served as built.
+ * 1. review and annotate answer `/` with the built review.html / index.html
+ *    page, byte for byte, and only `Content-Type: text/html` (a local
+ *    session); in remote mode a gzip answer decompresses to the same bytes.
+ *    The Shapes server (`shape serve`, Shape turned on in the sandbox) answers
+ *    `/` with the built shape.html: gzip as embedded to a browser that takes
+ *    it, unzipped to one that does not.
+ *    The chunks and stylesheet the page loads up front (packed behind it,
+ *    build/pack-app.ts) are served as built, `nosniff`. Review's diagram
+ *    engine files are served as built.
  * 2. annotate runs from a copy of the binary in an install dir; that copy is
  *    then replaced the way the installer does it on this OS (POSIX: stage
  *    next to it, rename over it; Windows: move the running exe aside to
@@ -50,7 +56,7 @@ for (const line of readFileSync(digestsFile, "utf8").split("\n")) {
   const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
   if (m) digests.set(basename(m[2]), m[1]);
 }
-for (const name of ["index.html", "review.html"]) {
+for (const name of ["index.html", "review.html", "shape.html"]) {
   if (!digests.has(name)) throw new Error(`no digest for ${name} in ${digestsFile}`);
 }
 
@@ -133,10 +139,10 @@ function replaceLikeInstaller(target, source) {
   if (sha256(readFileSync(target)) !== sha256(readFileSync(source))) throw new Error("the replacement did not land");
 }
 
-function checkPage(label, res, digest, encoding) {
+function checkPage(label, res, digest, encoding, contentType = "text/html") {
   if (res.status !== 200) return fail(`${label}: status ${res.status}`);
   const type = res.headers["content-type"];
-  if (type !== "text/html") fail(`${label}: Content-Type ${type}`);
+  if (type !== contentType) fail(`${label}: Content-Type ${type}`);
   let body = res.body;
   if (encoding === "identity") {
     if (res.headers["content-encoding"]) fail(`${label}: unexpected Content-Encoding ${res.headers["content-encoding"]}`);
@@ -148,6 +154,29 @@ function checkPage(label, res, digest, encoding) {
   }
   if (sha256(body) !== digest) return fail(`${label}: body (${body.length} bytes) is not the built page`);
   ok(`${label}: the built page, ${body.length} bytes, ${encoding}`);
+  return body.toString("utf8");
+}
+
+/** The files a served page loads up front (its entry chunk, its stylesheet): each as built. */
+async function checkPageAssets(label, p, page, headers, encoding) {
+  if (typeof page !== "string") return;
+  const paths = [...page.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+  if (paths.length === 0) return fail(`${label}: the page loads no /assets/ file`);
+  for (const path of paths) {
+    const res = await get(p, path, headers);
+    const name = basename(path);
+    if (res.status !== 200) {
+      fail(`${label} ${path}: status ${res.status}`);
+      continue;
+    }
+    if (res.headers["x-content-type-options"] !== "nosniff") fail(`${label} ${path}: no nosniff`);
+    const coding = res.headers["content-encoding"];
+    if (coding && coding !== encoding) fail(`${label} ${path}: Content-Encoding ${coding}, expected ${encoding}`);
+    const body = coding === "gzip" ? gunzipSync(res.body) : res.body;
+    if (!digests.has(name)) fail(`${label} ${path}: no digest for ${name}`);
+    else if (sha256(body) !== digests.get(name)) fail(`${label} ${path}: not the built ${name}`);
+    else ok(`${label} ${path}: as built, ${body.length} bytes`);
+  }
 }
 
 function scratchRepo() {
@@ -173,7 +202,8 @@ async function servedPages(repo) {
     const child = start(binary, ["review"], { PLANNOTATOR_PORT: String(p) }, repo);
     try {
       const diff = await waitFor(p, "/api/diff", child);
-      checkPage("review /", await get(p, "/"), digests.get("review.html"), "identity");
+      const page = checkPage("review /", await get(p, "/"), digests.get("review.html"), "identity");
+      await checkPageAssets("review", p, page, {}, "identity");
       checkPage("review / again", await get(p, "/"), digests.get("review.html"), "identity");
       const engine = JSON.parse(diff.body.toString("utf8")).diagramEngine;
       if (engine && typeof engine === "object") {
@@ -201,12 +231,36 @@ async function servedPages(repo) {
     const child = start(binary, ["annotate", "doc.md"], { PLANNOTATOR_PORT: String(p), ...extra }, repo);
     try {
       await waitFor(p, "/api/plan", child);
-      checkPage(label, await get(p, "/", headers), digests.get("index.html"), encoding);
+      const page = checkPage(label, await get(p, "/", headers), digests.get("index.html"), encoding);
+      await checkPageAssets(label, p, page, headers, encoding);
     } catch (e) {
       fail(`${label}: ${e.message}\n${child.log()}`);
     } finally {
       stop(child);
     }
+  }
+}
+
+async function shapePage(repo) {
+  // Shape is off by default: turn it on in the sandbox, and give the server its port the way a stopped one keeps it.
+  const p = port++;
+  const shapes = join(env.PLANNOTATOR_DATA_DIR, "shapes");
+  mkdirSync(shapes, { recursive: true });
+  writeFileSync(join(env.PLANNOTATOR_DATA_DIR, "config.json"), JSON.stringify({ inboxShape: true }));
+  writeFileSync(join(shapes, "server.json"), JSON.stringify({ v: 1, pid: 0, port: p, url: `http://127.0.0.1:${p}`, version: "smoke", started: "" }));
+  const child = start(binary, ["shape", "serve"], {}, repo);
+  try {
+    await waitFor(p, "/api/shape-server", child);
+    for (const [label, headers, encoding] of [
+      ["shape /", {}, "identity"],
+      ["shape / (gzip)", { "Accept-Encoding": "gzip, deflate, br" }, "gzip"],
+    ]) {
+      checkPage(label, await get(p, "/", headers), digests.get("shape.html"), encoding, "text/html; charset=utf-8");
+    }
+  } catch (e) {
+    fail(`shape: ${e.message}\n${child.log()}`);
+  } finally {
+    stop(child);
   }
 }
 
@@ -222,7 +276,9 @@ async function pagesAfterReplacement(repo) {
     await waitFor(p, "/api/plan", child);
     replaceLikeInstaller(installed, replacement);
     ok(`the running binary was replaced the way ${isWindows ? "install.ps1 and install.cmd do" : "install.sh does"}`);
-    checkPage("annotate / first fetched after the replacement", await get(p, "/"), digests.get("index.html"), "identity");
+    const label = "annotate / first fetched after the replacement";
+    const page = checkPage(label, await get(p, "/"), digests.get("index.html"), "identity");
+    await checkPageAssets(label, p, page, {}, "identity");
     const plan = await get(p, "/api/plan");
     if (plan.status !== 200) fail(`/api/plan after the replacement: ${plan.status}`);
     else ok("annotate /api/plan still answers after the replacement");
@@ -288,6 +344,7 @@ async function probeFirstReadAfterReplacement() {
 
 const repo = scratchRepo();
 await servedPages(repo);
+await shapePage(repo);
 await pagesAfterReplacement(repo);
 if (bun) await probeFirstReadAfterReplacement();
 else console.log("SKIP: no --bun, the embedded-file probe did not run");

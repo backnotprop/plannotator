@@ -11,8 +11,8 @@
  * seen); typing pauses it and pins the moment; Comment keeps the paused
  * frame (a real JPEG in the Inbox's markups) and lists the comment with its
  * time; a dot on the rail and the panel's time pill seek back to it; Send
- * carries "At 0:02 (…)" and the frame's path, read back by wait_for_reply;
- * and the pane on a phone (the comments under the rail, "Comment at").
+ * carries "At 0:02 (…)" and the frame's path, read back by read_thread;
+ * and the pane on a phone (the comments under the rail, the row in full screen's composer).
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-video.spec.ts`.
@@ -237,11 +237,13 @@ test('Mark up draws on the paused frame; the marked-up copy rides the comment, l
   await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.6, { steps: 8 });
   await page.mouse.up();
   await shot('6-mark-up-the-frame');
+  // Enter adds the marked-up frame to the reply at once, at the pinned moment; the words after it are its note.
   await page.keyboard.press('Enter');
-  await expect(pane.locator('[data-video-frame] .ib-vpen')).toBeVisible();
+  await expect(pane.locator('[data-video-composer] [data-markup-kept] img')).toBeVisible();
   await expect(pane.locator('[data-video-composer] [data-video-time]')).toHaveText('0:03');
-  await pane.getByRole('textbox', { name: /^Comment on launch-cut-v3\.webm at / }).fill('The counter jumps here; hold the colour change.');
-  await pane.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(pane.locator('.ib-apanel [data-video-card-time]')).toHaveText(['0:02', '0:03']);
+  await pane.getByRole('textbox', { name: 'A note with your drawing at 0:03' }).fill('The counter jumps here; hold the colour change.');
+  await pane.getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane.locator('.ib-apanel [data-video-card-time]')).toHaveText(['0:02', '0:03']);
   await expect(pane.locator('[data-video-dot]')).toHaveCount(2);
   await shot('7-two-comments-by-time');
@@ -250,13 +252,11 @@ test('Mark up draws on the paused frame; the marked-up copy rides the comment, l
 test('Send carries the moment and the frame; the agent reads both', async () => {
   const page = world.page;
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('One note on the cut.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = (reply.reply as { body: string }).body;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('## film/launch-cut-v3.webm');
   expect(body).toMatch(/Feedback on: "launch-cut-v3\.webm at 0:02"\nAt 0:02 \(2\.2 s\)\n> The title holds too long here/);
   const frame = /- \[launch-cut-v3 at 0:02\] `([^`]+)`/.exec(body);
@@ -272,7 +272,7 @@ test('Send carries the moment and the frame; the agent reads both', async () => 
   expect(world.errors).toEqual([]);
 });
 
-test('on a phone: the film on top, the comments under the rail, and "Comment at" opens the row', async ({ browser }) => {
+test('on a phone: the film on top, the comments under the rail, and the comment row in full screen\'s composer', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await context.newPage();
   try {
@@ -284,9 +284,32 @@ test('on a phone: the film on top, the comments under the rail, and "Comment at"
     await videoReady(page);
     await expect(pane.locator('[data-video-meta]')).toContainText('0 comments');
     await shot('8-phone-player', page);
-    await pane.locator('[data-video-compose]').click();
-    await expect(pane.locator('[data-video-composer] textarea')).toBeFocused();
+    // Full screen's composer (approval "inbox-fullscreen-composer") holds the row in its Comment tab: no "Comment at" step.
+    await expect(pane.locator('[data-video-compose]')).toHaveCount(0);
+    await expect(pane.locator('[data-fcomp] [role="radio"][data-fcomp-mode="comment"]')).toHaveAttribute('aria-checked', 'true');
+    // What "Comment at" did, kept: a tap in the comment field pauses the film and pins the moment it was at.
+    await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.play());
+    await page.waitForTimeout(300);
+    await seekTo(page, 2.2);
+    const field = pane.locator('[data-fcomp] [data-video-composer] textarea');
+    await field.tap();
+    await expect(field).toBeFocused();
+    const chip = pane.locator('[data-fcomp] [data-video-composer] [data-video-time]');
+    await expect(chip).toHaveAttribute('data-pinned', '');
+    await expect(chip).toHaveText('0:02');
+    expect(await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.paused)).toBe(true);
+    // And what its Cancel did: clearing the words lets go of the moment, so another can be picked.
+    await field.fill('The counter jumps here.');
+    await field.fill('');
+    await expect(chip).not.toHaveAttribute('data-pinned', '');
+    await seekTo(page, 3.4);
+    await field.fill('The counter jumps here.');
+    await expect(chip).toHaveAttribute('data-pinned', '');
+    await expect(chip).toHaveText('0:03');
     await shot('9-phone-compose', page);
+    await pane.locator('[data-fcomp] [data-video-comment-save]').tap();
+    await expect(pane.locator('[data-video-meta]')).toContainText('1 comment');
+    await expect(pane.locator('.ib-apanel [data-video-card-time]').first()).toHaveText('0:03');
   } finally {
     await context.close();
   }

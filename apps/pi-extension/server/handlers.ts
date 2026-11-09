@@ -17,6 +17,8 @@ import { listReferenceSkills, readReferenceSkillContent } from "../generated/rev
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
 import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
+import { starAskRoute, starAskService, type StarAskSurface } from "../generated/star-ask.ts";
+import { piPingVersion } from "./daily-ping.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import { isSameOriginRequest } from "./request-origin-guard.ts";
 import {
@@ -24,9 +26,11 @@ import {
 	type IntegrationResult,
 	type ObsidianConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
+	saveToNotion,
 } from "./integrations.ts";
 
 type Res = import("node:http").ServerResponse;
@@ -206,8 +210,8 @@ export function handleDraftRequest(
 }
 
 /**
- * Code-review /api/draft (#1590). Mirrors the Bun review route: outside PR
- * mode the keys carry only the patch hash and every call degrades to the
+ * Code-review /api/draft (#1590). Mirrors the Bun review route: unsupported
+ * surfaces carry only the patch hash and every call degrades to the
  * plain draft functions, byte-identical to handleDraftRequest.
  */
 export function handleReviewDraftRequest(
@@ -216,12 +220,13 @@ export function handleReviewDraftRequest(
 	keys: ReviewDraftKeys,
 	drafts: ReturnType<typeof createReviewDraftSession>,
 ): Promise<void> | void {
+	const clientId = new URL(req.url ?? "/", "http://localhost").searchParams.get("client");
 	if (req.method === "POST") {
 		return parseBody(req)
 			.then((body) => {
-				const saved = drafts.save(keys, body);
-				// PR mode reports a rejected (stale-generation) save; local
-				// reviews keep the historical always-ok response.
+				const saved = drafts.save(keys, body, clientId);
+				// Target-backed drafts report stale saves; unsupported surfaces
+				// retain the historical always-ok response.
 				if (!saved && keys.targetKey) {
 					json(res, { ok: false, error: "stale draft generation", ...drafts.state(keys) }, 409);
 					return;
@@ -234,10 +239,10 @@ export function handleReviewDraftRequest(
 				json(res, { error: message }, 500);
 			});
 	} else if (req.method === "DELETE") {
-		drafts.remove(keys, readDraftGenerationFromUrl(req));
+		drafts.remove(keys, readDraftGenerationFromUrl(req), clientId);
 		json(res, { ok: true });
 	} else {
-		const loaded = drafts.load(keys);
+		const loaded = drafts.load(keys, clientId);
 		if (loaded.found) {
 			json(res, loaded.draft);
 			return;
@@ -326,7 +331,7 @@ export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
 }
 
 /**
- * Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers.
+ * Save to external note apps (Obsidian, Bear, Octarine, Notion). Used by plan + annotate servers.
  * Mirrors packages/server/shared-handlers.ts handleSaveNotes: another site's
  * page is refused (403) and a stale tab's `serverSession` (409) before
  * anything is written or opened.
@@ -334,7 +339,7 @@ export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
 export async function handleSaveNotesRequest(
 	req: IncomingMessage,
 	res: Res,
-	options: { serverSession?: string } = {},
+	options: { serverSession?: string; notion?: boolean } = {},
 ): Promise<void> {
 	if (!isSameOriginRequest(req)) {
 		json(res, crossOriginRefusalBody(), 403);
@@ -344,6 +349,7 @@ export async function handleSaveNotesRequest(
 		obsidian?: IntegrationResult;
 		bear?: IntegrationResult;
 		octarine?: IntegrationResult;
+		notion?: IntegrationResult;
 	} = {};
 	try {
 		const body = await parseBody(req);
@@ -355,6 +361,7 @@ export async function handleSaveNotesRequest(
 		const obsConfig = body.obsidian as ObsidianConfig | undefined;
 		const bearConfig = body.bear as BearConfig | undefined;
 		const octConfig = body.octarine as OctarineConfig | undefined;
+		const notionConfig = body.notion as NotionConfig | undefined;
 		if (obsConfig?.vaultPath && obsConfig?.plan) {
 			promises.push(
 				saveToObsidian(obsConfig).then((r) => {
@@ -376,6 +383,13 @@ export async function handleSaveNotesRequest(
 				}),
 			);
 		}
+		if (options.notion && notionConfig?.plan && notionConfig?.parentPageId) {
+			promises.push(
+				saveToNotion(notionConfig).then((r) => {
+					results.notion = r;
+				}),
+			);
+		}
 		await Promise.allSettled(promises);
 		for (const [name, result] of Object.entries(results)) {
 			if (!result?.success && result)
@@ -387,4 +401,25 @@ export async function handleSaveNotesRequest(
 		return;
 	}
 	json(res, { ok: true, results });
+}
+
+/**
+ * The "Star the repo" ask on the done screen (generated/star-ask.ts, the Bun servers' `handleStarAsk`):
+ * `POST /api/star-ask/claim`, `/shown` and `/answer`. False for any other path. A release is the published package
+ * (release CI's `release.json`, as for the daily ping). In remote mode it never shows: gh there is the server
+ * machine's login, not the person's own.
+ */
+export async function handleStarAskRequest(
+	req: IncomingMessage,
+	res: import("node:http").ServerResponse,
+	url: URL,
+	surface: StarAskSurface,
+	remote: boolean,
+): Promise<boolean> {
+	if (!url.pathname.startsWith("/api/star-ask/")) return false;
+	const body = req.method === "POST" ? await parseBody(req) : undefined;
+	const answered = await starAskRoute(starAskService(() => piPingVersion() !== undefined), surface, req.method ?? "GET", url.pathname, body, { remote });
+	if (!answered) return false;
+	json(res, answered.body, answered.status);
+	return true;
 }

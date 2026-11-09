@@ -11,15 +11,18 @@
   "imports": {
     "#guide-reader": "./guide/GuideReader.tsx",
     "#surface-guide-reader": "./guide/SurfaceGuideReader.tsx",
-    "#search-palette": "./search/SearchPalette.tsx"
+    "#search-palette": "./search/SearchPalette.tsx",
+    "#platform-post": "./guide/PlatformPost.tsx",
+    "#shape-board": "./shape/ShapeBoard.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
+    "@plannotator/system": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "motion": "^12.38.0",
+    "motion": "^14.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "uqr": "^0.1.3"

@@ -12,7 +12,7 @@ Open settings with the **gear icon** in the header. Available tabs depend on the
 
 ## Theme
 
-The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System follows your OS preference and updates automatically. Dark is the default.
+The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System uses your OS preference and updates automatically. Dark is the default.
 
 The **Theme** tab in Settings assigns a palette to each half of a pair: one theme for light mode, one for dark mode. A Light/Dark switch above the grid decides which half you are assigning, and the grid then lists only the palettes that can render it (Kanagawa Wave appears under Dark, Kanagawa Lotus under Light, and a palette that ships both variants appears under each with that mode's colors). The summary line above the grid always names both halves, and clicking either side jumps the grid to it.
 
@@ -62,6 +62,10 @@ Controls whether the browser tab closes automatically after you approve or deny 
 | **Immediately** | Tab closes right away |
 | **After 3 seconds** | Tab closes after a 3-second delay |
 | **After 5 seconds** | Tab closes after a 5-second delay |
+
+### Hide the repository owner
+
+Controls how the repository is named beside the document, in the plan diff, in code review's header and in the tab title. Off by default: `acme/payments-service`. On, the repository's name stands alone: `payments-service`, or the project for a GitLab subgroup path. Hovering the name always shows the full owner and repository. Outside a git remote the label is the folder name, which has no owner, so the setting changes nothing there. The setting is kept in your browser.
 
 ## Display
 
@@ -141,11 +145,11 @@ Code review's **Analysis** tab controls two independent, optional layers:
 - **Semantic changes** identifies changed named code entities. It is enabled by default for compatibility and can be turned off without affecting the ordinary diff.
 - **Call flow** uses CallDiff to compare inferred call trees between the review's two exact Git snapshots. It is experimental and off by default.
 
-The first code-review session shows both choices side by side in a one-time welcome; change them later in **Settings → Analysis**. Call flow's toggle is the install consent and names the current review's language support, estimated total size, and Node.js 22+ requirement.
+The first code-review session shows both choices side by side in a one-time welcome; change them later in **Settings → Analysis**. Call flow's toggle is the install consent and names the current review's language support, estimated total size, and Node.js 22.18+ requirement.
 
-When Call Flow is enabled and supported, **Call flow** appears beside All files in the left panel. Its Dock switches between an interactive **Paths** tree and CallDiff's exact, copyable **Raw** output. The compact **flow** badge in a file header opens every complete inferred entry tree containing a changed call in that file rather than a pruned step list. Both structured surfaces navigate to source locations in the ordinary diff, and all Dock/Lens views share one snapshot-bound analysis result.
+When Call Flow is enabled and supported, **Call flow** appears beside All changes in the left panel. Its Dock switches between an interactive **Paths** tree and CallDiff's exact, copyable **Raw** output. In **Paths**, a summary line counts the new and removed calls, each entry path is a card, and each call's `file:line` chip is strong when the call moves into another file. The compact **flow** badge in a file header opens every complete inferred entry tree containing a changed call in that file rather than a pruned step list. Both structured surfaces navigate to source locations in the ordinary diff, and all Dock/Lens views share one snapshot-bound analysis result.
 
-Call Flow is syntactic: it does not use type resolution, runtime traces, or data-flow analysis. Treat its paths as review and navigation context, not proof that a path executes. The managed runtime requires Node.js 22 or newer and is not installed with Plannotator. First enable detects the changed languages and automatically installs the pruned core (about 5 MB on macOS arm64) plus only their grammar packs in the background. Later missing languages install automatically while installed-language analysis remains available; the skipped-files line reports progress. Each target gets one automatic attempt per review session; an install failure stays quiet and requires an explicit Retry in that session. Open the Dock's **Languages** detail to see cumulative installed size, every supported family, installed state, and estimated per-pack size, or install one ahead of need. Scripted installs can opt into the core with `--with-call-flow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `plannotator install-runtime call-flow`.
+Call Flow is syntactic: it does not use type resolution, runtime traces, or data-flow analysis. Treat its paths as review and navigation context, not proof that a path executes. The managed runtime requires Node.js 22.18 or newer and is not installed with Plannotator. First enable detects the changed languages and automatically installs the pruned core (about 5 MB on macOS arm64) plus only their grammar packs in the background. Later missing languages install automatically while installed-language analysis remains available; the skipped-files line reports progress. Each target gets one automatic attempt per review session; an install failure stays quiet and requires an explicit Retry in that session. Open the Dock's **Languages** detail to see cumulative installed size, every supported family, installed state, and estimated per-pack size, or install one ahead of need. Scripted installs can opt into the core with `--with-call-flow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `plannotator install-runtime call-flow`.
 
 ## Resizable panels
 

@@ -3,8 +3,11 @@
  * §4.2-4.4 and the owner's answers): one sidebar button whose state the
  * server works out from what is on this machine.
  *
- *   available   a newer stable release exists (the shared release check) and
- *               nothing newer is installed yet; not snoozed for that version.
+ *   available   a newer stable release is known (the shared release check, or
+ *               Check now) and nothing newer is installed yet; not snoozed for
+ *               that version. Shown whether or not update checks are on:
+ *               PLANNOTATOR_UPDATE_CHECK=0 stops only the automatic checks,
+ *               never the person's way to a release this machine knows of.
  *   updating    the install script runs (update.lock is held): the person
  *               pressed Update now, ran `plannotator update`, or auto-update
  *               started it.
@@ -15,14 +18,15 @@
  *               sidebar.
  *
  * The Inbox is long-lived and one per machine, so it also runs the release
- * check (never awaited by a request, never in a dev run, never while
- * PLANNOTATOR_UPDATE_CHECK is off): at start and on a page load when the
+ * check (never awaited by a request, never in a dev run, never on its own
+ * while PLANNOTATOR_UPDATE_CHECK is off; Check now always asks): at start and on a page load when the
  * answer is over a minute old, and on its health tick when it is over 10
  * minutes old. It re-reads the cache on that tick, so a check another process
  * made reaches it without a second request.
  */
 
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import type { InboxUpdate } from "@plannotator/core/inbox-types";
 import { statSync } from "node:fs";
 import { loadConfig, parseAutoUpdateEnv, parseUpdateCheckEnv, resolveAutoUpdate, resolveUpdateCheck } from "@plannotator/shared/config";
@@ -50,6 +54,7 @@ import {
   runReleaseCheck,
   UPDATE_SNOOZE_MS,
   type FetchReleaseResult,
+  type InstallFlagId,
   type ReleaseHighlight,
 } from "@plannotator/shared/update-check";
 import {
@@ -62,12 +67,27 @@ import {
   startManualUpdate,
   type InstallerLaunch,
   type ManualUpdateOutcome,
+  UPDATE_PREPARE_FAILED,
 } from "./auto-update";
 import { listSessions as defaultListSessions, type SessionInfo } from "./sessions";
+import { lastRunLog, stagingFailureIn, tlsFailureIn, type UpdateTlsFailure } from "./update-log";
 import { fetchReleaseImagesFor, storedReleaseImageSources } from "./inbox-whats-new-images";
 
 /** While an install runs, the binary is probed this often (the design's 2 s). */
 export const INBOX_UPDATING_TICK_MS = 2_000;
+
+/** The failure dialog's facts; a failed download also says whether it failed at TLS (update.log). */
+export function failureDetails(
+  exitCode: number,
+  log: string,
+  platform: NodeJS.Platform = process.platform,
+): NonNullable<InboxUpdateDetails["failure"]> {
+  const run = exitCode === UPDATE_PREPARE_FAILED ? lastRunLog(log) : "";
+  const prepare = stagingFailureIn(run);
+  if (prepare) return { exit_code: exitCode, log, prepare };
+  const tls = tlsFailureIn(run);
+  return { exit_code: exitCode, log, ...(tls && { tls }), ...(tls === "untrusted" && platform === "darwin" && { release_first: true as const }) };
+}
 
 export type { InboxUpdate };
 export type InboxUpdateState = InboxUpdate["state"];
@@ -107,7 +127,17 @@ export interface InboxUpdateDetails {
   plugin_command: string | null;
   /** Open Plannotator sessions, which keep their old binary. */
   sessions: { mode: SessionInfo["mode"]; project: string; label: string; started_at: string }[];
-  failure: { exit_code: number; log: string } | null;
+  /**
+   * `tls` (additive, exit 75 only): the download failed at TLS, as
+   * update-prepare reported in update.log. `untrusted`: point
+   * NODE_EXTRA_CA_CERTS at the network's root. `revoked`: a blocked key, so
+   * never the install command over this network. `release_first` (additive,
+   * `untrusted` on macOS only): the release page comes before the install
+   * command, since macOS curl still trusts emSign G3. `prepare` (additive,
+   * exit 75 only): the update was downloaded but the temp folder could not
+   * hold it; the plain reason ("the temp folder /tmp is full (ENOSPC)").
+   */
+  failure: { exit_code: number; log: string; tls?: UpdateTlsFailure; release_first?: true; prepare?: string } | null;
   log: string;
   snoozed_until: string | null;
 }
@@ -141,6 +171,8 @@ export interface InboxUpdatesOptions {
   /** The binary to probe for "ready"; null: no probe. */
   binaryPath: string | null;
   healthTickMs: number;
+  /** Called on start and on every tick (the daily ping rides this timer: packages/server/inbox.ts). */
+  onTick?: () => void;
   now?: () => number;
   /** The release check's primary source (the "latest release" redirect). Default: GitHub's. */
   fetchReleasePage?: () => Promise<FetchReleaseResult>;
@@ -158,6 +190,48 @@ export interface InboxUpdatesOptions {
   probeVersion?: (binaryPath: string) => Promise<string | null>;
   /** The button's model changed. */
   onChange: () => void;
+  /** A linked machine's Update is in and its install script has finished: restart onto the binary on disk. */
+  onRestartWanted?: () => void;
+  /** Tests: this user's home, which a path sent to a linked machine never names. */
+  home?: string;
+}
+
+/**
+ * What a linked machine's window reads about this machine's update (the door's `GET update`). Only what its small
+ * dialog says: no log lines, no project names, no username.
+ */
+export interface MachineUpdateAnswer {
+  current: string;
+  update: InboxUpdate | null;
+  platform: NodeJS.Platform;
+  /** Where update.log is, as `~/…` (machinePath). */
+  log: string;
+  /** The install flags it remembers, as neutral ids: the other machine's own table spells its install command. */
+  flags: readonly InstallFlagId[];
+  /** Open reviews, counted: which projects they are in stays here. */
+  open_reviews: number;
+  /** `unchanged`: the install ended without an error and this machine still runs the same version. */
+  failure: { exit_code: number; tls?: UpdateTlsFailure; release_first?: true; prepare?: string; unchanged?: true } | null;
+}
+
+/** What Update answers a linked machine. `joined`: an install was already running. `restarting`: the new binary was already on disk. */
+export type MachineUpdateOutcome = ManualUpdateOutcome["outcome"] | "restarting" | "joined";
+
+/**
+ * A path of this machine, for another machine's window: its username stays here. Under the home folder it is
+ * `~/…`; under the data folder it is named that way; anywhere else only the file's name goes.
+ */
+export function machinePath(path: string, home: string, dataDir?: string): string {
+  const under = (root: string): string | null => {
+    if (!root || !path.startsWith(root)) return null;
+    const rest = path.slice(root.length);
+    return /^[/\\]/.test(rest) ? rest : null;
+  };
+  const inHome = under(home);
+  if (inHome) return `~${inHome}`;
+  const inData = dataDir ? under(dataDir) : null;
+  if (inData) return `$PLANNOTATOR_DATA_DIR${inData}`;
+  return path.split(/[/\\]/).pop() ?? "";
 }
 
 /** How long GET /api/inbox/whats-new waits for a release's notes before answering "still fetching". */
@@ -205,7 +279,6 @@ export async function probeBinaryVersion(binaryPath: string): Promise<string | n
 export function deriveInboxUpdate(input: {
   current: string;
   onDisk: string | null;
-  checksOn: boolean;
   managed: boolean;
   lockHeld: boolean;
   state: ReturnType<typeof readUpdateState>;
@@ -241,7 +314,11 @@ export function deriveInboxUpdate(input: {
   ) {
     return base(pendingVersion, "failed");
   }
-  if (!input.checksOn || !latest || !isNewerStableVersion(latest.version, current)) return null;
+  // Not gated on update checks: with them off the Inbox stops asking on its
+  // own, but a release it knows of (Check now, or a check before they were
+  // turned off) stays one click away. "X is available" with nothing to press
+  // left a person no way to update from the Inbox.
+  if (!latest || !isNewerStableVersion(latest.version, current)) return null;
   if (isSnoozed(input.state, latest.version, input.now)) return null;
   return base(latest.version, "available");
 }
@@ -259,10 +336,16 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   let fastTimer: ReturnType<typeof setTimeout> | null = null;
   let ticking = false;
   let stopped = false;
+  /** A linked machine pressed Update: restart by itself once the install is finished (no page here to do it). */
+  let restartWanted = false;
+  /** That Update ended with no error and the same binary: the version it was for, until the next press or restart. */
+  let noChange: string | null = null;
 
   // "Just updated": this Inbox runs a newer version than the one that ran
-  // before it. Shown as a quiet link for the life of this process, while its
-  // notes are saved or can be fetched (computeUpdatedLink).
+  // before it, or a later start on that version whose link was not yet
+  // offered with readable notes (whatsNewPending). Shown as a quiet link for
+  // the life of this process, while its notes are saved or can be fetched
+  // (computeUpdatedLink).
   let updated: string | null = null;
   // The version the Inbox ran before this one (inboxPreviousVersion), kept
   // across restarts until the next update: What's new counts the releases a
@@ -273,12 +356,14 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       const state = readUpdateState(options.dataDir);
       const before = state.inboxVersion;
       const newer = !!before && compareStableVersions(options.version, before) === 1;
-      if (newer) updated = normalizeStableVersion(options.version);
+      if (newer || (before === options.version && state.whatsNewPending === options.version)) updated = normalizeStableVersion(options.version);
       if (before !== options.version) {
         patchUpdateState((s) => {
           const next: typeof s = { ...s, inboxVersion: options.version };
-          if (newer) next.inboxPreviousVersion = before;
-          else if (before) delete next.inboxPreviousVersion;
+          if (newer) {
+            next.inboxPreviousVersion = before;
+            next.whatsNewPending = options.version;
+          } else if (before) delete next.inboxPreviousVersion;
           return next;
         }, options.dataDir);
       }
@@ -313,7 +398,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return known.some((v) => normalizeStableVersion(v) === version);
   };
 
-  const ensureNotes = (version: string): Promise<void> => {
+  /** `asked`: the person's Check now, which asks even with update checks off. */
+  const ensureNotes = (version: string, asked = false): Promise<void> => {
     const running = notesInFlight.get(version);
     if (running) return running;
     if (!fetchableVersion(version)) return Promise.resolve();
@@ -321,7 +407,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       version,
       dataDir: options.dataDir,
       now,
-      enabled: checksOn,
+      enabled: asked ? () => true : checksOn,
       ...(options.fetchReleaseTag && { fetchRelease: options.fetchReleaseTag }),
     })
       .then(() => undefined)
@@ -356,11 +442,28 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return job;
   };
 
+  // Set once this run offered the link with readable notes (whatsNewPending is then removed).
+  let whatsNewOffered = false;
   /** The link shows while the notes are saved, being fetched, or can be fetched now. */
   const computeUpdatedLink = (): string | null => {
     if (!updated) return null;
     try {
-      if (hasReleaseNotesContent(readReleaseNotes(updated, options.dataDir))) return updated;
+      if (hasReleaseNotesContent(readReleaseNotes(updated, options.dataDir))) {
+        // Offered with readable notes: a later start on this version no longer shows it.
+        if (!whatsNewOffered) {
+          whatsNewOffered = true;
+          try {
+            if (readUpdateState(options.dataDir).whatsNewPending === options.version) {
+              patchUpdateState((s) => {
+                const next = { ...s };
+                delete next.whatsNewPending;
+                return next;
+              }, options.dataDir);
+            }
+          } catch {}
+        }
+        return updated;
+      }
       if (!checksOn()) return null;
       if (notesInFlight.has(updated)) return updated;
       return isNotesFetchDue(readUpdateState(options.dataDir), updated, now()) ? updated : null;
@@ -407,7 +510,6 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return deriveInboxUpdate({
       current: options.version,
       onDisk,
-      checksOn: checksOn(),
       managed: isManaged(),
       lockHeld: isUpdateLockHeld(options.dataDir),
       state: readUpdateState(options.dataDir),
@@ -427,7 +529,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       options.onChange();
     }
     // While an install runs, look at the binary every 2 s.
-    if (!stopped && next?.state === "updating" && !fastTimer) {
+    if (!stopped && (next?.state === "updating" || restartWanted) && !fastTimer) {
       fastTimer = setTimeout(() => {
         fastTimer = null;
         void tick();
@@ -454,6 +556,25 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     onDisk = version;
   };
 
+  /**
+   * A linked machine's Update, judged right after a fresh look at the binary and only once the install script has
+   * finished (its skills and plugins come after the binary swap). A new binary: restart. An install that failed
+   * says so through the failed state. Anything else ended with this machine on the same version, and the person
+   * who pressed Update is told (`update_no_change`), never left looking at Update again.
+   */
+  const settleMachineUpdate = () => {
+    if (!restartWanted || stopped || isUpdateLockHeld(options.dataDir)) return;
+    restartWanted = false;
+    const state = compute();
+    if (state?.state === "ready") {
+      options.onRestartWanted?.();
+      return;
+    }
+    if (state?.state === "failed") return;
+    noChange = normalizeStableVersion(readUpdateState(options.dataDir).pending?.version) ?? state?.version ?? normalizeStableVersion(options.version);
+    options.onChange();
+  };
+
   const sources = {
     ...(options.fetchReleasePage && { fetchReleasePage: options.fetchReleasePage }),
     ...(options.fetchRelease && { fetchRelease: options.fetchRelease }),
@@ -461,7 +582,13 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
 
   /** `freshForMs`: how young an answer must be to skip asking (start and page loads: 1 min). */
   const tick = async (freshForMs?: number) => {
-    if (ticking || stopped) return;
+    if (stopped) return;
+    try {
+      options.onTick?.();
+    } catch {
+      // Never the update check's problem.
+    }
+    if (ticking) return;
     ticking = true;
     try {
       await probeBinary();
@@ -492,11 +619,25 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         }
       }
       refresh();
+      settleMachineUpdate();
     } catch {
       // A tick never throws.
     } finally {
       ticking = false;
     }
+  };
+
+  const launch = (): ManualUpdateOutcome => {
+    const outcome = startManualUpdate({
+      currentVersion: release ? options.version : undefined,
+      dataDir: options.dataDir,
+      now,
+      platform: process.platform,
+      isManaged,
+      launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
+    });
+    refresh();
+    return outcome;
   };
 
   const details = (): InboxUpdateDetails => {
@@ -510,7 +651,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     const current = model ?? compute();
     let sessions: SessionInfo[] = [];
     try {
-      sessions = listSessions();
+      // An in-process server (OpenCode) keeps no binary open: not "running on" this version.
+      sessions = listSessions().filter((s) => !s.host);
     } catch {}
     const snooze = state.snooze;
     const failingNow = failing();
@@ -539,7 +681,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       command: installCommandFor(process.platform, flags),
       plugin_command: flags.includes("skip-claude-plugin") ? CLAUDE_PLUGIN_UPDATE_COMMANDS.join(" && ") : null,
       sessions: sessions.map((s) => ({ mode: s.mode, project: s.project, label: s.label, started_at: s.startedAt })),
-      failure: current?.state === "failed" && result ? { exit_code: result.exitCode, log: paths.log } : null,
+      failure: current?.state === "failed" && result ? failureDetails(result.exitCode, paths.log) : null,
       log: paths.log,
       snoozed_until: snooze && isSnoozed(state, snooze.version, now()) ? new Date(snooze.until).toISOString() : null,
     };
@@ -578,18 +720,85 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       if (tickTimer) clearInterval(tickTimer);
       if (fastTimer) clearTimeout(fastTimer);
     },
-    /** Update now: the install script for the newest release, once (update.lock). */
-    updateNow(): ManualUpdateOutcome {
-      const outcome = startManualUpdate({
-        currentVersion: release ? options.version : undefined,
-        dataDir: options.dataDir,
-        now,
+    /**
+     * Update now: the install script for the newest release, once (update.lock).
+     * With update checks off the known release may be weeks old, so the
+     * person's click asks GitHub once first and installs the newest answer;
+     * when that check fails (offline), the release already known is installed.
+     * With checks on, the cache is at most 10 minutes old and is used as is.
+     */
+    async updateNow(): Promise<ManualUpdateOutcome> {
+      if (release && !checksOn()) {
+        try {
+          await runReleaseCheck({ dataDir: options.dataDir, now, enabled: () => true, force: true, ...sources });
+        } catch {
+          // The known release stands.
+        }
+      }
+      return launch();
+    },
+    /** The newest release this machine knows of. */
+    knownLatest: () => knownLatestRelease(readUpdateState(options.dataDir))?.version ?? null,
+    /** The install script owns this copy, so it can update itself. */
+    selfUpdates: () => release && isManaged(),
+    /** That linked machine's Update ended with no error and no new binary: the version it was for. */
+    noChange: () => noChange,
+    /** A linked machine's window asks what this machine would do. */
+    machineRead(): MachineUpdateAnswer {
+      const d = details();
+      const home = options.home ?? homedir();
+      // A reason can name the temp folder (update-prepare.ts), and that path can hold a username: under the home
+      // folder it reads `~/…`, anywhere else it stays on this machine.
+      const private_ = (text: string) =>
+        (home ? text.split(home).join("~") : text)
+          .replace(/temp folder (?!~)\S.*?(?= is full \(| can't be written \(| does not exist \(| \()/, "temp folder")
+          .replace(/(^|[\s'"(])\/[^\s'")]+/g, "$1…");
+      const failure = d.failure;
+      return {
+        current: d.current,
+        update: d.update,
         platform: process.platform,
-        isManaged,
-        launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
-      });
+        log: machinePath(d.log, home, options.dataDir),
+        flags: readInstallFlags(options.dataDir).flags,
+        open_reviews: d.sessions.length,
+        failure: failure
+          ? {
+              exit_code: failure.exit_code,
+              ...(failure.tls && { tls: failure.tls }),
+              ...(failure.release_first && { release_first: true as const }),
+              ...(failure.prepare && { prepare: private_(failure.prepare) }),
+            }
+          : noChange
+            ? { exit_code: 0, unchanged: true }
+            : null,
+      };
+    },
+    /**
+     * A linked machine pressed Update. Exactly Update now, with its lock, its checks and its log, and never a version
+     * the caller names: this Inbox asks GitHub itself, then installs the newest answer. A binary already on disk is a
+     * restart. An install already running (a terminal's, another window's) is joined. No page here restarts this
+     * Inbox, so it does that itself once the install has finished.
+     */
+    async machineStart(): Promise<{ outcome: MachineUpdateOutcome }> {
+      if (!release) return { outcome: "dev-build" };
+      noChange = null;
+      await probeBinary();
+      const before = compute();
+      if (isUpdateLockHeld(options.dataDir) || before?.state === "ready") {
+        const joined = isUpdateLockHeld(options.dataDir);
+        restartWanted = true;
+        refresh();
+        return { outcome: joined ? "joined" : "restarting" };
+      }
+      try {
+        await runReleaseCheck({ dataDir: options.dataDir, now, enabled: () => true, force: true, ...sources });
+      } catch {
+        // The release already known stands.
+      }
+      const outcome = launch();
+      if (outcome.outcome === "launched" || outcome.outcome === "locked") restartWanted = true;
       refresh();
-      return outcome;
+      return { outcome: outcome.outcome === "locked" ? "joined" : outcome.outcome };
     },
     /** Remind me tomorrow: hide the button for this version for 24 h, for every tab. */
     snooze(): boolean {
@@ -609,6 +818,12 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         force: true,
         ...sources,
       });
+      // The newer release's notes too (the update dialog's summary, What's
+      // new), part of the same explicit request; once per version, throttled.
+      const latest = knownLatestRelease(readUpdateState(options.dataDir))?.version;
+      if (latest && isNewerStableVersion(latest, options.version) && !hasReleaseNotesContent(readReleaseNotes(latest, options.dataDir))) {
+        void ensureNotes(latest, true);
+      }
       refresh();
       // In plain words, from both sources' answers as stored ("release page didn't answer as expected; GitHub API rate-limited").
       if (outcome.outcome !== "failed") return { ok: true };

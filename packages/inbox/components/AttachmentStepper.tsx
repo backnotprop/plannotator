@@ -7,6 +7,8 @@ import { Icon } from '../icons';
 import type { AttachmentStep } from '../stepping';
 import { changedLine } from './AttachmentTiles';
 import { FileName } from './FileName';
+import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
+import { TipKeys } from '../shortcuts/hint';
 
 /** Where a step came from: it decides where focus goes after it. */
 export type StepSource = 'button' | 'menu' | 'key';
@@ -26,6 +28,8 @@ export interface AttachmentStepperProps {
   endNote: string | null;
   /** Annotations waiting for a Send, by file path (the counts on the peek's thumbnails). */
   annotationCounts: ReadonlyMap<string, number>;
+  /** What the peek lists when `steps` is fewer than the thread's files (a question's picture choices): every file. Absent: `steps`. */
+  peek?: { steps: readonly AttachmentStep[]; index: number; onGo: (index: number) => void };
 }
 
 /** The short label a file without a thumbnail shows in the peek: its extension ("MD", "PDF"), else its kind. */
@@ -81,6 +85,12 @@ export function FilePeek(props: {
   onClose: (reason: 'key' | 'outside') => void;
   onGo: (index: number) => void;
   /**
+   * What ‹ Previous and Next › step through when it is not `steps` (a
+   * question's picture choices, the sheet still listing every file), and
+   * what they call each one. Absent: `steps`, files.
+   */
+  within?: { steps: readonly AttachmentStep[]; index: number; noun: 'option' };
+  /**
    * A phone's sheet: ‹ Previous and Next › above the files (the owner's answer
    * for files a swipe cannot step; shown for every file, so the sheet is the
    * same everywhere). `onStep` steps (the host closes the sheet); at an end the
@@ -91,15 +101,17 @@ export function FilePeek(props: {
   const { steps, phone, index } = props;
   const rows = useMemo(() => peekRows(steps, props.annotationCounts), [steps, props.annotationCounts]);
   const onStep = props.onStep;
-  const prev = steps[index - 1];
-  const next = steps[index + 1];
+  const stepping = props.within ?? { steps, index, noun: 'file' as const };
+  const prev = stepping.steps[stepping.index - 1];
+  const next = stepping.steps[stepping.index + 1];
+  const noun = stepping.noun;
   const header =
     phone && onStep ? (
-      <div className="ib-peekstep" role="group" aria-label="Step through the files" data-peek-step="">
+      <div className="ib-peekstep" role="group" aria-label={`Step through the ${noun}s`} data-peek-step="">
         <button
           type="button"
           className="ib-peekstep-b"
-          aria-label={prev ? `Previous file: ${prev.attachment.name}` : 'Previous file: this is the first'}
+          aria-label={prev ? `Previous ${noun}: ${prev.attachment.name}` : `Previous ${noun}: this is the first`}
           aria-disabled={prev ? undefined : true}
           onClick={() => onStep(-1)}
           data-peek-step-prev=""
@@ -108,12 +120,12 @@ export function FilePeek(props: {
           <span>Previous</span>
         </button>
         <span className="ib-peekstep-n" aria-hidden="true">
-          {index + 1} of {steps.length}
+          {stepping.index + 1} of {stepping.steps.length}
         </span>
         <button
           type="button"
           className="ib-peekstep-b"
-          aria-label={next ? `Next file: ${next.attachment.name}` : 'Next file: this is the last'}
+          aria-label={next ? `Next ${noun}: ${next.attachment.name}` : `Next ${noun}: this is the last`}
           aria-disabled={next ? undefined : true}
           onClick={() => onStep(1)}
           data-peek-step-next=""
@@ -141,8 +153,8 @@ export function FilePeek(props: {
   );
 }
 
-/** Two lines: where the button goes, then its keys. */
-function StepTip({ text, keys, children }: { text: string; keys: string[]; children: React.ReactElement }) {
+/** Two lines: where the button goes, then its key (`[` or `]`, from the registry). */
+function StepTip({ text, action, children }: { text: string; action: 'previous' | 'next'; children: React.ReactElement }) {
   return (
     <Tooltip
       side="top"
@@ -150,18 +162,9 @@ function StepTip({ text, keys, children }: { text: string; keys: string[]; child
       content={
         <span className="flex flex-col gap-1">
           <span>{text}</span>
-          {keys.length > 0 && (
-            <span className="flex items-center gap-1 text-muted-foreground">
-              {keys.map((key, i) => (
-                <span key={key} className="flex items-center gap-1">
-                  {i > 0 && <span>or</span>}
-                  <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-muted px-1 font-mono text-[10px] leading-none text-foreground/80">
-                    {key}
-                  </kbd>
-                </span>
-              ))}
-            </span>
-          )}
+          <span className="flex items-center gap-1 text-muted-foreground empty:hidden">
+            <TipKeys scope={inboxFileViewerShortcuts} action={action} />
+          </span>
         </span>
       }
     >
@@ -215,7 +218,8 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
     }
   };
 
-  const peek = menuOpen && <FilePeek id={peekId} steps={steps} index={index} phone={false} annotationCounts={props.annotationCounts} onClose={close} onGo={props.onGo} />;
+  const listed = props.peek ?? { steps, index, onGo: props.onGo };
+  const peek = menuOpen && <FilePeek id={peekId} steps={listed.steps} index={listed.index} phone={false} annotationCounts={props.annotationCounts} onClose={close} onGo={listed.onGo} />;
 
   const endNote = (
     <span className={`ib-endnote${props.endNote ? ' ib-on' : ''}`} aria-hidden="true" data-step-end-note="">
@@ -226,7 +230,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
   return (
     <nav className="ib-stepper" aria-label="Files in this thread" data-attachment-stepper="">
       <span className="ib-stepbox">
-        <StepTip text={prev ? `Previous: ${prev.attachment.name}` : 'This is the first file'} keys={['[', '←']}>
+        <StepTip text={prev ? `Previous: ${prev.attachment.name}` : 'This is the first file'} action="previous">
           <button type="button" className="ib-stepbtn" aria-label={prevLabel} aria-disabled={prev ? undefined : 'true'} onClick={() => props.onStep(-1, 'button')} data-step-prev="">
             <Icon name="chevL" size={15} />
           </button>
@@ -257,7 +261,7 @@ export function AttachmentStepper(props: AttachmentStepperProps) {
             <Icon name="chevD" size={13} />
           </span>
         </button>
-        <StepTip text={next ? `Next: ${next.attachment.name}` : 'This is the last file'} keys={[']', '→']}>
+        <StepTip text={next ? `Next: ${next.attachment.name}` : 'This is the last file'} action="next">
           <button type="button" className="ib-stepbtn" aria-label={nextLabel} aria-disabled={next ? undefined : 'true'} onClick={() => props.onStep(1, 'button')} data-step-next="">
             <Icon name="chevR" size={15} />
           </button>

@@ -8,7 +8,7 @@
  * drops a thread the person opened, a notice is silent only when the bell
  * owns its sound, and two tabs raise each item once.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -29,17 +29,21 @@ interface Raised {
 }
 
 let raised: Raised[] = [];
+/** The notices raised, as the browser would hold them: a test clicks one with `onclick`. */
+let notices: { onclick: (() => void) | null }[] = [];
 let front = { visible: true, focused: true };
 const saved: { notification?: unknown; hasFocus?: () => boolean; visibility?: PropertyDescriptor } = {};
 
 function installStubs() {
   raised = [];
+  notices = [];
   class RecordingNotification {
     static permission: NotificationPermission = 'granted';
     static requestPermission = async () => 'granted' as NotificationPermission;
     onclick: (() => void) | null = null;
     constructor(title: string, options: NotificationOptions = {}) {
       raised.push({ title, body: options.body ?? '', tag: options.tag ?? '', silent: options.silent === true });
+      notices.push(this);
     }
     close() {}
   }
@@ -74,13 +78,16 @@ let onScreen: string | null = null;
 let questionsHeard = 0;
 let bell = false;
 let otherTabInFront = false;
+/** What a click on a notice does to the route. */
+let onOpenThread: (threadId: string) => void = () => {};
+let onOpenList: () => void = () => {};
 
 function Probe({ index }: { index: number }) {
   tabs[index] = useInboxNotifications({
     settings: { enabled: true, dismissed: false, allowed_origin: null },
     onSettings: () => {},
-    openThread: () => {},
-    openList: () => {},
+    openThread: (threadId) => onOpenThread(threadId),
+    openList: () => onOpenList(),
     onQuestions: () => {
       questionsHeard++;
     },
@@ -187,6 +194,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
     questionsHeard = 0;
     bell = false;
     otherTabInFront = false;
+    onOpenThread = () => {};
+    onOpenList = () => {};
     tabs.length = 0;
     window.localStorage.clear();
     installStubs();
@@ -462,6 +471,55 @@ describe.if(hasDom)('useInboxNotifications', () => {
       (globalThis as Record<string, unknown>).EventSource = RealEventSource;
       Recording.permission = 'granted';
     }
+  });
+
+  /** Run a click with the address starting at `start`: every hash it passes through, and the one it ends on. */
+  async function addressesDuring(start: string, click: () => void): Promise<{ steps: string[]; end: string }> {
+    const real = window.history.replaceState;
+    window.history.replaceState(null, '', start || window.location.pathname);
+    const steps: string[] = [];
+    window.history.replaceState = function (this: History, ...args: Parameters<History['replaceState']>) {
+      real.apply(this, args);
+      steps.push(window.location.hash);
+    };
+    try {
+      act(click);
+      return { steps, end: window.location.hash };
+    } finally {
+      window.history.replaceState = real;
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }
+
+  test('a click on a notice about the thread already showing still changes the address, and leaves it as it was', async () => {
+    await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
+    const { steps, end } = await addressesDuring('#thread=t1', () => notices.at(-1)!.onclick!());
+    expect(steps[0]).toMatch(/^#thread=t1&click=\d+$/);
+    expect(end).toBe('#thread=t1');
+  });
+
+  test('a click that opens another thread signals on the address it opened, after opening it', async () => {
+    await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
+    onOpenThread = (threadId) => window.history.pushState(null, '', `#thread=${threadId}`);
+    const { steps, end } = await addressesDuring('#thread=old', () => notices.at(-1)!.onclick!());
+    expect(steps[0]).toMatch(/^#thread=t1&click=\d+$/);
+    expect(end).toBe('#thread=t1');
+  });
+
+  test("a click on a burst's notice, the list already at rest: the address changes and ends with no hash", async () => {
+    await batch([message('t1', 't1'), message('t2', 't2')], list([{ id: 't1', section: 'new' }, { id: 't2', section: 'new' }]));
+    const { steps, end } = await addressesDuring('', () => notices.at(-1)!.onclick!());
+    expect(steps[0]).toMatch(/^#click=\d+$/);
+    expect(end).toBe('');
+  });
+
+  test('a click on the test notice, which routes nowhere, gives the sign too', async () => {
+    await act(async () => {
+      await tabs[0]!.sendTest();
+    });
+    const { steps, end } = await addressesDuring('#settings/general', () => notices.at(-1)!.onclick!());
+    expect(steps[0]).toMatch(/^#settings\/general&click=\d+$/);
+    expect(end).toBe('#settings/general');
   });
 
   test('the window report carries this tab: one id per page, its permission and origin', () => {

@@ -9,19 +9,30 @@
  */
 import { defineShortcutScope, formatShortcutBindingTokens, getShortcutPlatform, matchesShortcutBinding } from '@plannotator/ui/shortcuts';
 import { isMac, isModKeyHeld } from '@plannotator/ui/utils/platform';
+import { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from '../shortcuts/extras';
+import { bareKeyAllowed } from '../shortcuts/guards';
 
-export const inboxSearchShortcuts = defineShortcutScope({
-  id: 'inbox-search',
-  title: 'Inbox',
-  shortcuts: {
-    openSearch: {
-      description: 'Open search',
-      bindings: ['Mod+K'],
-      section: 'Search',
-      preventDefault: true,
+/** The search scope; `/` beside ⌘K is an extra (shortcuts/extras.ts). */
+export function buildInboxSearchShortcuts(extras: InboxShortcutExtras = INBOX_SHORTCUT_EXTRAS) {
+  return defineShortcutScope({
+    id: 'inbox-search',
+    title: 'Inbox',
+    lettersByCode: true,
+    shortcuts: {
+      openSearch: {
+        description: 'Search',
+        // ⌘K first: the chord the Search entry's keycap shows, and the one that works from inside a field.
+        bindings: extras.slashSearch ? ['Mod+K', '/'] : ['Mod+K'],
+        section: 'Everywhere',
+        hint: extras.slashSearch ? '/ only where you are not typing.' : undefined,
+        preventDefault: true,
+        displayOrder: 0,
+      },
     },
-  },
-});
+  });
+}
+
+export const inboxSearchShortcuts = buildInboxSearchShortcuts();
 
 export const OPEN_SEARCH_BINDING = inboxSearchShortcuts.shortcuts.openSearch.bindings[0]!;
 
@@ -38,7 +49,20 @@ export function isOpenSearchKey(event: KeyEventLike, mac: boolean = isMac): bool
   const own = mac === isMac ? isModKeyHeld(event) : mac ? event.metaKey : event.ctrlKey;
   const other = mac ? event.ctrlKey : event.metaKey;
   if (!own || other) return false;
-  return matchesShortcutBinding(event, OPEN_SEARCH_BINDING);
+  // ⌘K on the K key on a Cyrillic or Greek layout too (the scope's `lettersByCode`).
+  return matchesShortcutBinding(event, OPEN_SEARCH_BINDING, inboxSearchShortcuts);
+}
+
+/**
+ * Whether a keydown is `/` for search (an extra): a `/` where the person is
+ * not typing, with single keys on. Matched by its character, so it is the key
+ * that types `/` on any layout, Shift included where `/` needs it (Shift+7 on
+ * German, Swiss and Nordic layouts); ⌘ / Ctrl / Alt still stand it down.
+ */
+export function isSlashSearchKey(event: KeyboardEvent, scope = inboxSearchShortcuts): boolean {
+  if (!scope.shortcuts.openSearch.bindings.includes('/')) return false;
+  if (event.key !== '/') return false;
+  return bareKeyAllowed(event);
 }
 
 /**
@@ -50,6 +74,12 @@ export function isOpenSearchKey(event: KeyEventLike, mac: boolean = isMac): bool
  * inside an attached HTML page's frame never reach the window.
  */
 export function onOpenSearchKey(event: KeyboardEvent, open: (opener: HTMLElement | null) => void, mac: boolean = isMac): void {
+  if (isSlashSearchKey(event)) {
+    // `/` never fires inside a dialog (the guard): no palette or modal to defer to.
+    event.preventDefault();
+    open(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    return;
+  }
   if (!isOpenSearchKey(event, mac)) return;
   const palette = document.querySelector<HTMLDialogElement>('dialog[data-search-palette][open]');
   if (palette) {

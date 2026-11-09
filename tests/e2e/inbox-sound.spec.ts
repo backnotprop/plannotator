@@ -28,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, launchOff, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -118,15 +118,25 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
+  // A world folder of its own (not inboxScratch's), so launch goes off here: with it on, every window reads the launch
+  // block, which runs `claude --version` on this PATH (the stub's teardown fails the run).
+  launchOff(dataDir);
   // An Inbox that ran before on an older version: this run is an update.
-  if (options.updatedFrom) writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+  if (options.updatedFrom) {
+    writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+    // Due on a used Inbox, and its check would run the `codex` on this PATH.
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' } }));
+  }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
     HOME: home,
     TMPDIR: tmpdir(),
     PLANNOTATOR_DATA_DIR: dataDir,
+    // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+    NO_ANON_PING: '1',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
+    PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     PLANNOTATOR_INBOX_PHONES: '0',
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });

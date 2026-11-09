@@ -2,7 +2,11 @@ import React from 'react';
 import {
   formatShortcutBindingTokens,
   listScopeShortcuts,
+  resolveShortcutBindings,
+  reviewExplorerShortcuts,
+  reviewMarkdownPreviewShortcuts,
   vimSelectionShortcuts,
+  type ShortcutScopeDefinition,
 } from '../shortcuts';
 import { isMac, modKey, altKey } from '../utils/platform';
 
@@ -141,6 +145,23 @@ const vimShortcuts: ShortcutSection[] = (() => {
   return Array.from(sections, ([title, shortcuts]) => ({ title, shortcuts }));
 })();
 
+/** Sections read from registry scopes (this system's keys), so they cannot drift. */
+function scopeSections(scope: ShortcutScopeDefinition<any>): ShortcutSection[] {
+  const sections = new Map<string, Shortcut[]>();
+  const entries = listScopeShortcuts(scope)
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+  for (const entry of entries) {
+    const shortcuts = sections.get(entry.section) ?? [];
+    shortcuts.push({
+      keys: formatShortcutBindingTokens(resolveShortcutBindings(entry)[0] ?? ''),
+      desc: entry.description,
+      hint: entry.hint,
+    });
+    sections.set(entry.section, shortcuts);
+  }
+  return Array.from(sections, ([title, shortcuts]) => ({ title, shortcuts }));
+}
+
 const planActionShortcuts: ShortcutSection = {
   title: 'Actions',
   shortcuts: [
@@ -213,6 +234,8 @@ const reviewShortcuts: ShortcutSection[] = [
       { keys: ['Z'], desc: 'Undo collapse', hint: 'Reopens the last collapsed file and scrolls to it' },
     ],
   },
+  ...scopeSections(reviewExplorerShortcuts),
+  ...scopeSections(reviewMarkdownPreviewShortcuts),
   {
     title: 'Annotations',
     shortcuts: [

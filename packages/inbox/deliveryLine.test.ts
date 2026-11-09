@@ -50,6 +50,25 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
   });
 
+  // Approval "inbox-stopped-reply": Claude Code refused the reply after the person stopped that session (#2780), and
+  // takes nothing until they type there. "Sending" or "Queued" would promise a turn that is not coming.
+  test('a session Claude Code holds until the person types: Stopped, whatever the turn state or Send now', () => {
+    const stopped = { state: 'queued' as const, text: 'Stopped: goes in when you type in that session' };
+    const idle = { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: true };
+    expect(deliveryLine({ ...base, connection: { ...idle, held: true } })).toEqual(stopped);
+    expect(deliveryLine({ ...base, sendingNow: true, connection: { ...idle, held: true } })).toEqual(stopped);
+    expect(deliveryLine({ ...base, connection: { busy: null, idle_since: null, send_now: false, held: true } })).toEqual(stopped);
+    // They typed and it went in: Delivered, not Stopped, even before the connection's next word clears the hold.
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', connection: { ...idle, held: true } })).toEqual({
+      state: 'delivered',
+      text: 'Delivered to Claude Code, 5:12 PM',
+    });
+    // Not held: the ordinary words.
+    expect(deliveryLine({ ...base, connection: { ...idle, held: false } }).text).toBe('Sending to Claude Code…');
+    expect(deliveryLine({ ...base, connection: { busy: true, idle_since: null, send_now: false } }).text).toBe('Queued · Claude Code is working; it gets this when its turn ends.');
+    expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
+  });
+
   test('an agent that only reads the thread keeps the truthful wording and never offers Send now', () => {
     const line = deliveryLine({ ...base, wakes: false, connection: { busy: true, idle_since: null, send_now: true } });
     expect(line).toEqual({ state: 'saved', text: 'Saved for Claude Code. It sees it when it next reads this thread.' });
@@ -105,5 +124,23 @@ describe('restartNote', () => {
     expect(restartNote({ ...busy, outdated: { loaded: '0.28.20', installed: '0.28.25', fix: 'update_extension' } })).toBeNull();
     expect(restartNote({ busy: true, idle_since: null, send_now: false })).toBeNull();
     expect(restartNote(null)).toBeNull();
+  });
+});
+
+describe('a reply another agent read', () => {
+  test('names the reader, with the time, in place of Delivered', () => {
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false, readBy: 'Claude Code' })).toMatchObject({
+      state: 'delivered',
+      text: 'Read by Claude Code, 5:12 PM',
+    });
+  });
+
+  test('no record: today\'s wording, for a thread from before it was recorded', () => {
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false }).text).toBe('Delivered to Claude Code, 5:12 PM');
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false, readBy: null }).text).toBe('Delivered to Claude Code, 5:12 PM');
+  });
+
+  test('not delivered yet: the name changes nothing', () => {
+    expect(deliveryLine({ ...base, wakes: false, name: 'Cursor', readBy: 'Claude Code' }).text).toStartWith('Saved for Cursor.');
   });
 });

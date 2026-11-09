@@ -32,6 +32,7 @@ import {
 } from "./command-path.ts";
 import { createPiVersionProbe } from "./pi-version.ts";
 import { guardChildStreams, writeChildLine } from "./child-io.ts";
+import { askAiChildEnv } from "./ask-ai-env.ts";
 
 // Re-export mapPiEvent from shared (runtime-agnostic)
 export { mapPiEvent } from "./pi-events.ts";
@@ -76,6 +77,10 @@ export class PiProcessNode {
 			// (same reasoning as codex-app-server.ts).
 			proc = spawn(file, args, {
 				cwd,
+				// Plannotator's integration off in this throwaway Pi: Pi's RPC
+				// mode reports `ctx.hasUI`, so the Plannotator Pi extension would
+				// otherwise take it for a person's session (ask-ai-env.ts).
+				env: askAiChildEnv(),
 				stdio: ["pipe", "pipe", "ignore"],
 			});
 		} catch (err) {

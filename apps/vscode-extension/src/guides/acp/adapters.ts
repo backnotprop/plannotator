@@ -23,29 +23,11 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ManagedAdapterSpec, ManagedLaunch } from "@plannotator/acp-client/agents";
 import { findExecutable, type Runner } from "../sources/runner";
 
-/** An npm package that starts the agent's ACP server, pinned to one version. */
-export interface ManagedAdapterSpec {
-  package: string;
-  /** Exact version (published at least 7 days before it was pinned). */
-  version: string;
-  /** The package's `bin` entry to run. */
-  bin: string;
-  /**
-   * `npm install --before`: the day the pin was chosen less 7 days, so every
-   * dependency npm resolves was published at least 7 days before the pin.
-   */
-  before: string;
-}
-
-/** What `managedLaunch` answers: run `command args` (with `env`). */
-export interface ManagedLaunch {
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-  dir: string;
-}
+// The pinned adapter and its launch, as the agent table names them (packages/acp-client/agents.ts).
+export type { ManagedAdapterSpec, ManagedLaunch };
 
 const POINTER = "current.json";
 /** Written into a copy when the pointer moves away from it: `{ replacedAt }`. */

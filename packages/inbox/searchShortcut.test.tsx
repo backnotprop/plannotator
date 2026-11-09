@@ -17,7 +17,7 @@
  *
  * The whole window on the compiled binary, macOS and not: tests/e2e/inbox-search.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -96,6 +96,39 @@ test.skipIf(!hasDom)('with the palette open it goes back to the palette\'s input
   expect([opened, blocked.defaultPrevented]).toEqual([[], false]);
 });
 
+test.skipIf(!hasDom)('/ opens search where nobody is typing, and never in a field, a dialog, with a modifier, or with single keys off', async () => {
+  const prefs = await import('./shortcuts/prefs');
+  const slash = (target: EventTarget, init: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key: '/', code: 'Slash', bubbles: true, cancelable: true, ...init });
+    const opened: (HTMLElement | null)[] = [];
+    target.addEventListener('keydown', (e) => shortcut.onOpenSearchKey(e as KeyboardEvent, (opener) => opened.push(opener), true), { once: true });
+    target.dispatchEvent(event);
+    return { opened: opened.length, prevented: event.defaultPrevented };
+  };
+  const row = document.createElement('button');
+  const field = document.createElement('textarea');
+  document.body.append(row, field);
+  row.focus();
+  expect(slash(row)).toEqual({ opened: 1, prevented: true });
+  // Where `/` is Shift+7 (German, Swiss, Nordic layouts) it is still the key that types `/`.
+  expect(slash(row, { shiftKey: true, code: 'Digit7' })).toEqual({ opened: 1, prevented: true });
+  // Typing a slash in the reply box is a slash.
+  expect(slash(field)).toEqual({ opened: 0, prevented: false });
+  expect(slash(row, { ctrlKey: true })).toEqual({ opened: 0, prevented: false });
+  expect(slash(row, { isComposing: true })).toEqual({ opened: 0, prevented: false });
+  const modal = document.createElement('dialog');
+  modal.setAttribute('open', '');
+  document.body.appendChild(modal);
+  expect(slash(row)).toEqual({ opened: 0, prevented: false });
+  modal.remove();
+  prefs.setSingleKeys(false);
+  try {
+    expect(slash(row)).toEqual({ opened: 0, prevented: false });
+  } finally {
+    prefs.setSingleKeys(true);
+  }
+});
+
 test.skipIf(!hasDom)('the scope holds this one shortcut, and the registry accepts it', () => {
   const { inboxSearchShortcuts, OPEN_SEARCH_BINDING } = shortcut;
   expect(Object.keys(inboxSearchShortcuts.shortcuts)).toEqual(['openSearch']);
@@ -135,8 +168,9 @@ test.skipIf(!hasDom)('the Search entry shows the keycaps and names the chord', (
     ),
   );
   const entry = host.querySelector<HTMLButtonElement>('.ib-sp-entry')!;
-  expect(entry.getAttribute('aria-keyshortcuts')).toBe(shortcut.openSearchAriaKeys());
-  const hint = entry.querySelector('[data-search-hint]')!;
-  expect(hint.textContent).toBe(shortcut.openSearchHint());
+  // The chord, and `/` (an extra, on).
+  expect(entry.getAttribute('aria-keyshortcuts')).toBe(`${shortcut.openSearchAriaKeys()} /`);
+  const hint = entry.querySelector('[data-shortcut-hint="inbox-search.openSearch"]')!;
+  expect(hint.getAttribute('data-keycap')).toBe(shortcut.openSearchHint());
   expect(hint.getAttribute('aria-hidden')).toBe('true');
 });

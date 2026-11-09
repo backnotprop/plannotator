@@ -293,7 +293,9 @@ test('waiting on a busy agent: "Undelivered N min" on the row (blue / grey), Sen
   await page.goto(`${world.url}`);
   const heroRow = page.locator(`.ib-lbody [data-thread-id="${hero.thread}"]`).first();
   const stuckRow = page.locator(`.ib-lbody [data-thread-id="${stuck.thread}"]`).first();
+  // A wide row (1440) draws the full words (the owner, 2026-10-29), read as they are.
   await expect(heroRow.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
+  await expect(heroRow.locator('.ib-c .ib-sr')).toHaveCount(0);
   await expect(heroRow.locator('[data-undelivered]')).not.toHaveAttribute('data-stuck', /.*/);
   await expect(stuckRow.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
   await expect(stuckRow.locator('[data-undelivered]')).toHaveAttribute('data-stuck', '');
@@ -309,7 +311,10 @@ test('waiting on a busy agent: "Undelivered N min" on the row (blue / grey), Sen
   await heroRow.hover();
   const action = page.locator(`[data-row="${hero.thread}"] > [data-row-send-now]`);
   await expect(action).toBeVisible();
-  await expect(heroRow.locator('.ib-c')).toBeHidden();
+  // "Undelivered 3 min" sits left of the marks (approval "inbox-row-byline", the one-line row), clear of the
+  // action, so it stays on screen beside Send now.
+  await expect(heroRow.locator('.ib-c')).toBeVisible();
+  expect((await heroRow.locator('.ib-c').boundingBox())!.x + (await heroRow.locator('.ib-c').boundingBox())!.width).toBeLessThanOrEqual((await action.boundingBox())!.x);
   await shot(page, 'list-hover', sentGroup);
   await stuckRow.hover();
   await expect(page.locator(`[data-row="${stuck.thread}"] > [data-row-send-now]`)).toHaveCount(0);
@@ -356,7 +361,7 @@ test('on a phone: the row badge, the band and a 44 px Send now', async ({ browse
     await windowAhead(page, 3.5 * MIN);
     await page.goto(world.url);
     const row = page.locator(`.ib-mrow[data-thread-id="${hero.thread}"]`);
-    await expect(row.locator('[data-undelivered]')).toHaveText('Undelivered 3 min');
+    await expect(row.locator('[data-undelivered]')).toHaveText('Undelivered 3m');
     // A phone row keeps one tap target: no Send now on it.
     await expect(page.locator('[data-row-send-now]')).toHaveCount(0);
     await shot(page, 'phone-list');

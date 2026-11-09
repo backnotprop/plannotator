@@ -393,16 +393,13 @@ export function openCodeSpecShellSafe(spec: string): boolean {
 }
 
 /**
- * Runs first, in the same paste: `opencode2 plugin update` answers for the
- * folder it runs in, and in a folder the service has not opened yet its
- * plugins are not loaded: with a target it fails ("Plugin is not configured:
- * @plannotator/opencode@latest"), without one it says "No plugin updates
- * available". The first OpenCode command in a folder opens it; the next one
- * sees its plugins. Measured on OpenCode 2.0.22 in fresh folders: the update
- * alone 0/5, after `opencode2 plugin list` 5/5 (bash and zsh, with and without
- * a target). `&&` is valid in bash, zsh, fish, PowerShell 7 and cmd.
+ * Wait for the folder's plugins before inspecting updates. On OpenCode 2.1.4,
+ * `plugin list` can return before activation, leaving `plugin update` with
+ * "Plugin is not configured". `models` awaits plugin activation on the server
+ * without starting a model turn. The real-host reload test covers this from
+ * a folder the service has never opened.
  */
-export const OPENCODE2_OPEN_FOLDER_COMMAND = "opencode2 plugin list";
+export const OPENCODE2_OPEN_FOLDER_COMMAND = "opencode2 models";
 
 /** `opencode2 plugin update <spec>`: only Plannotator. OpenCode wants the spec exactly as configured (`@plannotator/opencode@latest`; the bare name is "not configured"). A spec that is not shell-safe gives the command with no target. Either way after OPENCODE2_OPEN_FOLDER_COMMAND. */
 export function opencodePluginUpdateCommand(spec: string | null): string {

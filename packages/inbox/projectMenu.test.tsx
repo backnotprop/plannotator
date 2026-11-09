@@ -11,7 +11,7 @@
  * back with the next agent message, and the phone's always-shown ⋯ and
  * sheet.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -221,7 +221,7 @@ test.skipIf(!hasDom)('⋯ is a real button beside the row, named for the project
   expect(more.getAttribute('aria-expanded')).toBe('true');
   expect(row.hasAttribute('data-menu')).toBe(true);
   const items = [...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim());
-  expect(items).toEqual(['Mark all as read', 'Archive all']);
+  expect(items).toEqual(['Mark all as read', 'Archive all', 'Rename…']);
   expect(item('read')!.hasAttribute('data-disabled')).toBe(false);
 });
 
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('a right-click on the row opens the same menu', async () =>
     row.querySelector('.ib-proj')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 200 }));
   });
   await until(() => !!menu(), 'the context menu');
-  expect([...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim())).toEqual(['Mark all as read', 'Archive all']);
+  expect([...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim())).toEqual(['Mark all as read', 'Archive all', 'Rename…']);
 });
 
 test.skipIf(!hasDom)('Mark all as read: one batch, the warning toast, and one Undo (Z) puts every thread back', async () => {
@@ -296,6 +296,8 @@ test.skipIf(!hasDom)('the project the list shows stays while the person is there
   await choose('archive');
   await until(() => !!document.querySelector('[data-project-archived]'), 'the empty state');
   expect(document.querySelector('[data-project-archived]')!.textContent).toContain(`Everything in ${name} is archived.`);
+  // The rows stay drawn, archived and faded, under it until the list settles (approval "inbox-list-view", R7).
+  expect(document.querySelectorAll('.ib-lbody [data-row]:not([data-archived])').length).toBe(0);
   expect(projectRow()!.hasAttribute('data-held')).toBe(true);
   const inbox = [...document.querySelectorAll<HTMLButtonElement>('.ib-nav')].find((b) => b.textContent?.includes('Inbox'))!;
   await act(async () => {

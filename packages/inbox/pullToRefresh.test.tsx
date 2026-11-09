@@ -13,7 +13,7 @@
  * The motion itself (real touch, mid-pull, ready, the spin) is proved in real
  * browsers by tests/e2e/inbox-pull-refresh.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

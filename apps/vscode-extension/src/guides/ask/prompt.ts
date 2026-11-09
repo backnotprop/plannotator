@@ -65,7 +65,9 @@ export function aboutLabel(about: AskAbout): string {
   const side = about.side === "base" ? " (the old version)" : " (the new version)";
   if (about.kind === "selection" && about.lines) {
     const lines = about.lines.start === about.lines.end ? `line ${about.lines.start}` : `lines ${about.lines.start}–${about.lines.end}`;
-    return `${lines} of ${about.path}${side}, in ${ch}`;
+    // On the old side of a renamed file the lines are the old path's: name it, and the new one.
+    const where = about.side === "base" && about.oldPath ? `${about.oldPath} (renamed to ${about.path} by the change)` : about.path;
+    return `${lines} of ${where}${side}, in ${ch}`;
   }
   return `the file ${about.path}, in ${ch}`;
 }

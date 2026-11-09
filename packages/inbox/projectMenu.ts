@@ -12,7 +12,7 @@
 
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from './api';
-import { agentName, plural } from './format';
+import { agentName, plural, shortAgentName } from './format';
 import { offersRowMarkRead } from './markRead';
 
 export type ProjectAction = 'read' | 'archive';
@@ -45,6 +45,8 @@ export interface ProjectBatchToast {
   phoneLead: string;
   /** The muted rest of the line: the warning or the questions closed when there are any, else the project. */
   detail: string;
+  /** A phone's detail, when the warning names an agent: what happened first, the name last ("Stopped · Pi"). */
+  phoneDetail?: string;
   /** What the live region says: the whole of it, the project and when it comes back included. */
   speech: string;
   /** An agent was stopped or held up on a thread the batch took: the warning icon (no Reply: several threads). */
@@ -68,7 +70,14 @@ export function projectBatchToast(action: ProjectAction, projectName: string, ta
   const stopped = rows.filter((row) => row.questions.stopped && row.questions.open > 0);
   const holds = rows.reduce((sum, row) => sum + (row.questions.open > 0 ? row.questions.holds_up.length : 0), 0);
   let warning = '';
-  if (stopped.length === 1) warning = `${agentName(stopped[0]!.author)} was stopped`;
+  // The toast cuts a long agent name (shortAgentName); the live region says it whole.
+  let said = '';
+  let phoneDetail: string | undefined;
+  if (stopped.length === 1) {
+    warning = `${shortAgentName(agentName(stopped[0]!.author))} was stopped`;
+    phoneDetail = `Stopped · ${shortAgentName(agentName(stopped[0]!.author))}`;
+    said = `${agentName(stopped[0]!.author)} was stopped`;
+  }
   else if (stopped.length > 1) warning = `${stopped.length} agents were stopped`;
   else if (holds > 0) warning = `Held up ${plural(holds, 'thing')}`;
   const closed = questions > 0 ? `Closed ${plural(questions, 'question')}` : '';
@@ -76,9 +85,10 @@ export function projectBatchToast(action: ProjectAction, projectName: string, ta
   const back = action === 'read' ? 'Back when an agent writes' : 'Back when an agent writes there';
   const lead = action === 'read' ? `Marked ${threads} read` : `Archived ${threads}`;
   const detail = why || projectName;
-  const speech = `${lead} in ${projectName}. ${why || back}.`;
-  if (action === 'read') return { lead, phoneLead: `${threads} read`, detail, speech, icon: warning ? 'warn' : 'check' };
-  return { lead, phoneLead: `Archived ${threads}`, detail, speech, icon: warning ? 'warn' : 'archive' };
+  const speech = `${lead} in ${projectName}. ${said || why || back}.`;
+  const phone = phoneDetail ? { phoneDetail } : {};
+  if (action === 'read') return { lead, phoneLead: `${threads} read`, detail, ...phone, speech, icon: warning ? 'warn' : 'check' };
+  return { lead, phoneLead: `Archived ${threads}`, detail, ...phone, speech, icon: warning ? 'warn' : 'archive' };
 }
 
 /** A key for one batch, so a retried request answers what the first did (the server's `batch_id`). */

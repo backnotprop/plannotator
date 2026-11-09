@@ -8,7 +8,7 @@
  * too and opens in the plain lightbox, so a click always opens something. The
  * browser proof is tests/e2e/inbox-image-viewer.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -184,4 +184,23 @@ test.skipIf(!hasDom)('an image that fails to load is its alt text and opens noth
   await act(async () => dot.click());
   expect(document.querySelector('[data-image-lightbox]')).toBeNull();
   expect(opened).toEqual([]);
+});
+
+// Approval "picture-choices-layout": the card is laid out before its pictures load, from the size the
+// Inbox recorded when the message was sent. What regresses if this fails: the picture choices jump once
+// their pictures load (the layout read the size from the loaded image), or a picture of an older message,
+// sent before sizes were recorded, breaks the card instead of taking the default box.
+test.skipIf(!hasDom)('a picture choice carries the size recorded when the message was sent, before it loads; one with no record carries none', async () => {
+  const phone = { ...image('att_01K7PPPPPPPPPPPPPPPPPPPPPP', 'design/phone.png'), width: 1170, height: 2532 };
+  const body = [':::question', 'Which header?', '', '- [ ] A — ![A](design/phone.png) title only', '- [ ] B — ![B](design/b.png) title and project', ':::'].join('\n');
+  await render(body, [phone, B], []);
+  const tiles = [...host!.querySelectorAll<HTMLElement>('[data-question-tile]')];
+  expect(tiles).toHaveLength(2);
+  const box = (tile: HTMLElement) => tile.querySelector<HTMLElement>('[data-question-tile-picture]')!;
+  expect(box(tiles[0]!).style.getPropertyValue('--question-picture-ratio')).toBe('1170 / 2532');
+  expect(tiles[0]!.getAttribute('data-question-tile-shape')).toBe('tall');
+  // B's record has no size (an older message): no size, no shape; the window reserves its default box.
+  expect(box(tiles[1]!).style.getPropertyValue('--question-picture-ratio')).toBe('');
+  expect(tiles[1]!.hasAttribute('data-question-tile-shape')).toBe(false);
+  expect(host!.querySelector('[data-question-tiles]')!.getAttribute('data-question-tiles-shape')).toBe('mixed');
 });

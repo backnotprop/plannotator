@@ -7,55 +7,13 @@ import { Tooltip } from '@plannotator/ui/components/Tooltip';
  * language: same viewed circle, same leading change-type letter, same
  * stage button/dot.
  *
- * The change-type letter and +/- counts are the shared diff-file-tree atoms
- * from @plannotator/ui (the same ones the embeddable DiffFileTree renders);
- * they are re-exported here so review call sites keep importing one module.
+ * The change-type letter is the shared diff-file-tree atom from
+ * @plannotator/ui, re-exported so review call sites import one module. The
+ * +/- numbers are the review's own `CountColumns` (two aligned columns), not
+ * ui's `DiffCounts`.
  */
-export { ChangeTypeLetter, DiffCounts } from '@plannotator/ui/components/DiffFileTree';
-
-/** Viewed checkbox — always visible: green check-circle when viewed, empty
- * circle otherwise. Fixed 16px slot, same as StageControl, so the two align
- * as a column. (`forceVisible` retained as a no-op for call-site stability.) */
-export const ViewedControl: React.FC<{
-  isViewed: boolean;
-  onToggle?: () => void;
-  /** Deprecated no-op — the control is always visible now. */
-  forceVisible?: boolean;
-}> = ({ isViewed, onToggle }) => (
-  <Tooltip content={isViewed ? 'Viewed — click to unmark' : 'Mark as viewed'} side="bottom">
-    <span
-      role="checkbox"
-      aria-checked={isViewed}
-      aria-label={isViewed ? 'Viewed — unmark' : 'Mark as viewed'}
-      // tabIndex + key handling: these controls live INSIDE the row <button>
-      // (a real nested <button> is invalid HTML), so they need their own
-      // focus stop and Enter/Space activation to be keyboard-operable.
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle?.();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggle?.();
-        }
-      }}
-      className="w-4 h-4 flex items-center justify-center flex-shrink-0 rounded hover:bg-muted/50 cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
-    >
-      {isViewed ? (
-        <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ) : (
-        <svg className="w-3.5 h-3.5 text-muted-foreground opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <circle cx="12" cy="12" r="9" />
-        </svg>
-      )}
-    </span>
-  </Tooltip>
-);
+export { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
+export { ViewedControl, CountColumns, countColumnVars } from '@plannotator/ui/components/FileRowAtoms';
 
 /** Staging affordance — plus button on unstaged working files (always
  * visible, brightens on hover), primary dot when staged, spinner mid-flight.
@@ -142,33 +100,66 @@ export const AnnotationBadge: React.FC<{ count: number }> = ({ count }) => {
   );
 };
 
-/** A foldable section header for the left panel lists: the status view's
- * Committed / Changes / Untracked headers and the tree's kind blocks. Chevron,
- * optional icon, label, then anything the caller adds (counts). */
+/** Below this panel width, group headings, folders and files drop their
+ *  number columns (and a heading its viewed count), so names keep the room;
+ *  All changes keeps its totals. Styles: `[data-compact-rows]` in index.css. */
+export const COMPACT_ROWS_WIDTH = 220;
+export const compactRowsProps = (width: number): { 'data-compact-rows'?: '' } =>
+  width < COMPACT_ROWS_WIDTH ? { 'data-compact-rows': '' } : {};
+
+/**
+ * A foldable group heading in the left panel lists: the tree's kind blocks
+ * (Code / Tests / Generated) and the Git status view's Committed / Changes /
+ * Untracked (approved design record "review-sidebar-aligned").
+ *
+ * Flush: the kind icon sits where a folder's chevron sits (the panel's 16 px
+ * content edge) and the label on the folder-name edge (34 px); with no icon
+ * the label starts on the content edge. Heavier and darker than folders. The
+ * whole 28 px row is the button, so Enter and Space fold it with no new keys.
+ * The chevron follows the label: always shown on a folded group; on an open
+ * one only on hover or keyboard focus (and always on touch screens), so a
+ * folded group looks folded without a hover. Then whatever the caller adds
+ * (the numbers). Styles: `.panel-section-heading` in index.css.
+ */
 export const PanelSectionHeader: React.FC<{
   label: string;
   collapsed: boolean;
   onToggle: () => void;
   icon?: React.ReactNode;
   children?: React.ReactNode;
-}> = ({ label, collapsed, onToggle, icon, children }) => (
-  <button
-    type="button"
-    onClick={onToggle}
-    aria-expanded={!collapsed}
-    className="w-full flex items-center gap-1.5 px-2 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-  >
-    <svg
-      className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
+  /** The heading's spoken name, when it should say more than the label
+   *  (what the group holds, its numbers in words). */
+  ariaLabel?: string;
+  /** What the group holds, shown on hover and keyboard focus. */
+  tooltip?: string;
+}> = ({ label, collapsed, onToggle, icon, children, ariaLabel, tooltip }) => {
+  const button = (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={ariaLabel}
+      data-panel-section-header=""
+      data-collapsed={collapsed ? '' : undefined}
+      className="panel-section-heading"
     >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-    {icon}
-    <span className="text-[11px] font-medium">{label}</span>
-    {children}
-  </button>
-);
+      {icon ? (
+        <span className="panel-heading-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
+      <span className="panel-heading-label">{label}</span>
+      <svg className="panel-heading-chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+      </svg>
+      {children}
+    </button>
+  );
+  return tooltip ? (
+    <Tooltip content={tooltip} side="right" wide>
+      {button}
+    </Tooltip>
+  ) : (
+    button
+  );
+};

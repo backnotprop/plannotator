@@ -5,10 +5,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 rm -rf generated
+# The viewer pin is generated, not committed: make sure one exists (a no-op
+# when it does; a checkout that skipped `bun install` gets the fallback pin).
+bun ../guides-show/build/sync-manifest.ts --if-missing
 mkdir -p generated generated/ai/providers
 
 # Modules that MOVED to @plannotator/core — vendor the real impl from core.
-for f in feedback-templates project diff-type file-kind review-prompt guide-prompt favicon forge-refs code-file annotatable annotation-threads diagram-anchor image-region html-anchor markdown-structure question-block text-cut inline-markdown server-session external-annotation agent-jobs agent-switch agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto package-changes package-changes-npm; do
+for f in feedback-templates project diff-type file-kind review-prompt guide-prompt favicon forge-refs code-file annotatable annotation-threads diagram-anchor image-region html-anchor markdown-structure question-block text-cut inline-markdown server-session external-annotation agent-jobs agent-switch agent-terminal source-save open-in-apps diff-paths diff-files guide guide-notes guide-format guide-viewer-manifest compress crypto package-changes package-changes-npm forge-ref-card; do
   src="../../packages/core/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -29,7 +32,7 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in child-env annotate-bundle plannotator-tool prompts review-core review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-github-account pr-gitlab pr-bitbucket checklist integrations-common repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html diagram-engine-assets url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host host-control request-origin request-host local-image update-check browser-intent agent-program package-metadata package-changes-service; do
+for f in child-env annotate-bundle plannotator-tool prompts review-core repo-files repo-files-node fuzzy-path review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args advertised-url review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-github-account pr-gitlab pr-bitbucket checklist integrations-common notion repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html packed-app diagram-engine-assets url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav repo-file data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host tailnet-audience this-machine-reader reference-reader host-control request-origin request-host local-image update-check daily-ping star-ask browser-intent agent-program package-metadata package-changes-service ref-cards ref-cards-node; do
   src="../../packages/shared/$f.ts"
   # Shared modules that import browser-safe siblings from @plannotator/core
   # (e.g. guide-store → core/guide-format): generated/ is flat and vendors the
@@ -39,12 +42,34 @@ for f in child-env annotate-bundle plannotator-tool prompts review-core review-i
     > "generated/$f.ts"
 done
 
+# Shape (the living board): the format (core/shape), the store and the route
+# core Pi's Shape routes mount (server/serverShape.ts). The store keys a shape's
+# project like the Inbox does (shared/inbox/project-key).
+mkdir -p generated/shape generated/inbox
+printf '// @generated — DO NOT EDIT. Source: packages/core/ulid.ts\n' | cat - ../../packages/core/ulid.ts > generated/ulid.ts
+printf '// @generated — DO NOT EDIT. Source: packages/core/shape.ts\n' | cat - ../../packages/core/shape.ts \
+  | sed -e "s|from ['\"]\./guide['\"]|from '../guide.ts'|g" -e "s|from ['\"]\./ulid['\"]|from '../ulid.ts'|g" \
+    -e "s|from ['\"]\./shape-scene['\"]|from './shape-scene.ts'|g" \
+  > generated/shape/core.ts
+# A board's scenes (core/shape checks them; shape-scene reads core/shape's types).
+printf '// @generated — DO NOT EDIT. Source: packages/core/shape-scene.ts\n' | cat - ../../packages/core/shape-scene.ts \
+  | sed "s|from ['\"]\./shape['\"]|from './core.ts'|g" > generated/shape/shape-scene.ts
+printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/format.ts\n' | cat - ../../packages/shared/shape/format.ts \
+  | sed "s|from ['\"]@plannotator/core/shape['\"]|from './core.ts'|g" > generated/shape/format.ts
+# One line each (not a loop): tests/parity/vendor-parity.test.ts reads these paths to match Pi's imports.
+printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/store.ts\n' | cat - ../../packages/shared/shape/store.ts > "generated/shape/store.ts"
+printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/routes.ts\n' | cat - ../../packages/shared/shape/routes.ts > "generated/shape/routes.ts"
+printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/project-key.ts\n' | cat - ../../packages/shared/inbox/project-key.ts \
+  | sed "s|from ['\"]@plannotator/core/project['\"]|from '../project.ts'|g" > generated/inbox/project-key.ts
+
 # The Plannotator Inbox connection (plannotator_inbox and the reply wake):
 # the pure contract and the node-runtime link the OpenCode plugin uses too.
 # agent-link imports only ./connection and node: modules, so the folder keeps
-# its own relative import.
+# its own relative import. tailnet (the serve header names, for
+# tailnet-audience and so this-machine-reader) imports ../tailscale.
+# pi-session-claim (which process runs a Pi session) imports node: only.
 mkdir -p generated/inbox
-for f in connection agent-link; do
+for f in connection agent-link tailnet pi-session-claim; do
   src="../../packages/shared/inbox/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done
@@ -72,6 +97,7 @@ for f in agent-review-message codex-review claude-review review-findings marker-
     | sed 's|from "@plannotator/shared/external-annotation"|from "./external-annotation.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
     | sed 's|from "@plannotator/shared/review-prompt"|from "./review-prompt.ts"|' \
+    | sed 's|from "@plannotator/ai/providers/ask-ai-env"|from "./ai/providers/ask-ai-env.ts"|' \
     > "generated/$f.ts"
 done
 
@@ -86,6 +112,7 @@ for f in tour-review; do
     | sed 's|from "\.\./claude-review"|from "./claude-review.ts"|' \
     | sed 's|from "\.\./config"|from "./config.ts"|' \
     | sed 's|from "@plannotator/shared/tour"|from "./tour.ts"|' \
+    | sed 's|from "@plannotator/ai/providers/ask-ai-env"|from "./ai/providers/ask-ai-env.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
     > "generated/$f.ts"
 done
@@ -107,6 +134,7 @@ for f in guide-review; do
     | sed 's|from "@plannotator/shared/guide-format"|from "./guide-format.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
     | sed 's|from "@plannotator/shared/guide-prompt"|from "./guide-prompt.ts"|' \
+    | sed 's|from "@plannotator/ai/providers/ask-ai-env"|from "./ai/providers/ask-ai-env.ts"|' \
     > "generated/$f.ts"
 done
 
@@ -128,6 +156,9 @@ done
 # command composes into the proxy-served bridge body for live app sessions.
 printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
   | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
+# bridge-script.ts imports the sandbox shim (a dependency-free string constant too).
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/sandboxShim.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/sandboxShim.ts" > "generated/sandboxShim.ts"
 
 # Vendor the moved AI context types and the model catalog from core into generated/ai/.
 for f in ai-context model-catalog; do
@@ -143,7 +174,7 @@ for f in index types provider session-manager endpoints context base-session ses
     > "generated/ai/$f.ts"
 done
 
-for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io pi-sdk pi-sdk-node pi-events pi-version; do
+for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io ask-ai-env pi-sdk pi-sdk-node pi-events pi-version qwen-sdk qwen-events; do
   src="../../packages/ai/providers/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" \
     | sed "s|from ['\"]@plannotator/core/model-catalog['\"]|from '../model-catalog.ts'|g" \

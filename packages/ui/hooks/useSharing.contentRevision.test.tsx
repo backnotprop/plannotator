@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useSharing } from './useSharing';
-import { AnnotationType, type Annotation } from '../types';
+import { AnnotationType, type Annotation, type DocumentRenderAs } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 const originalFetch = globalThis.fetch;
@@ -56,7 +56,7 @@ function Harness({
   const [attachments, setAttachments] = useState<Parameters<typeof useSharing>[2]>([]);
   const [rawHtml, setRawHtml] = useState('<h1>Same HTML</h1>');
   const [shareHtml, setShareHtml] = useState('');
-  const [, setRenderAs] = useState<'markdown' | 'html'>('html');
+  const [, setRenderAs] = useState<DocumentRenderAs>('html');
   const result = useSharing(
     markdown,
     annotations,
@@ -174,7 +174,7 @@ describe.if(hasDom)('useSharing request invalidation', () => {
       const [attachments, setAttachments] = useState<Parameters<typeof useSharing>[2]>([]);
       const [rawHtml, setRawHtml] = useState('<h1>Doc</h1>');
       const [shareHtml, setShareHtml] = useState('');
-      const [, setRenderAs] = useState<'markdown' | 'html'>('html');
+      const [, setRenderAs] = useState<DocumentRenderAs>('html');
       // Mirrors App.tsx resolveRawHtmlForShare: memoized on shareHtml, sets it on success.
       const resolveRawHtmlForShare = useCallback(async (): Promise<string | null> => {
         if (shareHtml) return shareHtml;

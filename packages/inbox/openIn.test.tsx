@@ -11,7 +11,7 @@
  * not Copy path, and a page that came through the tailnet gets only "Open in
  * new tab" for HTML and images.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -25,6 +25,7 @@ import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const { resetPageSessionForTests } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -107,6 +108,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   if (!hasDom) return;
+  // The api module keeps the first server session it read; an earlier file's server is not this one's (CI runs each file with --isolate).
+  resetPageSessionForTests();
   world = worlds.shift()!;
   viaTailnet = false;
   document.cookie = 'plannotator-open-in-app=; path=/; max-age=0';
@@ -163,7 +166,8 @@ const itemsOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[
 const checkedOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[data-open-in-item]')].filter((item) => item.querySelector('.ib-openin-check')).map((item) => item.getAttribute('data-open-in-item'));
 const launches = () => {
   const file = join(dir!, 'data', 'launches.jsonl');
-  return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { app: string; path: string }) : [];
+  // The server process creates this file, then writes to it: a read between the two sees it empty.
+  return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { app: string; path: string }) : [];
 };
 
 async function openMenu(el: ParentNode, trigger: string, id: string): Promise<HTMLElement> {
@@ -209,6 +213,8 @@ test.skipIf(!hasDom)('markdown: the first editor is the button; picking another 
   expect(launched.app).toBe('cursor');
   expect(launched.path.endsWith('/plan.md')).toBe(true);
   await until(() => pane(el).querySelector('[data-open-in-primary]')?.getAttribute('data-open-in-primary') === 'cursor', 'cursor remembered');
+  // The server logs a launch before its answer arrives, and the button waits for that answer.
+  await until(() => pane(el).querySelector<HTMLButtonElement>('[data-open-in-primary]')?.disabled === false, 'the first launch answered');
   // The left half launches the remembered app straight away.
   await act(async () => pane(el).querySelector<HTMLButtonElement>('[data-open-in-primary]')!.click());
   await until(() => launches().length === before + 2, 'the second launch');

@@ -80,7 +80,7 @@ async function openReply(page: Page, threadId: string): Promise<ReturnType<Page[
   // itself once read (approval "inbox-reply-drafts"); the read can land between the check and
   // the click, so a click that finds no Reply is tried again. The test starts from an empty box.
   const box = pane.getByRole('textbox', { name: /^Reply to/ });
-  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await reply.click({ timeout: 1_000 }).catch(() => {});
   }
@@ -151,7 +151,7 @@ test.afterAll(async () => {
   }
 });
 
-test('@ opens the live sessions grouped by agent (the owner first, MCP agents last); a pick is a chip with "Goes to" and the heads-up', async () => {
+test('@ opens the live sessions grouped by agent (the owner first, MCP agents last); a pick is a chip with the one line of what Send does', async () => {
   const { page } = world;
   const box = await openReply(page, world.tags.ids.t1);
   await box.pressSequentially('Queue it, and cap retries at 5. @');
@@ -182,23 +182,21 @@ test('@ opens the live sessions grouped by agent (the owner first, MCP agents la
   await box.pressSequentially('please re-run the ledger tests against the queue. ');
   await tag(page, box, 'Pi', S.pi);
   await box.pressSequentially('raise the visibility timeout in infra/queue.tf to 30 s.');
-  const notes = page.locator('[data-tag-notes]');
-  await expect(notes.locator('[data-tag-recipient]')).toHaveText(['Claude Code owns this thread', 'Claude Code (another session)', 'Pi']);
-  await expect(notes.locator('[data-tag-heads-up="non-owner"]')).toHaveText([
-    "Claude Code (another session) doesn't own this thread. It gets your reply and a pointer to this thread.",
-    "Pi doesn't own this thread. It gets your reply and a pointer to this thread.",
-  ]);
+  // One line under the box (approval "inbox-tag-handoff", A2): Send asks them; two agents can be added, not handed the thread.
+  const line = page.locator('[data-tag-mode]');
+  await expect(line.locator('[data-tag-mode-words]')).toHaveText('Asks Claude Code (another session) and Pi');
+  await expect(line.locator('[data-tag-mode-to]')).toHaveText(['Add instead']);
+  await expect(page.locator('[data-tag-notes]')).toHaveCount(0);
   await expect(page.locator('[data-tag-live]')).toContainText("Tagged Pi. It doesn't own this thread");
   await shot(page, '2-tagged-desktop');
 
-  // An agent that reads the Inbox only: the other heads-up.
+  // An agent that reads the Inbox only: the line says so, and offers no switch.
   await box.fill('Queue it, and cap retries at 5. ');
   await box.press('End');
   await tag(page, box, 'Codex', S.codex);
   await box.pressSequentially('the runbook in docs-site needs the new dead-letter alert.');
-  await expect(notes.locator('[data-tag-heads-up="not-woken"]')).toHaveText(
-    "Codex can't be woken: it reads the Inbox through MCP. It sees your reply the next time it reads this thread.",
-  );
+  await expect(line.locator('[data-tag-mode-words]')).toHaveText("Asks Codex · Codex isn't woken: it sees your reply the next time it reads this thread");
+  await expect(line.locator('[data-tag-mode-to]')).toHaveCount(0);
   await shot(page, '3-mcp-desktop');
   expect(world.errors).toEqual([]);
 });
@@ -309,7 +307,7 @@ test('a tag in a file comment: the composer offers agents with "Goes to" and the
   const { page } = world;
   await fileCommentTaggingPi(page);
   await shot(page, '4-file-comment-desktop');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const reply = page.getByRole('textbox', { name: /^Reply to/ });
   await reply.fill('See my comment on the design.');
@@ -348,7 +346,7 @@ test('the sent reply shows one line per agent (Lines): delivered, queued with it
   await expect(page.locator('.ib-lbody [data-thread-id="' + world.tags.ids.t2 + '"]').first()).toContainText('1 of 3 delivered · Pi queued');
 });
 
-test('the thread head and the row show the agents in the thread, overlapping', async () => {
+test('the thread head shows the agents in the thread overlapping, the row beside its project', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.tags.ids.t3}`);
   const head = page.locator('[data-thread-participants]');
@@ -356,7 +354,8 @@ test('the thread head and the row show the agents in the thread, overlapping', a
   await expect(head.locator('[data-tag-stack]')).toHaveAttribute('data-tag-stack', '2');
   await shot(page, '6-thread-head-desktop', { clip: { selector: '.ib-pbody > .ib-tmeta[data-thread-meta]', pad: 40 } });
   const row = page.locator(`.ib-lbody [data-thread-id="${world.tags.ids.t3}"]`).first();
-  await expect(row.locator('[data-tag-stack]')).toHaveAttribute('data-tag-stack', '2');
+  await expect(row.locator('[data-row-agents]')).toHaveAttribute('data-row-agents', '2');
+  await expect(row.locator('[data-row-agents]')).toHaveAttribute('aria-label', 'Claude Code and Pi');
   await shot(page, '7-list-row-desktop', { clip: { selector: `.ib-lbody [data-thread-id="${world.tags.ids.t2}"]`, pad: 24 } });
   await shot(page, '7-list-desktop');
 });
@@ -377,7 +376,7 @@ test('a phone-width window: a tag in a file comment, on the full-screen file (a 
   }
 });
 
-test('on a phone: 44 px rows in the picker, the notes and lines inside 320 px, and the same states', async ({ browser }) => {
+test('on a phone: 44 px rows in the picker, the line and lines inside 320 px, and the same states', async ({ browser }) => {
   for (const width of [390, 320]) {
     const context = await browser.newContext({ ...PHONE, viewport: { width, height: 844 } });
     try {
@@ -398,20 +397,21 @@ test('on a phone: 44 px rows in the picker, the notes and lines inside 320 px, a
       await box.pressSequentially('raise it. ');
       await tag(page, box, 'Codex', S.codex);
       await box.pressSequentially('add the alert.');
-      await expect(page.locator('[data-tag-heads-up]')).toHaveCount(2);
-      for (const el of await page.locator('[data-tag-notes], [data-tag-notes] *').all()) {
+      await expect(page.locator('[data-tag-mode-words]')).toContainText('Asks Pi and Codex');
+      for (const el of await page.locator('[data-tag-mode], [data-tag-mode] *').all()) {
         const rect = await el.boundingBox();
         if (rect) expect(rect.x + rect.width).toBeLessThanOrEqual(width + 0.5);
       }
       expect(await fits()).toBe(true);
       await shot(page, `2-tagged-${name}`);
       if (width === 390) {
-        // The heads-up for an agent that cannot be woken, alone.
+        // An agent that cannot be woken, alone: no switch.
         await box.fill('Queue it. ');
         await box.press('End');
         await tag(page, box, 'Codex', S.codex);
         await box.pressSequentially('the runbook needs the alert.');
-        await expect(page.locator('[data-tag-heads-up="not-woken"]')).toBeVisible();
+        await expect(page.locator('[data-tag-mode-words]')).toContainText("Codex isn't woken");
+        await expect(page.locator('[data-tag-mode-to]')).toHaveCount(0);
         await shot(page, `3-mcp-${name}`);
       }
       await page.goto(`${world.url}#thread=${world.tags.ids.t2}`);

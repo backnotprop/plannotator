@@ -8,15 +8,19 @@
  *  - The walk on a desktop through the Inbox's real viewers: a pick, a comment
  *    on the question's words, a comment on a line of EVALUATION.md, one Send,
  *    the replay, a circle on a screenshot, Artifacts, the film commented at a
- *    moment, compose to a session, and the person's own Inbox at step 10. Every
+ *    moment, compose to a session, "Make it yours" (step 10: theme, colours,
+ *    text size; "Connect agents next") and the person's own Inbox at step 11. Every
  *    comment box opens with the developer's real comment; nothing is written
  *    but the tour setting; the person's list is exactly as it was. Shots light
  *    and dark, one headless video.
  *  - Keyboard only; an iPhone in WebKit (taps, 44 px targets, the film
  *    comment); reduced motion and a stacked window.
- *  - Exit at steps 1 to 8 gives the Inbox back as it was; a real message
- *    mid-tour is a chip; Back never reopens the tour; step 9 counts as
+ *  - Exit at steps 1 to 10 gives the Inbox back as it was; a real message
+ *    mid-tour is a chip; Back never reopens the tour; steps 10 and 11 count as
  *    finished.
+ *  - "Make it yours": a pick shows at once and is saved, Skip puts back what
+ *    the step opened with, the keyboard reaches every control, and its title
+ *    takes focus without a ring after a click.
  *  - The fixture routes: read only, the film by Range, the notes as text.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -50,7 +54,10 @@ function startWorld(name: string): World {
   const env: Record<string, string> = {
     // The system's own tools only: never the agents installed on the machine running the spec.
     PATH: '/usr/bin:/bin',
+    // The test sandbox: no agent CLI is looked up at all, not even the ChatGPT or Codex app's own on macOS.
+    PLANNOTATOR_TEST_SANDBOX: root,
     HOME: home,
+    NO_ANON_PING: '1',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -297,8 +304,9 @@ interface WalkOptions {
 }
 
 /**
- * From the tour's first card to step `to` (1 to 9), doing each step's real action and keeping every
- * suggestion the boxes open with. Step 9 is the person's own Inbox.
+ * From the tour's first card to step `to` (1 to 11), doing each step's real action and keeping every
+ * suggestion the boxes open with. Step 10 is "Make it yours" (left with its Next, nothing picked); step 11 is the
+ * person's own Inbox.
  */
 async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<void> {
   const phone = options.phone ?? false;
@@ -337,7 +345,7 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('4-box');
   await keep('[data-comment-popover] textarea');
   await shot('04-comment');
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await at('5');
   await shot('05-file-tile');
   if (to === 5) return;
@@ -349,7 +357,7 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('5-box');
   await keep('[data-comment-popover] textarea');
   await shot('05-comment');
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await at('6');
   await shot('06-reply');
   if (to === 6) return;
@@ -375,9 +383,8 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await page.mouse.move(canvas.x + canvas.width * 0.55, canvas.y + canvas.height * 0.6, { steps: 8 });
   await page.mouse.up();
   await shot('07-markup');
+  // Enter adds the drawing (with the suggestion's words in the box) to the reply at once.
   await page.keyboard.press('Enter');
-  await at('7-drawn-unsaved');
-  await page.locator('[data-attachment-pane] [data-image-comment-save]').click();
   await at('7-drawn');
   await shot('07-circled');
   await press('[data-tour-next]');
@@ -449,8 +456,12 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('9-also');
   await shot('09-also');
   await press('[data-tour-next]');
+  await at('10-yours');
+  await shot('10-make-it-yours');
+  if (to === 10) return;
+  await press('[data-tour-next]');
   await expect(page.locator('[data-tour-exit="finish"]')).toBeVisible();
-  await shot('10-yours');
+  await shot('11-yours');
 }
 
 /** Routes the tour may ask for: its own read-only routes, the window's reads, the `tour` setting and the window's presence report. */
@@ -487,7 +498,7 @@ test('the walk on a desktop: the real viewers, compose and Artifacts; writes not
   const suggestions: string[] = [];
   const began = Date.now();
   shooting = 0;
-  await walk(page, 10, { suggestions, shot: (name) => shoot(page, `desktop-${name}`) });
+  await walk(page, 11, { suggestions, shot: (name) => shoot(page, `desktop-${name}`) });
   const seconds = (Date.now() - began - shooting) / 1000;
   expect(suggestions).toEqual(SUGGESTIONS);
   // Nothing of the tour reached the server but the tour setting.
@@ -522,11 +533,84 @@ test('keyboard only: Tab and Enter through the coach cards, focus never on the p
   await page.keyboard.press('Enter');
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '1');
   await focusKept(page);
+  // Reached by a key: the next card's title has focus and shows its ring (only a click or a tap keeps it quiet).
+  await expect(coach(page).locator('h2')).toBeFocused();
+  await expect(coach(page).locator('h2')).not.toHaveCSS('outline-style', 'none');
   // The thread's row by keyboard.
   await page.locator('[data-thread-id="tour-vscode"]').first().focus();
   await page.keyboard.press('Enter');
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '2');
   await focusKept(page);
+  expect(errors).toEqual([]);
+  await context.close();
+});
+
+test('"Make it yours": no ring on its title after a click; the keyboard picks and the window changes at once; Skip puts back what the step opened with', async ({ browser }) => {
+  const w = startWorld('yours');
+  const errors: string[] = [];
+  const { context, page } = await open(browser, w, errors);
+  const writes = writesOf(page);
+  const html = page.locator('html');
+  await page.locator('[data-tour-start]').click();
+  await pastIntro(page);
+  await page.evaluate(() => {
+    location.replace('#tour=9');
+  });
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '9');
+  await page.locator('[data-tour-forward]').click();
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '9-loop');
+  await page.locator('[data-tour-next]').click();
+  await page.locator('[data-tour-next]').click();
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 11');
+  await expect(page.locator('[data-tour-bar]')).toContainText('Your settings');
+  // Reached by a click: the title has focus (screen readers read it) and no ring.
+  const title = coach(page).locator('h2');
+  await expect(title).toHaveText('Make it yours');
+  await expect(title).toBeFocused();
+  await expect(title).toHaveCSS('outline-style', 'none');
+  await expect(page.locator('[data-tour-palette]')).toHaveCount(3);
+  // Under the colour sets, how many more Settings has (counted from the palette registry; the DOM test checks the count).
+  await expect(page.locator('[data-tour-more-colors]')).toHaveText(/^[1-9]\d* more in Settings$/);
+  // The Next button says what comes next.
+  await expect(page.locator('[data-tour-next]')).toHaveText('Connect agents next');
+  await shoot(page, 'make-it-yours-opened');
+  // A fresh machine opens on Match system, Plannotator, 14. The keyboard: one stop per group, the arrows pick.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-mode="system"] input')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('[data-tour-mode="dark"] input')).toBeChecked();
+  await expect(html).not.toHaveClass(/(^|\s)light(\s|$)/);
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-palette="plannotator"] input')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('[data-tour-palette="catppuccin"] input')).toBeChecked();
+  await expect(html).toHaveClass(/theme-catppuccin/);
+  // Under the colour sets, the "N more in Settings" link, then the text size.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-settings-link]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-settings] input[name="ib-tset-size"][value="14"]')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(html).toHaveCSS('--inbox-text-size', '15');
+  await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('dark catppuccin catppuccin 15');
+  // Dark was picked, so the shot is as it is on screen (shoot() switches the OS scheme, which an explicit Dark ignores).
+  await page.waitForTimeout(400);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: join(shots, 'make-it-yours-picked.png') });
+  // Then Skip and "Connect agents next", in that order.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-skip]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 11 of 11');
+  await expect(html).toHaveClass(/theme-plannotator(\s|$)/);
+  await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
+  await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('system plannotator plannotator 14');
+  await focusKept(page);
+  // What the step wrote: the theme, the text size and the tour setting, through the settings route only.
+  expect(writes.filter((r) => !r.startsWith('POST /api/inbox/settings'))).toEqual([]);
+  for (const r of writes) expect(r).toMatch(/"(tour|theme|text_size)"/);
   expect(errors).toEqual([]);
   await context.close();
 });
@@ -546,11 +630,12 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   await expect(coach(page).locator('[data-tour-your-turn]')).toHaveText('Your turn');
   // A click on the card's own words points at its target again.
   await coach(page).locator('h2').click();
-  await expect(page.locator('.ib-tour-again')).toHaveCount(1);
+  await expect(page.locator('.ib-tour-mark')).toHaveCount(1);
+  await expect(page.locator('.ib-tour-mark')).toHaveCSS('outline-style', 'solid');
   // The step's end, then the next step's card, for every step to 9; then step 9's end is the loop.
   const ends: Record<number, string> = { 1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: '8-open', 8: '9' };
   for (let n = 1; n <= 8; n++) {
-    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 10`);
+    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 11`);
     await page.locator('[data-tour-forward]').click();
     await expect(coach(page), `after step ${n}`).toHaveAttribute('data-tour-coach', ends[n]!);
     await focusKept(page);
@@ -577,7 +662,10 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   await expect(page.locator('[data-tour-forward]')).toHaveCount(0);
   await page.locator('[data-tour-next]').click();
   await page.locator('[data-tour-next]').click();
-  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 10');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 11');
+  // "Make it yours" asks for nothing: no Fast-forward, its Next goes on.
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+  await expect(page.locator('[data-tour-forward]')).toHaveCount(0);
   expect(writes.filter((r) => !r.startsWith('POST /api/inbox/settings'))).toEqual([]);
   expect(await ownList(w)).toBe(before);
   expect(errors).toEqual([]);
@@ -633,7 +721,7 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
     await big('[data-tour-exit]');
     await big('[data-tour-next]');
     const suggestions: string[] = [];
-    await walk(page, 10, {
+    await walk(page, 11, {
       phone: true,
       suggestions,
       shot: async (name) => {
@@ -656,6 +744,12 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
         if (name === '02-send') await big('[data-tour-warm-send]');
         if (name === '06-reply') await big('[data-tour-reply]');
         if (name === '08-answer') await big('[data-tour-next]');
+        if (name === '10-make-it-yours') {
+          for (const sel of ['[data-tour-skip]', '[data-tour-next]', '[data-tour-mode="dark"]', '[data-tour-palette="catppuccin"]', '[data-tour-settings] .ib-seg-o']) await big(sel);
+          // The three colour sets stay one row on a phone.
+          const tops = await page.locator('[data-tour-palette]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+          expect(new Set(tops).size).toBe(1);
+        }
         await shoot(page, `phone-${name}`);
       },
     });
@@ -664,6 +758,107 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
     expect(await ownList(w)).toBe(before);
     expect(errors).toEqual([]);
     await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+// The keyboard is a stand-in: an iPhone's readings of the visual viewport (see inbox-phone-compose-send.spec.ts), not a real one.
+test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and with it up (a tap on the message) Send is free; then "Make it yours" fits its buttons on one row', async () => {
+  const w = startWorld('phone-send');
+  const errors: string[] = [];
+  const browser = await webkit.launch({ args: [] });
+  const stand = (page: Page, height: number) =>
+    page.evaluate((height) => {
+      const vv = window.visualViewport!;
+      if (height) Object.defineProperty(vv, 'height', { configurable: true, get: () => document.documentElement.clientHeight - height });
+      else delete (vv as unknown as Record<string, unknown>).height;
+      vv.dispatchEvent(new Event('resize'));
+    }, height);
+  try {
+    for (const { width, height, keyboard } of [
+      { width: 320, height: 568, keyboard: 353 },
+      { width: 393, height: 659, keyboard: 402 },
+    ]) {
+      const { context, page } = await open(browser, w, errors, { ...devices['iPhone 15'], viewport: { width, height } });
+      const press = presser(page, true);
+      const at = (key: string) => expect(coach(page)).toHaveAttribute('data-tour-coach', key, { timeout: 15_000 });
+      const html = page.locator('html');
+      const field = page.locator('[data-compose] textarea');
+      const send = page.locator('[data-compose] .ib-cp-foot [data-compose-send]');
+      const sendFree = () =>
+        send.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return r.bottom <= window.visualViewport!.height + 0.5 && !!hit?.closest('[data-compose-send]');
+        });
+      await page.goto(`${w.url}#tour=9`);
+      await at('9');
+      await press('[data-open-compose]');
+      await at('9-open');
+      await press('[data-compose] [data-compose-to]');
+      await page.locator('[role="option"]').first().tap();
+      await at('9-to');
+
+      // The pick: focus on To, never on the message, so nothing raises a keyboard.
+      await expect(page.locator('[data-compose] [data-compose-to]')).toBeFocused();
+      await expect(field).not.toBeFocused();
+      expect(await sendFree(), `${width}: Send is free with the keyboard down`).toBe(true);
+      await expect(coach(page)).toBeVisible();
+
+      // A tap on the message raises it all the same: the card gives way, Send and Exit stay.
+      await field.focus();
+      await stand(page, keyboard);
+      await expect(html).toHaveAttribute('data-ib-keyboard', '');
+      await expect(coach(page)).toBeHidden();
+      await expect.poll(sendFree, { message: `${width}: Send is free with the keyboard up` }).toBe(true);
+      await expect(page.locator('[data-tour-bar-over] [data-tour-exit]')).toBeVisible();
+      await stand(page, 0);
+      await expect(html).not.toHaveAttribute('data-ib-keyboard', /.*/);
+      await expect(coach(page)).toBeVisible();
+
+      await stand(page, keyboard);
+      await expect(coach(page)).toBeHidden();
+      await send.tap();
+      await at('9-loop');
+
+      // "Make it yours" at this width: Skip and "Connect agents next" on one row, each one line and 44 px, inside the screen.
+      await press('[data-tour-next]');
+      await at('9-also');
+      await press('[data-tour-next]');
+      await at('10-yours');
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || (a.effect as KeyframeEffect | null)?.getComputedTiming().iterations === Infinity));
+      const buttons = await page.locator('[data-tour-skip], [data-tour-next]').evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          // The words' line boxes (text nodes only), and the drawn arrow beside them, not under them.
+          const rects: DOMRect[] = [];
+          for (const node of el.childNodes) {
+            if (node.nodeType !== Node.TEXT_NODE) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            rects.push(...[...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0));
+          }
+          const lines = new Set(rects.map((q) => Math.round(q.top))).size;
+          const icon = el.querySelector('svg')?.getBoundingClientRect();
+          const mid = icon ? icon.top + icon.height / 2 : null;
+          const besideWords = mid === null || rects.some((q) => mid >= q.top && mid <= q.bottom && icon!.left >= q.right - 0.5);
+          return { text: el.textContent, top: Math.round(r.top), right: r.right, width: r.width, height: r.height, lines, besideWords, clipped: el.scrollWidth > el.clientWidth + 0.5 };
+        }),
+      );
+      expect(buttons.map((b) => b.text), `${width}`).toEqual(['Skip', 'Connect agents next']);
+      expect(new Set(buttons.map((b) => b.top)).size, `${width}: one row`).toBe(1);
+      for (const b of buttons) {
+        expect(b.lines, `${width}: ${b.text} on one line`).toBe(1);
+        expect(b.besideWords, `${width}: ${b.text}'s arrow on the words' line`).toBe(true);
+        expect(b.clipped, `${width}: ${b.text} not cut`).toBe(false);
+        expect(b.height, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
+        expect(b.width, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
+        expect(b.right, `${width}: ${b.text} on the screen`).toBeLessThanOrEqual(width);
+      }
+      await context.close();
+    }
+    expect(errors).toEqual([]);
   } finally {
     await browser.close();
   }
@@ -691,7 +886,7 @@ test('reduced motion: no pulse, a shorter replay; a stacked window: the thread c
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '4');
   await selectWords(page, '[data-tour-message="ask"] .ib-body', PHRASE);
   await page.locator(toolbarComment).first().click();
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '5');
   await page.locator('[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="EVALUATION.md"]').click();
   // Stacked: the file covers the thread.
@@ -699,7 +894,7 @@ test('reduced motion: no pulse, a shorter replay; a stacked window: the thread c
   await shoot(page, 'stacked-05-file', ['light']);
   await selectWords(page, '[data-attachment-pane] .ib-docscroll', EV_LINE);
   await page.locator(toolbarComment).first().click();
-  await page.locator('[data-comment-popover] button', { hasText: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '6');
   await page.locator('[data-tour-reply]').filter({ visible: true }).first().click();
   const sent = Date.now();
@@ -726,10 +921,10 @@ test('Exit at every step gives the person’s Inbox back exactly as it was; a re
     await expect(page).toHaveURL(/#tour=1$/);
     await pastIntro(page);
   };
-  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     await enter();
     await walk(page, n);
-    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 10`);
+    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 11`);
     await page.locator('[data-tour-exit="exit"]').click();
     await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
     // Started in Settings: Exit returns to Settings, as the browser's Back (no new entry).
@@ -815,11 +1010,11 @@ test('leaving by the chip or the tour sidebar’s Settings: Back never reopens t
   await context.close();
 });
 
-test('step 10 and after a reload: every way out leaves the tour behind; from step 10 it counts as finished, How to allow opens Settings → General', async ({ browser }) => {
+test('step 11 and after a reload: every way out leaves the tour behind; from step 11 it counts as finished, How to allow opens Settings → General', async ({ browser }) => {
   const w = startWorld('step9');
   const first = await agentWrites(w, 'A first real message.', 'First one');
   const errors: string[] = [];
-  // The browser blocked notifications for this address: step 10 offers How to allow.
+  // The browser blocked notifications for this address: step 11 offers How to allow.
   const { context, page } = await open(browser, w, errors, {}, () => {
     if (window.Notification) Object.defineProperty(window.Notification, 'permission', { get: () => 'denied' });
   });
@@ -829,13 +1024,13 @@ test('step 10 and after a reload: every way out leaves the tour behind; from ste
     await expect(page).toHaveURL(/#tour=1$/);
     await pastIntro(page);
   };
-  // Reached by its address: step 10 is the person's own Inbox, whatever came before.
-  const toStep9 = async () => {
+  // Reached by its address: step 11 is the person's own Inbox, whatever came before.
+  const toStep11 = async () => {
     // In the tour's own history entry, as a step change is.
     await page.evaluate(() => {
-      location.replace('#tour=10');
+      location.replace('#tour=11');
     });
-    await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 10');
+    await expect(step(page)).toHaveAttribute('aria-label', 'Step 11 of 11');
   };
   const neverTheTour = async () => {
     await page.goBack();
@@ -852,7 +1047,7 @@ test('step 10 and after a reload: every way out leaves the tour behind; from ste
   const finishedAt = () => config(w).inboxTour?.finished_at ?? null;
 
   await fromSettings();
-  await toStep9();
+  await toStep11();
   const before = finishedAt();
   await page.getByRole('button', { name: 'How to allow' }).click();
   await expect(page).toHaveURL(/#settings\/general$/);
@@ -864,7 +1059,7 @@ test('step 10 and after a reload: every way out leaves the tour behind; from ste
 
   for (const row of ['[data-inbox-nav]', '.ib-setrow .ib-nav']) {
     await fromSettings();
-    await toStep9();
+    await toStep11();
     const was = finishedAt();
     await page.locator(row).first().click();
     await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
@@ -930,3 +1125,88 @@ test('the fixture routes: read only, embedded in the binary, the film by range, 
     expect(served.equals(readFileSync(join(content, name))), name).toBe(true);
   }
 });
+
+// The narrowest phones (the reviewer's 320 and 390 px probe, kept as a test): at 14 and at 15 px text, "Make it yours" stays
+// inside the screen, three tiles a row, no caption cut, 44 px targets, the buttons one line each.
+for (const width of [320, 390]) {
+  test(`"Make it yours" on a ${width} px phone, at 14 and 15 px text: inside the screen, tiles a row, 44 px, nothing cut`, async () => {
+    const w = startWorld(`yours${width}`);
+    const errors: string[] = [];
+    const browser = await webkit.launch({ args: [] });
+    try {
+      const { context, page } = await open(browser, w, errors, { ...devices['iPhone 15'], viewport: { width, height: width === 320 ? 568 : 844 }, colorScheme: 'light' });
+      await page.locator('[data-tour-start]').tap();
+      await pastIntro(page, 'tap');
+      await page.evaluate(() => location.replace('#tour=10'));
+      await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || (a.effect as KeyframeEffect | null)?.getComputedTiming().iterations === Infinity));
+      for (const size of ['14', '15']) {
+        if (size === '15') {
+          await page.locator('[data-tour-settings] input[name="ib-tset-size"][value="15"]').tap({ force: true });
+          await expect(page.locator('html')).toHaveCSS('--inbox-text-size', '15');
+          await page.waitForTimeout(300);
+        }
+        const m = await page.evaluate(async () => {
+          const box = (e: Element) => {
+            const b = e.getBoundingClientRect();
+            return { left: b.left, right: b.right, top: Math.round(b.top), width: b.width, height: b.height };
+          };
+          const all = (s: string) => [...document.querySelectorAll(s)].map(box);
+          const card = document.querySelector('[data-tour-coach]') as HTMLElement;
+          // The card comes in with a 160 ms scale (ib-pm-in): measure it at rest, with no transform on it or above it, read
+          // from fresh style. Without the read, WebKit on Linux CI can hand back boxes from a frame still scaled (43.8 px).
+          const scaled = () => {
+            for (let e: Element | null = card; e; e = e.parentElement) if (getComputedStyle(e).transform !== 'none') return true;
+            return false;
+          };
+          for (let frame = 0; frame < 120 && scaled(); frame++) await new Promise((r) => requestAnimationFrame(r));
+          if (scaled()) return null;
+          const wordLines = (el: Element) => {
+            const tops = new Set<number>();
+            for (const node of el.childNodes) {
+              if (node.nodeType !== Node.TEXT_NODE) continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              for (const q of range.getClientRects()) if (q.width > 0 && q.height > 0) tops.add(Math.round(q.top));
+            }
+            return tops.size;
+          };
+          return {
+            docOverflowX: document.documentElement.scrollWidth - innerWidth,
+            cardOverflowX: card.scrollWidth - card.clientWidth,
+            card: box(card),
+            modes: all('[data-tour-mode]'),
+            pals: all('[data-tour-palette]'),
+            sizes: all('[data-tour-settings] .ib-seg-o'),
+            buttons: all('[data-tour-skip], [data-tour-next]'),
+            buttonLines: [...document.querySelectorAll('[data-tour-skip], [data-tour-next]')].map(wordLines),
+            cut: [...document.querySelectorAll('.ib-tset-cap, .ib-tset-more')].filter((e) => (e as HTMLElement).scrollWidth > (e as HTMLElement).clientWidth + 0.5).map((e) => e.textContent),
+          };
+        });
+        const at = `${width} px, ${size} px text`;
+        if (!m) throw new Error(`${at}: the card was still scaled after 120 frames`);
+        expect(m.docOverflowX, `${at}: the page`).toBeLessThanOrEqual(0);
+        expect(m.cardOverflowX, `${at}: the card`).toBeLessThanOrEqual(0);
+        expect(m.card.left, at).toBeGreaterThanOrEqual(0);
+        expect(m.card.right, at).toBeLessThanOrEqual(width);
+        expect(new Set(m.modes.map((b) => b.top)).size, `${at}: the theme tiles one row`).toBe(1);
+        expect(new Set(m.pals.map((b) => b.top)).size, `${at}: the colour tiles one row`).toBe(1);
+        expect(new Set(m.sizes.map((b) => b.top)).size, `${at}: the sizes one row`).toBe(1);
+        expect(new Set(m.buttons.map((b) => b.top)).size, `${at}: Skip and Next one row`).toBe(1);
+        expect(m.buttonLines, `${at}: each button one line`).toEqual([1, 1]);
+        expect(m.cut, `${at}: nothing cut`).toEqual([]);
+        for (const b of [...m.modes, ...m.pals, ...m.sizes, ...m.buttons]) {
+          expect(b.height, at).toBeGreaterThanOrEqual(44);
+          expect(b.width, at).toBeGreaterThanOrEqual(44);
+          expect(b.left, at).toBeGreaterThanOrEqual(m.card.left);
+          expect(b.right, at).toBeLessThanOrEqual(m.card.right);
+        }
+        await shoot(page, `phone-${width}-make-it-yours-${size}`, ['light']);
+      }
+      expect(errors).toEqual([]);
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  });
+}

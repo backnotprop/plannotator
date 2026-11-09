@@ -8,6 +8,8 @@
 /* Tell Tailwind where to scan for classes */
 @source "../ui/components/**/*.tsx";
 @source "../ui/hooks/**/*.ts";
+/* The shared chat window has no host in this app, so its classes stay out of this stylesheet. */
+@source not "../ui/components/chat/**";
 @source "./*.tsx";
 @source "./components/**/*.tsx";
 @source "../guide-viewer/**/*.tsx";
@@ -452,12 +454,10 @@ diffs-container {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.25rem 0 1rem;
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.65);
+  padding: 0.25rem 0 0.5rem;
 }
 .call-flow-header > div:first-child { min-width: 0; flex: 1 1 14rem; }
 
-.call-flow-eyebrow,
 .call-flow-empty-kicker {
   margin-bottom: 0.25rem;
   color: var(--primary);
@@ -471,7 +471,7 @@ diffs-container {
 .call-flow-header h2 {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   letter-spacing: -0.015em;
 }
@@ -480,6 +480,45 @@ diffs-container {
   margin: 0.25rem 0 0;
   color: var(--muted-foreground);
   font-size: 0.75rem;
+}
+
+/* One summary line under the title: "14 new · 1 removed · 4 files · 2 entries". */
+.call-flow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.875rem;
+  font-family: var(--font-sans);
+}
+.call-flow-summary-item,
+.call-flow-legend-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.call-flow-summary-changed {
+  color: var(--foreground);
+  font-weight: 550;
+}
+
+/* Status marker: a dot, shared by the rows, the summary and the legend.
+   Unchanged context is a hollow ring; new is green, removed is red. */
+.call-flow-marker {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.25px oklch(from var(--muted-foreground) l c h / 0.7);
+}
+.call-flow-marker-added {
+  background: var(--success);
+  box-shadow: none;
+}
+.call-flow-marker-removed {
+  background: var(--destructive);
+  box-shadow: none;
 }
 
 .call-flow-header-actions {
@@ -571,26 +610,32 @@ diffs-container {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.45);
+  padding: 0.25rem 0 0.5rem;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
   color: var(--muted-foreground);
+  font-family: var(--font-sans);
   font-size: 0.6875rem;
 }
 
-.call-flow-legend b {
-  display: inline-block;
-  width: 1.25ch;
-  font-weight: 700;
-}
-
 .call-flow-legend-hint { margin-left: auto; }
-.call-flow-status-added { color: var(--success); }
-.call-flow-status-removed { color: var(--destructive); }
 
+/* Call paths as cards. Row geometry lives in these variables so the tree
+   lines always meet the markers: a row at depth d puts its marker centre at
+   d * indent + base + toggle + marker / 2. Every mode must keep
+   indent >= toggle + marker / 2, or a child's toggle cell starts left of its
+   caller's line and the elbow collapses (CallFlowTreeView.geometry.test.ts). */
 .call-flow-trees {
+  --call-flow-indent: 22px;
+  --call-flow-base: 8px;
+  --call-flow-toggle: 14px;
+  --call-flow-marker-cell: 14px;
+  --call-flow-row-height: 30px;
+  --call-flow-line: oklch(from var(--muted-foreground) l c h / 0.32);
+  --call-flow-dim: oklch(from var(--muted-foreground) l c h / 0.78);
   display: grid;
-  gap: 0.875rem;
-  padding-top: 0.875rem;
+  gap: 1.25rem;
+  padding-top: 0.5rem;
+  font-size: 0.78125rem;
 }
 
 .call-flow-tree-toolbar {
@@ -647,9 +692,12 @@ diffs-container {
   }
 }
 
+/* Each entry point is a card. */
 .call-flow-entry {
-  overflow: hidden;
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.6);
+  border: 1px solid oklch(from var(--border) l c h / 0.8);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 1px 2px oklch(from var(--foreground) l c h / 0.04);
   content-visibility: auto;
   contain-intrinsic-block-size: auto 20rem;
 }
@@ -658,46 +706,65 @@ diffs-container {
   display: flex;
   width: 100%;
   align-items: center;
-  min-height: 2rem;
+  min-height: 2.5rem;
   gap: 0.5rem;
   border: 0;
+  border-radius: var(--radius-lg);
   padding: 0 0.75rem;
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.58);
-  background: oklch(from var(--muted) l c h / 0.2);
+  background: transparent;
   color: inherit;
   font: inherit;
+  font-family: var(--font-sans);
   text-align: left;
   cursor: pointer;
 }
+.call-flow-entry-header[aria-expanded="true"] {
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.6);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
 
+.call-flow-chevron { transition: transform 120ms ease; }
 .call-flow-entry-mark {
-  display: grid;
-  width: 1rem;
-  place-items: center;
-  color: var(--primary);
+  flex: none;
+  color: var(--muted-foreground);
+}
+.call-flow-entry-header[aria-expanded="true"] .call-flow-entry-mark,
+.call-flow-expand[aria-expanded="true"] .call-flow-chevron { transform: rotate(90deg); }
+.call-flow-entry-kicker {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .call-flow-entry-label {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-family: var(--font-sans);
-  font-weight: 550;
+  font-size: 0.8125rem;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The quiet "N changed" count. */
 .call-flow-entry-meta {
+  flex: none;
   margin-left: auto;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 999px;
+  background: var(--muted);
   color: var(--muted-foreground);
-  font-size: 0.625rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 0.6875rem;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
 .call-flow-entry-header:focus-visible {
   outline: 1px solid var(--ring);
   outline-offset: -2px;
 }
 @media (hover: hover) and (pointer: fine) {
-  .call-flow-entry-header:hover { background: oklch(from var(--muted) l c h / 0.35); }
+  .call-flow-entry-header:hover { background: oklch(from var(--foreground) l c h / 0.04); }
 }
 
 .call-flow-tree,
@@ -706,15 +773,16 @@ diffs-container {
   padding: 0;
   list-style: none;
 }
+.call-flow-tree { padding: 0.375rem 0 0.5rem; }
+.call-flow-node { position: relative; }
 
 .call-flow-row {
   position: relative;
   display: grid;
-  grid-template-columns: 1.375rem 1.375rem minmax(12rem, 1fr) minmax(12rem, 24rem);
-  align-items: stretch;
-  min-height: 2.25rem;
-  padding-left: calc(var(--call-flow-depth) * 1.25rem + 0.375rem);
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.35);
+  grid-template-columns: var(--call-flow-toggle) var(--call-flow-marker-cell) minmax(0, 1fr) minmax(0, max-content);
+  align-items: center;
+  min-height: var(--call-flow-row-height);
+  padding-left: calc(var(--call-flow-depth) * var(--call-flow-indent) + var(--call-flow-base));
 }
 .call-flow-row.call-flow-row-search-current {
   background: oklch(from var(--warning) l c h / 0.08);
@@ -727,47 +795,45 @@ diffs-container {
   color: inherit;
 }
 
-.call-flow-file-boundary {
-  display: grid;
-  grid-template-columns: max-content max-content minmax(0, 1fr);
-  min-height: 1.75rem;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.75rem 0.25rem calc(var(--call-flow-depth) * 1.25rem + 0.75rem);
-  border-top: 1px solid oklch(from var(--border) l c h / 0.65);
-  border-bottom: 1px solid oklch(from var(--border) l c h / 0.3);
-  background: oklch(from var(--muted) l c h / 0.28);
+/* Tree lines: a rounded elbow from the caller's marker into each child row,
+   and a rail on to the next sibling. Leaves carry the elbow through the empty
+   toggle cell to their marker; a parent shows its chevron there instead. */
+.call-flow-children > .call-flow-node::before,
+.call-flow-children > .call-flow-node:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: calc((var(--call-flow-row-height) - 8px) / -2);
+  left: calc((var(--call-flow-depth) - 1) * var(--call-flow-indent) + var(--call-flow-base) + var(--call-flow-toggle) + var(--call-flow-marker-cell) / 2 - 0.5px);
+  pointer-events: none;
 }
-.call-flow-file-boundary-label {
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: 0.5625rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.call-flow-children > .call-flow-node::before {
+  width: calc(var(--call-flow-indent) - var(--call-flow-toggle) - var(--call-flow-marker-cell) / 2 + 0.5px);
+  height: calc(var(--call-flow-row-height) / 2 + (var(--call-flow-row-height) - 8px) / 2);
+  border-bottom: 1px solid var(--call-flow-line);
+  border-left: 1px solid var(--call-flow-line);
+  border-bottom-left-radius: 7px;
 }
-.call-flow-file-boundary-name {
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 0.625rem;
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.call-flow-children > .call-flow-node:not(:last-child)::after {
+  bottom: 0;
+  width: 1px;
+  background: var(--call-flow-line);
 }
-.call-flow-file-boundary-directory {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 0.625rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.call-flow-children .call-flow-expand-leaf { position: relative; }
+.call-flow-children .call-flow-expand-leaf::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 1px;
+  left: 0;
+  border-top: 1px solid var(--call-flow-line);
 }
 
 .call-flow-row-selectable::after {
   content: '';
   position: absolute;
   z-index: 0;
-  inset: 0.1875rem;
+  inset: 1px 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   pointer-events: none;
@@ -793,20 +859,21 @@ diffs-container {
   z-index: 1;
 }
 
-.call-flow-node:last-child > .call-flow-row { border-bottom: 0; }
-.call-flow-row-added { background: oklch(from var(--success) l c h / 0.045); }
-.call-flow-row-removed { background: oklch(from var(--destructive) l c h / 0.04); }
 .call-flow-row-focused {
   box-shadow: inset 2px 0 0 var(--primary);
-  background: oklch(from var(--primary) l c h / 0.07);
+  background: oklch(from var(--primary) l c h / 0.06);
 }
 
+/* Positioned so a coarse pointer's larger touch area (::after) is placed
+   around the chevron, not against the row. */
 .call-flow-expand {
+  position: relative;
   display: grid;
-  width: 1.375rem;
-  min-height: 2.25rem;
+  width: var(--call-flow-toggle);
+  min-height: var(--call-flow-row-height);
   place-items: center;
   border: 0;
+  border-radius: 3px;
   padding: 0;
   background: transparent;
   color: var(--muted-foreground);
@@ -815,23 +882,22 @@ diffs-container {
 
 .call-flow-status {
   display: grid;
-  min-height: 2.25rem;
+  min-height: var(--call-flow-row-height);
   place-items: center;
-  color: var(--muted-foreground);
-  font-weight: 700;
+  pointer-events: none;
 }
-
-.call-flow-status-added { color: var(--success); }
-.call-flow-status-removed { color: var(--destructive); }
+/* A changed step's dot carries a soft halo. */
+.call-flow-row .call-flow-marker-added { box-shadow: 0 0 0 3px oklch(from var(--success) l c h / 0.16); }
+.call-flow-row .call-flow-marker-removed { box-shadow: 0 0 0 3px oklch(from var(--destructive) l c h / 0.16); }
 
 .call-flow-node-target {
   display: flex;
   align-items: center;
   min-width: 0;
-  min-height: 2.25rem;
+  min-height: var(--call-flow-row-height);
   gap: 0.625rem;
   border: 0;
-  padding: 0 0.75rem 0 0.375rem;
+  padding: 0 0.75rem 0 0.5rem;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -843,10 +909,13 @@ diffs-container {
 .call-flow-node-label {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.call-flow-node-label { font-weight: 450; }
+.call-flow-node-branch-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .call-flow-node-kind {
   padding: 0.0625rem 0.3125rem;
   border-radius: var(--radius-sm);
@@ -854,55 +923,95 @@ diffs-container {
   color: var(--muted-foreground);
   font-size: 0.625rem;
 }
+
+/* The called name leads; the receiver and the arguments recede, and the
+   arguments truncate first. */
+.call-flow-signature {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.call-flow-signature-receiver {
+  flex: 0 1 auto;
+  min-width: 3ch;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+}
+.call-flow-signature-name {
+  flex: none;
+  color: var(--foreground);
+  font-weight: 600;
+}
+/* The large shrink weight takes the arguments down to nothing before the
+   receiver gives up any width. */
+.call-flow-signature-rest {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--call-flow-dim);
+  text-overflow: ellipsis;
+}
+.call-flow-row-removed .call-flow-signature-name,
+.call-flow-row-removed .call-flow-node-branch-label {
+  color: var(--destructive);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.call-flow-row-removed .call-flow-signature-receiver,
+.call-flow-row-removed .call-flow-signature-rest { opacity: 0.75; }
+
 .call-flow-node-location,
 .call-flow-node-location-placeholder {
   min-width: 0;
-  min-height: 2.25rem;
+  min-height: var(--call-flow-row-height);
 }
 .call-flow-node-location {
   display: grid;
+  max-width: 18rem;
   align-content: center;
-  justify-items: start;
-  gap: 0.0625rem;
+  justify-items: end;
   overflow: hidden;
   border: 0;
-  padding: 0.25rem 0.625rem;
+  padding: 0 0.625rem;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
-  text-align: left;
   cursor: pointer;
 }
 .call-flow-node-location:disabled { cursor: default; }
-.call-flow-node-location-main {
+
+/* file:line chip: strong where the call moves into another file, faint where
+   it stays in its caller's file. */
+.call-flow-node-chip {
   display: flex;
   min-width: 0;
   max-width: 100%;
   align-items: baseline;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 5px;
+  font-size: 0.92em;
 }
 .call-flow-node-file {
   min-width: 0;
   overflow: hidden;
-  color: var(--foreground);
-  font-size: 0.6875rem;
-  font-weight: 500;
+  color: var(--call-flow-dim);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .call-flow-node-line {
   flex: none;
-  color: var(--primary);
-  font-size: 0.625rem;
+  color: var(--call-flow-dim);
 }
-.call-flow-node-directory {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 0.625rem;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.call-flow-node-location-cross-file .call-flow-node-chip {
+  background: var(--muted);
+  box-shadow: inset 0 0 0 1px oklch(from var(--border) l c h / 0.7);
+}
+.call-flow-node-location-cross-file .call-flow-node-file {
+  color: var(--foreground);
+  font-weight: 500;
 }
 
 .call-flow-expand:focus-visible,
@@ -916,9 +1025,14 @@ diffs-container {
 
 @media (hover: hover) and (pointer: fine) {
   .call-flow-row:hover {
-    background: oklch(from var(--foreground) l c h / 0.045);
+    background: oklch(from var(--foreground) l c h / 0.035);
   }
-  .call-flow-node-location:not(:disabled):hover .call-flow-node-file { color: var(--primary); }
+  .call-flow-node-location:not(:disabled):hover .call-flow-node-file,
+  .call-flow-node-location:not(:disabled):hover .call-flow-node-line {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 }
 
 .call-flow-empty {
@@ -1368,40 +1482,30 @@ diffs-container {
 }
 
 .call-flow-trees-compact {
-  gap: 0.375rem;
+  --call-flow-indent: 19px;
+  --call-flow-base: 4px;
+  --call-flow-toggle: 12px;
+  --call-flow-marker-cell: 12px;
+  --call-flow-row-height: 26px;
+  gap: 0.5rem;
   padding: 0 0.375rem 0.375rem;
   font-size: 0.6875rem;
 }
 
 .call-flow-trees-compact .call-flow-entry-header {
-  min-height: 1.75rem;
+  min-height: 2rem;
   padding-inline: 0.5rem;
 }
 
 .call-flow-trees-compact .call-flow-entry-meta { display: none; }
-.call-flow-trees-compact .call-flow-row {
-  grid-template-columns: 1.375rem 1.375rem minmax(9rem, 1fr) minmax(8rem, 14rem);
-  min-height: 1.875rem;
-  padding-left: calc(var(--call-flow-depth) * 1rem + 0.25rem);
-}
-.call-flow-trees-compact .call-flow-expand,
-.call-flow-trees-compact .call-flow-status,
-.call-flow-trees-compact .call-flow-node-target,
-.call-flow-trees-compact .call-flow-node-location,
-.call-flow-trees-compact .call-flow-node-location-placeholder {
-  min-height: 1.875rem;
-}
+.call-flow-trees-compact .call-flow-tree { padding-block: 0.25rem; }
 .call-flow-trees-compact .call-flow-node-target {
   gap: 0.375rem;
   padding-right: 0.375rem;
 }
 .call-flow-trees-compact .call-flow-node-location {
-  padding: 0.125rem 0.375rem;
-}
-.call-flow-trees-compact .call-flow-file-boundary {
-  min-height: 1.5rem;
-  padding-block: 0.125rem;
-  padding-left: calc(var(--call-flow-depth) * 1rem + 0.625rem);
+  max-width: 14rem;
+  padding: 0 0.375rem;
 }
 .call-flow-trees-compact .call-flow-tree-toolbar {
   position: sticky;
@@ -1596,10 +1700,18 @@ diffs-container {
     min-width: 2.75rem;
     min-height: 2.75rem;
   }
-  .call-flow-row { grid-template-columns: 2.75rem 1.375rem minmax(0, 1fr) minmax(10rem, 20rem); }
-  .call-flow-expand,
-  .call-flow-node-target,
-  .call-flow-node-location,
+  .call-flow-trees,
+  .call-flow-trees-compact { --call-flow-row-height: 2.75rem; }
+  /* The toggle cell keeps its width so the tree lines hold; the button's
+     touch area grows over the indent and the (decorative) marker cell. */
+  button.call-flow-expand::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: calc(-1 * var(--call-flow-marker-cell));
+    bottom: 0;
+    width: 2.75rem;
+  }
   .call-flow-file-badge,
   .call-flow-open-dock,
   .call-flow-view-switch button,
@@ -1610,23 +1722,16 @@ diffs-container {
   .call-flow-raw-toolbar button,
   .call-flow-search input { min-height: 2.75rem; }
   .call-flow-search input { font-size: 1rem; }
-  .call-flow-expand { width: 2.75rem; }
 }
 
 @media (max-width: 42rem) {
   .call-flow-header { align-items: stretch; flex-direction: column; }
+  /* In a column the 14rem basis would be a height. */
+  .call-flow-header > div:first-child { flex: none; }
   .call-flow-header-actions { align-self: stretch; justify-content: space-between; margin-left: 0; }
   .call-flow-legend-hint { width: 100%; margin-left: 0; }
-  .call-flow-row { grid-template-columns: 1.375rem 1.375rem minmax(0, 1fr); }
   .call-flow-node-kind { display: none; }
-  .call-flow-node-location,
-  .call-flow-node-location-placeholder {
-    grid-column: 3;
-    min-height: 1.75rem;
-    padding-top: 0;
-  }
-  .call-flow-node-directory { display: none; }
-  .call-flow-file-boundary-directory { display: none; }
+  .call-flow-node-location { max-width: 9rem; padding-inline: 0.375rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1637,6 +1742,7 @@ diffs-container {
   .call-flow-install-cta { transition: none; }
   .call-flow-install-cta:active { transform: none; }
   .call-flow-row-selectable::after { transition: none; }
+  .call-flow-chevron { transition: none; }
 }
 
 /* Search result highlight in sidebar */
@@ -2317,4 +2423,272 @@ diffs-container {
 .md-compact,
 .review-comment-markdown {
   overflow-wrap: anywhere;
+}
+
+/* =====================================================
+   The code review sidebar (approved design record
+   "review-sidebar-aligned"). Two left edges for the whole panel: containers
+   (row fills, the Go to file field, the pills) on x = 8, content (icons,
+   chevrons, tab text, the sentence, the progress words) on x = 16; labels on
+   x = 34. Numbers in two right-aligned columns ending on the row's right
+   edge. One spacing scale: 12 px between sections, 8 or 4 between related
+   rows, 28 px rows touching. One line: the tabs' track (plus the sticky
+   block's edge while files scroll under it). Selected and pressed states are
+   a quiet grey fill: no coloured bars, no added borders, glows or gradients.
+   Unlayered on purpose: these win over the shared .file-tree-item rules
+   (theme.css) and the Tailwind utilities in the rows.
+   ===================================================== */
+.review-sidebar {
+  --sidebar-fill-faint: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --sidebar-line: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --sidebar-text-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--background));
+  background: var(--background);
+  border-right-color: color-mix(in oklab, var(--border) 50%, transparent);
+}
+
+/* The tools and progress rows stuck over the list: a hairline only while
+   files are scrolled under them. */
+.review-sticky-tools {
+  transition: box-shadow 150ms ease-out;
+}
+.review-sticky-tools[data-stuck] {
+  box-shadow: 0 1px 0 var(--sidebar-line);
+}
+/* Keep a row brought into view clear of the sticky block. */
+.review-sidebar :is(.file-tree-item, .review-folder-row, .panel-section-heading) {
+  scroll-margin-top: 64px;
+}
+
+/* File rows: 28 px, touching; the selected row a grey fill. A row with
+   comments or a staged file keeps no tint (its badge and + say it). */
+.review-sidebar .file-tree-item {
+  min-height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-right: 8px;
+  gap: 6px;
+  border-radius: 6px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.review-sidebar .file-tree-item.has-annotations,
+.review-sidebar .file-tree-item.staged {
+  background: transparent;
+}
+.review-sidebar .file-tree-item:hover {
+  background: var(--sidebar-fill);
+  color: var(--foreground);
+}
+.review-sidebar .file-tree-item.scroll-active {
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+.review-sidebar .file-tree-item.active,
+.review-sidebar .file-tree-item.active.has-annotations,
+.review-sidebar .file-tree-item.staged.active {
+  background: var(--sidebar-fill-strong);
+  color: var(--foreground);
+}
+.review-sidebar .file-tree-item.active .stage-plus:not(:hover) {
+  border-color: var(--border);
+}
+.review-sidebar .file-tree-item:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+
+/* A file row's lead: [viewed][git add][letter] name [badges]. The room the
+   12 px indent costs comes out of the gaps around the change letter and the
+   comment badge, so names keep their width. */
+.review-file-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.review-change-letter {
+  display: flex;
+  flex-shrink: 0;
+  margin: 0 -2px;
+}
+.review-file-row-main > .truncate ~ * {
+  margin-left: -2px;
+}
+
+/* 24 px targets for the 16 px Viewed and Git add controls (WCAG 2.2): the
+   hit area grows 4 px each way, and 2 px more space keeps the two from
+   overlapping. */
+.review-sidebar .file-tree-item :is([role="checkbox"], .stage-plus) {
+  position: relative;
+}
+.review-sidebar .file-tree-item :is([role="checkbox"], .stage-plus)::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.review-sidebar .file-tree-item [role="checkbox"] {
+  margin-right: 2px;
+}
+
+/* The +/- number columns (CountColumns). The panel sets the widths from its
+   widest numbers (--count-add-w / --count-del-w). */
+.review-count-columns {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--count-add-w, 3ch), max-content)
+    minmax(var(--count-del-w, 3ch), max-content);
+  column-gap: 4px;
+  justify-items: end;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.review-count-columns[data-count-columns="quiet"],
+.review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions),
+.review-kind-viewed {
+  color: var(--sidebar-text-tertiary);
+}
+.review-kind-viewed {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* All files' "changed on disk" dot on a changed row: just left of the + column,
+   whose width the panel sets. 11 px so `ch` in the widths is the numbers' ch.
+   Without numbers (a narrow panel) it takes their place. */
+.review-on-disk-dot {
+  font-size: 11px;
+  right: calc(8px + var(--count-del-w, 3ch) + 4px + var(--count-add-w, 3ch) + 6px);
+}
+.review-sidebar[data-compact-rows] .review-on-disk-dot {
+  right: 8px;
+}
+/* The name ends before the dot instead of running under it. */
+[data-repo-changed]:has(> .review-on-disk-dot) .review-file-row-main {
+  padding-right: 10px;
+}
+
+/* Folder rows of the Changes tree: the chevron on the content edge, the name
+   on the label edge; tertiary grey, lighter than a group heading. */
+.review-folder-row {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--sidebar-text-tertiary);
+  transition: background-color 120ms, color 120ms;
+}
+.review-folder-row:hover {
+  background: var(--sidebar-fill);
+  color: var(--foreground);
+}
+.review-folder-row:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+
+/* Group headings (PanelSectionHeader): flush, heavier and darker than
+   folders. The chevron after the label shows on a folded group, on hover and
+   on keyboard focus, and always on touch screens. */
+.panel-section-heading {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  color: color-mix(in oklab, var(--foreground) 78%, var(--background));
+  transition: background-color 120ms, color 120ms;
+}
+.panel-section-heading:hover {
+  background: var(--sidebar-fill);
+  color: var(--foreground);
+}
+.panel-section-heading:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+.panel-heading-icon {
+  width: 12px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  color: var(--sidebar-text-tertiary);
+}
+.panel-section-heading:hover .panel-heading-icon {
+  color: var(--muted-foreground);
+}
+.panel-heading-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+.panel-heading-chevron {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  margin-left: -2px;
+  color: var(--sidebar-text-tertiary);
+  opacity: 0;
+  transform: rotate(90deg);
+  transition: opacity 120ms, transform 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+.panel-section-heading[data-collapsed] .panel-heading-chevron {
+  opacity: 1;
+  transform: none;
+}
+.panel-section-heading:is(:hover, :focus-visible) .panel-heading-chevron {
+  opacity: 1;
+  color: var(--muted-foreground);
+}
+@media (hover: none) {
+  .panel-heading-chevron {
+    opacity: 1;
+  }
+}
+
+/* A narrow panel (COMPACT_ROWS_WIDTH): headings, folders and files drop their
+   numbers so names keep the room; All changes keeps its totals, the
+   heading's spoken name keeps its numbers, and the progress line wraps
+   between its parts. */
+.review-sidebar[data-compact-rows] :is(.file-tree-item, .review-folder-row) > .review-count-columns,
+.review-sidebar[data-compact-rows] .panel-section-heading [data-kind-counts],
+.review-sidebar[data-compact-rows] [data-progress-dot] {
+  display: none;
+}
+
+/* Groups: 12 px between them. */
+.review-panel-group + .review-panel-group {
+  margin-top: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-sticky-tools,
+  .review-folder-row,
+  .panel-section-heading,
+  .panel-heading-chevron {
+    transition: none;
+  }
 }

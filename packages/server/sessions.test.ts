@@ -1,12 +1,21 @@
 /**
  * The session registry: writes are atomic, and the read-only lister the
- * update advert runs on every page payload never deletes a file.
+ * update advert runs on every page payload never deletes a file. OpenCode's
+ * in-process servers are listed apart: the update checks never see them, and
+ * no entry outlives its server.
  */
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listLiveSessions, listSessions, registerSession, type SessionInfo } from "./sessions";
+import {
+  listInProcessSessions,
+  listLiveSessions,
+  listSessions,
+  registerInProcessSession,
+  registerSession,
+  type SessionInfo,
+} from "./sessions";
 
 let dataDir: string;
 let saved: string | undefined;
@@ -71,4 +80,100 @@ test("registerSession never throws when the data dir can't be written (a file in
   writeFileSync(blocked, "x");
   process.env.PLANNOTATOR_DATA_DIR = blocked;
   expect(() => registerSession(info(process.pid))).not.toThrow();
+});
+
+describe("in-process sessions (OpenCode)", () => {
+  const opencodeDir = () => join(dataDir, "sessions", "opencode");
+  const entry = (port: number) => ({
+    port,
+    url: `http://localhost:${port}`,
+    mode: "review" as const,
+    project: "p",
+    startedAt: new Date().toISOString(),
+    label: "review-p",
+  });
+  const serve = () => Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("ok") });
+
+  test("listed while its server answers; the update checks' readers never see it", async () => {
+    const server = serve();
+    try {
+      const unlist = registerInProcessSession("opencode", entry(server.port));
+      // listSessions and listLiveSessions read what every released binary
+      // reads (the top folder's *.json), so an older binary skips it too.
+      expect(listSessions()).toEqual([]);
+      expect(listLiveSessions()).toEqual([]);
+      expect(readdirSync(opencodeDir())).toEqual([`${process.pid}-${server.port}.json`]);
+      expect(await listInProcessSessions("opencode")).toMatchObject([{ pid: process.pid, port: server.port, host: "opencode" }]);
+
+      unlist();
+      expect(readdirSync(opencodeDir())).toEqual([]);
+      expect(() => unlist()).not.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a stale entry is dropped and removed: its server stopped, its process gone, or unreadable", async () => {
+    const stopped = serve();
+    registerInProcessSession("opencode", entry(stopped.port));
+    stopped.stop(true);
+
+    const live = serve();
+    try {
+      const dead = deadPid();
+      writeFileSync(join(opencodeDir(), `${dead}-${live.port}.json`), JSON.stringify({ ...entry(live.port), pid: dead, host: "opencode" }));
+      writeFileSync(join(opencodeDir(), "1-2.json"), '{"pid": 1, "port"');
+
+      expect(await listInProcessSessions("opencode")).toEqual([]);
+      expect(readdirSync(opencodeDir())).toEqual([]);
+    } finally {
+      live.stop(true);
+    }
+  });
+
+  test("registering removes entries whose process is gone, and keeps live ones, without waiting for a list", () => {
+    mkdirSync(opencodeDir(), { recursive: true });
+    const write = (pid: number, port: number) =>
+      writeFileSync(join(opencodeDir(), `${pid}-${port}.json`), JSON.stringify({ ...entry(port), pid, host: "opencode" }));
+    write(deadPid(), 1);
+    write(process.ppid, 3);
+    // pid 1 belongs to root: kill(1, 0) answers EPERM for anyone else, which is alive.
+    if (process.platform !== "win32") write(1, 4);
+    const unlist = registerInProcessSession("opencode", entry(2));
+    const kept = [`${process.pid}-2.json`, `${process.ppid}-3.json`, ...(process.platform !== "win32" ? ["1-4.json"] : [])];
+    expect(readdirSync(opencodeDir()).sort()).toEqual(kept.sort());
+    unlist();
+  });
+
+  test("the process's exit removes its entries; a killed process's entry is dropped by the next list", async () => {
+    const script = [
+      `import { registerInProcessSession } from ${JSON.stringify(join(import.meta.dir, "sessions.ts"))};`,
+      `const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("ok") });`,
+      `registerInProcessSession("opencode", { ...${JSON.stringify(entry(0))}, port: server.port });`,
+      `console.log("ready");`,
+      `if (process.argv.includes("--exit")) process.exit(0);`,
+    ].join("\n");
+    const run = (arg: string) =>
+      Bun.spawn([process.execPath, "-e", script, "--", arg], {
+        env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_INBOX_CONNECT: "0", PLANNOTATOR_UPDATE_CHECK: "0" },
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+
+    const exits = run("--exit");
+    expect(await exits.exited).toBe(0);
+    expect(readdirSync(opencodeDir())).toEqual([]);
+
+    const killed = run("--stay");
+    try {
+      const first = await killed.stdout.getReader().read();
+      expect(new TextDecoder().decode(first.value)).toContain("ready");
+      expect(readdirSync(opencodeDir())).toHaveLength(1);
+    } finally {
+      killed.kill("SIGKILL");
+      await killed.exited;
+    }
+    expect(await listInProcessSessions("opencode")).toEqual([]);
+    expect(readdirSync(opencodeDir())).toEqual([]);
+  });
 });

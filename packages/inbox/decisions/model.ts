@@ -9,7 +9,9 @@
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind, inboxAgentName } from '@plannotator/core/inbox-types';
 import { capQuestionPrompt, type QuestionAnswer } from '@plannotator/core/question-block';
+import { INBOX_STOPPED_REPLY_TEXT } from '@plannotator/core/inbox-delivery-line';
 import { sendTargetsOf, type SendTarget } from '../sendTargets';
+import { plainLabel } from '../folding';
 
 /** Why a decision left the projection while the queue held it. */
 export type DecisionGone = 'sent' | 'replaced' | 'closed';
@@ -296,7 +298,9 @@ export function groupKeys(state: QueueState): string[] {
 /**
  * The replies a group's Send makes: the thread's own Send targets
  * (`sendTargetsOf`, one per session; approval "inbox-explicit-skip"), kept to
- * this group's session and to the ones that carry an answer. Words, files
+ * this group's session and to the ones that carry an answer. The session's
+ * action items whose Done or Can't do it waits in the thread's draft ride
+ * along (`actions`), as picks do; alone they make no reply here. Words, files
  * and comments wait for the thread's own Send.
  */
 export function groupSendTargets(thread: InboxThread, sessionKey: string): SendTarget[] {
@@ -322,7 +326,7 @@ export type GroupSend =
   | { kind: 'failed'; error: string };
 
 /** After a Send: Delivered, then working, then Replied (brief §4), from the list row and the connection. */
-export type AfterSend = 'sending' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
+export type AfterSend = 'sending' | 'stopped' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
 
 /**
  * Where a sent reply is, from the row's own delivery (the same rule the
@@ -335,14 +339,17 @@ export function afterSendOf(row: InboxListRow | undefined, sentAt: string, busy:
   const state = row?.delivery?.state;
   const delivered = state === 'delivered' || (row?.sent?.checked_at ?? null) !== null;
   if (delivered) return busy ? 'working' : 'delivered';
+  // Claude Code holds it until the person types in that session (approval "inbox-stopped-reply"): Stopped, not Queued.
+  if (row?.delivery?.reason === 'stopped') return 'stopped';
   if (state === 'queued' || state === 'saved' || state === 'undelivered') return state;
   return 'sending';
 }
 
-export const AFTER_SEND_ORDER: readonly AfterSend[] = ['sending', 'undelivered', 'queued', 'saved', 'delivered', 'working', 'replied'];
+export const AFTER_SEND_ORDER: readonly AfterSend[] = ['sending', 'undelivered', 'stopped', 'queued', 'saved', 'delivered', 'working', 'replied'];
 
 export const AFTER_SEND_WORDS: Record<AfterSend, string> = {
   sending: 'Sending',
+  stopped: INBOX_STOPPED_REPLY_TEXT,
   queued: 'Queued',
   saved: 'Saved',
   undelivered: 'Not delivered',
@@ -443,7 +450,8 @@ export function skipAnswer(question: InboxQuestion, note: string): QuestionAnswe
 export function answerWords(answer: QuestionAnswer | null): string {
   if (!answer) return 'No answer';
   if (answer.skipped) return 'Skipped';
-  const parts = [...answer.selected];
+  // A picked label as its plain words (`plainLabel`): "15% off", not its markdown.
+  const parts = answer.selected.map(plainLabel);
   if (answer.other?.trim()) parts.push(answer.other.trim());
   if (answer.text?.trim()) parts.push(answer.text.trim());
   const words = parts.join(', ') || (answer.note ? 'A note' : 'No answer');
@@ -458,6 +466,11 @@ export function swipeChoices(question: InboxQuestion): [string, string] | null {
   if (readInboxQuestionKind(question.kind) !== 'single' || question.choices.length !== 2) return null;
   if (question.reversible || question.choices.some((choice) => choice.image)) return null;
   return [question.choices[0]!.label, question.choices[1]!.label];
+}
+
+/** The swipe's hint under the card, the labels as their words; a swipe still commits the label as written. */
+export function swipeHint(choices: readonly [string, string]): string {
+  return `Swipe right for ${plainLabel(choices[0])}, left for ${plainLabel(choices[1])}.`;
 }
 
 /**

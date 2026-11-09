@@ -36,8 +36,11 @@ configurePlannotatorUI({
   alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
   fenceTheme,                  // (colorTheme, mode) => Shiki theme name | undefined for code fences (default: SHIKI_THEME_MAP, else pierre-dark/light)
   componentTooltips,           // true: ui's own hover text (components/HostTitle) draws as ui's Tooltip, not a native title (ui 0.53.0; default false)
+  commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
+  visibleCommentDrafts,        // true: a Viewer comment closed with words keeps its highlight and a floating "Draft" badge that reopens it (default false)
   digitHexIssueRefs,           // true: digit-only #123456 / #12345678 link as issue refs (when a ref link can be built), not hex swatches (default false)
-  refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request)
+  touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
+  refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
 });
 ```
@@ -64,10 +67,10 @@ Building your own tooltip and removing the built-in double-click reset are host-
 The Mermaid runtime, the Graphviz engine, KaTeX and the username dictionary are off the static import graph of `Viewer`, so a host that bundles by route does not download them for a plain markdown read. Graphviz has its own slot since 0.41.0 (`utils/graphviz`, the same shape as Mermaid's: lazy `import('@viz-js/viz')` on the first dot fence, or `setGraphvizRuntime` from the host) and the block shows the source fence under a status until the SVG lands. Mermaid, Graphviz, KaTeX and the dictionary sit behind synchronous slots:
 
 - **Math.** Without registration, a math node renders its TeX as text in the same wrapper (same `data-math-tex` / `data-math-display` / `aria-label` / class names), loads KaTeX via `import('katex')`, and re-renders typeset. To keep math typeset on the very first commit, as Plannotator does, add one line to your entry: `import "@plannotator/ui/utils/math-eager";`. To put KaTeX and its stylesheet on one lazy chunk instead, pass `mathRendererLoader`. The stylesheet remains your job either way (see "Consuming it", step 3). The default `import('katex')` is the only runtime mention of `katex` in the package and lives in `utils/math-default-loader` (0.33.0), called only while no loader is registered; a registered loader is never backfilled by it, though a default load already in flight at registration still fills the slot (pre-existing), so register the loader before the first math render. Chunk emission is static, so a bundler still emits that chunk (never requested) unless you alias the module away; see HANDOFF.md "Lazy renderers and eager entries" for the two-line alias. The Mermaid runtime has its own `import("katex")` for `$$` labels, which leaves a second, shared KaTeX chunk in a host build even with the alias; since 0.34.0 a host redirects that one import (for importers inside the `mermaid` package only) to `@plannotator/ui/utils/mermaid-math-slot`, which typesets the labels through your registered renderer, so one KaTeX chunk remains and it is yours. Recipe and measurement in HANDOFF.md, same section. `resetMathRenderer()` empties the slot only and keeps a registered loader (0.34.0); `setMathRendererLoader(null)` is the explicit way back to the package default.
-- **Mermaid.** Without registration, the first diagram on a page fetches the runtime through `import('mermaid')` and the block shows the source fence under a "Rendering diagram" status until the SVG lands; a failed import is dropped from the memo, re-attempted once after a short delay, and the error panel (with the source) offers Retry, which issues another fresh attempt. **Since 0.40.0 (Mermaid 12.0.0, ELK layout by default, Safari 17.4+) this lazy path is Plannotator's own**: the plan editor no longer imports the eager entry, so a document with no diagram never downloads the runtime in a chunked build. `import "@plannotator/ui/utils/mermaid-eager";` in your entry registers and initializes the runtime at startup instead, if you would rather it never fail separately from the app. Mermaid 12 lays flowchart, state, class, ER and requirement diagrams out with ELK (orthogonal edges, different packing); every generated SVG `id` keeps its 11.x shape, but children of `g.edgePaths` are now in declaration order, so select edges by id (`{renderId}-L_{from}_{to}_{n}`, `{renderId}-edge{n}`), never by DOM position. Details in HANDOFF.md "Mermaid 12 (0.40.0)". **Diagrams follow the colour theme.** Before every render `MermaidBlock` calls `applyMermaidTheme` (`utils/mermaidTheme`), which reads the theme tokens off the document (`--background`, `--foreground`, `--card`, `--border`, `--muted`, `--muted-foreground`, `--primary`, the accent tokens and `--font-sans`; `readThemeTokens`), derives a complete `themeVariables` set for every diagram family from them (`buildMermaidThemeVariables(tokens, mode)`, pure; base theme `dark` under a dark resolved mode, `default` under light; every text-on-fill pair guarded to WCAG 4.5:1 and every line 3:1, rule in the module doc) and runs the global `mermaid.initialize` once per `(palette, mode, shadow amount)` key, re-rendering mounted diagrams when the key changes. The key comes from `useTheme()`, so a host that mounts `ThemeProvider` and ships `theme.css` gets diagrams in its palette with nothing to configure. **The node shadow follows the palette too.** Mermaid 12's neo look shadows every node from a fixed `rgba(185,185,185,1)` grey; the mapping keeps the look and replaces that filter, setting `themeVariables.dropShadow` from the page's own ground at `options.shadowAmount` (0..1, default `DEFAULT_MERMAID_SHADOW_AMOUNT` = **0.7** of Mermaid's geometry; 1 reproduces its `1px 2px 2px` exactly, 0 publishes `dropShadow: false` and the neo rules render `filter: none`). Its polarity follows the page — lighter than the ground on a dark page, darker on a light one, which is what Mermaid's own `insertLookDefs` does and what keeps a shadow visible at all. A host that wants Mermaid's grey passes its own `themeVariables.dropShadow` after ours; one that wants none passes `{ shadowAmount: 0 }`. `mermaidThemeKey(palette, mode, amount?)` appends the amount only when it is not the default, so a host that names none keeps the key it had. **Fallback contract:** with no tokens on the document (no `ThemeProvider`, no `theme.css`) `readThemeTokens` returns `undefined`, nothing is re-initialized, and the runtime keeps the static `MERMAID_CONFIG` it was initialized with, so such a host renders byte-identically to 0.39.0. `MERMAID_CONFIG` keeps its value and meaning (`securityLevel: 'strict'` pinned); the new exports are additive. Honest limit of any in-page retry: a browser records a failed module fetch in its module map for the page lifetime, so a fresh `import()` of the same chunk URL rejects without a request; the retry recovers failures after the fetch (engine instantiation, initialize) and hosts that version chunk URLs. A host that needs recovery from a failed first fetch uses versioned chunk URLs or a `vite:preloadError` reload at app level.
+- **Mermaid.** Without registration, the first diagram on a page fetches the runtime through `import('mermaid')` and the block shows the source fence under a "Rendering diagram" status until the SVG lands; a failed import is dropped from the memo, re-attempted once after a short delay, and the error panel (with the source) offers Retry, which issues another fresh attempt. **Since 0.40.0 (Mermaid 12.0.0, ELK layout by default, Safari 17.4+) this lazy path is Plannotator's own**: the plan editor no longer imports the eager entry, so a document with no diagram never downloads the runtime in a chunked build. `import "@plannotator/ui/utils/mermaid-eager";` in your entry registers and initializes the runtime at startup instead, if you would rather it never fail separately from the app. Mermaid 12 lays flowchart, state, class, ER and requirement diagrams out with ELK (orthogonal edges, different packing); every generated SVG `id` keeps its 11.x shape, but children of `g.edgePaths` are now in declaration order, so select edges by id (`{renderId}-L_{from}_{to}_{n}`, `{renderId}-edge{n}`), never by DOM position. Details in HANDOFF.md "Mermaid 12 (0.40.0)". **Diagrams follow the colour theme.** Before every render `MermaidBlock` calls `applyMermaidTheme` (`utils/mermaidTheme`), which reads the theme tokens off the document (`--background`, `--foreground`, `--card`, `--border`, `--muted`, `--muted-foreground`, `--primary`, the accent tokens and `--font-sans`; `readThemeTokens`), derives a complete `themeVariables` set for every diagram family from them (`buildMermaidThemeVariables(tokens, mode)`, pure; base theme `dark` under a dark resolved mode, `default` under light; every text-on-fill pair guarded to WCAG 4.5:1 and every line 3:1, rule in the module doc) and runs the global `mermaid.initialize` once per `(palette, mode, shadow amount)` key, re-rendering mounted diagrams when the key changes. The key comes from `useTheme()`, so a host that mounts `ThemeProvider` and ships `theme.css` gets diagrams in its palette with nothing to configure. **The node shadow follows the palette too.** Mermaid 12's neo look shadows every node from a fixed `rgba(185,185,185,1)` grey; the mapping keeps the look and replaces that filter, setting `themeVariables.dropShadow` from the page's own ground at `options.shadowAmount` (0..1, default `DEFAULT_MERMAID_SHADOW_AMOUNT` = **0.7** of Mermaid's geometry; 1 reproduces its `1px 2px 2px` exactly, 0 publishes `dropShadow: false` and the neo rules render `filter: none`). Its polarity follows the page — lighter than the ground on a dark page, darker on a light one, which is what Mermaid's own `insertLookDefs` does and what keeps a shadow visible at all. A host that wants Mermaid's grey passes its own `themeVariables.dropShadow` after ours; one that wants none passes `{ shadowAmount: 0 }`. `mermaidThemeKey(palette, mode, amount?)` appends the amount only when it is not the default, so a host that names none keeps the key it had. **Fallback contract:** with no tokens on the document (no `ThemeProvider`, no `theme.css`) `readThemeTokens` returns `undefined`, nothing is re-initialized, and the runtime keeps the static `MERMAID_CONFIG` it was initialized with, so such a host renders byte-identically to 0.39.0. `MERMAID_CONFIG` keeps its value and meaning (`securityLevel: 'strict'` pinned); the new exports are additive. Honest limit of any in-page retry: a browser records a failed module fetch in its module map for the page lifetime, so a fresh `import()` of the same chunk URL rejects without a request; the retry recovers failures after the fetch (engine instantiation, initialize) and hosts that version chunk URLs. A host that needs recovery from a failed first fetch uses versioned chunk URLs or a `vite:preloadError` reload at app level. The `Viewer`'s lazy blocks (Mermaid, Graphviz, HTML and SVG embeds), the diagram popout and the Source pane each sit in `components/LazyBlockBoundary`: when a chunk cannot load, that one block shows its source under a quiet "Couldn't load this view. Reload" line ("This page was updated. Reload to see this" when the chunk answers 404), and the rest of the page stays mounted.
 - **Identity.** With an `identityProvider` the generator is never called and the word lists stay out of your bundle. Without one, default names come from a small built-in pool of the same `adjective-noun-tater` shape; `import "@plannotator/ui/utils/identity-tater";` registers the full dictionary, or pass your own `identityGenerator`.
 
-Plannotator's own entries import the eager math and identity modules (`math-eager` and `identity-tater` in both `packages/editor/App.tsx` and `packages/review-editor/App.tsx`), which is what keeps math typeset on the first commit and names minted from the full dictionary; neither app imports `mermaid-eager` since 0.40.0, so the Mermaid runtime rides a lazy chunk on the share portal and is inlined by `inlineDynamicImports` in the single-file builds. `tests/entry-assets.test.ts` fails if an eager math/identity import is dropped or an eager Mermaid import creeps back. See HANDOFF.md "Lazy renderers and eager entries" and "Mermaid 12 (0.40.0)".
+Plannotator's own entries import the eager math and identity modules (`math-eager` and `identity-tater` in both `packages/editor/App.tsx` and `packages/review-editor/App.tsx`), which is what keeps math typeset on the first commit and names minted from the full dictionary; neither app imports `mermaid-eager` since 0.40.0, so the Mermaid runtime rides a lazy chunk, both on the share portal and in the plan and review apps (which since #1618 ship as one packed file whose server answers each chunk at `/assets/*`, instead of inlining them). `tests/entry-assets.test.ts` fails if an eager math/identity import is dropped or an eager Mermaid import creeps back. See HANDOFF.md "Lazy renderers and eager entries" and "Mermaid 12 (0.40.0)".
 
 ### Markdown editor extensions + wiki links (`MarkdownEditor` / `InlineMarkdown`)
 
@@ -114,6 +117,8 @@ Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^
 
 `components/html-viewer` is supported host surface as of 0.29.0: the overlay-projection annotation viewer for raw HTML (placed comment markers, pinpoint element anchors, shift-click multi-target comments). Its contract is **props plus the validated iframe message protocol** — not `configurePlannotatorUI()`, which only governs the backend surfaces around it. Drive the `annotations` prop (marker numbering derives from its array order); `readOnly` keeps markers painted and clickable while disabling all authoring. **0.29.0 also carries a breaking migration:** highlight.js is gone and `.hljs` selectors are inert — style code via the exported `pn-code` class (`CODE_BLOCK_CLASS` in `utils/codeHighlight`). See HANDOFF.md § "Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)" before upgrading from 0.28.0.
 
+**`sandbox`** (published in ui 0.55.0): the srcdoc frame's whole `sandbox` attribute. The default is `"allow-scripts allow-modals"`, so a page's `alert`, `confirm` and `prompt` open. A host that shows documents other people wrote passes `sandbox="allow-scripts"`, so no dialog draws over its origin. `hostNavigates` still adds `allow-popups`. A non-string such as `null` gets the default. `""` is the strictest frame: no scripts, so nothing on the page can be annotated. A changed value applies when the frame next loads a document. Do not add `allow-same-origin`. See HANDOFF.md § "`HtmlViewer` `sandbox`".
+
 #### HTML annotation parity seams (0.32.0)
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:
@@ -124,6 +129,7 @@ Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotati
 - **`components/HtmlSurfaceControls`**: the eye / refresh / pen header controls with Plannotator's markup and `labels` overrides.
 - **`AnnotationPanel` `unanchoredIds`**: an "Unanchored" chip on the listed cards.
 - **`HtmlViewer` `scrollBehavior`** (`'auto'` for reduced motion) and **`maxAdditionalTargets`** (a product cap the bridge honors too). With the cap enforced upstream (bridge toggle, parent trust boundary on submit and on restore, `projectHostThreads` `maxTargets` on read), a composed comment never reaches the host with more targets than the cap, so a host's own cap-dropped handling (`capDroppedTargets` from `buildPersistedHtmlAnchor`, or a message-counting listener) is unreachable in normal operation; keep it only as a backstop for rows written by an older host build or by another writer. Byte-budget drops (`sizeDroppedTargets`) are a separate path and remain reachable.
+- **`HtmlViewer` `scrollClear`** (optional `() => { left, top, bottom } | null`, frame pixels): where a host's own panel floats over the frame's right side. Read when an annotation is selected and sent as `clear` on `scroll-to`: a mark under the panel scrolls to just below it where the page can scroll and there is room, else it is centred as before. Absent or null: the message and the scroll are unchanged; an older bridge ignores the field.
 - An `ExternalAnnotationTransport` whose `subscribe` emits `snapshot` on a host push keeps `useExternalAnnotations` off its fallback poll.
 
 See HANDOFF.md § "HTML annotation parity seams".
@@ -239,7 +245,7 @@ exactly. The standalone `StickyHeaderLane` remains supported for Plannotator's
 hidden-at-rest ghost lane, but its always-visible mode is an overlay and is not
 the in-flow host integration.
 
-#### Content under the title (`Viewer.belowTitle`; unreleased)
+#### Content under the title (`Viewer.belowTitle`; ui 0.54.0)
 
 `belowTitle?: ReactNode` draws a host's node right under the document's
 title, e.g. a references block (pull requests, depends on, links, referenced
@@ -268,7 +274,7 @@ by). Use it instead of inserting into the Viewer's DOM.
 - **Absent is absent.** `undefined`, `null` and booleans draw no wrapper; the
   DOM is exactly the one without the prop.
 
-See HANDOFF.md § "Viewer `belowTitle` (unreleased)".
+See HANDOFF.md § "Viewer `belowTitle` (published in ui 0.54.0)".
 
 ### Diagram engine (`components/diagram`; 0.41.0)
 
@@ -355,6 +361,17 @@ the composer (0.44.0)" covers the chips, the metric rule, the merged-range
 refactor behind them, and the three inherited limits (duplicate labels,
 restored drafts, and a label that is a prefix of another label).
 
+### Float roots
+
+The floats that portal into `document.body` carry a stable hook on their root, so a host can style or mark them (for example `-webkit-app-region: no-drag` under a window's own buttons) without matching Tailwind classes: `.annotation-toolbar` (`AnnotationToolbar`), `[data-table-toolbar]` (`TableToolbar`), `.code-snippet-preview-window` (`CodeSnippetPreview`), `[data-floating-picker]` (`FloatingQuickLabelPicker`), `[data-comment-popover]` and `[data-popover-layer]` (`CommentPopover`). Attributes only: no look or behaviour changes.
+
+### Timeline foot seams (`AnnotationPanel`)
+
+Both opt-in and defaulting to today's behavior.
+
+- **`timelineFooter?: ReactNode`**: the host's own section after the timeline, inside its scroll area, so the cards and the section scroll as one. Absent: no wrapper element.
+- **`hideEmptyMessage?: boolean`**: an empty timeline without "No annotations yet" and its hint, for a host that shows something else there. The way to other files' comments stays.
+
 ### Annotation card seams (`AnnotationPanel`; 0.45.0)
 
 Two more opt-in props, both on the panel and both defaulting to today's
@@ -401,16 +418,36 @@ slot and mentions on the edit box (0.45.0)".
   their own (the Inbox sorts a video's comments by the moment they are at).
   Ties keep creation order; replies still thread under their parent. Omit it
   and the panel sorts by creation exactly as before.
-- **`title?`, `titleNote?`, `cardParts?: (annotation) => { quote?, images? }`**
-  (ui 0.53.0) — the header's title (default "Annotations") and a quiet note
-  at its right, and per card whether the built-in quote and image row are
-  drawn (the Inbox's video comments draw the moment and the frame in
-  `renderCardHeader` instead). Omit them and the panel is as before.
+- **`title?`, `titleNote?`, `cardParts?: (annotation) => { quote?, images?, text? }`**
+  (ui 0.53.0; `text` ui 0.54.0) — the header's title (default "Annotations")
+  and a quiet note at its right, and per card whether the built-in quote,
+  image row and comment text are drawn (the Inbox's video comments draw the
+  moment and the frame in `renderCardHeader` instead). `text: false` treats
+  the stored text as the host's stand-in, not the person's words: it is not
+  drawn and the card's edit box starts empty (the Inbox's drawing with no
+  words, whose text "See the marked-up image." is for the agent). Omit them
+  and the panel is as before.
+- **`renderCardBody?: (annotation) => ReactNode`** (ui 0.54.0) — the host's
+  own body for a plan-annotation card, drawn where the comment text goes,
+  inside the card (a click on it selects the card). The Inbox draws a
+  drawing with no words as its picture. Omit it and nothing extra is drawn.
 - **Export: `exportLocation`** (ui 0.53.0) — a string a host sets on the
   COPY of an annotation it hands the exporters (`exportAnnotations`,
   `exportLinkedDocAnnotations`): one line printed under the entry's heading
   (the Inbox's `At 1:42 (102.4 s of 7:41)`). Never stored; an annotation
   without it exports byte-identically.
+
+### Image annotator seams (`components/ImageAnnotator`; ui 0.54.0)
+
+- **`escapeCancels?: boolean`** — Escape closes the drawing screen and accepts
+  nothing; Enter and the ✓ accept; a click outside closes only an empty
+  drawing (strokes are never lost to a stray click); the ✓'s title reads
+  "Save (Enter)". The Inbox passes it (the owner's rule, 2026-10-26). Omit it
+  and Escape, Enter and a click outside all accept, under "Save (Esc)", as
+  plan review has always done.
+- **`hint?: ReactNode`** — the line under the image in place of "Press Esc or
+  Enter or click outside to accept" (the Inbox: "Enter or ✓ adds to your
+  reply · Esc cancels"). Omit it and the line is as before.
 
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
@@ -468,7 +505,7 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 
 **Answers without comments (ui 0.53.0).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (ui 0.53.0)".
 
-**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only) and its composer come back, question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
+**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only; `textDeletions` adds Delete back, unreleased) and its composer come back, a diagram's parts take comments too (ui 0.56.0), question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
 
 **Local links decided by the host (ui 0.53.0).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (ui 0.53.0)".
 
@@ -492,7 +529,145 @@ import { DiffFileTree } from "@plannotator/ui/components/DiffFileTree";
 - `role="tree"` with `treeitem` rows (`aria-level`, `aria-expanded`, `aria-selected`) and one tab stop. While focus is in the tree: ArrowDown/`j`, ArrowUp/`k`, Home, End select files in tree order (the review's keys, opening folders as needed); ArrowRight/ArrowLeft open/close a focused folder, ArrowLeft from a file focuses its folder. Unlike the review, nothing listens on `window`.
 - Styling is the `file-tree-item` rules in `styles.css` plus ThemeProvider tokens; no fetches, no seams.
 
-For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`, as the review does. See HANDOFF.md § "Diff file tree".
+For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`. Plannotator's review shares the tree builder, the expansion hook and `ChangeTypeLetter`, but since its aligned sidebar it draws its own folder and file rows, so it is no longer an example of these atoms. See HANDOFF.md § "Diff file tree".
+
+### Document contents rail (`components/MarkdownContentsRail`; ui 0.56.0)
+
+Workspaces' contents rail, moved here (approved 2026-10-03 in Workspaces; the move approved 2026-10-30) so Workspaces and the Plannotator Inbox draw the same one. Plan review does not use it.
+
+```tsx
+import { DeferredMarkdownContentsRail } from "@plannotator/ui/components/DeferredMarkdownContentsRail";
+
+// In the document pane, beside the scroll element; it positions itself (fixed) from that element.
+<DeferredMarkdownContentsRail markdown={markdown} scrollViewport={scrollEl} />
+```
+
+```css
+/* Its own stylesheet: import it OUTSIDE any cascade layer, after the host's base reset. */
+@import "@plannotator/ui/contents-rail.css";
+```
+
+- **Shape.** A 36 px dock of tick marks 24 px right of the reading column, vertically centred on the scroll element; it never changes the document's width. At most 10 ticks: a longer document is condensed into 10 spans, each shown by its shallowest heading nearest the span's middle. The current tick has `aria-current="location"`. A tick (or ↑ ↓ ← → Home End, Enter, while a tick has focus) opens a 256 px Contents panel to the LEFT of the dock, over the prose: every heading of levels 1 to 4, its breadcrumb its accessible name (`buildMarkdownContentsModel` also gives each heading a one-line excerpt, the first text after it cut at 180 characters). A pick is marked at once, smooth-scrolls the heading to the 80 px activation line (instantly under reduced motion) and flashes it. Escape on a tick closes the panel; Escape anywhere else closes a panel opened by pointer too (focus stays where it was), except while focus is in an editable control, a dialog, a menu or a listbox, whose Escape it is. It is `preventDefault`-ed and never stopped, so a host's own Escape handler sees it was used. An outside press, or focus leaving the panel, closes it too. No hover reveal, no left/right setting.
+- **When it shows.** At least 4 headings of levels 1 to 4 (`hasContentsRailHeadings` in `utils/annotationHelpers`, over `tocHeadings(blocks, 4)`; a host can ask without loading the rail), a scroll element at least 480 px wide, and 68 px free between the reading column's right edge and the scroll element's right edge (its scrollbar excluded): `canShowContentsRail`, `resolveContentsRailGeometry`. A docked column outside the scroll element (comments) therefore makes it yield, never overlap.
+- **Contract with the page.** Positions come from the rendered headings (`[data-block-type="heading"][data-block-id]`, `BlockRenderer`'s); only the rail's own heading ids are read, so an embedded document's headings (namespaced ids) never move the mark. The reading column is `[data-document-read-content]` inside the scroll element unless `contentSelector` names another (the Inbox passes the Viewer's `[data-doc-text-root]`). Any change to the scroll element's DOM re-binds the headings (a host that remounts its reading column, the same headings at new places, is followed).
+- **Which heading is current.** The rail's own scroll math, moved with it into `utils/headingScrollSpy`: each heading's top is cached when the rail measures; every scroll frame a binary search finds the last heading at or above the activation line (`CONTENTS_ACTIVATION_OFFSET`, 80 px below the scroll element's top; Workspaces' was 52), and at the document's end the last heading is current. It needs no band, so a short pane, a jump (scrollbar drag, scroll restore, Home) and scrolling up all mark the right heading.
+- **Loading.** `DeferredMarkdownContentsRail` mounts it after the page is interactive (`requestIdleCallback`, 2 s cap; a zero-delay timer where that is missing) from a lazy chunk.
+- **Styles.** `pn-contents-rail-*` rules in their own stylesheet, `@plannotator/ui/contents-rail.css` (not in `theme.css` or `styles.css`). Import it outside any cascade layer: a later unlayered base reset beats layered rules and puts the ticks over the prose. Plain CSS on the host's tokens, each with a fallback: `--popover`, `--popover-foreground`, `--shadow-menu`, `--geometry-floating-radius`, `--geometry-structure-radius`, `--surface-hover`, `--motion-duration-fast|basic|relaxed`, `--ease-enter|exit`, `--primary`, `--foreground`, `--muted-foreground`. The labels inherit the font size.
+- **Optional host props** (defaults reproduce Workspaces' rail): `blocks` (the host's parsed blocks instead of `markdown`; otherwise one cached parse per body, `utils/blockParse` `parseBlocksShared`), `contentSelector`, `hidden` (a host's own hide choice: draws nothing, still measures), `onAvailableChange(fits)` (whether it can show, after each measure, so a host can offer another way to Contents where it yields), `panelAction` (one control at the right of the open panel's title; the Inbox's Hide).
+- Also moved: `hooks/usePrefersReducedMotion`.
+
+### Scroll-spies: one per surface
+
+Two, both in the package, never two on one surface:
+
+- **Plan review** keeps `hooks/useActiveSection`, unchanged: an IntersectionObserver band from 80 px below the scroll element's top to 20% of its height. `useActiveSection.positions.test.tsx` pins its answers at scroll positions that tell 80 from 52 or 100 px and 20% from 30%.
+- **The contents rail's surface** (the rail, and `DocumentContents` where the rail yields) uses the rail's scroll math, `utils/headingScrollSpy` (above); `hooks/useHeadingScrollSpy(scrollViewport, blockIds)` is it for a list. Both scroll a pick to 80 px, so a pick lands where plan review's does.
+
+### Document contents (`components/DocumentContents`; ui 0.56.0)
+
+A Contents list on the contents rail's surface, for where the rail yields: `TableOfContents` bound to one scroll element, with the rail's headings (levels 1 to 4) and the rail's scroll math (`useHeadingScrollSpy`) marking the heading being read, so the list and the rail never disagree. It reads the current heading at once on mount (a sheet opened mid-document). It draws no chrome; the host titles and places it. It keeps the marked entry in view inside the list's own scroll box.
+
+```tsx
+import { DocumentContents } from "@plannotator/ui/components/DocumentContents";
+
+<DocumentContents blocks={blocks} annotations={annotations} scrollViewport={scrollEl} onNavigate={closeSheet} />
+```
+
+- The headings come from `tocHeadings(blocks, 4)` (`utils/annotationHelpers`), the function `buildTocHierarchy`, plan review's "has entries" check (levels 1 to 3, the default) and the contents rail use.
+- `TableOfContents` takes two optional seams: `scrollViewport`, the element a click scrolls (default: the `ScrollViewportProvider` context, as before), and `maxLevel` (default 3). Plan review passes neither and is unchanged.
+- Used by the Inbox's sheet (a phone, or where the rail yields) and the phone surface; plan review keeps `SidebarContainer`.
+
+### Floating chat window (`components/chat`; ui 0.56.0)
+
+A floating window, a transcript and a composer, as screen code only: the host owns the conversation, the transport and anything saved. It imports nothing from a backend and has no seam in `configurePlannotatorUI`; everything comes in as props.
+
+```tsx
+import { ChatComposer, ChatFrame, ChatTranscript, ChatWindowStore } from "@plannotator/ui/components/chat";
+
+const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: save, onOpen: load });
+
+<div className="relative isolate">
+  <ChatFrame store={store} label="Chat" header={() => <span>Chat</span>} onClose={close}>
+    {() => (
+      <>
+        <ChatTranscript messages={messages} status={status} agentName="Agent" />
+        <ChatComposer value={value} onChange={setValue} onSend={send} below={<span>docs/plan.md</span>} />
+      </>
+    )}
+  </ChatFrame>
+</div>
+```
+
+- **Frame.** `ChatFrame` is `absolute`, so its parent is the frame it floats in and is fitted to. Give that parent its own stacking context (`isolate`): the window is `z-40`. Under 392 px of width the window is forced fullscreen, because it cannot float there.
+- **Geometry.** The store holds what the person chose. What is drawn is fitted to the frame at render, so a frame that narrows for a moment changes neither the store nor what you save. `onGeometryChange` runs for each step of a person's drag or resize, so debounce it and flush on unload. It does not run for `initialGeometry`, for `restore`, or when the frame changes size. The store never touches storage.
+- **Keys.** The frame listens to no key. `useChatFrameKeys` is the opt-in map (Mod+J, Shift+Mod+J, Escape). `useChatFrameFocusReturn` returns focus to the element wearing `data-chat-launcher` when focus was in the window.
+- **Composer.** It is controlled and set `onChange` synchronously, or typing and IME input are lost. `onSend` runs while `busy` and with an empty box, so guard those. Enter does not bubble past the React root, so a bubble listener on `window` or `document` does not hear it; capture listeners and native listeners on ancestors still do. Other keys bubble as usual, so an app's own Escape handling still sees them. On a touch keyboard pass `sendOnEnter={false}`: it has no Shift, so otherwise no message can have a second line.
+- **Text.** `ChatTranscript` draws text parts as sanitized markdown. Nothing in message text can carry a class, a `data-*` or `aria-*` attribute, a script or, unless you pass `richMarkdown`, an image, and links open in a new tab with `noopener`. Raw HTML in an agent's text shows as text; the one exception is `<br>`, which stays a line break. Where the sanitizer fails its check on first use, or the text is past a work limit (length, parse time, the size of the HTML it makes, or thousands of characters past ASCII in one paragraph or code block, which is what makes layout slow), the message goes out as plain text. The time limit is a check, not a wall, and it is wall-clock, so a text near it can draw either way. A run of text too costly to parse, such as one holding a very long word, is local: it goes out as literal text and the rest stays formatted, and so does a table with too many cells. Long lines of code in a code block cost nothing. Mark a part `state: 'streaming'` while it grows: a text too costly to draw on every delta then stays plain, and redraws only as it grows by an eighth, so its last words can lag. It renders in full once the part stops streaming or the turn ends. A person can send while an answer streams: keep `status` at `streaming` and the answer above their message keeps streaming, and put a turn that is over in `stopped`. Rendering never throws.
+- **Rich markdown.** `richMarkdown` on `ChatTranscript` (also on `ChatMessageView` and `ChatMarkdown`, and `richMarkdownHtml(text, { literalHtml })` for the string) is the one switch for what `marked` writes for GFM and the default leaves out: images, strikethrough, task checkboxes, link titles and list start numbers. It is off by default and Plannotator never turns it on, because **an image loads a remote address from model text**, which tells that server the person's IP and your origin. **The address can carry anything the model has read**, so text injected into what it reads can send that out with no click: set a CSP `img-src` to the hosts you trust. A relative address loads from your own origin, with your cookies, and `SameSite` does not stop it, so check that no GET route of yours changes anything.
+
+  ```tsx
+  <ChatTranscript messages={messages} status={status} agentName="Agent" richMarkdown />
+  ```
+
+  - A `ChatMarkdown` you return from `renderPart` or inside `renderMessage` hears the transcript's setting. Pass `richMarkdown={false}` to one to say no. Outside a transcript, pass it on each.
+  - It applies to both sides. `![a](url)` in a person's message draws, and HTML they typed stays literal, as without it.
+  - An agent's raw `<img>` draws with `src`, `alt`, `title`, `width` and `height` and nothing else. A raw `<input type="checkbox">` draws disabled, and any other raw `<input>` is removed. A raw comment draws nothing when it stands alone, as a whole block or between words. Inside a longer block of raw HTML it stays text, and an `<img>` written in it still draws. Every other raw tag stays text, as without it: raw HTML is what the limits under **Text** depend on, so `<details>`, `<kbd>`, `<sub>`, `<video>` and `<p align>` do not draw.
+  - `src` follows DOMPurify's rule: `http`, `https`, `ftp`, `ftps`, `mailto`, `tel`, `callto`, `sms`, `cid`, `xmpp`, `matrix`, relative addresses, and `data:` on an image. `javascript:` and the like are taken out.
+  - Every limit under **Text** applies. Those bound the DOM, not the network, so **one text part draws at most 100 images**, counting markdown and raw tags together: past that an image shows its alt text and makes no request. A message with several text parts gets 100 for each. Images load lazily, so one far off screen waits until the person scrolls near it.
+  - A run of inline text with a word past 8,000 characters stays literal. So a `data:` image past that size stays text in markdown or in a sentence. A raw `<img>` on its own line is not inline text: only the 256,000-character limit on the whole text applies to it.
+  - `ChatTranscript` follows an image that loads while the pane is at its live edge. It follows only with its own `richMarkdown` on, so a `ChatMarkdown` of yours that turns it on inside a transcript that does not stays where it is.
+  - Images are sized by Tailwind's preflight (`max-width: 100%; height: auto`), which `styles.css` carries. With no preflight on your page, add your own rule, or a model's `width` can overflow the column.
+- **The person's text as typed** (ui 0.60.0). `keepUserBlankLines` on `ChatTranscript` (also on `ChatMessageView`, and `keepBlankLines` on a `ChatMarkdown` with `literalHtml`) draws the person's messages as the Inbox draws a person's reply: each line break stays a line break, and a paragraph after 2 or more blank lines keeps them (up to 10) instead of one paragraph gap. The gap is drawn as one `<br>` per blank line past the first, before the paragraph, so no `style` or `class` reaches the sanitizer. Blank lines before the first block, inside a list, a quote or a code block are not kept, as in the Inbox. The agent's text is not affected. Off by default; Plannotator never turns it on.
+
+  ```tsx
+  <ChatTranscript messages={messages} status={status} agentName="Agent" keepUserBlankLines />
+  ```
+
+  A `ChatMarkdown` you return from `renderPart` hears the transcript's setting when it has `literalHtml`; pass `keepBlankLines={false}` to one to say no.
+- **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through, or `null` to draw nothing. To paint into a text part, return your own `ChatMarkdown`, with the props the transcript gives its own plus yours. Leave out `literalHtml` and a person's `<b>` draws bold:
+
+  ```tsx
+  <ChatMarkdown
+    text={part.text}
+    streaming={part.state === "streaming"}
+    literalHtml={message.role === "user"}
+    messageId={message.id}
+    role={message.role}
+    partIndex={index}
+    annotatable
+    rootRef={ref}
+  />
+  ```
+
+  `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
+- **Name row.** `agentBadge` draws after the name on the agent's turns, before the Stopped label. `ChatPendingTurn` does not draw it.
+- **Styles.** Nine tokens are not in `theme.css`; `components/chat/index.ts` lists them, and a host defines them in its own `@theme`. Add this folder and `components/ui/{button,textarea}.tsx` to your `@source`. Recipes live in `chatRecipes.tsx` so a `*.tsx` glob reaches them.
+
+### Inbox thread parts (`components/inbox-thread`; ui 0.56.0, in progress)
+
+The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete.
+
+```tsx
+import { Icon, HostMark } from "@plannotator/ui/components/inbox-thread/icons";
+import { GuideCard } from "@plannotator/ui/components/inbox-thread/GuideCard";
+
+<div className="pn-inbox" data-pn-tooltip-root="">
+  <GuideCard guide={guide} onOpen={open} />
+</div>
+```
+
+```css
+/* Its own stylesheet: import it OUTSIDE any cascade layer, after the host's base reset. */
+@import "@plannotator/ui/inbox-thread.css";
+```
+
+- **In the folder so far.** `icons` (`Icon`, `HostMark`, `AuthorMark`, `TabGlyph`, `TailscaleMark`), `Tip` (`Tip`, `isTextCut`), `FileName`, `GuideCard`, `SkillsLine`, `ReaskNote`, `reask` (the pure Re-ask rules), and `SnoozeMenu` (`SnoozeTimes`, the Snooze times and Pick a time views a host renders inside its own Base UI `Menu.Popup`, and `SnoozePicker`, the day and half-hour lists; the times come from `@plannotator/core/inbox-snooze`, and the part only calls `onPick(untilIso)`).
+- **Host-neutral.** A part takes what it shows as props, over core's `InboxMessageWire`, `InboxAttachmentState` and related types. It makes no request and reads no route, hash, cookie or storage. `tests/inbox-thread-parts-host-neutral.test.ts` fails if one does.
+- **Tooltips.** `Tip` portals into the nearest `[data-pn-tooltip-root]`, so put that attribute on your `.pn-inbox` root, the same element: the sheet styles nothing outside that root. Without a `TooltipProvider`, each `Tip` keeps its own 150 ms delay.
+- **Styles.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. `@plannotator/ui/inbox-thread.css` is generated from that file at `prepack` (the pattern of `bridge-script.asset.js`; gitignored, in `files`). It is the whole sheet, about 560 KB raw and 79 KB gzipped, not a subset. What a host has to do is under "Consuming it".
+- **Nothing reaches outside `.pn-inbox`.** The generator scopes every selector to the root with `:where(.pn-inbox)`, which adds no specificity, so the cascade is the Inbox's. It drops the rules that style the page itself (`html`, `body`, `#root`, `html:has(.pn-inbox)`, `:root[data-ib-keyboard-pin]:has(.pn-inbox)`). What stays on `:root` is `--ib-*` tokens only, and every global name (`@keyframes`, `@property`, `::highlight()`, container names) starts `ib-`. The cost: a part that portals outside the root has no look, so portal into the root. `tests/inbox-thread-css.test.ts` checks all of this over the real `inbox.css`, so a new rule there cannot leak unnoticed. A new at-rule the generator does not know, such as `@font-face`, fails `prepack`.
+- **Width.** The sheet carries the Inbox's viewport media queries as they are. In a panel narrower or wider than the Inbox's pane they answer for the window, not the panel. See HANDOFF.md § "Inbox thread stylesheet".
+- **Plannotator.** The parts' old paths in `packages/inbox` re-export them, and the Inbox passes nothing new and does not load the generated sheet. These parts add no Tailwind output: the built CSS of plan review, code review, the Inbox and `styles.css` does not change.
 
 ## Consuming it (e.g. from Workspaces)
 
@@ -511,13 +686,22 @@ npm install @plannotator/ui @plannotator/core
    The same policy covers math: KaTeX's stylesheet + fonts are deliberately not in `styles.css` — if you render math, load `katex/dist/katex.min.css` yourself (import, CDN tag, or self-hosted copy; see HANDOFF.md "Math rendering").
 4. Import components: `import { Viewer } from "@plannotator/ui/components/Viewer";`
 5. Build with a bundler that compiles TS/TSX (Vite + React 19 + Tailwind v4). The packages ship **source**, so your bundler compiles them — set `moduleResolution: "bundler"`, `allowImportingTsExtensions`, `jsx: "react-jsx"`.
+6. **If you render the Inbox thread parts** (`components/inbox-thread`):
+   - Import `@plannotator/ui/inbox-thread.css` **outside any cascade layer, after your base reset**, as with `contents-rail.css`. Inside a layer below Tailwind's `base`, Tailwind's preflight beats it.
+   - Keep `styles.css` from step 2: the sheet reads its theme tokens and defines none of them.
+   - Wrap the parts in one root with both markers, `<div className="pn-inbox" data-pn-tooltip-root="">`. The root sets the type, `height: 100%`, `position: relative` and `background: var(--ib-ground)`. The Inbox's pane paints `--card`, so set `background: var(--card)` on your root to match it, or use your panel's own surface. In a panel that scrolls, `height: 100%` stops the background short of tall content, so set `height: auto` on the root too, or make the root the scroller.
+   - Fonts are step 3's. The sheet ships none. With Tailwind, its theme defines `--font-sans` and `--font-mono`, and that beats `styles.css` in a lower layer, so the parts draw in the system font. Set both on your root.
+   - Set the mode on `<html>` as `ThemeProvider` does: the sheet reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount. A theme switch lands in one frame: while `<html>` has `.pn-theme-switching` (`THEME_SWITCHING_CLASS`), `styles.css` sets every transition's duration and delay to 0 s. `ThemeProvider` holds it on every switch, from the class swap until two frames after the redraw commits. A host that swaps the theme classes on `<html>` itself calls `holdThemeSwitch()` (from `components/ThemeProvider`) just before its swap: it adds the class and removes it two frames later. A part that redraws in the new theme a frame later (it reads the new tokens in `requestAnimationFrame`, as the Pierre diff parts do) calls `extendThemeSwitch()` just before that redraw, which restarts the two frames while a switch is landing and does nothing otherwise. The rule covers the whole page with `!important`: for those 2 to 3 frames after each switch, every transition on the page lands at once, the host's own included (an animated sun/moon icon jumps instead of turning, and the host's colour fades are instant). A transition already running finishes normally.
+   - Portal into the root: the sheet styles nothing outside it.
+
+**Upgrade note: the plan look defaults to Clean.** `gridEnabled` (storage key `plannotator-grid-enabled`) now defaults to `false`, and a stored value counts only with the v2 marker `plannotator-plan-look-v2 = 'resolved'`. Plannotator's chooser and its Settings switch write it. On the first settings read, a v1 marker (`plannotator-plan-look-choice-resolved = 'true'`, or the legacy `plannotator-look-feel-announcement-seen = '2'`) next to a stored `'true'` is moved to Clean once (the stored value is rewritten to `'false'` and the v2 key set to `'notice'`); a v1 marker with Clean becomes `'resolved'` silently. Plannotator's apps then show a one-time notice. That includes the share portal's root and demo pages; only a shared session puts it off. A host that renders no chooser (Workspaces) shows nothing, so its users simply open in Clean, and every user with no marker opens in Clean too. To keep stored values instead, call `markLookAndFeelChoiceResolved()` from `@plannotator/ui/utils/lookAndFeelAnnouncement` before the first settings read, or seed `plannotator-plan-look-v2 = 'resolved'` in your `storageBackend`. A host that writes `gridEnabled` from its own UI should call `markLookAndFeelChoiceResolved()` with it, or the value will not survive a reload.
 
 ## Packages & publishing
 
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.48.0 depends exactly on `@plannotator/core` 0.25.8. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.62.0 (unreleased; 0.61.0 is published) depends exactly on `@plannotator/core` 0.25.20 (unreleased); the launch-agents stack pins 0.25.21 (unpublished: its three new subpaths, HANDOFF.md). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

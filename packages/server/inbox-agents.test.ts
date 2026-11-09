@@ -5,12 +5,13 @@
  * touched, what a later run does, and what uninstall removes.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
   agentHomeAllowed,
+  clinePluginInstalled,
   codexHome,
   geminiDir,
   connectInboxAgents,
@@ -262,6 +263,22 @@ describe("agents connected by one key in a plain-JSON file", () => {
     expect(statSync(file).mtimeMs).toBe(mtime);
   });
 
+  test("a write is atomic: a new file renamed over the old one (never rewritten in place), the file's mode kept, no temp file left", () => {
+    // An agent reading its file mid-write sees the old text or the new, never half; shared by every JSON file Plannotator edits.
+    const dir = join(fake.home, "atomic");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "mcp.json");
+    writeFileSync(file, '{\n  "mcpServers": {}\n}\n', { mode: 0o640 });
+    chmodSync(file, 0o640);
+    for (const value of [{ command: "/p/plannotator", args: ["inbox", "mcp"] }, undefined]) {
+      const inode = statSync(file).ino;
+      expect(writeJsonEntry(file, ["mcpServers"], value, [["/p/plannotator", "inbox", "mcp"]])).toMatchObject({ ok: true, changed: true });
+      expect(statSync(file).ino).not.toBe(inode);
+      expect(statSync(file).mode & 0o777).toBe(0o640);
+      expect(readdirSync(dir)).toEqual(["mcp.json"]);
+    }
+  });
+
   test("a file that is not plain JSON is refused and left as it was", async () => {
     const dir = join(fake.home, ".cursor");
     mkdirSync(dir, { recursive: true });
@@ -340,6 +357,103 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     const report = await connect();
     expect(report.manual).toEqual(["opencode"]);
     expect(fake.calls()).toEqual([]);
+  });
+
+  test("DeepSeek Harness with Plannotator's plugin in a profile: inboxTool on for it, and dsh is never run", async () => {
+    fake.install("dsh");
+    mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+    writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+    const report = await connect();
+    expect(report.added).toEqual(["dsh"]);
+    expect(loadConfig().inboxTool).toEqual({ dsh: true });
+    // Plannotator never starts dsh: the fake on PATH logs every run.
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("turning on another agent's tool keeps the DeepSeek Harness switch and any host this version does not know", async () => {
+    mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: false, "next-host": true } }));
+    expect((await connect()).added).toEqual(["pi"]);
+    // A host this version does not know (a newer Plannotator's) is kept too.
+    expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: false, "next-host": true, pi: true });
+  });
+
+  test("a `dsh` on PATH alone (Debian's distributed shell) is not DeepSeek Harness, and is never run", async () => {
+    fake.install("dsh");
+    const report = await connect();
+    expect(report.manual).not.toContain("dsh");
+    expect(report.added).not.toContain("dsh");
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("DeepSeek Harness: DSH_HOME is where the profiles are", async () => {
+    const dshHome = join(fake.root, "elsewhere-dsh");
+    mkdirSync(join(dshHome, "profiles", "desktop"), { recursive: true });
+    writeFileSync(join(dshHome, "profiles", "desktop", "package.json"), JSON.stringify({ devDependencies: { "@plannotator/dsh": "link:/src/apps/dsh-plugin" } }));
+    expect((await connect()).added).toEqual([]);
+    expect((await connect({ DSH_HOME: dshHome })).added).toEqual(["dsh"]);
+  });
+
+  test("DeepSeek Harness without the plugin is left to a person, never MCP, and dsh is never run", async () => {
+    fake.install("dsh");
+    mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+    writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@deepseek-ai/dsh-bundle-web-app": "1.0.0" } }));
+    const report = await connect();
+    expect(report.manual).toEqual(["dsh"]);
+    expect(report.added).toEqual([]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline with Plannotator's plugin installed from npm: inboxTool on for it, and cline is never run", async () => {
+    fake.install("cline");
+    const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "plannotator-cline-1a2b3c", "package", "node_modules", "@plannotator", "cline");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    const report = await connect();
+    expect(report.added).toEqual(["cline"]);
+    expect(report.manual).toEqual([]);
+    expect(loadConfig().inboxTool).toEqual({ cline: true });
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline: a plugin installed from a local folder is found under CLINE_DIR, even with no cline on PATH (the VS Code extension)", async () => {
+    const clineDir = join(fake.root, "elsewhere-cline");
+    const pkg = join(clineDir, "plugins", "_installed", "local", "cline-plugin-9f8e7d", "package");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    expect((await connect()).added).toEqual([]);
+    expect((await connect({ CLINE_DIR: clineDir })).added).toEqual(["cline"]);
+  });
+
+  test("Cline: the plugin as a plain file in ~/.cline/plugins (a built index.js copied there) is found", async () => {
+    mkdirSync(join(fake.home, ".cline", "plugins"), { recursive: true });
+    writeFileSync(join(fake.home, ".cline", "plugins", "weather.js"), "export default { name: 'weather' };\n");
+    expect((await connect()).added).toEqual([]);
+    writeFileSync(join(fake.home, ".cline", "plugins", "plannotator.js"), 'const pkg = { name: "@plannotator/cline" };\nexport default { name: "plannotator" };\n');
+    expect((await connect()).added).toEqual(["cline"]);
+  });
+
+  test("Cline: a workspace-scope install (<folder>/.cline/plugins) is found for the folder the Inbox runs in, read only", () => {
+    const e = createAgentEnvironmentFor({ platform: process.platform, homeDir: fake.home, env: {} });
+    const workspace = join(fake.root, "ledger");
+    const pkg = join(workspace, ".cline", "plugins", "_installed", "npm", "plannotator-cline-4d5e6f", "package", "node_modules", "@plannotator", "cline");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    expect(clinePluginInstalled(e, join(fake.root, "other"))).toBe(false);
+    expect(clinePluginInstalled(e, workspace)).toBe(true);
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline with someone else's plugin only is still left to the person", async () => {
+    fake.install("cline");
+    const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "weather-1a2b3c", "package", "node_modules", "weather");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "weather" }));
+    const report = await connect();
+    expect(report.manual).toEqual(["cline"]);
+    expect(loadConfig().inboxTool).toBeUndefined();
   });
 
   test("Claude Code: nothing written; said to be on already", async () => {
