@@ -14,7 +14,7 @@
  * The rule: no answer the person typed is lost or sent stale. A newest answer
  * that was not saved stays owed, and the next wait saves it first.
  */
-import type { InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 
 /** Saves one answer. False: it was not saved and the person was told (a held or replaced one is true). */
 export type PickSave = () => Promise<boolean>;
@@ -181,4 +181,33 @@ export function onlyQuestionsChanged(before: InboxThread, after: InboxThread): b
   if (before === after) return true;
   if (!sameFields(before, after, 'messages') || before.messages.length !== after.messages.length) return false;
   return before.messages.every((message, index) => sameFields(message, after.messages[index]!, 'questions'));
+}
+
+/**
+ * `thread` with each question never older than the newest copy this window's
+ * own saves brought back (`saved`, by `<message id>/<key>`). A read of the
+ * thread the server answered before the last saves landed can arrive after
+ * them; taken whole, it put an older answer back in the field being typed in,
+ * and the next key built on it, so letters typed since were lost (the owner,
+ * 2026-11-08: "it felt like it was backspacing on me"). A question's revision
+ * only grows, so a copy with a lower one is older. The same thread object
+ * when nothing is kept, and each message untouched keeps its object.
+ */
+export function keepSavedQuestions(thread: InboxThread, saved: ReadonlyMap<string, InboxQuestion>): InboxThread {
+  if (saved.size === 0) return thread;
+  let changed = false;
+  const messages = thread.messages.map((message) => {
+    if (!message.questions?.length) return message;
+    let kept = false;
+    const questions = message.questions.map((q) => {
+      const mine = saved.get(`${q.message_id}/${q.key}`);
+      if (!mine || mine.revision <= q.revision) return q;
+      kept = true;
+      return mine;
+    });
+    if (!kept) return message;
+    changed = true;
+    return { ...message, questions };
+  });
+  return changed ? { ...thread, messages } : thread;
 }

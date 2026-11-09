@@ -250,6 +250,10 @@ configurePlannotatorUI({
   componentTooltips: true,
   // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
   digitHexIssueRefs: true,
+  // An owner/repo#123 links even in a project with no git origin (no repo of its own to link bare #123 into):
+  // agents are told to write that form for another repo's PR or issue. github.com until the first list read, then
+  // the host most projects use (defaultRefHost.ts, from api.ts).
+  crossRepoRefsWithoutRepo: true,
   // ui marks <body data-pn-popout> while a popout is open and <html data-pn-selection-chooser> while the diff's
   // selection chooser shows; the window's build keys theme.css's and comments.css's body:has() / html:has() on them
   // (build/inbox-page-marks.ts: each such :has() cost a style pass over the whole page on every DOM change).

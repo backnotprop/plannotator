@@ -192,6 +192,7 @@ import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
@@ -426,6 +427,12 @@ export interface InboxServerOptions {
    * saying so.
    */
   htmlContent?: string;
+  /** The live bridge's sources for live sites (`inbox-live.ts`), passed by the CLI as annotate's are, so the server never imports ui. Absent: sites are listed but do not open. */
+  liveBridge?: InboxLiveBridgeSources;
+  /** Tests: how long a live site's proxy lives with no open or ping (default `INBOX_LIVE_IDLE_MS`, 10 minutes). */
+  liveIdleMs?: number;
+  /** Tests: the live probe's fetch. */
+  liveProbeFetch?: typeof fetch;
   /**
    * Tests: where the Feedback dialog's send goes (inbox-feedback.ts). Default:
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
@@ -617,6 +624,8 @@ export interface InboxServer {
   imageCapture: InboxImageCapture;
   /** The Codex wake (inbox-codex-wake.ts): tests run its sweep. */
   codexWake: InboxCodexWake;
+  /** The live sites' proxies (inbox-live.ts): tests read which run and run the idle sweep. */
+  liveSites: Pick<InboxLiveSites, "running" | "sweep">;
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
@@ -785,6 +794,9 @@ const ERROR_STATUS: Record<string, number> = {
   cookie_host_url_host_in_use: 409,
   tailscale_unavailable: 409,
   local_only: 403,
+  live_unavailable: 503,
+  live_not_answering: 422,
+  live_site_not_found: 404,
 };
 
 /**
@@ -815,6 +827,18 @@ export const WINDOW_CSP = [
   "base-uri 'self'",
   "form-action 'none'",
 ].join("; ");
+
+/**
+ * The window's policy, on this computer's port and through the tailnet alike
+ * (exported for the tests that pin it). `frame-src` stays at `default-src
+ * 'self'`, never a localhost port: a live site's proxy is framed through a
+ * same-origin wrapper page whose own policy names that one port
+ * (`liveFrameCsp` in inbox-live.ts). A srcdoc frame (an HTML attachment) is
+ * checked against THIS policy when it navigates itself, so naming
+ * `http://localhost:*` here would let any attachment send its frame to any
+ * local port (proved by tests/e2e/inbox-live-sites.spec.ts).
+ */
+export { WINDOW_CSP as INBOX_WINDOW_CSP };
 
 /** `/` before the window is built (a source run, the server tests). */
 const NOT_BUILT_PAGE =
@@ -1307,6 +1331,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+        // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
+        checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
         // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
         searchIndex: search.index,
         findProjects,
@@ -1396,7 +1422,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
       // When its letter mark's picture was set (Set picture…), additive: the window's key for the picture.
       const picture = projectPictures.uploadedAt(project.id);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
+      // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
+      const repo = repos.peek(project.root);
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -3945,6 +3974,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
+  /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer, and its owner over the tailnet. */
+  const liveSites = createInboxLiveSites({
+    store,
+    serverSession,
+    dataDir,
+    readBody,
+    json,
+    errorResponse,
+    localOnly,
+    port: () => port,
+    bridge: options.liveBridge ?? null,
+    idleMs: options.liveIdleMs,
+    fetchImpl: options.liveProbeFetch,
+    // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
+    tailnet: {
+      isOwner: (req) => tailscale.isOwnerRequest(req.headers),
+      openRelay: (handlers) => tailscale.openRelay(handlers),
+      windowOrigin: () => tailscale.windowOrigin(),
+    },
+  });
+
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
   const voice = createInboxVoice({
     dataDir,
@@ -5901,6 +5951,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
+      // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
+      // person's signed-in dev app; another site's page is refused, reads included.
+      const liveAnswer = await liveSites.route(req, path, via);
+      if (liveAnswer) return liveAnswer;
+
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two for this computer's owner only: a tailnet guest reads them as before.
       const newMessage = await live.route(req, path, ownerOrLocal(req, via), isGuest(req, via));
@@ -6163,6 +6218,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     debugLog?.close();
     clearInterval(dataCheck);
     windows.stop();
+    liveSites.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);
     setAsideTimers.clear();
     connectStop.abort();
@@ -6201,7 +6257,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

@@ -27,7 +27,12 @@ type InAppRendererProps = Omit<
   | 'allowScrollChaining'
 >;
 
-export const ReviewGuideHost: React.FC<{ children: React.ReactNode; globalComments?: GuideGlobalComments }> = ({ children, globalComments }) => {
+export const ReviewGuideHost: React.FC<{
+  children: React.ReactNode;
+  globalComments?: GuideGlobalComments;
+  /** The top bar's Collapse all (GuideDiffControls): folds or opens every file card. */
+  collapseAll?: GuideHostValue['collapseAll'];
+}> = ({ children, globalComments, collapseAll }) => {
   const state = useReviewState();
 
   const getDiffRendererProps = useCallback(
@@ -96,8 +101,9 @@ export const ReviewGuideHost: React.FC<{ children: React.ReactNode; globalCommen
       generatedFiles: state.generatedFiles,
       renderOverviewDiagram,
       ...(globalComments ? { globalComments } : {}),
+      ...(collapseAll ? { collapseAll } : {}),
     }),
-    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram, globalComments],
+    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram, globalComments, collapseAll],
   );
 
   return <GuideHostProvider value={value}>{children}</GuideHostProvider>;

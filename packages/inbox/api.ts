@@ -15,6 +15,7 @@ import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import { learnProjects } from './projectPictures';
+import { learnDefaultRefHost } from './defaultRefHost';
 import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
@@ -148,6 +149,11 @@ export interface ProjectFolder extends InboxProject {
   combined?: { id: string; name: string; root: string }[];
   /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
   picture?: number;
+  /**
+   * Its git origin's host (null: a remote that names none, which links as github.com). Absent for a project with no
+   * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
+   */
+  repo_host?: string | null;
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -1077,6 +1083,8 @@ function learnMachines(model: ListModel): void {
   for (const project of model.projects) rememberMachine([project.id], project.machine);
   // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
   learnProjects(model.projects);
+  // The host an owner/repo#123 links on in a thread with no repo: the one most projects use (defaultRefHost.ts).
+  learnDefaultRefHost(model.projects);
 }
 
 /** A file's query: the page session, and for another machine the key its door asks of every write. */
@@ -1305,6 +1313,19 @@ const listReader = createListReader<ListModel>((since) =>
 /** Tests only: the next list read is a whole one. */
 export function resetListReads(): void {
   listReader.reset();
+}
+
+/** A running app ready to frame: the proxy URL and its bridge token (`GET .../live/:site`, this computer only). */
+export interface LiveSiteWire {
+  id: string;
+  url: string;
+  origin: string;
+  app_url: string;
+  /** What the window frames: the Inbox's same-origin wrapper page, whose only frame is the proxy (`app_url`). */
+  frame_url: string;
+  proxy_origin: string;
+  token: string;
+  opened_by: 'agent' | 'person';
 }
 
 export const inboxApi = {
@@ -1579,6 +1600,14 @@ export const inboxApi = {
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }),
+  // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
+  // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
+  liveSite: (threadId: string, siteId: string, probe = false) =>
+    get<{ site: LiveSiteWire }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}${probe ? '?probe=1' : ''}`)),
+  pingLiveSite: (threadId: string, siteId: string) =>
+    post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
+  saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
+    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }),
   restart: () => post<{ ok: true }>(inboxUrl('/restart'), {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>(inboxUrl('/update')),
