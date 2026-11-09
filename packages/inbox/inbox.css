@@ -4499,6 +4499,11 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-fade 100ms linear reverse both; }
   @keyframes ib-lt-fade { from { opacity: 0; } to { opacity: 1; } }
 }
+/*
+ * The Sidebar tip (sidebarTip.ts): the Launch tip's card, fixed beside the sidebar with its arrow on the sidebar's
+ * edge. Under every menu and dialog (they are what a person opens over it).
+ */
+.ib-tour-coach.ib-lt.ib-st { position: fixed; z-index: 60; }
 /* Create thread from a Board card: which card the new thread is for. */
 .ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
 .ib-cp-card b { color: var(--foreground); font-weight: 600; }

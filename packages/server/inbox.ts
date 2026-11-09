@@ -255,6 +255,7 @@ import {
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
+import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
@@ -3064,6 +3065,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
   };
   /**
+   * The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): the owner's, a day or more after first use, while no
+   * sidebar layout was ever saved, until it was shown once. Outside the line, as the Launch tip: its claim stamps only
+   * `inboxReveals.sidebar_tip`.
+   */
+  const sidebarTipState = (owner: boolean): SidebarTipState => {
+    const config = loadConfig();
+    return {
+      owner,
+      customized: sidebarState().rev > 0 || config.inboxSidebar !== undefined,
+      firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+      tenure: snoozeIntroRelease,
+      saved: config.inboxReveals?.sidebar_tip,
+    };
+  };
+  const claimSidebarTip = (owner: boolean, key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = sidebarTipClaim(sidebarTipState(owner), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, sidebar_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -3080,6 +3104,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState(owner)),
+      // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
+      sidebar_tip: sidebarTipDue(sidebarTipState(owner), now.toISOString()),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -5425,8 +5451,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -5444,6 +5470,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Launch tip: outside the line, its own stamp only (packages/shared/inbox/launch-tip.ts).
         if (id === "launch_tip") {
           return json({ show: claimLaunchTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
+        if (id === "sidebar_tip") {
+          return json({ show: claimSidebarTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

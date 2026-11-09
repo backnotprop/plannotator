@@ -626,6 +626,8 @@ export interface PlannotatorConfig {
     tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
+    /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
+    sidebar_tip?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
