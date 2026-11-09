@@ -1,6 +1,6 @@
 /**
- * Each machine's agents for the sidebar's Agents section (design record "Agents sidebar section", Option A; PR 1 of 4:
- * the data, drawn by nothing yet). The list read carries them (`agents`, packages/server/inbox-agents-list.ts) and App
+ * Each machine's agents for the sidebar's Agents section (agents/AgentsSection.tsx, approval "inbox-agents-section").
+ * The list read carries them (`agents`, packages/server/inbox-agents-list.ts) and App
  * puts each read here, before the read's own "nothing new" check: an agent's last poll moves on every read, and only
  * what reads this store draws again for it, never the list.
  *

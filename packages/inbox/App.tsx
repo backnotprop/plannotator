@@ -6172,7 +6172,9 @@ function Inbox() {
   }, [stack.thread, view, route.thread, phone]);
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
-  const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
+  const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.
@@ -7158,6 +7160,18 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
+            // The Agents section (approval "inbox-agents-section"): an agent opens its thread as a starred one does;
+            // Add agent is New message with a new session chosen (plain New message where nothing can be started
+            // from here), and Add machine is Settings → Machines, where a machine is linked.
+            agentRows={windowRows}
+            onOpenAgentThread={(threadId) => {
+              const now = routeRef.current;
+              if (now.page === 'inbox' && now.thread === threadId) return;
+              go({ page: 'inbox', project: now.page === 'inbox' ? now.project : null, thread: threadId });
+            }}
+            onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
+            onAddMachine={machines.self && !guestPage ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
             projectCounts={projectCounts}
             projectActivity={latestProjectActivity}
