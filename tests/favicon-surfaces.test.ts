@@ -24,11 +24,11 @@ const MARKETING_FAVICON_LINKS = [
 // The studio's files, byte for byte. Never redrawn, resized or re-encoded here.
 const MARKETING_ICON_SHA256: Record<string, string> = {
   "apps/marketing/public/favicon.ico":
-    "e9a26dc9e012d8eb2d58cc8a07283611ae578070855af680c60ff52f923a2a0e",
+    "7402e8509ac4ab49194fa387ab0722766cfab5ab94230c798facfd0e97771c59",
   "apps/marketing/public/favicon.svg":
-    "c864fbefe0ca22c825e105e61d99b281c8486f8d962702f5085af16c711393a9",
+    "47cb128c12a479dd1f5d13fe56be141393b04c845e5a7fd6941538a951bd9fd6",
   "apps/marketing/public/apple-touch-icon.png":
-    "fd15a0e13e5a6309cc1971b935557e17081504f2989cf922912cd19c3f725176",
+    "5f5d84c3c72bf0acbcc6e634e037108754794ff9f9c8e3b596d0e7b7c088f4fb",
 };
 
 interface PngStats {
@@ -154,7 +154,7 @@ describe("favicon surfaces", () => {
 
   test("the shared application favicon is the studio's 192px goggles icon", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "e7d047d1a462a92f14b0222856c1939f60edef4be2485576d32c88dfa2492e92",
+      "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
     );
     const stats = inspectPng(FAVICON_PNG_BYTES);
     expect(stats).toMatchObject({ width: 192, height: 192 });

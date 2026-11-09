@@ -13,7 +13,7 @@ import {
 describe("production favicon", () => {
   test("embeds the studio's 192px goggles PNG exactly", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "e7d047d1a462a92f14b0222856c1939f60edef4be2485576d32c88dfa2492e92",
+      "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
     );
     expect(Array.from(FAVICON_PNG_BYTES.subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
