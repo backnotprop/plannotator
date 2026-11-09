@@ -338,7 +338,7 @@ describe("the skills catalog", () => {
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 
@@ -362,7 +362,7 @@ describe("what an agent's tool carries", () => {
   };
 
   // Off is byte-equal to an Inbox that has no Code review at all: config.json without the key, and with it false.
-  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's field and the context notes' words", async () => {
+  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's fields and the context notes' words", async () => {
     const w = await world();
     const never = JSON.stringify(await rawList(w.base));
     expect(never).not.toContain("Approve or Send feedback");
@@ -370,7 +370,7 @@ describe("what an agent's tool carries", () => {
     const on = JSON.stringify(await rawList(w.base));
     await w.setCodeReview(false);
     expect(JSON.stringify(await rawList(w.base))).toBe(never);
-    // On: the only changes are submit_guide's `review` property and the context notes (approval
+    // On: the only changes are submit_guide's `review` and `walkthrough` properties and the context notes (approval
     // "inbox-context-notes"): send_message's `body` gains the :::note line, submit_guide's `guide` names `notes?`.
     type Prop = { description?: string };
     const strip = (list: string) => {
@@ -379,6 +379,7 @@ describe("what an agent's tool carries", () => {
         const props = tool.inputSchema.properties;
         if (tool.name === "submit_guide") {
           delete props.review;
+          delete props.walkthrough;
           expect(props.guide?.description).toBe(INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES);
           props.guide!.description = INBOX_GUIDE_FIELD_DESCRIPTION;
         }

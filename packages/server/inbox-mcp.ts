@@ -325,6 +325,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
+  walkthroughThread?: (threadId: string) => boolean;
+  /**
+   * Whether Shape is on (config.json `inboxShape`, read on every request). With Code review on, get_guide_brief names
+   * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
+   */
+  shapeOn?: () => boolean;
 }
 
 

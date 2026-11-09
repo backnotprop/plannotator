@@ -45,10 +45,11 @@ if [[ ! -f "$grype_config" ]]; then
   exit 1
 fi
 
+# Authenticated with GH_TOKEN when the job sets it; every file is checked below.
 download() {
   local url="$1"
   local destination="$2"
-  curl --fail --location --retry 3 --proto '=https' --tlsv1.2 --output "$destination" "$url"
+  bash "$workspace/scripts/ci-fetch-release-asset.sh" "$url" "$destination"
 }
 
 verify_sha256() {
@@ -85,6 +86,8 @@ cyclonedx_binary="$tools_dir/cyclonedx"
 download "https://github.com/CycloneDX/cyclonedx-cli/releases/download/v${cyclonedx_version}/cyclonedx-linux-x64" "$cyclonedx_binary"
 verify_sha256 "$cyclonedx_sha256" "$cyclonedx_binary"
 chmod +x "$tools_dir/syft" "$tools_dir/grype" "$cyclonedx_binary"
+# The token was only for the downloads: the scanners below run without it.
+unset GH_TOKEN
 
 # Schema validation does not require locale-sensitive behavior. Keep the
 # self-contained .NET CycloneDX binary independent of the runner's ICU image.

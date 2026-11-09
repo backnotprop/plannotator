@@ -3605,6 +3605,141 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await box.locator('[data-compose-cancel]').click();
 });
 
+test('New review, a walkthrough: the words are the ask, its thread is named from them, and the code comes with no verdict', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="walkthrough"]').check({ force: true });
+  // Nothing but the words: no changes to choose, no picker, and Start waits for them.
+  await expect(box.locator('[data-review-choices="changes"]')).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toHaveCount(0);
+  const words = box.locator('[data-compose-text] textarea');
+  await expect(words).toBeFocused();
+  await expect(words).toHaveAttribute('placeholder', 'What should it walk you through?');
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await words.fill('How does a failed charge get retried? Start from the webhook.');
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Failed charge');
+  await expect(box.locator('[data-compose-send]')).toContainText('Start walkthrough');
+  await shot(page, 'w-box');
+  for (const [width, height] of [[390, 844], [320, 700]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `w-box-${width}`, ['light']);
+    const row = box.locator('[data-review-choices="kind"]');
+    expect(await row.evaluate((group) => group.getBoundingClientRect().right <= group.parentElement!.getBoundingClientRect().right)).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+
+  // Its row from the start, by the word, under a name that came from what was typed.
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveCount(0);
+  const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Failed charge' });
+  await expect(row).toContainText('Walkthrough');
+  // Being written, not curated: the row and the thread say so.
+  await expect(row).toContainText('Writing…');
+  await expect(row).not.toContainText('Curating');
+  await expect(page.locator('[data-review-curating]')).toHaveText('Writing the walkthrough…');
+  await expect(page.getByText('/review-walkthrough').first()).toBeVisible();
+  const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  await shot(page, 'w-curating');
+
+  // The agent names files and lines, and sends its own patch too: it isn't looked at.
+  const longFile = join(world.projects.web, 'src/walk-long.ts');
+  writeFileSync(longFile, Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
+  const sent = await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'A failed charge starts at the webhook.',
+    guide: {
+      title: 'How a failed charge gets retried',
+      intent: 'Follow one failed charge.',
+      sections: [
+        { title: 'Where it starts', overview: 'The webhook takes the event.', diffs: [{ file: 'src/i18n/fallback.ts', lines: '1-2', summary: 'The first lines.' }] },
+        { title: 'Between', overview: 'Words with no code beside them.', diffs: [] },
+        { title: 'Further down', overview: 'Two places in a long file.', diffs: [{ file: 'src/walk-long.ts', lines: '30-32, 50-51', summary: 'Those lines.' }] },
+      ],
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+  } as never);
+  const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
+  await expect(reviewed).toContainText('Ready', { timeout: 15_000 });
+  await expect(reviewed).toContainText('Walkthrough');
+  await expect(reviewed).toHaveAttribute('data-pulls-move', 'on_you');
+
+  // The card asks nothing and counts nothing.
+  const card = page.locator('[data-review-card]').last();
+  await expect(card).toContainText('Walkthrough');
+  await expect(card).not.toContainText('Waiting on you');
+  await expect(card).not.toContainText('+0');
+  await expect(card).toContainText('2 files');
+  await shot(page, 'w-card');
+
+  // Open: the code once, not side by side, and no verdict to give.
+  await card.locator('[data-review-start]').click();
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
+  // The top bar keeps its diff controls but no Split / Unified button: nothing is marked as changed.
+  await expect(page.locator('[data-review-message] [data-diff-controls]')).toBeVisible();
+  await expect(page.locator('[data-review-message] [data-diff-layout-toggle]')).toHaveCount(0);
+  await expect(page.locator('[data-diff-style-switch]')).toHaveCount(0);
+  await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
+  await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');
+  await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
+  await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
+  await expect(page.getByText('unmodified line')).toHaveCount(0);
+  // No ticks: no chapter Reviewed, no file Viewed, and no "N of M" line in the chapter menu.
+  await expect(page.locator('[data-review-message]').getByRole('button', { name: /viewed/i })).toHaveCount(0);
+  await page.locator('[data-review-jump]').first().click();
+  await expect(page.locator('[data-review-jump-menu] [data-review-jump-row]').first()).toBeVisible();
+  await expect(page.locator('[data-review-progress]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+  // Two ranges in a file leave no room over its header for a separator that isn't there: it sits as a one-range file's does.
+  const gapOver = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().evaluate((shell) => {
+    const body = [shell, ...shell.querySelectorAll('*')].flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];
+    return body ? body.getBoundingClientRect().top - shell.getBoundingClientRect().top : Number.NaN;
+  });
+  expect(Math.abs((await gapOver('src/walk-long.ts')) - (await gapOver('src/i18n/fallback.ts')))).toBeLessThan(4);
+  await page.waitForTimeout(1200);
+  await shot(page, 'w-pane');
+  // All files: the same code, nothing counted, and no words about changes.
+  await page.getByRole('radio', { name: 'All files' }).first().check({ force: true });
+  await expect(page.locator('[data-guide-file-shell="src/i18n/fallback.ts"]').first()).toBeVisible();
+  await expect(page.getByText('Every changed file')).toHaveCount(0);
+  await expect(page.getByText(/^\+0/)).toHaveCount(0);
+  await shot(page, 'w-pane-files');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'w-pane-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#thread=${encodeURIComponent(threadId!)}`);
+  await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
+  await shot(page, 'w-thread');
+  rmSync(longFile);
+  // The list's mark says the word; a plain guided review's mark keeps its own.
+  await expect(page.locator(`[data-row="${threadId}"] [data-guide-mark]`).first()).toHaveAttribute('aria-label', 'Walkthrough');
+  await expect(page.locator('[data-guide-mark][aria-label="Guided review"]').first()).toBeAttached();
+
+  // More asked: the row is with the agent, and its plain answer, no second walkthrough, brings it back.
+  const moveOf = () => page.evaluate(async (id) => ((await (await fetch('/api/inbox/reviews')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.find((row) => row.thread_id === id)?.move, threadId);
+  await page.evaluate(async (id) => {
+    await fetch(`/api/inbox/messages/${id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotency_key: '00000000-0000-4000-8000-00000000a001', words: 'Where does the 200 come from?' }) });
+  }, sent.message_id);
+  await expect.poll(moveOf).toBe('agents');
+  await claude.send({ project_path: world.projects.web, reply_to: sent.message_id as string, body: 'From charge.ts, line 4.' });
+  await expect.poll(moveOf).toBe('on_you');
+
+  // Code review off: the field isn't there, and nothing is sent.
+  await setCodeReview(false);
+  await expect(claude.submitGuide({ project_path: world.projects.web, thread: 'walk-off', walkthrough: true, guide: { title: 'Off', intent: 'Off.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/i18n/fallback.ts' }] }] } } as never)).rejects.toThrow('walkthrough');
+  await setCodeReview(true);
+});
+
 test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {
   const { page } = world;
   await setCodeReview(true);

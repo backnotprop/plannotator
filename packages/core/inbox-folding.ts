@@ -78,11 +78,26 @@ export interface FoldPlan {
 }
 
 /**
+ * The most messages a thread opens on when more than this many are new
+ * (approval "inbox-thread-fold-unread"): the newest ones, read or unread.
+ * The middle fold's step is the same 20 (Thread.tsx `FOLD_STEP`).
+ */
+export const OPEN_NEWEST_MAX = 20;
+
+/**
  * How a thread opens: a message is shown in full when it is new since the
  * last look, holds a pick not yet sent, or is the last message; every other
  * message folds. A one-message thread folds nothing (it looks as it always
  * did), and so does a thread whose seqs are unknown (an older Inbox: the
  * window cannot tell what was read).
+ *
+ * More than OPEN_NEWEST_MAX new: only the newest OPEN_NEWEST_MAX messages
+ * open by the rule above. The new ones older than those fold and hide behind
+ * one middle fold of their own, from the first new message down to the
+ * newest OPEN_NEWEST_MAX (the read messages above it fold as before), so the
+ * "New since you looked" line sits right above that fold and the thread
+ * opens where it did. The thread's first message is never hidden. One
+ * holding a pick not sent stays open, as before.
  */
 export function planFolds(messages: readonly InboxMessageWire[], fresh: ReadonlySet<string>, boundary: number | null): FoldPlan {
   const folded = new Set<string>();
@@ -92,20 +107,43 @@ export function planFolds(messages: readonly InboxMessageWire[], fresh: Readonly
   // The last real message stays open too when the Inbox's notes trail it: it
   // carries the reply's "Saved for / Delivered to" line.
   const lastReal = lastNonNote(messages);
+  // Past OPEN_NEWEST_MAX new: the new messages from the first one down to the newest OPEN_NEWEST_MAX hide.
+  const firstNew = messages.findIndex((m) => fresh.has(m.id));
+  const many = messages.reduce((n, m) => n + (fresh.has(m.id) ? 1 : 0), 0) > OPEN_NEWEST_MAX;
+  const newestFrom = many ? messages.length - OPEN_NEWEST_MAX : messages.length;
   let run: string[] = [];
+  let early: string[] = [];
   const flush = () => {
     if (run.length >= 4) hidden.push(run.slice(1, run.length - 2));
     run = [];
   };
-  for (const message of messages) {
-    const open = fresh.has(message.id) || holdsUnsentPick(message) || message === last || message === lastReal;
+  const flushEarly = () => {
+    if (early.length > 0) hidden.push(early);
+    early = [];
+  };
+  messages.forEach((message, index) => {
+    const pick = holdsUnsentPick(message);
+    if (many && index >= firstNew && index < newestFrom) {
+      flush();
+      if (pick) {
+        flushEarly();
+        return;
+      }
+      folded.add(message.id);
+      // The first message stays as its line, above the fold.
+      if (index > 0) early.push(message.id);
+      return;
+    }
+    flushEarly();
+    const open = fresh.has(message.id) || pick || message === last || message === lastReal;
     if (open) {
       flush();
-      continue;
+      return;
     }
     folded.add(message.id);
     run.push(message.id);
-  }
+  });
+  flushEarly();
   flush();
   return { folded, hidden };
 }
@@ -367,7 +405,7 @@ export function holdingsOf(message: InboxMessageWire, options: { delivered: bool
     const n = message.sent_annotations!;
     out.push({ kind: 'annotations', text: String(n), say: `${plural(n, 'annotation')} sent`, count: n });
   }
-  if (message.guide) out.push({ kind: 'guide', text: 'Guided review', say: 'a guided review' });
+  if (message.guide) out.push(message.guide.walkthrough ? { kind: 'guide', text: 'Walkthrough', say: 'a walkthrough' } : { kind: 'guide', text: 'Guided review', say: 'a guided review' });
   if (options.delivered) out.push({ kind: 'delivered', text: 'Delivered', say: 'delivered' });
   return out;
 }

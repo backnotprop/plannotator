@@ -7,12 +7,15 @@ import { describe, expect, test } from "bun:test";
 import {
   checkInboxDrawing,
   INBOX_REVIEW_SKILL_TEXTS,
+  INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE,
   INBOX_REVIEW_CURATE_DRAWING_LINE,
   INBOX_REVIEW_RECHECK_DRAWING_LINE,
   inboxDrawingCodes,
   inboxDrawnViewOf,
   inboxReviewLines,
   inboxReviewRound,
+  inboxReviewSkill,
+  inboxReviewSkills,
   inboxShowMeRequest,
   type InboxShowMeTarget,
 } from "./inbox-review";
@@ -122,14 +125,29 @@ describe("checkInboxDrawing", () => {
   });
 });
 
-describe("the review skills mention the overview's drawing", () => {
-  test("/review-curate ends with it; /review-recheck has it after its chapters paragraph", () => {
-    const curate = INBOX_REVIEW_SKILL_TEXTS["review-curate"].body;
+describe("the review skills mention the overview's drawing only while Shape is on", () => {
+  test("Shape on: /review-curate ends with it; /review-recheck has it after its chapters paragraph", () => {
+    const curate = inboxReviewSkill("review-curate", { shape: true })!.body;
+    expect(curate).toBe(INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE["review-curate"]!.body);
     expect(curate.trimEnd()).toEndWith(INBOX_REVIEW_CURATE_DRAWING_LINE);
-    const recheck = INBOX_REVIEW_SKILL_TEXTS["review-recheck"].body;
+    const recheck = inboxReviewSkill("review-recheck", { shape: true })!.body;
     const chapters = recheck.indexOf("Give one chapter to each comment you acted on");
     expect(chapters).toBeGreaterThan(-1);
     expect(recheck.indexOf(INBOX_REVIEW_RECHECK_DRAWING_LINE)).toBeGreaterThan(chapters);
+  });
+
+  test("Shape off (approval code-review-029-shape-off): no skill asks for a drawing, and the rest is the Shape-on text", () => {
+    const offered = inboxReviewSkills();
+    expect(offered.map((skill) => skill.name)).toEqual(inboxReviewSkills({ shape: true }).map((skill) => skill.name));
+    for (const name of Object.keys(INBOX_REVIEW_SKILL_TEXTS)) {
+      const off = INBOX_REVIEW_SKILL_TEXTS[name]!.body;
+      for (const word of ["overview.diagram", "drawing", "Shape", "shape --help", "data-mark"]) expect([name, off.includes(word)]).toEqual([name, false]);
+      // Only the drawing line (and its blank line) goes.
+      const on = INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE[name]!.body;
+      const lines = (text: string) => text.split("\n").filter((line) => line !== "" && line !== INBOX_REVIEW_CURATE_DRAWING_LINE && line !== INBOX_REVIEW_RECHECK_DRAWING_LINE);
+      expect(lines(off)).toEqual(lines(on));
+    }
+    expect(inboxReviewSkill("review-curate")!.body).toBe(INBOX_REVIEW_SKILL_TEXTS["review-curate"]!.body);
   });
 });
 

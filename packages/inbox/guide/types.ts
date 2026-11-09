@@ -32,6 +32,8 @@ export interface GuideReaderProps {
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;
+  /** False: the chapters take no "Reviewed" tick (a walkthrough: code as it is, nothing to review). Default true. */
+  chapterTicks?: boolean;
   /** Line comments on the diffs; absent, the diffs are read-only (a resolved thread). */
   comments?: GuideReaderComments;
   /**
@@ -84,11 +86,46 @@ export interface GuideReaderProps {
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
   fileOpenIn?: (path: string) => ReactNode;
   /**
+   * What the host draws itself under lines of the diffs (the PR page: other people's threads from the forge). Never
+   * comments: nothing counts, sends or posts them. Absent: none, as before.
+   */
+  lineNotes?: readonly GuideLineNote[];
+  /**
+   * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
+   * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
+   * should scroll away with the code is a line note on line 0. Absent: none, as before.
+   */
+  wholeFileNotes?: readonly GuideFileNote[];
+  /**
    * Context notes (approval "inbox-context-notes"): agents' words on lines, drawn under their last line by
    * `renderContextNote` through review-editor's `contextNotes` seam, never as comments. Absent: nothing changes.
    */
   contextNotes?: readonly GuideContextNote[];
   renderContextNote?: (id: string) => ReactNode;
+}
+
+/** One thing the host draws under a line (review-editor's `HostLineNote`, as the window's strict typecheck sees it). */
+export interface GuideLineNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  line: number;
+  side: 'old' | 'new';
+  /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
+  key: string;
+  render: () => ReactNode;
+}
+
+/** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */
+export interface GuideFileNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  /** Changes whenever what `render` draws changes; the same key leaves the file's header as it is. */
+  key: string;
+  /** The height it draws at, in px, when known: the header is sized for it from the start (review-editor's `height`). */
+  height?: number;
+  render: () => ReactNode;
 }
 
 /** Where a context note sits (review-editor's `ContextNoteAnchor`, as the window's strict typecheck sees it). */
