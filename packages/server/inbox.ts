@@ -4195,6 +4195,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The same `codex` and Codex home a launch finds (the plain env launch uses), so the line is the account a launch runs as.
   const codexAccount = createInboxCodexAccount({
     environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchOwnEnv() }),
+    ready: () => launch.availableFor(INBOX_CODEX_HOST),
     dataDir,
     ...(options.voice?.extraClis ? { extraClis: options.voice.extraClis } : {}),
   });

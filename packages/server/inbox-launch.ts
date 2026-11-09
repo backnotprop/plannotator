@@ -1742,6 +1742,11 @@ ${result.text}`);
       return result;
     },
 
+    /** Whether `agent` can start here now (its host's own check, the 30 s answer New message uses); null for no such host. */
+    availableFor(agent: string): Promise<LaunchAvailability> | null {
+      return Object.hasOwn(hosts, agent) ? available(hosts[agent]!) : null;
+    },
+
     /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
     launched(agent: string, session: string): boolean {
       return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);

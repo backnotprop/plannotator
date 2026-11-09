@@ -87,12 +87,27 @@ export interface InboxCodexAccountReader {
   stop(): void;
 }
 
-/** `environment`: the env a launch finds `codex` and its home on (read again for each run). */
-export function createInboxCodexAccount(options: { environment: () => AgentEnvironment; dataDir: string; extraClis?: readonly string[]; now?: () => number }): InboxCodexAccountReader {
+/**
+ * `environment`: the env a launch finds `codex` and its home on (read again for each run). `ready`: launch's own check
+ * for Codex (New message's), asked first: Codex is only run for its account where New message could start it, so a
+ * Codex not found, too old, or without the Inbox MCP entry is never run for this line; a check that says signed out
+ * is the answer without running Codex.
+ */
+export function createInboxCodexAccount(options: {
+  environment: () => AgentEnvironment;
+  ready?: () => Promise<{ ok: true } | { ok: false; code?: string }> | null;
+  dataDir: string;
+  extraClis?: readonly string[];
+  now?: () => number;
+}): InboxCodexAccountReader {
   const now = options.now ?? Date.now;
   const running = new Set<CodexAppServerProcess>();
 
   const readOnce = async (): Promise<InboxCodexAccount> => {
+    if (options.ready) {
+      const ready: { ok: boolean; code?: string } = (await options.ready()) ?? { ok: false };
+      if (!ready.ok) return ready.code === "signed_out" ? { state: "signed_out" } : ready.code === "missing" ? { state: "missing" } : { state: "unknown" };
+    }
     const environment = options.environment();
     /** Codex's config and login are read from the home it runs with, never one the Inbox was not given. */
     const codexEnv = { ...environment.env, CODEX_HOME: codexHome(environment) };

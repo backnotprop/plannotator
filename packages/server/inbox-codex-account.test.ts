@@ -16,7 +16,7 @@ afterEach(() => {
   for (const undo of cleanup.splice(0).reverse()) undo();
 });
 
-function setup(state: FakeCodexLaunchState, withCodex = true) {
+function setup(state: FakeCodexLaunchState, withCodex = true, ready?: () => Promise<{ ok: true } | { ok: false; code?: string }>) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-codex-account-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -31,6 +31,7 @@ function setup(state: FakeCodexLaunchState, withCodex = true) {
     environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } }),
     dataDir: data,
     extraClis: [],
+    ...(ready ? { ready } : {}),
     now: () => clock.now,
   });
   cleanup.push(() => reader.stop());
@@ -70,6 +71,19 @@ describe("Codex's account, read from Codex", () => {
     clock.now += 30_001;
     await reader.read();
     expect(fake.starts()).toHaveLength(2);
+  });
+
+  test("Codex runs only where New message could start it: launch's check first", async () => {
+    // No Inbox MCP entry (or too old, or not found): no row, and Codex never ran.
+    const off = setup({ login: "chatgpt" }, true, async () => ({ ok: false, code: "tool_off" }));
+    expect(await off.reader.read()).toEqual({ state: "unknown" });
+    expect(off.fake.starts()).toHaveLength(0);
+    // Launch's check says signed out: that is the answer, without running Codex.
+    const out = setup({ login: "chatgpt" }, true, async () => ({ ok: false, code: "signed_out" }));
+    expect(await out.reader.read()).toEqual({ state: "signed_out" });
+    expect(out.fake.starts()).toHaveLength(0);
+    const ok = setup({ login: "apikey" }, true, async () => ({ ok: true }));
+    expect(await ok.reader.read()).toEqual({ state: "signed_in", kind: "api_key", plan: null, limits: null });
   });
 
   test("the parsers take named fields only", () => {
