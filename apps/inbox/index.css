@@ -31,6 +31,8 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
+@import "../../packages/inbox/prototype-window.css";
 /* System: the drawing's own sheet (sys- classes, packages/system), drawn in Reviews' System pane. */
 @import "../../packages/system/src/system.css";
 /* Floating reply drafts and Ask AI in the corner. */

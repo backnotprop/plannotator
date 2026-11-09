@@ -2971,6 +2971,15 @@ Chromium checks a `:has()` whose subject is `html`, `body` or another ancestor o
 - **`TooltipArmed`** (`components/Tooltip.tsx`, a React context, default `true`): inside a provider with `false`, every `Tooltip` renders its trigger child alone, with no Base UI root behind it (a `forceOpen` tooltip still draws). The trigger is the same element with the same text and label, so nothing on screen changes; only the hover text is not there until the host arms it again. Plannotator's Inbox arms a long thread's messages near the view and leaves the rest unarmed (`packages/inbox/messageArming.tsx`): each Base UI tooltip root is 50 to 200 hooks, and 245 open messages held about 100 MB of JS heap in them (#2948). A host with no provider renders exactly as before.
 - **`decoding="async"`** on a markdown image is now set only when the host's `resolveImage` returns a smaller copy (`width`): an image with no resolver, and one the host serves as it is, has no `decoding` attribute, as before #2948.
 
+## Questions: option lines, a slot after the options, a trade-offs table; LiveSiteViewer (unreleased; opt-in seams)
+
+From the Inbox's trade-offs and prototypes (approval `inbox-question-tradeoffs`). A host that passes none of these sees no change.
+
+- **`Viewer`'s `questionOptionLines?: boolean`** (default off). On, the question cards read `Pros:`, `Cons:` and `Prototype:` lines under a `- [ ]` choice (core's `parseQuestionBlock(..., { optionLines: true })`) instead of keeping them in the choice's description. Off, every line stays text, as before.
+- **`Viewer`'s `renderQuestionAfterChoices?(question, index)`** → `BlockRenderer` → `QuestionBlock`'s `renderAfterChoices`. A node it returns sits right under the options; the options and the node are wrapped in `[data-question-tray-host]`, the options in `[data-question-tray]`, for the host's own styling. No node, no wrapper.
+- **The trade-offs table**, only when the parsed question carries `pros` or `cons` (so only with `questionOptionLines`): a closed "Trade-offs" line under Why (`[data-question-tradeoffs-toggle]`, `aria-expanded`) that opens a `role="table"` (`[data-question-tradeoffs]`), one row per option with Pros and Cons side by side, stacked below 600 px of card width.
+- **`LiveSiteViewer`** (`components/html-viewer`, from #2258): `HtmlViewer` for a proxied running app. `HtmlViewer` gains `liveSandbox?` (the frame's sandbox for a live page) and the bridge script a `nested` mode (the editor is `parent.parent` when the app sits in a wrapper page). Not used by Plannotator's plan, review or annotate pages.
+
 ## `crossRepoRefsWithoutRepo`: `owner/repo#123` links where the caller names no repo (unreleased; additive, opt-in, no core change)
 
 An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRepo`; without one it stayed plain text. A Plannotator Inbox thread whose project has no git origin (a folder that is not a repo) therefore showed `backnotprop/plannotator#2948` as plain text, though the ref names its own repo and agents are told to write it.

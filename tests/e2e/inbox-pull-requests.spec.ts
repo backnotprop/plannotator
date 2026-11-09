@@ -1076,10 +1076,15 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
   // Global comment is a quiet mark in the bar; the diff controls (one Split / Unified button, Collapse all, the gear) sit
-  // in the review app's muted tab row over the code.
+  // in the bar too, before it, as in a thread's review (the owner: in the Inbox they are always in the header).
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-pull-tabs] [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+  await expect(review.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+  await expect(review.locator('[data-diff-controls]')).toHaveCount(1);
+  const barOrder = await review.locator('.ib-vhead').evaluate((bar) => {
+    const left = (selector: string) => Math.round(bar.querySelector(selector)!.getBoundingClientRect().left);
+    return [left('[data-diff-controls]') < left('[data-guide-global-comment-add]'), left('[data-guide-global-comment-add]') < left('[data-review-decision]')];
+  });
+  expect(barOrder).toEqual([true, true]);
   await expect(review.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
@@ -1105,22 +1110,21 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
   expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', cornerRight: '0px', barApart: true });
-  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it, the 33 px tab row over the
-  // code alone, in a fill of its own, the first file right under it.
+  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it and right under the bar:
+  // no row over the code (no empty band; the diff controls are in the bar).
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
-    const [bar, rail, body, tabs] = ['.ib-vhead', '.ib-rrail', '.ib-gbody', '[data-pull-tabs]'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
-    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
+    const [bar, rail, body] = ['.ib-vhead', '.ib-rrail', '.ib-gbody'].map(box) as [DOMRect, DOMRect, DOMRect];
     return {
       barHeight: bar.height,
       railTop: rail.top - bar.bottom,
       railFoot: root.getBoundingClientRect().bottom - rail.bottom,
       beside: body.left - rail.right,
-      tabs: { height: tabs.height, top: tabs.top - bar.bottom, overCode: [tabs.left, tabs.right, body.top - tabs.bottom].map(Math.round), apart: fill('[data-pull-tabs]') !== fill('.ib-gbody') && fill('[data-pull-tabs]') !== fill('.ib-vhead') },
+      codeTop: Math.round(body.top - bar.bottom),
+      row: root.querySelectorAll('[data-pull-tabs], .ib-prp-tabs').length,
     };
   });
-  const codeBox = (await review.locator('.ib-gbody').boundingBox())!;
-  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, tabs: { height: 33, top: 0, overCode: [Math.round(codeBox.x), Math.round(codeBox.x + codeBox.width), 0], apart: true } });
+  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, codeTop: 0, row: 0 });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1997,7 +2001,7 @@ test('the next file\'s header right under the last code row, whatever separators
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
-    await review.locator('[data-pull-tabs] [data-diff-layout-toggle="split"]').click();
+    await review.locator('.ib-vhead [data-diff-layout-toggle="split"]').click();
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
   } finally {
     await context.close();
@@ -2508,11 +2512,18 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
-    // The bar has it at every width but a phone's, beside the title.
-    for (const width of [800, 1040, 1280, 1440]) {
+    // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
+    // gives way before the title does: the title's tip names the author as well.
+    for (const width of [1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     }
+    await page.setViewportSize({ width: 800, height: 900 });
+    const narrow = await review.evaluate((root) => {
+      const width = (selector: string) => root.querySelector(selector)!.getBoundingClientRect().width;
+      return { title: width('[data-pull-review-title]') > width('[data-pull-review-readonly]') + 24, overflow: root.querySelector('.ib-vhead')!.scrollWidth - root.querySelector('.ib-vhead')!.clientWidth };
+    });
+    expect(narrow).toEqual({ title: true, overflow: 0 });
     await page.setViewportSize({ width: 1440, height: 900 });
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {

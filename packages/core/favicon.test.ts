@@ -11,9 +11,9 @@ import {
 } from "./favicon";
 
 describe("production favicon", () => {
-  test("embeds the canonical 64px PNG exactly", () => {
+  test("embeds the studio's 192px goggles PNG exactly", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
+      "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
     );
     expect(Array.from(FAVICON_PNG_BYTES.subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -24,10 +24,11 @@ describe("production favicon", () => {
       FAVICON_PNG_BYTES.byteOffset,
       FAVICON_PNG_BYTES.byteLength,
     );
-    expect(view.getUint32(16)).toBe(64);
-    expect(view.getUint32(20)).toBe(64);
+    expect(view.getUint32(16)).toBe(192);
+    expect(view.getUint32(20)).toBe(192);
     expect(view.getUint8(24)).toBe(8);
-    expect(view.getUint8(25)).toBe(6);
+    // Colour type 2 (RGB) or 6 (RGBA): the studio's file decides.
+    expect([2, 6]).toContain(view.getUint8(25));
   });
 
   test("keeps the SVG export as a wrapper around the canonical PNG", () => {

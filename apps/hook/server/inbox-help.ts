@@ -28,7 +28,7 @@ import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
-import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, inboxServedTools } from "@plannotator/server/inbox-mcp";
+import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inboxServedTools } from "@plannotator/server/inbox-mcp";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
@@ -456,6 +456,20 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "```markdown",
     INBOX_CONTRACT_EXAMPLE,
     "```",
+    "",
+    "### Trade-offs and prototypes",
+    "",
+    "Lines indented under a `- [ ]` choice (a plain `- Label` bullet would take them into its label), each optional, each read once. Write them only when they help the person pick:",
+    "",
+    "- `Pros: <item>; <item>` and `Cons: <item>; <item>`: what the option gives and what it costs, items split on `;`. The card keeps them in a Trade-offs line under Why that opens into a table, one row per option, Pros and Cons side by side. Give them for every option or for none.",
+    "- `Prototype: <page>`: a page the person tries before picking that option; leave it off an option with nothing to show. \"Try prototype\" on the card opens it full window; they step between the options' pages and press Pick. The page is either an HTML file you attach in the same send (send_message's `attachments`, its path written as there; it shows as sent), or the address of an app running on this computer (`http://localhost:5173/checkout?v=b`): the send is refused, naming the question and option, when nothing answers there, so start it first and keep it running until they answer. Their comments on a page come back in the reply under that option's name.",
+    "- One `Prototype: <page>` line at the block's own indent instead: one page that shows every option.",
+    "",
+    "```markdown",
+    INBOX_TRADEOFFS_EXAMPLE,
+    "```",
+    "",
+    "Here `proto/checkout-b.html` is in `attachments`, and the app runs on port 5173.",
     "",
     "### Action items only the person can do",
     "",
