@@ -40,7 +40,7 @@ function LiveDrawing({ draft }: { draft: LiveDraft }) {
   );
   if (sources.length === 0) return null;
   return (
-    <div className="ib-message ib-drafting" data-drafting={draft.call} data-done={draft.done ? '' : undefined}>
+    <div className="ib-drafting" data-drafting={draft.call} data-done={draft.done ? '' : undefined}>
       <p className="ib-drafting-line" role="status">
         {draft.done ? 'Sending…' : 'Drawing…'}
       </p>

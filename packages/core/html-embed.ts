@@ -171,6 +171,16 @@ export const EMBED_BOOTSTRAP = `(function () {
 const SVG_BASE_VARS = "--chart-1:#4f6bed;--chart-2:#e8833a;--chart-3:#2fa37a;--chart-4:#d64c63;--chart-5:#8b5cf6;";
 
 /**
+ * Text an agent filled with `--muted` or `--border` meant "quiet text", but
+ * those are a surface and a hairline: on the message they nearly vanish (seen
+ * in dark, 2026-11-09). Such text is drawn in the quiet text color instead.
+ */
+const SVG_QUIET_TEXT = ["muted", "border"]
+  .flatMap((token) => ["text", "tspan"].map((tag) => `${tag}[fill="var(--${token})"]`))
+  .join(",")
+  .concat("{fill:var(--muted-foreground,currentColor)}");
+
+/**
  * A ```svg fence's markup with the host's theme in it, for a drawing shown
  * through `<img>` (which reads nothing from the page around it): the tokens
  * as CSS variables of the same name on its root, `currentColor` as the
@@ -189,7 +199,7 @@ export function themedSvg(source: string, theme: EmbedTheme): string {
     // A value that could end the rule or the element is left out: the drawing falls back to its own.
     if (typeof value === "string" && value && !/[<>{};&]/.test(value)) vars += `${name}:${value};`;
   }
-  const css = `:root{${vars}color-scheme:${theme.scheme};color:var(--foreground,CanvasText);font-family:var(--font-sans,system-ui,sans-serif)}`;
+  const css = `:root{${vars}color-scheme:${theme.scheme};color:var(--foreground,CanvasText);font-family:var(--font-sans,system-ui,sans-serif)}${SVG_QUIET_TEXT}`;
   const at = open.index + open[0].length;
   return `${source.slice(0, at)}<style>${css}</style>${source.slice(at)}`;
 }
