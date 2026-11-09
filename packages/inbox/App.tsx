@@ -70,6 +70,7 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
+import { inboxAgentsWatched, setInboxAgents } from './agentsList';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -1542,6 +1543,8 @@ function Inbox() {
       const newest = held && listCursor.current?.session === held.serverSession ? Math.max(listCursor.current.cursor, held.cursor) : held?.cursor;
       if (held && next.serverSession === held.serverSession && next.cursor < newest!) return held;
       listCursor.current = { session: next.serverSession, cursor: next.cursor };
+      // Each machine's agents (agentsList.ts): their own store, so a read that moved only them never draws the list.
+      setInboxAgents(next.agents);
       // Nothing new (listSame.ts): the list held stays, and nothing is drawn again. A row's own state shows in place
       // as before (an own write's row put back by the read, the open thread's row).
       if (!adopt && held && firstList.current!.done && sameListModel(held, next, { cursor: routeRef.current.page === 'settings' })) {
@@ -2319,7 +2322,7 @@ function Inbox() {
           // again only where a list shows.
           stepsBus.emit('presence');
           // A session's label changed (issue #2450), or one ended or came back: the list carries both, so it is read again.
-          if (!deliveriesReadList(change, latestSectionsRef.current)) return;
+          if (!deliveriesReadList(change, latestSectionsRef.current, inboxAgentsWatched())) return;
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
