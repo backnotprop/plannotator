@@ -21,6 +21,7 @@ import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { namesList } from '../tags';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
+import { markRecipientList } from '../pageMarks';
 
 function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; short: string; ended: boolean }) {
   return (
@@ -137,7 +138,7 @@ export function ReplyRecipient({
   );
 
   const list = open ? (
-    <div className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" style={spot} onMouseDown={(event) => event.preventDefault()}>
+    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" style={spot} onMouseDown={(event) => event.preventDefault()}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
         const quiet = QUIET[row.state];

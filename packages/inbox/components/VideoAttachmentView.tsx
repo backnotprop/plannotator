@@ -16,6 +16,7 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { useRowDraft } from '../fileCommentDrafts';
+import { markImageComposer } from '../pageMarks';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -438,7 +439,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   ) : (
     !readOnly &&
     (!phone || composing) && (
-      <div className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
+      <div ref={markImageComposer} className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
         {commentCard}
       </div>
     )
