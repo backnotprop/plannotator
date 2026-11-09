@@ -1511,7 +1511,8 @@ export const INBOX_HELD_POLL_FIELD = 'held'
  * The poll field by which a connection says which session ids its
  * conversation continues, nearest first (a string, or a list of at most 8):
  * the host gave the conversation a new session id (Claude Code's branch of a
- * conversation, whose transcript names the session it came from). Set by the
+ * conversation, whose transcript names the session it came from, and its
+ * hand-over to a new session, which the old transcript records). Set by the
  * host from its own records, never by the model: it is no tool argument.
  * While a session it names is not live, the Inbox hands this session what
  * waits for that one (packages/server/inbox-continuations.ts); a session that

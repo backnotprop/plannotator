@@ -2,7 +2,17 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inboxClaimArgv, inboxProjectDirArgv, inboxReleaseArgv, TRANSCRIPT_FORKED_FROM_SCRIPT, TRANSCRIPT_TITLE_SCRIPT, transcriptForkedFromOf, transcriptTitleOf } from './inbox'
+import {
+  inboxClaimArgv,
+  inboxProjectDirArgv,
+  inboxReleaseArgv,
+  TRANSCRIPT_CONTINUED_IN_SCRIPT,
+  TRANSCRIPT_FORKED_FROM_SCRIPT,
+  TRANSCRIPT_TITLE_SCRIPT,
+  transcriptForkedFromOf,
+  transcriptHandoversOf,
+  transcriptTitleOf,
+} from './inbox'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -314,6 +324,22 @@ describe.skipIf(!POWERSHELL || !existsSync(POWERSHELL))('the PowerShell twins of
     writeFileSync(plain, '{"type":"user","sessionId":"s2"}\n')
     expect(run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [plain, '4096']))).toMatchObject({ code: 0, out: '' })
     expect(run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [join(scratch(), 'missing.jsonl'), '4096']))).toMatchObject({ code: 0, out: '' })
+  })
+
+  test("transcript continued-in: a folder's hand-overs read as the POSIX script's", () => {
+    ps()
+    const dir = join(scratch(), 'project')
+    mkdirSync(dir)
+    const handover = (from: string, to: string) => `${JSON.stringify({ type: 'continued-in', sessionId: from, continuedInSessionId: to })}\n`
+    writeFileSync(join(dir, 's1.jsonl'), `{"type":"user","sessionId":"s1"}\n${handover('s1', 's2')}{"type":"custom-title","customTitle":"T"}\n`)
+    // A real turn after the record: the person went back to that session.
+    writeFileSync(join(dir, 's3.jsonl'), `${handover('s3', 's2')}{"type":"assistant","sessionId":"s3"}\n`)
+    writeFileSync(join(dir, 's2.jsonl'), '{"type":"user","sessionId":"s2"}\n')
+    writeFileSync(join(dir, 'notes.txt'), handover('s4', 's2'))
+    const result = run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [dir, '4096']))
+    expect(result.code).toBe(0)
+    expect(transcriptHandoversOf(result.out)).toEqual([{ from: 's1', to: 's2' }])
+    expect(run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [join(scratch(), 'missing'), '4096']))).toMatchObject({ code: 0, out: '' })
   })
 
   test('the project folder: absolute, relative or missing, as a path Windows opens', () => {

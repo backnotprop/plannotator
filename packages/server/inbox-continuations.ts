@@ -5,7 +5,8 @@
  * answers, or the session it is addressed to), and that session's connection
  * polls for it. When the host gives a conversation a new id (Claude Code's
  * branch of a conversation: the new transcript names the session it came
- * from), the old id never polls again, and a reply would wait on it for good.
+ * from; its hand-over to a new session: the old transcript names the new
+ * one), the old id never polls again, and a reply would wait on it for good.
  *
  * So a connection may say, on every poll, which session ids its conversation
  * continues (`continues`, set by the host from its own records, never by the

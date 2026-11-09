@@ -762,6 +762,28 @@ hands the branch what waits for the old id once that id no longer polls
 `inbox-notifications-and-agents.md`). A `--resume` or `--continue` that keeps
 its id, and `/clear` (a new conversation), name nothing. Not checked on a live
 Claude Code: whether `--fork-session` writes the same rows.
+A conversation handed over to a new session is the other case, and the one the
+report was: the new transcript has no `forkedFrom`. Claude Code instead ends
+the OLD transcript with
+`{"type":"continued-in","sessionId":<old>,"continuedInSessionId":<new>}` (read
+in the 2.1.321 binary, where it is written when a conversation is moved to a
+background session, which starts in another process from the old transcript;
+seen in a real transcript about 2.5 minutes after a manual `/compact`, among
+`/model` and `/login`, and which of the person's actions led to it is not
+known). So the new session looks for the transcript that names it:
+`TranscriptContinuedIn` reads the last 8 KB of each transcript in its own
+project folder (one `/bin/sh` or PowerShell call for the folder; only each
+file's record comes back) and follows the records back, nearest first, up to 8
+sessions (A handed to B handed to C: C says `[B, A]`); a session is named
+once, so records that point at each other end the line. As Claude Code reads
+it, a record counts only while no `user` or `assistant` row follows it (the
+person went back to that session); a cut or broken record is nothing. Looked
+for at the session's first poll in a process and, while nothing is found, 5
+more times over about a minute (the record is written just after the new
+session starts), then never again in that process; never at delivery. The poll
+sends both cases' ids in the one `continues` list. Not checked: a hand-over
+whose new transcript is in another project folder (a worktree move) is not
+found.
 Beside it, `exportSessionProject` (`controller.ts`) sets
 `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the folder
 the session's `plannotator_inbox` tool files under (`InboxLink.projectFolder()`,

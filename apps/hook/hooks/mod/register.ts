@@ -105,6 +105,7 @@ import {
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
   withReminderSession,
@@ -555,6 +556,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
     const forkedFrom = new TranscriptForkedFrom(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
+    // So does a conversation handed over to this session: the old transcript ends with a record that names it.
+    const continuedIn = new TranscriptContinuedIn(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
     const instance = new PlannotatorMod(host, {
       sessionId,
       dataDir: settings.dataDir,
@@ -566,7 +569,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
-      continues: () => forkedFrom.read(),
+      continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),
     })
