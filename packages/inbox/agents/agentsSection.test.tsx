@@ -199,7 +199,7 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
-const three = () => machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook'), view(MINI, 'Mini', { state: 'offline' })]);
+const three = () => machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook', { state: 'offline' }), view(MINI, 'Mini')]);
 const surface = () => document.querySelector<HTMLElement>('[data-agents-surface]');
 const names = (scope: ParentNode) => [...scope.querySelectorAll('.ib-name')].map((el) => el.textContent);
 const mark = (id: string) => document.querySelector<HTMLElement>(`[data-agent-mark="${id}"]`)!;
@@ -214,13 +214,14 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(headers.indexOf('agents')).toBeLessThan(headers.indexOf('projects'));
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toBe('Agents');
   const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
-  expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook', 'Mini']);
-  expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1'], []]);
+  // Mini has no agent: it shows nothing, no caption and no empty line.
+  expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook']);
+  expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1']]);
   expect(names(groups[0]!.querySelector('[data-sidebar-agent]')!)).toEqual(['Fix login redirect']);
   // Each caption is quiet (the grey of a quiet row) and an asleep machine says so to a screen reader; none counts.
   for (const caption of surface()!.querySelectorAll('[data-machine]')) expect(caption.classList.contains('ib-proj-quiet')).toBe(true);
-  expect(surface()!.querySelector(`[data-machine="${MINI}"]`)!.hasAttribute('data-away')).toBe(true);
-  expect(surface()!.querySelector(`[data-machine="${MINI}"]`)!.textContent).toContain('Mini asleep since');
+  expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.hasAttribute('data-away')).toBe(true);
+  expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.textContent).toContain('MacBook asleep since');
   expect(surface()!.querySelector('.ib-n')).toBeNull();
   // A caption is still the machine's filter, marked while shown.
   act(() => surface()!.querySelector<HTMLButtonElement>(`[data-machine="${MAC}"]`)!.click());
@@ -279,7 +280,7 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
-test.skipIf(!hasDom)('closed, Agents is a heading like any other section: no panel, no Add buttons, only the row on show; opening brings the panel and the buttons back', async () => {
+test.skipIf(!hasDom)('closed, Agents is a heading like any other section: no Add buttons, only the row on show; opening brings the buttons and the rows back; never a panel', async () => {
   // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
   const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
   const stored = new Map<string, string>();
@@ -297,24 +298,54 @@ async function closedAgents() {
   mount(<Sidebar {...props} />);
   const header = () => document.querySelector<HTMLButtonElement>('[data-sidebar-section="agents"]')!;
   const state = () => ({
-    panel: surface()!.classList.contains('ib-sbagents'),
     closed: surface()!.hasAttribute('data-closed'),
     buttons: [...surface()!.querySelectorAll('[data-agents-add]')].map((b) => b.getAttribute('data-agents-add')),
     rows: [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')),
   });
-  expect(state()).toEqual({ panel: true, closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+  expect(state()).toEqual({ closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
   act(() => header().click());
   expect(header().getAttribute('aria-expanded')).toBe('false');
   // The heading stays, with its goggles; the thread on show keeps its row, as a closed Projects keeps its project.
-  expect(state()).toEqual({ panel: false, closed: true, buttons: [], rows: ['ses_s1'] });
+  expect(state()).toEqual({ closed: true, buttons: [], rows: ['ses_s1'] });
   expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
-  // A new draw (a reload's) is still closed, with no panel.
+  // A new draw (a reload's) is still closed.
   unmountAll();
   mount(<Sidebar {...props} />);
-  expect(state()).toEqual({ panel: false, closed: true, buttons: [], rows: ['ses_s1'] });
+  expect(state()).toEqual({ closed: true, buttons: [], rows: ['ses_s1'] });
   act(() => header().click());
-  expect(state()).toEqual({ panel: true, closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+  expect(state()).toEqual({ closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
 }
+
+test.skipIf(!hasDom)("a machine's name shows only while agents show from more than one machine, and a machine with no agent shows nothing", () => {
+  const captions = () => [...surface()!.querySelectorAll('[data-machine] .ib-name')].map((el) => el.textContent);
+  const rows = () => [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent'));
+  const flush = () => surface()!.querySelector('[data-agents-section]')!.hasAttribute('data-flat');
+  const draw = (groups: InboxAgentsGroup[], machineId: string | null = null) => {
+    act(() => setInboxAgents(groups));
+    mount(<Sidebar {...sidebarProps({ machines: three(), machineId })} />);
+  };
+  // One machine has agents, the two others none: no caption at all, the agents alone and flush.
+  draw([group([agent('ses_s1'), agent('ses_s2')], SELF), group([], MAC), group([], MINI)]);
+  expect([captions(), rows(), flush()]).toEqual([[], ['ses_s1', 'ses_s2'], true]);
+  expect(surface()!.querySelectorAll('[data-agents-machine]')).toHaveLength(1);
+  // The agents all on another machine than this one: still one machine, still no caption.
+  draw([group([], SELF), group([agent('ses_m1')], MAC)]);
+  expect([captions(), rows(), flush()]).toEqual([[], ['ses_m1'], true]);
+  // Not even for the machine the list is filtered to.
+  draw([group([], SELF), group([agent('ses_m1')], MAC)], MAC);
+  expect(captions()).toEqual([]);
+  // Two machines with agents: both named, their agents a step in; the third, empty, is not there.
+  draw([group([agent('ses_s1')], SELF), group([agent('ses_m1')], MAC), group([], MINI)]);
+  expect([captions(), rows(), flush()]).toEqual([['Studio', 'MacBook'], ['ses_s1', 'ses_m1'], false]);
+  // An ended agent is not an agent on show: its machine counts as empty.
+  draw([group([agent('ses_s1')], SELF), group([agent('ses_m2', { state: 'ended', live: false })], MAC)]);
+  expect([captions(), rows()]).toEqual([[], ['ses_s1']]);
+  // Every machine empty: the one empty line, once, and no caption.
+  draw([group([], SELF), group([], MAC), group([], MINI)]);
+  expect(captions()).toEqual([]);
+  expect(surface()!.querySelectorAll('.ib-agents-empty')).toHaveLength(1);
+  expect(surface()!.textContent).toContain('Agents show here while they run.');
+});
 
 const HERE: InboxComposeLaunch = {
   agents: [
