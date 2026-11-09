@@ -96,6 +96,7 @@ import {
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
+  type InboxAgentsGroup,
   type InboxListRow,
   type InboxMessage,
   type InboxProject,
@@ -201,6 +202,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
+import { inboxAgentsGroup, inboxAgentsWithoutLabels, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -1585,6 +1587,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
+    // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
+    const ownAgents = agentsOf(own, now);
     return {
       serverSession,
       version,
@@ -1620,7 +1624,51 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         .map((pin) => byId.get(pin.thread_id))
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
+      /**
+       * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
+       * merged view, this Inbox's first and then each linked machine whose list carried one, each with its `machine`.
+       * Labels are stripped for a reader who is not this computer's owner (the route).
+       */
+      agents: merged ? inboxMergedAgents(machines.selfId, ownAgents, machines.agents()) : [ownAgents],
     };
+  };
+
+  /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
+  const agentsOf = (own: InboxListRow[], now: Date): InboxAgentsGroup => {
+    const projectById = (id: string) => {
+      const project = store.project(store.canonicalProjectId(id));
+      return project ? { id: project.id, name: project.name } : null;
+    };
+    let lastThreads: ReturnType<InboxStore["lastThreadsBySession"]> | null = null;
+    const waits: InboxAgentWait[] = [];
+    const archived = new Set<string>();
+    for (const row of own) {
+      if (inboxRowArchived(row)) {
+        archived.add(row.thread_id);
+        continue;
+      }
+      if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
+      const owner = store.threadOwner(row.thread_id);
+      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
+    }
+    return inboxAgentsGroup({
+      sessions: live.agentSessions(inboxStartOfDay(live.clock())),
+      launches: launch.agents(),
+      waits,
+      archived,
+      projectOf: (root, session) => {
+        if (root !== null) {
+          const known = store.projectByRoot(root);
+          return (known && projectById(known.id)) ?? inboxFolderProject(root);
+        }
+        lastThreads ??= store.lastThreadsBySession();
+        const wrote = lastThreads.get(session);
+        return wrote ? projectById(wrote.project_id) : null;
+      },
+      projectById,
+      lastHeardOf: live.lastHeardOf,
+      labels: true,
+    });
   };
 
   /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
@@ -3335,9 +3383,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
         // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
         const labelsHere = ownerOrLocal(req, via);
-        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean) => {
-          if (!moved && !labelsHere) return;
-          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}) })}\n\n`);
+        // `agents` (additive): the sidebar's Agents moved (inbox-agents-list.ts); every reader hears it (a guest's carry no labels).
+        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean, agents: boolean) => {
+          if (!moved && !agents && !labelsHere) return;
+          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) })}\n\n`);
         };
         if (windowId || url.searchParams.get("deliveries") === "1") deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
@@ -3919,24 +3968,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // open thread's authors read the list again.
   // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only);
   // `sessions`: a session ended or came back, which moves a row's "Session ended" whatever else it says.
-  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean) => void>();
+  // `agents`: the sidebar's Agents moved (inbox-agents-list.ts): a session started or ended, a turn started or ended, a
+  // session's folder changed, an ended one passed midnight, or a launch's line moved. A label says `labels`; a thread
+  // waiting on the person moves it through a store line, which the windows read the list for anyway.
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean, agents: boolean) => void>();
   let lastDeliverySignature = "";
   let lastPresenceSignature = live.presenceSignature();
   let lastLabelVersion = live.labelVersion();
+  // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
+  // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
+  let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
   const deliveryWatch = setInterval(() => syncSection("timer:delivery", () => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
-    const signature = live.deliverySignature() + launch.signature();
+    const launched = launch.signature();
+    const signature = live.deliverySignature() + launched;
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    if (!moved && !labels) return;
+    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}`;
+    const agents = agentsSignature !== lastAgentsSignature;
+    lastAgentsSignature = agentsSignature;
+    if (!moved && !labels && !agents) return;
     lastDeliverySignature = signature;
     lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();
-    for (const listener of deliveryListeners) listener(labels, moved, sessions);
+    for (const listener of deliveryListeners) listener(labels, moved, sessions, agents);
   }), INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -3973,8 +4032,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     onChange: () => {
-      // A run line moved: a delivery move to every window, no label change.
-      for (const listener of deliveryListeners) listener(false, true, false);
+      // A run line moved: a delivery move to every window, no label change; the Agents section shows the launch's state.
+      for (const listener of deliveryListeners) listener(false, true, false, true);
     },
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
@@ -4506,7 +4565,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
         // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
         // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
-        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows;
+        // `agents`' labels too (inbox-agents-list.ts): the owner's alone.
+        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : { ...rows, agents: inboxAgentsWithoutLabels(rows.agents) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");

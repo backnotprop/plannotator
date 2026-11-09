@@ -3163,6 +3163,56 @@ export interface InboxComposeProject {
   sessions: InboxComposeSession[];
 }
 
+/**
+ * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
+ * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
+ * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ */
+export interface InboxAgent {
+  /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
+  id: string;
+  /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
+  session: string;
+  /** Set when the Inbox launched it: the launch's id and its thread. */
+  launch?: { id: string; thread_id: string };
+  /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
+  host: string | null;
+  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  label?: string;
+  /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
+  project: { id: string | null; name: string } | null;
+  /**
+   * `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does);
+   * else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
+   */
+  state: "waiting" | "working" | "idle" | "ended";
+  /** How many of its threads wait on the person (0 when none). */
+  waiting: number;
+  /** Its session is live now (polls, or a launch that a reply starts again); false for an ended one. */
+  live: boolean;
+  /** When it started; null when this Inbox never heard it start (it only owns a waiting thread). */
+  started_at: string | null;
+  /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
+  last_seen_at: string | null;
+}
+
+/** The most agents a list names per machine; `total` says how many there are past that. */
+export const INBOX_AGENTS_LISTED_MAX = 40;
+
+/**
+ * One machine's agents on the list model (`agents`, one group per machine): waiting first (most waiting first),
+ * then working, idle and ended, each the most recently heard first, at most `INBOX_AGENTS_LISTED_MAX`.
+ */
+export interface InboxAgentsGroup {
+  /** The machine (its `ibx_` id), on the merged view (`machines=1`) only. */
+  machine?: string;
+  agents: InboxAgent[];
+  /** Every agent of the machine, those past the cap included. */
+  total: number;
+  /** How many of `total` ended today (each `ended`). */
+  ended_today: number;
+}
+
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
 export interface InboxLaunchTrust {
   /** The folder the trust lands on. */
