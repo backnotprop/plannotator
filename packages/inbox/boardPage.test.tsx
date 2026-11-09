@@ -617,117 +617,25 @@ test.if(hasDom)('a card linking only a Jira issue (a link only) draws no lane ma
   expect(asked.flatMap((c) => c.body!.cards as string[])).toEqual(['crd_both']);
 });
 
-// The checklist on the Board (approval "inbox-thread-steps", part 4: "the opened card lists the same steps,
-// read-only"; approval "inbox-checklist-spinners-2026-11-07": the lane card stays still, with only the amber pause while
-// a list waits on the person). It rides on the cards read's `steps` (switch on).
-function checklist(steps: { step: string; status: InboxStepStatus }[], presence: InboxStepsWire['presence'] = 'working', updated = NEW): InboxStepsWire {
-  return { id: 'stp_auto', project_id: 'prj_1', thread_id: 'msg_auto', agent: CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>, updated_at: updated, presence, steps: steps.map((s) => ({ ...s, note: null, at: NEW })) };
+// The checklist lives only in its thread (owner, 2026-11-09: "This feature should have nothing to do with anywhere
+// else in the app"): neither the lane card nor the opened card shows one, even while the cards read carries the
+// thread's lists and the thread's row says a step waits on the person (`steps_waiting`).
+function checklist(steps: { step: string; status: InboxStepStatus }[]): InboxStepsWire {
+  return { id: 'stp_auto', project_id: 'prj_1', thread_id: 'msg_auto', agent: CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>, updated_at: NEW, presence: 'working', steps: steps.map((s) => ({ ...s, note: null, at: NEW })) };
 }
-const AUTO_STEPS = checklist([
-  { step: 'Read the issue', status: 'done' },
-  { step: 'Pick the updater', status: 'waiting' },
-  { step: 'Wire the menu', status: 'doing' },
-]);
 
-/** The thread's list row as the server sends it: `steps_waiting` is the server's "still waits on the person" rule. */
-const autoRow = (waiting: boolean) => (id: string) =>
-  id === 'msg_auto' ? ({ thread_id: 'msg_auto', subject: 'Auto-update', project: { id: 'prj_1', name: 'web' }, ...(waiting ? { steps_waiting: true } : {}) } as unknown as InboxListRow) : null;
-
-test.if(hasDom)('the lane card: the still amber pause only while a list waits on the person, named for the card; nothing while the agent works, once the thread stops waiting, without a list or with the switch off', async () => {
+test.if(hasDom)('a Board card never shows a checklist, on the lane or opened, even while a step waits on the person', async () => {
   scriptFetch();
-  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
-  const auto = cardEl('crd_auto')!;
-  expect(auto.querySelector('.ib-bc-plan [data-step-mark="waiting"]')).not.toBeNull();
-  // Still: never the spinner, and no count on the card.
-  expect(auto.querySelector('.ib-stg-spin')).toBeNull();
-  expect(auto.textContent).not.toContain('1 of 3');
-  expect(auto.querySelector('[data-card-open]')!.getAttribute('aria-label')).toEndWith('. Checklist: 1 of 3 steps done; waiting on you: Pick the updater');
-  expect($$('.ib-bc-plan')).toHaveLength(1);
-  act(() => root?.unmount());
-  root = null;
-  document.body.innerHTML = '';
-  // Review 2 of #2847: the thread waits on a live session's list, and an ended session's old list (first in the read)
-  // still says "waiting". The card's words name the live list, the one its mark and the row stand for.
-  const ended = { ...checklist([{ step: 'Approve the old plan', status: 'waiting' }], 'ended'), id: 'stp_old', agent: { ...(CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>), session: 'ses_old' } };
-  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [ended, AUTO_STEPS] } } });
-  expect($$('.ib-bc-plan')).toHaveLength(1);
-  expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).toEndWith('. Checklist: 1 of 3 steps done; waiting on you: Pick the updater');
-  act(() => root?.unmount());
-  root = null;
-  document.body.innerHTML = '';
-  // The agent works on a step and nothing waits on the person: the card wears nothing.
-  const working = checklist([
-    { step: 'Read the issue', status: 'done' },
-    { step: 'Wire the menu', status: 'doing' },
-  ]);
-  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [working] } } });
-  expect($$('.ib-bc-plan')).toHaveLength(0);
-  expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toContain('Checklist');
-  act(() => root?.unmount());
-  root = null;
-  document.body.innerHTML = '';
-  // The list still says "waiting", but the thread no longer waits (the person replied, or the session ended): the
-  // server drops the row's `steps_waiting`, and the card goes plain with the row.
-  draw({ rowOf: autoRow(false), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
-  expect($$('.ib-bc-plan')).toHaveLength(0);
-  expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toContain('Checklist');
-  act(() => root?.unmount());
-  root = null;
-  document.body.innerHTML = '';
-  // Switch off: the read has no `steps`, so no card wears one.
-  draw();
-  expect($$('.ib-bc-plan')).toHaveLength(0);
-});
-
-/** The card agent's session in the live sessions read (the opened card's head reads it working, or idle). */
-const LIVE_CLAUDE = (busy: boolean) => [{ project: { id: 'prj_1', name: 'web', root: '/Users/ada/src/web' }, sessions: [{ session: 'ses_claude', host: 'claude-code', started_at: OLD, last_seen_at: NEW, busy, idle_since: busy ? null : NEW, last_thread: null }] }];
-
-test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and its rows; "Waiting on you ›" opens the list\'s thread', async () => {
-  scriptFetch(LIVE_CLAUDE(true));
-  const threads: string[] = [];
-  draw({
-    model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } },
-    openCard: 'crd_auto',
-    onOpenThread: (_card, thread) => threads.push(thread),
-  });
+  const steps = { msg_auto: [checklist([{ step: 'Read the issue', status: 'done' }, { step: 'Pick the updater', status: 'waiting' }, { step: 'Wire the menu', status: 'doing' }])] };
+  const waitingRow = (id: string) => (id === 'msg_auto' ? ({ thread_id: 'msg_auto', subject: 'Auto-update', project: { id: 'prj_1', name: 'web' }, steps_waiting: true } as unknown as InboxListRow) : null);
+  draw({ rowOf: waitingRow, model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps }, openCard: 'crd_auto' });
   await settle();
-  const list = $('[data-card-panel="crd_auto"] [data-card-checklist]')!;
-  expect(list.querySelector('h3.ib-st-lbl')!.textContent).toBe('Checklist');
-  expect(list.querySelector('[data-steps-head]')!.textContent).toBe('Checklist1/3');
-  expect([...list.querySelectorAll<HTMLElement>('.ib-st-row')].map((r) => r.dataset.stepStatus)).toEqual(['done', 'waiting', 'doing']);
-  // The same marks as the thread's list: the check, the amber pause, the spinner.
-  expect([...list.querySelectorAll('.ib-st-row [data-step-mark]')].map((m) => m.getAttribute('data-step-mark'))).toEqual(['done', 'waiting', 'doing']);
-  // Read only: the one control is the waiting row's way to the thread.
-  expect([...list.querySelectorAll('button')].map((b) => b.hasAttribute('data-steps-waiting'))).toEqual([true]);
-  await act(async () => list.querySelector<HTMLButtonElement>('[data-steps-waiting]')!.click());
-  expect(threads).toEqual(['msg_auto']);
-  act(() => root?.unmount());
-  root = null;
-  document.body.innerHTML = '';
-  draw({ openCard: 'crd_auto' });
-  await settle();
-  expect($('[data-card-panel="crd_auto"]')).not.toBeNull();
-  expect($('[data-card-checklist]')).toBeNull();
-});
-
-// The review of #2572: a session the Board reads ended (not live) while its list's presence still says working (no
-// polling connection) showed "○ ended" over a turning mark. The opened card's checklist says what its head says.
-test.if(hasDom)('the opened card: once its head reads the agent ended, that agent\'s list reads ended too (a still grey spinner, "as of"); another session\'s does not', async () => {
-  const other = { ...checklist([{ step: 'Write the notes', status: 'doing' }], 'working', OLD), id: 'stp_other', agent: { kind: 'agent', host: 'codex', session: 'ses_codex', name: 'Codex' } as Extract<InboxAuthor, { kind: 'agent' }> };
-  const panel = async (sessions: unknown[]) => {
-    scriptFetch(sessions);
-    draw({ model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS, other] } }, openCard: 'crd_auto' });
-    await settle();
-    const card = $('[data-card-panel="crd_auto"]')!;
-    const group = (session: string) => card.querySelector<HTMLElement>(`[data-card-checklist] [data-steps-group="${session}"]`)!;
-    const seen = { head: card.querySelector('[data-agent-state]')?.getAttribute('data-agent-state'), claude: group('ses_claude').dataset.presence, codex: group('ses_codex').dataset.presence, asOf: !!group('ses_claude').querySelector('.ib-st-asof') };
-    act(() => root?.unmount());
-    root = null;
-    document.body.innerHTML = '';
-    return seen;
-  };
-  // Not in the live sessions: the head says ended, and so does its own list.
-  expect(await panel([])).toEqual({ head: 'ended', claude: 'ended', codex: 'working', asOf: true });
-  // Live: the list reads as served.
-  expect(await panel(LIVE_CLAUDE(false))).toEqual({ head: 'idle', claude: 'working', codex: 'working', asOf: false });
+  const lane = cardEl('crd_auto')!;
+  const panel = $('[data-card-panel="crd_auto"]')!;
+  expect(panel).not.toBeNull();
+  for (const el of [lane, panel]) {
+    expect(el.querySelector('[data-step-mark], [data-card-steps], [data-card-checklist], [data-steps-head], [class*="ib-stg"]')).toBeNull();
+    expect(el.textContent).not.toMatch(/checklist|Pick the updater|1\/3/i);
+  }
+  expect(lane.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toMatch(/checklist|waiting on you/i);
 });

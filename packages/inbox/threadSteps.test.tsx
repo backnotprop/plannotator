@@ -22,7 +22,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
 import { dispatchInboxFrame, type InboxEventHandlers } from './api';
-import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsButtonList, stepsButtonMark, stepsButtonSig, stepsCount, stepsDoneWords, stepsListLabels, stepsListWaits, stepsName, stepsWaitingNameTail, stepsWaitTarget, stepsWaitWords, threadBoardCard } from './steps/model';
+import { pieGeometry, stepMeta, stepsAsOf, stepsButtonList, stepsButtonMark, stepsButtonSig, stepsCount, stepsListLabels, stepsListWaits, stepsName, stepsWaitingNameTail, stepsWaitTarget, threadBoardCard } from './steps/model';
 import { createStepsBus } from './steps/useThreadSteps';
 
 const hasDom = typeof document !== 'undefined';
@@ -132,21 +132,13 @@ describe('the rules (steps/model.ts)', () => {
     ]);
   });
 
-  test('the Board (part 4): a card\'s lists come from every thread it links, the latest written first; the head\'s icon opens a card that links the thread, never a cancelled one', () => {
-    const older = { ...list('idle'), id: 'stp_old', thread_id: 'msg_old', updated_at: at(10, 0) };
-    const newer = { ...list('working'), id: 'stp_new', thread_id: 'msg_new', updated_at: at(14, 0) };
-    const cleared = { ...list('working'), id: 'stp_gone', thread_id: 'msg_gone', updated_at: at(15, 0), steps: [] };
-    const steps = { msg_old: [older], msg_new: [newer], msg_gone: [cleared] };
-    expect(cardStepLists(['msg_old', 'msg_new', 'msg_gone', 'msg_none'], steps).map((l) => l.id)).toEqual(['stp_new', 'stp_old']);
-    // The switch off: the read has no `steps`.
-    expect(cardStepLists(['msg_old'], undefined)).toEqual([]);
+  test('the head\'s Board icon opens a card that links the thread, never a cancelled one', () => {
     const cards = [
       { id: 'crd_dropped', column: 'dropped', threads: [M1] },
       { id: 'crd_live', column: 'in_progress', threads: ['msg_other', M1] },
     ];
     expect(threadBoardCard(cards, M1)?.id).toBe('crd_live');
     expect(threadBoardCard(cards.slice(0, 1), M1)).toBeNull();
-    expect(stepsDoneWords(list('working'))).toBe('3 of 6 steps done');
   });
 
   // Review of #2571, finding 2: two sessions of one agent must not read the same.
@@ -198,17 +190,15 @@ describe('the button (steps/model.ts)', () => {
     expect(stepsCount(withStatuses(['done', 'dropped', 'doing'])).text).toBe('1/2');
   });
 
-  test('it shows a list that waits on the person first, else the newest; the lane card\'s words name the waiting step', () => {
+  test('it shows a list that waits on the person first, else the newest', () => {
     const working = withStatuses(['done', 'doing']);
     const waiting = { ...withStatuses(['waiting']), id: 'stp_w' };
     expect(stepsButtonList([working, waiting])?.id).toBe('stp_w');
     expect(stepsButtonList([working])).toBe(working);
     expect(stepsButtonList([])).toBeNull();
-    expect(stepsWaitWords([working])).toBeNull();
-    expect(stepsWaitWords([working, waiting])).toBe('Checklist: 0 of 1 steps done; waiting on you: Classify 30 days of failed charges');
   });
 
-  // Review 2 of #2847: the button, the row and the lane card wait by one rule (the server's `steps_waiting`).
+  // Review 2 of #2847: the button waits by the server's rule (`inboxStepsWaitOnPerson`).
   test('the waiting rule: never an ended session\'s list, never once the person answered (a reply or a 👍) since the list was written', () => {
     const waiting = withStatuses(['done', 'waiting', 'doing']);
     const answered = (when: string) => (since: string) => Date.parse(when) >= Date.parse(since);
@@ -224,16 +214,14 @@ describe('the button (steps/model.ts)', () => {
     expect(stepsButtonMark({ ...waiting, presence: 'ended' })).toBe('doing');
   });
 
-  test('an ended session\'s old waiting list never beats a live one, on the button or the lane card', () => {
+  test('an ended session\'s old waiting list never beats a live one on the button', () => {
     const live = { ...withStatuses(['done', 'waiting']), id: 'stp_live', agent: B };
     const stale = { ...withStatuses(['waiting', 'todo'], 'ended'), id: 'stp_ended' };
     expect(stepsButtonList([stale, live])?.id).toBe('stp_live');
     expect(stepsButtonMark(stepsButtonList([stale, live])!)).toBe('waiting');
-    expect(stepsWaitWords([stale, live])).toBe('Checklist: 1 of 2 steps done; waiting on you: Retry worker on pg-boss');
-    // Only the ended one: the newest shows, with no amber, and the lane card says nothing waits.
+    // Only the ended one: the newest shows, with no amber.
     expect(stepsButtonList([stale])?.id).toBe('stp_ended');
     expect(stepsButtonMark(stale)).toBeNull();
-    expect(stepsWaitWords([stale])).toBeNull();
   });
 
   test('the button\'s key changes with what it shows: another list winning, the count, the mark, "as of", "+1"', () => {
@@ -602,7 +590,7 @@ test.skipIf(!hasDom)('the foot: 👍 Looks good comes before the checklist', asy
 });
 
 // Amendment 3: the checklist gives way first (its chevron), from the row's `steps` step or the buttons' own fit; on
-// a phone a step's words wrap to two lines, in the sheet and the opened card. Checked with the window's stylesheet.
+// a phone a step's words wrap to two lines in the sheet. Checked with the window's stylesheet.
 test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron and its "as of" go at the steps fit, and phone steps wrap to two lines', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
@@ -616,7 +604,6 @@ test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron and its "as of" g
     `<div class="ib-footrow" data-fit="keys skip edit steps" data-k="row"><div class="ib-footbtns">${chev}</div></div>`,
     `<div class="ib-footrow" data-k="own"><div class="ib-footbtns" data-steps-fit="">${chev}</div></div>`,
     '<div class="ib-oq-pos" data-phone=""><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="sheet">A long step</span></li></ul></div>',
-    '<div class="ib-crdp-phone"><div class="ib-crdp-steps"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="card">A long step</span></li></ul></div></div>',
     '<div class="ib-oq-pos"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="desk">A long step</span></li></ul></div>',
   ].join('');
   document.body.appendChild(box);
@@ -632,7 +619,7 @@ test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron and its "as of" g
     expect(asOfOf('own')).toBe('none');
     const text = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"]`)!);
     // (happy-dom computes no line clamp: the wrap is what it can read.)
-    for (const k of ['sheet', 'card']) expect(text(k).whiteSpace).toBe('normal');
+    expect(text('sheet').whiteSpace).toBe('normal');
     expect(text('desk').whiteSpace).toBe('nowrap');
   } finally {
     box.remove();
@@ -718,9 +705,9 @@ test.skipIf(!hasDom)('the stylesheet: the checklist button keeps Reply\'s colour
   }
 });
 
-// The calm row (approval "inbox-checklist-spinners-2026-11-07", row option A): the row never moves; it wears only the
-// still amber pause, after the project, while the server says a step waits on the person (`steps_waiting`).
-test.skipIf(!hasDom)('the list row: the still amber pause after the project only while a step waits on the person; never a spinner', async () => {
+// The checklist lives only in its thread (owner, 2026-11-09: "There should be nothing there"): a list row shows no
+// checklist mark, not even while the server says a step waits on the person (`steps_waiting`).
+test.skipIf(!hasDom)('the list row never shows a checklist mark, even while a step waits on the person', async () => {
   const listRow = (id: string, waiting: boolean): InboxListRow => ({
     thread_id: id,
     project_id: PROJECT.id,
@@ -758,14 +745,14 @@ test.skipIf(!hasDom)('the list row: the still amber pause after the project only
       );
     });
     const rowEl = (id: string) => host!.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
-    const mark = rowEl('msg_wait').querySelector<HTMLElement>('[data-row-steps-waiting]')!;
-    expect(mark.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
-    expect(mark.getAttribute('aria-label')).toBe('Checklist: waiting on you');
-    // After the project: the project's words come first in the row's first cell.
-    const project = mark.parentElement!.querySelector('.ib-p')!;
-    expect(project.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(rowEl('msg_work').querySelector('[data-row-steps-waiting]')).toBeNull();
-    expect(host!.querySelector('.ib-stg-spin')).toBeNull();
+    const waitingRow = rowEl('msg_wait');
+    expect(waitingRow).not.toBeNull();
+    // No step mark, spinner or pie, and no "Checklist" in anything it says or shows on hover.
+    expect(waitingRow.querySelector('[data-step-mark], [data-row-steps-waiting], [class*="ib-stg"], [class*="ib-st-"]')).toBeNull();
+    const said = [waitingRow.textContent ?? '', ...[...waitingRow.querySelectorAll('[aria-label], [title]')].flatMap((el) => [el.getAttribute('aria-label') ?? '', el.getAttribute('title') ?? ''])];
+    for (const words of said) expect(words).not.toMatch(/checklist|steps?\b/i);
+    // The row draws the same with or without a waiting checklist.
+    expect(waitingRow.innerHTML.replaceAll('msg_wait', 'msg_X')).toBe(rowEl('msg_work').innerHTML.replaceAll('msg_work', 'msg_X'));
     act(() => root?.unmount());
     host.remove();
     root = null;
