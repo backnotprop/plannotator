@@ -51,7 +51,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
-import { withOverviewMermaid } from './overviewMermaid';
+import { withChapterMermaid, withOverviewMermaid } from './overviewMermaid';
 import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
@@ -197,6 +197,7 @@ function Reader({
   fileOpenIn,
   selectionActions,
   renderOverviewDiagram,
+  renderChapterDiagram,
   renderOverviewFigure,
   renderHeadActions,
   highlight = null,
@@ -460,6 +461,8 @@ function Reader({
   }, [scrollTarget]);
   // Every guide the Inbox opens draws its Mermaid overview diagram, whatever the host draws itself.
   const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
+  // And each chapter's diagram (format version 5), at the top of the chapter's text.
+  const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
   const host = useMemo(
     () => ({
       files,
@@ -468,6 +471,7 @@ function Reader({
       ...(revealFile ? { revealFile } : {}),
       ...(phone || hostDiffControls ? {} : { renderSectionTab }),
       renderOverviewDiagram: drawOverviewDiagram,
+      renderChapterDiagram: drawChapterDiagram,
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
@@ -479,7 +483,7 @@ function Reader({
       ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

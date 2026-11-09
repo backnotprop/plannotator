@@ -119,7 +119,7 @@ export interface GenerationState {
   signIn?: { logins: LoginCommand[] };
   /** Guide history is off: nothing of this run is written to disk. */
   memoryOnly?: boolean;
-  /** The overview diagram was saved without a render check (no Guides webview could run one). */
+  /** A diagram (the overview's or a chapter's) was saved without a render check (no Guides webview could run one). */
   diagramUnchecked?: boolean;
   /** Permission requests waiting on the user. */
   pendingPermissions: PendingPermission[];
@@ -469,7 +469,7 @@ export class GuideGeneration {
     this.state.status = "finished";
     this.state.endedAt = this.now();
     const notes = [this.history ? "Saved." : "Done. Not saved: guide history is off, so this guide is kept only until VS Code closes."];
-    if (this.state.diagramUnchecked) notes.push("The overview diagram was not render-checked (no Guided Review tab was open); it is checked when the guide opens.");
+    if (this.state.diagramUnchecked) notes.push("A diagram was not render-checked (no Guided Review tab was open); it is checked when the guide opens.");
     this.state.statusMessage = notes.join(" ");
     if (this.history) deleteDraftRecord(this.input.repoKey, this.state.id);
     this.emit();
@@ -539,8 +539,10 @@ export class GuideGeneration {
   }
 
   private saveGuide(snapshot: GuideSnapshot, draft: GuideDraft): string {
-    const diagram = (snapshot.guide as { overview?: { diagram?: { source?: string } } }).overview?.diagram?.source;
-    const diagramCheck = diagram === undefined ? undefined : this.diagramChecks.get(diagram) ?? "unchecked";
+    // Every diagram of the guide (the overview's and each chapter's): "ok" only when each one passed a real render check.
+    const diagrams = [snapshot.guide.overview?.diagram, ...snapshot.guide.sections.map((s) => s.diagram)].filter((d) => d !== undefined);
+    const diagramCheck =
+      diagrams.length === 0 ? undefined : diagrams.every((d) => this.diagramChecks.get(d.source) === "ok") ? ("ok" as const) : ("unchecked" as const);
     if (diagramCheck === "unchecked") this.state.diagramUnchecked = true;
     const input = {
       repoKey: this.input.repoKey,
@@ -590,9 +592,9 @@ export class GuideGeneration {
         return { text: `The guide could not be saved: ${message}`, isError: true };
       }
       this.addActivity({ kind: "builder", title: name, detail: this.history ? "saved" : "done (not saved: guide history is off)", status: "completed" });
-      if (this.state.diagramUnchecked) this.addActivity({ kind: "info", title: "The overview diagram was not render-checked here; it is checked when the guide opens." });
+      if (this.state.diagramUnchecked) this.addActivity({ kind: "info", title: "A diagram was not render-checked here; it is checked when the guide opens." });
       this.emit();
-      const unchecked = this.state.diagramUnchecked ? "\nThe overview diagram could not be render-checked (no Guided Review tab is open); the reader checks it when the guide opens." : "";
+      const unchecked = this.state.diagramUnchecked ? "\nA diagram could not be render-checked (no Guided Review tab is open); the reader checks it when the guide opens." : "";
       return { text: `${answer.text}${unchecked}\nThe reader opens the guide now; end your turn.`, isError: false };
     }
     this.addActivity({

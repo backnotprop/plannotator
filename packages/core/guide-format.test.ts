@@ -69,7 +69,7 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["unknown top-level field", (s) => (s.annotations = []), "$"],
     ["unknown guide field", (s) => (s.guide.saved = true), "$.guide"],
     ["unknown section field", (s) => (s.guide.sections[0].order = 1), "$.guide.sections[0]"],
-    ["unknown version", (s) => (s.version = 5), "$.version"],
+    ["unknown version", (s) => (s.version = 6), "$.version"],
     // Version 1 has no overview: a v1 reader never sees one.
     ["overview on a version-1 snapshot", (s) => (s.guide.overview = { text: "x" }), "$.guide"],
     ["empty overview text", (s) => { s.version = 2; s.guide.overview = { text: "  " }; }, "$.guide.overview.text"],
@@ -369,4 +369,86 @@ describe("format version 4: the guide author's context notes", () => {
     expect(checkGuideNotes(withNotes([{ lineStart: 6, lineEnd: 6, side: "old", text: "x" }]), FIXTURE_PATCH_TS_JSON)).toHaveLength(1);
     expect(checkGuideNotes({ sections: [{ diffs: [{ file: "src/gone.ts", notes: [note] }] }] }, FIXTURE_PATCH_TS_JSON)).toHaveLength(1);
   });
+});
+
+describe("format version 5: a chapter's diagram", () => {
+  const pieces = {
+    reviewed: [true, false],
+    review: { rawPatch: FIXTURE_PATCH_TS_JSON, gitRef: "origin/main..HEAD", diffType: "since-base", base: "origin/main", source: FIXTURE_V1_LOCAL.source },
+    generator: FIXTURE_V1_LOCAL.generator,
+    exportedAt: FIXTURE_V1_LOCAL.exportedAt,
+  };
+  const { reviewed: _r, ...base } = FIXTURE_V1_LOCAL.guide;
+  const mermaid = { kind: "mermaid" as const, source: "flowchart LR\n  a --> b" };
+  const withDiagram = (diagram: unknown, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    ...extra,
+    sections: base.sections.map((section, i) => (i === 0 ? { ...section, diagram } : section)),
+  });
+  const build = (diagram: unknown, extra: Record<string, unknown> = {}) =>
+    buildGuideSnapshot({ ...pieces, guide: withDiagram(diagram, extra) as typeof base });
+
+  test("a chapter with a diagram builds version 5 and reads it back on that chapter only", () => {
+    const built = build(mermaid);
+    expect(built.version).toBe(5);
+    const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(built)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.guide.sections[0]!.diagram).toEqual(mermaid);
+    expect("diagram" in parsed.value.guide.sections[1]!).toBe(false);
+  });
+
+  test("stray producer fields on a chapter's diagram never travel", () => {
+    const built = build({ ...mermaid, note: "x" });
+    expect(built.guide.sections[0]!.diagram).toEqual(mermaid);
+  });
+
+  test("version 5 keeps an overview with its old diagram, and notes", () => {
+    const overview = { text: "How it fits.", diagram: { kind: "mermaid" as const, source: "flowchart TD\n  x --> y" } };
+    const guide = withDiagram(mermaid, { overview });
+    guide.sections[1] = { ...guide.sections[1]!, diffs: guide.sections[1]!.diffs.map((ref) => ({ ...ref, notes: [{ lineStart: 1, lineEnd: 1, text: "why" }] })) };
+    const built = buildGuideSnapshot({ ...pieces, guide: guide as typeof base });
+    expect(built.version).toBe(5);
+    const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(built)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.guide.overview).toEqual(overview);
+    expect(parsed.value.guide.sections[1]!.diffs[0]!.notes).toHaveLength(1);
+  });
+
+  test("a chapter's diagram is refused below version 5: an older reader never sees one", () => {
+    const doc = JSON.parse(JSON.stringify(build(mermaid)));
+    for (const version of [1, 2, 3, 4]) expect(parseGuideSnapshot({ ...doc, version }).ok).toBe(false);
+  });
+
+  test("a guide with no chapter diagram keeps its old version, byte for byte", () => {
+    const built = buildGuideSnapshot({ ...pieces, guide: base as typeof base });
+    expect(built.version).toBe(1);
+    expect(JSON.stringify(built)).toBe(JSON.stringify(FIXTURE_V1_LOCAL));
+  });
+
+  test("an html chapter picture may carry the drawn keys", () => {
+    const drawn = { kind: "html" as const, source: "<div/>", css: ".a{}", width: 800, height: 400 };
+    const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(build(drawn))));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.guide.sections[0]!.diagram).toEqual(drawn);
+  });
+
+  const bad: Array<[string, unknown]> = [
+    ["an unknown kind", { kind: "svg", source: "<svg/>" }],
+    ["an empty source", { kind: "mermaid", source: "  " }],
+    ["no source", { kind: "mermaid" }],
+    ["an unknown field", { kind: "mermaid", source: "flowchart LR", title: "x" }],
+    ["drawn fields on a mermaid diagram", { kind: "mermaid", source: "flowchart LR", css: "x" }],
+    ["a diagram that is not an object", "flowchart LR"],
+  ];
+  for (const [name, diagram] of bad) {
+    test(`refuses ${name}`, () => {
+      const doc = JSON.parse(JSON.stringify(build(mermaid)));
+      doc.guide.sections[0].diagram = diagram;
+      const parsed = parseGuideSnapshot(doc);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error.path.startsWith("$.guide.sections[0].diagram")).toBe(true);
+    });
+  }
 });

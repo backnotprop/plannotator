@@ -251,3 +251,50 @@ describe('GuideSectionCard', () => {
     expect(calls).toContain(1);
   });
 });
+
+describe('GuideSectionCard: a chapter\'s diagram (format version 5)', () => {
+  const diagram = { kind: 'mermaid' as const, source: 'flowchart LR\n  a --> b' };
+  const narrative = () => host!.querySelector('[data-guide-section-narrative]')!;
+  async function mount(state: GuideHostValue<Record<string, unknown>>, props: Partial<React.ComponentProps<typeof GuideSectionCard>> = {}) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(renderCard(state, props));
+    });
+  }
+
+  test.skipIf(!hasDom)("is drawn by the host at the top of the chapter's text, before its words, with the chapter's index", async () => {
+    const asked: Array<[string, number]> = [];
+    const state = { ...makeState({ files: [makeFile()] }), renderChapterDiagram: (d: typeof diagram, index: number) => (asked.push([d.source, index]), <svg data-drawn-chapter="" />) };
+    await mount(state, { section: { ...section, diagram }, index: 2, total: 3 });
+    expect(asked).toEqual([[diagram.source, 2]]);
+    const box = narrative().querySelector('[data-guide-chapter-diagram="mermaid"]');
+    expect(box?.querySelector('svg[data-drawn-chapter]')).not.toBeNull();
+    // Above the chapter's words, inside the chapter's own column.
+    const words = Array.from(narrative().querySelectorAll('p')).find((p) => p.textContent === 'Chapter overview.')!;
+    expect(box!.compareDocumentPosition(words) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test.skipIf(!hasDom)('a host that cannot draw it (no renderer, or null) shows the chapter exactly as one without a diagram', async () => {
+    await mount(makeState({ files: [makeFile()] }));
+    const plain = narrative().innerHTML;
+    await act(async () => root!.unmount());
+    host!.remove();
+    for (const state of [makeState({ files: [makeFile()] }), { ...makeState({ files: [makeFile()] }), renderChapterDiagram: () => null }]) {
+      await mount(state, { section: { ...section, diagram } });
+      expect(narrative().innerHTML).toBe(plain);
+      await act(async () => root!.unmount());
+      host!.remove();
+    }
+    root = null;
+  });
+
+  test.skipIf(!hasDom)('a folded (reviewed) chapter does not draw it', async () => {
+    let asked = 0;
+    const state = { ...makeState({ files: [makeFile()] }), renderChapterDiagram: () => (asked++, <svg />) };
+    await mount(state, { section: { ...section, diagram }, reviewed: true });
+    expect(asked).toBe(0);
+    expect(host!.querySelector('[data-guide-chapter-diagram]')).toBeNull();
+  });
+});

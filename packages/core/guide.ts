@@ -43,9 +43,13 @@ export interface GuideSection {
    *  deliberate prose-only context section (no diffs, real overview text) is
    *  a valid model output and is preserved as-is rather than dropped. */
   diffs: GuideDiffRef[];
+  /** Optional: one diagram drawn at the top of the chapter's text, the same
+   *  shape as an overview's (snapshot format version 5, written only when a
+   *  chapter has one). Readers that cannot draw it show the chapter as before. */
+  diagram?: GuideOverviewDiagram;
 }
 
-/** The kinds of picture a guide overview can carry. Mermaid renders through
+/** The kinds of picture a guide overview or chapter can carry. Mermaid renders through
  *  Plannotator's diagram engine; HTML is a sanitized custom picture (not drawn
  *  by any viewer yet; accepted only where the producer can sanitize it). */
 export type GuideOverviewDiagramKind = 'mermaid' | 'html';

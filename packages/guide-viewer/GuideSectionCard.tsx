@@ -213,6 +213,9 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const position = numbered ? `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}` : null;
   const isCollapsed = showReviewed ? collapsedOverride ?? reviewed : collapsedOverride === true;
+  // A chapter's diagram (format version 5), drawn by the host at the top of the chapter's text; a host that cannot
+  // draw it leaves the chapter exactly as it is without one.
+  const chapterDiagram = section.diagram && !isCollapsed ? (host.renderChapterDiagram?.(section.diagram, index) ?? null) : null;
 
   const filesByPath = useMemo(() => new Map(host.files.map((file) => [file.path, file])), [host.files]);
   const summaryByPath = useMemo(() => {
@@ -339,6 +342,12 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 </button>
               )}
             </div>
+            )}
+
+            {chapterDiagram && (
+              <div data-guide-chapter-diagram={section.diagram?.kind} className="mt-3.5 min-w-0 md:flex-none">
+                {chapterDiagram}
+              </div>
             )}
 
             {section.overview && (

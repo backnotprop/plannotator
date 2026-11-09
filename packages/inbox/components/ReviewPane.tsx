@@ -740,6 +740,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isReview, overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
+  // A chapter's drawn html picture (format version 5) is drawn as the Overview's is, at the top of its chapter;
+  // anything else (Mermaid) is left to GuideReader, and a guide or a review with Code review off draws none.
+  const renderChapterDiagram = useCallback(
+    (diagram: GuideOverviewDiagram): ReactNode | null =>
+      isReview && overviewPicture(diagram) ? (
+        <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={`drawn by ${author} with the guide`} onCode={(target) => void openCode(target)} />
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isReview, author, files, chapters, mode],
+  );
   // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
   const renderHeadActions = useCallback(
     (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
@@ -1223,6 +1233,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
+                renderChapterDiagram={renderChapterDiagram}
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading

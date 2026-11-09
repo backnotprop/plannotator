@@ -41,11 +41,14 @@ export interface InboxReviewSkill {
 const NO_CODE = 'If you changed no code for this thread, say so in one sentence instead.';
 const OLD_SESSION = 'If submit_guide takes no `review` field in this session, send it without one.';
 
-/** /review-curate's line for the overview's drawing (Show me, AGENT-TEXT §5, approved), at the end of its instructions. */
-export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If the change is a flow across 3 or more steps that is easier to see than to read, give the overview one drawing (`overview.diagram`). The guide brief has the format.';
+/**
+ * /review-curate's line for a chapter's diagram (approval "guide-chapter-diagrams": diagrams go in chapters, not the
+ * overview), at the end of its instructions. AGENT TEXT: these words await the owner's OK and a clean-room test.
+ */
+export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one diagram (`sections[].diagram`, Mermaid preferred). The guide brief has the format.';
 
-/** /review-recheck's line for the overview's drawing (AGENT-TEXT §5, approved), after "Give one chapter to each comment you acted on…". */
-export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If the earlier review's overview had a drawing and you changed lines it opens, send it again, redrawn, as this review's `overview.diagram`, with the same data-mark ids.";
+/** /review-recheck's line for a chapter's diagram, after "Give one chapter to each comment you acted on…". AGENT TEXT: awaits the owner's OK. */
+export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If a chapter of the earlier review had a diagram and you changed what it shows, draw it again in the chapter of this review that covers that change (`sections[].diagram`).";
 
 /**
  * Every review skill Plannotator knows, by name. Which of them the "/" list
@@ -379,13 +382,18 @@ export function checkInboxDrawing(
 /** What an old `plannotator review draw` or `review drawings` gets while Code review is on: Show me makes a Shape now. */
 export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
 
-/** get_guide_brief's field doc for the overview's drawing (AGENT-TEXT §4), served only while Code review is on. */
-export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [
-  '- **overview.diagram** (optional): one drawing of how the whole change works, when',
-  '  it is a flow across 3 or more steps that is easier to see than to read.',
-  '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
-  '  drawing by the rules in `plannotator shape --help`. Or { "kind": "mermaid", "source" }.',
-  '  For Mermaid, draw it left to right (`flowchart LR`).',
+/**
+ * get_guide_brief's field doc for a chapter's diagram, served only while Code review is on (it replaces the overview
+ * diagram's doc: approval "guide-chapter-diagrams"). AGENT TEXT: these words await the owner's OK and a clean-room test.
+ */
+export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = [
+  '- **sections[].diagram** (optional): one diagram at the top of a chapter, only when a',
+  '  picture explains that chapter better than words (a flow across steps, how parts',
+  '  connect). Most chapters need none. It sits in the chapter\'s narrow text column (the',
+  '  person can expand it), so keep it small.',
+  '  Mermaid, preferred: { "kind": "mermaid", "source" }.',
+  '  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
+  '  drawing by the rules in `plannotator shape --help`.',
 ].join('\n');
 
 /**
@@ -398,7 +406,7 @@ export const INBOX_REVIEW_NOTES_RULE =
 /** submit_guide's `guide` field: as always with Code review off; with it on, a diff reference names its `notes`. */
 export const INBOX_GUIDE_FIELD_DESCRIPTION =
   'The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief\'s output_schema), as an object or its JSON.';
-export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRIPTION.replace('diffs: [{ file, summary }]', 'diffs: [{ file, summary, notes? }]');
+export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRIPTION.replace('overview, diffs: [{ file, summary }]', 'overview, diagram?, diffs: [{ file, summary, notes? }]');
 
 /**
  * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`, served only while

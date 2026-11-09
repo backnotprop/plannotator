@@ -8,7 +8,7 @@
  * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
  * own "Unsupported snapshot version" words.
  *
- * What regresses: a Show me word (the `overview.diagram` rules, the refusal of `review draw`,
+ * What regresses: a Show me word (the chapter diagram's rules, the refusal of `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
  * off. These texts change for everyone on purpose, so the test names the words
  * and not the texts; a control proves each word is real, with Code review on.
@@ -39,12 +39,12 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
  * `packages/core/inbox-review.ts`. A word holds no double quote or line break: the MCP texts are JSON, where those are escaped.
  */
 const SHOW_ME_WORDS = {
-  /** INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC */
-  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "plannotator shape --help"],
+  /** INBOX_REVIEW_CHAPTER_DIAGRAM_DOC (it replaced the overview diagram's doc: approval "guide-chapter-diagrams") */
+  get_guide_brief: ["sections[].diagram", "one diagram at the top of a chapter", "plannotator shape --help"],
   /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
   "review draw": ["review_draw_gone", "Show me makes a Shape"],
   /** INBOX_REVIEW_CURATE_DRAWING_LINE and INBOX_REVIEW_RECHECK_DRAWING_LINE */
-  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's"],
+  "the review skills": ["sections[].diagram", "give that chapter one diagram", "draw it again in the chapter"],
 };
 
 /** Each text an agent reads, with Code review on or off. */
