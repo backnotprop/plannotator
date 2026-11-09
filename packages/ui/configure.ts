@@ -23,7 +23,7 @@ import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
-import { setDigitHexIssueRefs } from './components/InlineMarkdown';
+import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
@@ -145,6 +145,17 @@ export interface PlannotatorUIConfig {
    */
   digitHexIssueRefs?: boolean;
   /**
+   * Link an `owner/repo#123` ref where the text's caller names no repo of
+   * its own (`InlineMarkdown` without `githubRepo`). `true`: on github.com.
+   * `{ host }`: on that host, by `forgeRefLinks`' rule (GitLab's
+   * `/-/issues/N`; a host it cannot form a link for leaves refs plain).
+   * Default: false, such refs stay plain text exactly as before. A caller
+   * that names its repo is unchanged, and bare `#123` still needs that repo.
+   * May be called again later: mounted text re-renders with the new host.
+   * The Plannotator Inbox passes the host most of its projects use.
+   */
+  crossRepoRefsWithoutRepo?: CrossRepoRefsWithoutRepo;
+  /**
    * Make the selection toolbar's Copy button (Viewer and HtmlViewer) copy rich
    * text: text/html plus text/plain in one clipboard write, and show Copy
    * where `hideCopyButton` hid it (the Viewer on desktop). Default: false,
@@ -243,6 +254,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
+  if (config.crossRepoRefsWithoutRepo !== undefined) setCrossRepoRefsWithoutRepo(config.crossRepoRefsWithoutRepo);
   if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
   if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);

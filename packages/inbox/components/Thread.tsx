@@ -43,6 +43,7 @@ import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
+import { useDefaultRefHost } from '../defaultRefHost';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
@@ -921,7 +922,7 @@ export function MessageBody({
           <div className="ib-ctxn-msg" data-context-note-block="">
             <ContextNoteChip file={note.file} lines={`${note.side === 'old' ? 'removed ' : ''}${rangeWord([note.lineStart, note.lineEnd])}`} {...(open ? { onOpen: () => open(note) } : {})} />
             <div className="ib-ctxn-msg-t">
-              <InlineMarkdown text={note.text} />
+              <InlineMarkdown text={note.text} githubRepo={refRepo?.display} repoHost={refRepo?.host} />
             </div>
           </div>
         );
@@ -931,7 +932,7 @@ export function MessageBody({
       if (!run) return undefined;
       return run.first ? actionsRef.current?.render(run.records) : null;
     },
-    [actionRuns, noteAtLine],
+    [actionRuns, noteAtLine, refRepo],
   );
 
   // ── Comments on the text (approval "inbox-message-comments") ──────────────
@@ -2812,7 +2813,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const artifactsOn = artifactsRoute;
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
   // The thread's web links (threadLinks.ts). With none, nothing here changes: the same button, the same view.
-  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo), [thread.messages, thread.project.repo]);
+  const refHost = useDefaultRefHost();
+  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo, refHost), [thread.messages, thread.project.repo, refHost]);
   /** Links and no artifacts: the button opens on them, its count theirs. */
   const linksOnly = linkList.count > 0 && files !== null && artifactList.length === 0;
   const linksOn = artifactsOn && linkList.count > 0 && (linksRoute || linksOnly);
