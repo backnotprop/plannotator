@@ -5947,11 +5947,9 @@ const ReviewApp: React.FC = () => {
             ? 'contents'
             : 'min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2'
           }>
-            {/* Split/Unified toggle + diff options sit in the dock tab strip
+            {/* Split/Unified toggle + diff options moved to the dock tab strip
                 (rightHeaderActionsComponent → ReviewDockRightActions). An open
-                guide hides the dock, so GuideScreen portals the same controls
-                in here. */}
-            {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
+                guide hides the dock; its controls join the tool icons below. */}
             {!isCompactTouchLayout && (origin ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
@@ -6272,6 +6270,9 @@ const ReviewApp: React.FC = () => {
                 )}
               </button>
             )}
+            {/* An open guide's Split/Unified, Collapse all and gear: GuideScreen
+                portals GuideDiffControls in here, after the tool icons. */}
+            {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
 
