@@ -228,7 +228,7 @@ export function AttachmentTiles({
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
-  /** The file open beside the thread: its tile says "Open beside" (`aria-current`); the thread does not scroll to it. */
+  /** The file open beside the thread: its tile is marked (`aria-current`, the highlight) and keeps its words; the thread does not scroll to it. */
   openId?: string | null;
   /** Where the tiles sit: at the foot of the message (with their heading and the image gallery), or in the header's band. */
   placement?: 'foot' | 'header';
@@ -370,7 +370,7 @@ export function AttachmentTiles({
               className={`ib-att-t${isOpen ? ' ib-open-beside' : ''}`}
               key={attachment.id}
               onClick={() => onOpen(attachment)}
-              aria-label={isOpen ? `${attachment.name}, open beside the thread` : `${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
+              aria-label={`${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
               aria-current={isOpen ? 'true' : undefined}
               aria-describedby={detailId}
               aria-keyshortcuts={attachment.id === newestId ? newestKeys : undefined}
@@ -382,7 +382,7 @@ export function AttachmentTiles({
               {text}
               {attachment.id === newestId && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
               <span className="ib-open" aria-hidden="true">
-                {isOpen ? 'Open beside' : isVideo ? 'Play' : 'Open'}
+                {isVideo ? 'Play' : 'Open'}
               </span>
             </button>,
           );
