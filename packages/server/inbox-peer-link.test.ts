@@ -237,6 +237,26 @@ describe("an Update pressed there", () => {
     expect(peer.updated).toMatchObject({ from: "0.28.46", to: "0.28.50" });
   });
 
+  test("an agent there was asked to update it (an older door): back on a new version, it ends as updated too", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.55" }) });
+    const { peer } = link(d.url);
+    peer.agentAsked = { from: "0.28.50", at: Date.now(), thread: "thr_1", agent: "Claude Code" };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.agentAsked).toBeNull();
+    expect(peer.updated).toMatchObject({ from: "0.28.50", to: "0.28.55" });
+  });
+
+  test("an agent asked there that has not acted yet: back on the same version, the ask stays", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.50" }) });
+    const { peer } = link(d.url);
+    peer.agentAsked = { from: "0.28.50", at: Date.now(), thread: "thr_1", agent: "Claude Code" };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.agentAsked).not.toBeNull();
+    expect(peer.updated).toBeNull();
+  });
+
   test("back on the same version with nothing running, the press is over: it never claims to be updating", async () => {
     const d = door({ health: health("0.28.46") });
     const { peer } = link(d.url);

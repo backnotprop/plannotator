@@ -166,7 +166,7 @@ After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 bun scripts/feedback-search-index.ts
 ```
 
-It reads public release notes, open issue titles and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
+It reads public release notes, open issue titles, fixed closed issue titles (with the release whose notes link their fix) and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
 
 ---
 

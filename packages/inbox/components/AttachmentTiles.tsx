@@ -4,6 +4,7 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAttachmentKindLabel, inboxVideoMeta, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
+import { drawnImageUrl, GALLERY_IMAGE_WIDTH, TILE_IMAGE_WIDTH } from '../images';
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
@@ -126,6 +127,8 @@ function GalleryImage({
   const wide = ratio > WIDE_IMAGE_RATIO;
   const source = useInboxFileSource();
   const src = source.imageUrl(image, readableVersion(image));
+  // A frame is at most a few hundred pixels wide: a big screenshot loads as a smaller copy (images.ts).
+  const shownSrc = drawnImageUrl(src, image.width, GALLERY_IMAGE_WIDTH);
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
   const detail = `${changed ?? sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
@@ -140,7 +143,7 @@ function GalleryImage({
       data-gallery-image={image.id}
       data-attachment-name={image.name}
     >
-      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}${wide ? ' ib-wide' : ''}`} style={{ aspectRatio: String(shown) }} data-src={src}>
+      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}${wide ? ' ib-wide' : ''}`} style={{ aspectRatio: String(shown) }} data-src={shownSrc}>
         {failed ? (
           <span className="ib-gal-fail">
             <Icon name="photo" size={20} />
@@ -148,7 +151,7 @@ function GalleryImage({
           </span>
         ) : (
           <img
-            src={src}
+            src={shownSrc}
             alt=""
             loading="lazy"
             decoding="async"
@@ -253,7 +256,7 @@ export function AttachmentTiles({
           const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
-              <img src={source.imageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
+              <img src={drawnImageUrl(source.imageUrl(attachment, readableVersion(attachment)), attachment.width, TILE_IMAGE_WIDTH)} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
             </span>
           ) : (
             <span className="ib-fi">

@@ -30,6 +30,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import { artifactKey, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
 import { readableVersion } from '../attachments';
+import { drawnImageUrl, GALLERY_IMAGE_WIDTH } from '../images';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { formatBytes, formatCount, fullTime, plural } from '../format';
 import { HostMark, Icon, type IconName } from '../icons';
@@ -257,7 +258,7 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
   if (kind === 'image') {
     return (
       <span className="ib-art-prev ib-art-f-img" data-face="image">
-        {near && !failed ? <img src={source.imageUrl(attachment, version)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
+        {near && !failed ? <img src={drawnImageUrl(source.imageUrl(attachment, version), attachment.width, GALLERY_IMAGE_WIDTH)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
       </span>
     );
   }

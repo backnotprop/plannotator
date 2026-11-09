@@ -8,8 +8,8 @@
  * Reply (its `.ib-btn` surface, theme tokens only) and shows the current step's mark, the amber pause while a step
  * waits on the person, the spinner while one is worked on, else the pie; then the count ("1/4"). It shows the list
  * that waits on the person, else the newest (one list per agent session; the panel shows them all). Freshness is
- * each list's presence class: the spinner turns only while its session works, is still and dim while idle, and still
- * and grey once ended, when the head adds "as of <time>".
+ * each list's presence class: the spinner turns while its step is in progress, busy or idle, and is still and grey
+ * once the session ended, when the head adds "as of <time>".
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';

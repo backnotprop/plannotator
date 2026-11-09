@@ -93,7 +93,7 @@ test.beforeAll(async () => {
   mkdirSync(join(billing, 'docs'));
   writeFileSync(join(billing, 'docs', 'retry-policy.md'), '# Retry policy\n\nFailed refunds are retried with exponential backoff, five times at most.\n');
   writeFileSync(join(billing, 'docs', 'on-call.md'), '# On-call\n\nThe on-call is paged once per refund, not once per attempt.\n');
-  // One agent session per thread: a session's unnamed messages join its own thread.
+  // One agent session per thread.
   const agents: SimAgent[] = [];
   const agent = async (name: string, host: string) => {
     const made = await SimAgent.connect({ binary, env, name, host });

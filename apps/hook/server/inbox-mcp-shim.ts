@@ -15,7 +15,7 @@
  * inside one (`inboxHostSessionFromEnv`: a Claude Code session's
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`), so a script or
  * command the session runs sends as that session, exactly as its
- * `plannotator_inbox` tool does: the same author, the same default thread, and
+ * `plannotator_inbox` tool does: the same author, the same threads, and
  * the person's reply wakes it. A Codex session is its thread: Codex names it
  * on every tool call (`params._meta.threadId`, from the `codex-mcp-client`)
  * and in the commands its shell runs (`CODEX_THREAD_ID`), and the shim sends

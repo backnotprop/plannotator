@@ -254,7 +254,7 @@ export interface InboxSendInput {
   /**
    * A thread name in this project: the open thread of that name, across
    * sessions, or a new one under it. Without it (and without reply_to) the
-   * message joins its session's open default thread. Ignored with reply_to.
+   * message starts a new thread. Ignored with reply_to.
    */
   thread?: string | null;
   /** The files attached, already recorded (blobs written) by recordInboxAttachments. */
@@ -808,16 +808,13 @@ export class InboxStore {
   private readonly questions = new Map<string, InboxQuestionRecord>();
   /** Each message's question ids (a question's message never changes, so the index only grows). */
   private readonly messageQuestions = new Map<string, Set<string>>();
-  /**
-   * Thread routing, kept from each root's first line in seq order, so a
-   * replay of the log gives the same answers: the newest unnamed root an
-   * agent session started in a project (`<project>\0<session>`), and the
-   * newest root of each thread name (`<project>\0<name key>`).
-   */
-  private readonly sessionThreads = new Map<string, string>();
   /** Each thread's message ids in seq order. */
   private readonly threadMembers = new Map<string, string[]>();
-  /** Every root of each thread name in seq order (`<project>\0<name key>`). */
+  /**
+   * Thread routing: every root of each thread name in seq order
+   * (`<project>\0<name key>`), kept from each root's first line, so a replay
+   * of the log gives the same answers.
+   */
   private readonly namedThreads = new Map<string, string[]>();
   /**
    * Threads the person started, by the name compose gave them (typed or the
@@ -1124,8 +1121,8 @@ export class InboxStore {
   /** Note a root's routing keys, from its first line only. */
   private indexRoot(message: InboxMessage): void {
     if (message.thread_id !== message.id) return;
-    // A thread the person started is no session's default thread, and its compose name (typed, or
-    // the suggestion) routes nothing: it is noted only so no other thread takes the same name.
+    // A thread the person started: its compose name (typed, or the suggestion) routes nothing:
+    // it is noted only so no other thread takes the same name.
     if (message.author.kind !== "agent") {
       if (message.started_by_person && message.thread_name) {
         const key = `${message.project_id}\0${inboxThreadNameKey(message.thread_name)}`;
@@ -1136,11 +1133,7 @@ export class InboxStore {
       return;
     }
     const name = message.thread_name ?? null;
-    if (name !== null) {
-      this.indexName(message.project_id, name, message.id);
-    } else if (message.author.session) {
-      this.sessionThreads.set(`${message.project_id}\0${message.author.session}`, message.id);
-    }
+    if (name !== null) this.indexName(message.project_id, name, message.id);
   }
 
   /**
@@ -1166,18 +1159,12 @@ export class InboxStore {
   /**
    * The thread a message without reply_to joins, or null for a new thread:
    * with a `name`, the newest OPEN thread of that name in the project (one the
-   * person reopened counts); else the newest unnamed thread the session
-   * started there, while it is open (resolved means done, so the next message
-   * starts anew). No session and no name: always a new thread.
+   * person reopened counts). Without a name, always a new thread (the owner,
+   * 2026-11-08: joining the session's last unnamed thread put long-lived
+   * sessions' news into weeks-old, unrelated threads).
    */
-  private routeThread(projectId: string, session: string | null, name: string | null): string | null {
-    if (name !== null) return this.newestOpen(projectId, this.rootsNamed(projectId, name));
-    if (!session) return null;
-    const roots = this.projectGroup(projectId)
-      .map((id) => this.sessionThreads.get(`${id}\0${session}`))
-      .filter((rootId): rootId is string => rootId !== undefined)
-      .sort((a, b) => (this.messageSeq.get(a) ?? 0) - (this.messageSeq.get(b) ?? 0));
-    return this.newestOpen(projectId, roots);
+  private routeThread(projectId: string, name: string | null): string | null {
+    return name === null ? null : this.newestOpen(projectId, this.rootsNamed(projectId, name));
   }
 
   /**
@@ -4013,7 +4000,7 @@ export class InboxStore {
       }
     }
 
-    if (!replyTo) threadId = this.routeThread(projectId, input.author.session, threadName);
+    if (!replyTo) threadId = this.routeThread(projectId, threadName);
     // A send across a combined project can land in the other folder's thread. Every message of a thread
     // stays in its root's project (deleting a thread reads one folder), so this one is written there, and
     // its relative files keep starting at the folder it came from.
@@ -6028,7 +6015,6 @@ export class InboxStore {
     this.readdressed.clear();
     this.questions.clear();
     this.messageQuestions.clear();
-    this.sessionThreads.clear();
     this.threadMembers.clear();
     this.namedThreads.clear();
     this.personNamed.clear();
@@ -6616,7 +6602,7 @@ export class InboxStore {
   /**
    * The person starts a thread, addressed to one live agent session (`to`):
    * a root person message (`started_by_person`, `reply_to` null) whose
-   * subject is derived from the body. It is no session's default thread
+   * subject is derived from the body. No send joins it by default
    * (routing indexes agent roots only), and the agent's answer lands in it by
    * `reply_to`. The session is handed it on its next poll (`pendingReplies`,
    * `isFor` by `to`) and only its delivery settles it. Replaying the same
@@ -6988,6 +6974,23 @@ export class InboxStore {
   personAnsweredSince(threadId: string, since: string): boolean {
     const root = this.messages.get(threadId)?.thread_id ?? threadId;
     return inboxPersonAnsweredSince(this.threadMessages(root), since);
+  }
+
+  /**
+   * The person's `reply` answers at least one of `session`'s questions: a question (never an action item) that agent
+   * session asked in the thread, sent with this reply and not skipped. A plain reply, a 👍 or a skip answers none. The
+   * wake's line that says when to start a checklist (INBOX_STEPS_START_WAKE_LINE) rides only on such a reply.
+   */
+  answersQuestionsOf(reply: InboxMessage, session: string): boolean {
+    if (reply.author.kind !== "person" || reply.ack_of) return false;
+    for (const member of this.threadMessages(reply.thread_id)) {
+      if (member.author.kind !== "agent" || member.author.session !== session) continue;
+      for (const id of this.messageQuestions.get(member.id) ?? []) {
+        const record = this.questions.get(id);
+        if (record && record.kind !== "action" && record.sent_reply_id === reply.id && record.answer && !record.answer.skipped) return true;
+      }
+    }
+    return false;
   }
 
   /** Every list that holds steps, in threads that still exist (Tidy reads them). */

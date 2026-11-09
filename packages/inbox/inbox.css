@@ -260,6 +260,7 @@
   --ib-fs-20: max(11px, calc(20px * var(--ib-type) / 14));
   --ib-fs-22: max(11px, calc(22px * var(--ib-type) / 14));
   --ib-fs-24: max(11px, calc(24px * var(--ib-type) / 14));
+  --ib-fs-29: max(11px, calc(29px * var(--ib-type) / 14));
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
@@ -1232,8 +1233,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
 /* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): at the header's right end, as the
-   chevrons were before (owner's pick). Hidden until the pointer rests on the header for a moment or keyboard focus
-   lands on it (data-chev, GroupBand in InboxList.tsx).
+   chevrons were before (owner's pick). Hidden until the pointer is on the header (at once, as the sidebar's sections)
+   or keyboard focus lands on it (data-chev, GroupBand in InboxList.tsx).
    It points right closed and down open, as the sidebar's sections do. It fades in over 200 ms with a 3 px slide, and
    goes in 100 ms; always drawn, so nothing moves when it shows. Reduced motion: the fade only. */
 .pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -6043,19 +6044,17 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-stg-spin { transform-origin: 50% 50%; }
 .ib-stg-spin .tr { stroke: var(--ib-st-track); }
 .ib-stg-spin .arc { stroke: var(--primary); }
-.ib-st-working .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
+/* In progress means turning, whether or not the session is busy this moment (owner, 2026-11-09); only an ended
+   session's list rests, grey. */
+.ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
 @keyframes ib-st-turn { to { transform: rotate(360deg); } }
-.ib-st-idle .ib-stg-spin .arc { stroke: color-mix(in oklab, var(--primary) 70%, var(--card)); }
 .ib-st-ended .ib-stg-spin .arc { stroke: var(--ib-st-ring); }
 .ib-st-ended .ib-stg-spin .tr { stroke: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
 /* Reduced motion: the arc rests from 12 o'clock to about 4, a partial ring (never the todo ring's full one). */
 @media (prefers-reduced-motion: reduce) {
   .ib-stp { animation: none; }
-  .ib-st-working .ib-stg-spin { animation: none; }
+  .ib-st-working .ib-stg-spin, .ib-st-idle .ib-stg-spin { animation: none; }
 }
-
-/* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
-.ib-strow { flex: none; display: inline-flex; align-items: center; }
 
 /* a phone: the sheet, 44 px rows and targets, a grab handle */
 .ib-oq-pos[data-phone] .ib-stp { width: auto; max-height: 72vh; border-radius: 14px 14px 0 0; border-width: 1px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); animation: ib-oq-up 240ms var(--ib-st-calm); }
@@ -6076,22 +6075,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-m { line-height: 22px; }
 .ib-oq-pos[data-phone] .ib-st-jump { margin: -11px 0; }
 
-/* the Board (part 4): the lane card stays still, with only the amber pause while a list waits on the person; the
-   opened card lists the steps under a section head like Threads and Links; the panel's head has a Board icon that
-   opens the card */
-.ib-bc-plan { flex: none; display: inline-flex; align-items: center; color: var(--ib-st-mut); }
-.ib-crdp-steps .ib-st-head { height: auto; padding: 0; margin: 0 0 4px; }
-.ib-crdp-sec.ib-crdp-steps h3.ib-st-lbl { margin: 0; }
-.ib-crdp-steps .ib-sts { margin: 0 -10px; }
-.ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
-/* The opened card on a phone: two lines too, as the foot's sheet. */
-.ib-crdp-phone .ib-crdp-steps .ib-st-row { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-gl { margin-top: 4px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-m { line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -9px 0; }
+/* The checklist lives only in its thread (owner, 2026-11-09): no mark on a list row or a Board card. The panel's head
+   keeps its Board icon, which opens the card that links the thread. */
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -7194,6 +7179,44 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
+/* GRILL-ME-TIP-START The grill-me tip (packages/inbox/components/GrillMeTip.tsx): Bro mode's card (navy, dot grid,
+   orange button; no Experimental chip), with a title line in place of the poster name and a small picture of one
+   question card in the light palette's colours, drawn from the real card's parts: picture tiles (the picked one a soft
+   tint, no outline), ui's Recommended tag (primary/15), the `Why <choice>:` line and the note field. */
+dialog.ib-dlg.ib-bro.ib-gm h2 { position: relative; margin: 0; padding: 24px 26px 0; font-size: var(--ib-fs-34, 34px); font-weight: 800; line-height: 1.04; letter-spacing: -0.035em; color: #fbfaf5; text-wrap: balance; }
+dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0.86em; font-weight: 600; letter-spacing: -0.04em; color: #f69d25; }
+.ib-gm .ib-gm-art { --gm-fg: oklch(0.18 0.02 260); --gm-muted: oklch(0.40 0.02 260); --gm-primary: oklch(0.50 0.25 280); --gm-line: oklch(0.88 0.01 260); position: relative; margin: 20px 26px 0; padding: 14px 14px 12px; border-radius: 12px; background: #fff; color: var(--gm-fg); box-shadow: 0 12px 28px -14px #000a; transform: rotate(-1deg); }
+.ib-gm .ib-gm-art .q { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 650; letter-spacing: -0.01em; }
+.ib-gm .ib-gm-art .ctx { margin: 2px 0 10px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--gm-muted); }
+.ib-gm .ib-gm-art .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ib-gm .ib-gm-art .tile { border-radius: 9px; overflow: hidden; background: color-mix(in oklch, var(--gm-line) 45%, #fff); }
+.ib-gm .ib-gm-art .tile.on { background: color-mix(in oklch, var(--gm-primary) 11%, #fff); }
+.ib-gm .ib-gm-art .pic { display: grid; align-content: start; gap: 5px; aspect-ratio: 16 / 8; padding: 9px 10px; margin: 5px 5px 0; border-radius: 6px; }
+.ib-gm .ib-gm-art .pic i { display: block; height: 5px; border-radius: 3px; background: currentColor; opacity: 0.55; }
+.ib-gm .ib-gm-art .pic i:first-child { width: 42%; height: 6px; opacity: 0.95; color: #4493f8; }
+.ib-gm .ib-gm-art .pic i:nth-child(2) { width: 88%; }
+.ib-gm .ib-gm-art .pic i:nth-child(3) { width: 70%; }
+.ib-gm .ib-gm-art .pic.dim { background: #2d333b; color: #adbac7; }
+.ib-gm .ib-gm-art .pic.night { background: #0d1117; color: #c9d1d9; }
+.ib-gm .ib-gm-art .cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 7px 8px 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; }
+.ib-gm .ib-gm-art .dot { width: 12px; height: 12px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--gm-muted) 55%, transparent); }
+.ib-gm .ib-gm-art .on .dot { box-shadow: inset 0 0 0 1.5px var(--gm-primary); background: radial-gradient(circle, var(--gm-primary) 0 3px, transparent 3.5px); }
+.ib-gm .ib-gm-art .tag { margin-left: auto; display: inline-flex; align-items: center; height: 17px; padding: 0 5px; border-radius: 4px; background: color-mix(in oklch, var(--gm-primary) 15%, transparent); color: var(--gm-primary); font-size: var(--ib-fs-10, 10px); font-weight: 650; letter-spacing: 0.03em; white-space: nowrap; }
+.ib-gm .ib-gm-art .why { margin: 9px 0 0; font-size: var(--ib-fs-11-5, 11.5px); line-height: 1.45; color: var(--gm-muted); }
+.ib-gm .ib-gm-art .why b { font-weight: 650; color: color-mix(in oklch, var(--gm-fg) 85%, transparent); }
+.ib-gm .ib-gm-art .note { display: flex; align-items: center; margin-top: 8px; padding: 6px 9px; border-radius: 7px; background: color-mix(in oklch, var(--gm-line) 35%, #fff); box-shadow: inset 0 0 0 1px var(--gm-line); font-size: var(--ib-fs-12, 12px); }
+.ib-gm .ib-gm-art .caret { display: inline-block; width: 1.5px; height: 13px; margin-left: 1px; background: var(--gm-primary); animation: ib-gm-caret 1.1s steps(1) infinite; }
+@keyframes ib-gm-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-gm .ib-gm-art .caret { animation: none; }
+}
+.ib-gm .ib-bi-text p + p { margin-top: 8px; }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-bro.ib-gm h2 { font-size: var(--ib-fs-29, 29px); padding: 22px 22px 0; }
+  .ib-gm .ib-gm-art { margin: 16px 20px 0; }
+  .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
+}
+/* GRILL-ME-TIP-END */
 /* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
    small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
    name and tags, one line, and its button (Smart groups' the primary one). */
@@ -7513,24 +7536,39 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .pn-inbox .ib-att-t .ib-att-kbd + .ib-open { margin-left: 0; }
 /* A keycap's text (shortcuts/hint.tsx ShortcutHint): drawn from the attribute, never part of its button's words. */
 kbd[data-keycap]::after { content: attr(data-keycap); }
-/* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
-   saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
-   dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
-dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100vh - 580px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
+/* Sidebar → Feedback (components/FeedbackDialog.tsx, approval "inbox-feedback-faq"): a "Feedback" title, then the
+   Inbox's segmented switch (Message | Common questions). Message: the message, an optional category and email, the
+   line saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. Common
+   questions: an accordion, then "Not here? Tell us about it" and Close. One left edge for all of it (the footer's
+   ghost button hangs its padding outside). On a phone the dialog is a bottom sheet (the sheet corner on top, the
+   safe area below), 44 px targets. */
+dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100vh - 613px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
 /* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show; in a short window it starts higher, so five lines leave Send in view. */
 .ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
 .ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
-.ib-fbk-form .ib-bfield { margin-top: 14px; }
+/* A known answer (feedbackKnown.ts), the first line, and a fixed issue: "Fixed in 0.28.52:" with Fixed in the accent
+   color, then the words, then the action, an accent link that runs a setting (approval "inbox-feedback-faq", take B). */
+.ib-fbk-lead { color: var(--primary); font-weight: 600; }
+/* It wraps rather than cut its action off. */
+.ib-fbk-rel li.ib-fbk-known { white-space: normal; }
+.ib-fbk-known-a { color: var(--foreground); }
+.pn-inbox .ib-fbk-act { padding: 0; border: 0; background: none; font: inherit; line-height: inherit; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-fbk-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 3px; }
+.ib-fbk-tabs { margin-top: 16px; }
+.ib-fbk-form .ib-bfield { margin-top: 16px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
+/* A window too short for the dialog with five lines (589 px with its border, under the switch): a shorter box, so Send stays in view. */
+@media (max-height: 640px) {
+  dialog.ib-fbk:not(.ib-fbk-phone) .ib-bfield .ib-fbk-msg { min-height: 0; height: 104px; }
+}
 .ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-fbk-count.ib-fbk-over { color: var(--destructive); }
-.ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-.ib-fbk-cats { display: inline-flex; gap: 6px; flex: none; }
-.pn-inbox .ib-fbk-cat { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.ib-fbk-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.ib-fbk-cats { display: inline-flex; gap: 8px; flex: none; }
+.pn-inbox .ib-fbk-cat { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
 .pn-inbox .ib-fbk-cat:hover:not(:disabled) { background: var(--muted); }
 .pn-inbox .ib-fbk-cat[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 13%, transparent); border-color: color-mix(in oklch, var(--primary) 42%, transparent); color: var(--primary); }
 .pn-inbox .ib-fbk-cat:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -7538,12 +7576,29 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fbk-contact { flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
 .ib-fbk-contact::placeholder, .ib-fbk-msg::placeholder { color: var(--muted-foreground); opacity: 0.8; }
 .ib-fbk-contact:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-.ib-fbk-what { display: grid; grid-template-columns: 15px minmax(0, 1fr); column-gap: 8px; margin: 14px 0 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
-.pn-inbox .ib-fbk-what svg.ib-ic { width: 15px; height: 15px; margin-top: 1px; }
+.ib-fbk-row .ib-fbk-contact { padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); }
+.ib-fbk-what { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); line-height: 1.5; color: var(--muted-foreground); text-wrap: pretty; }
 .ib-callout.ib-fbk-err { margin: 12px 0 0; }
-.ib-fbk-acts { margin-top: 18px; }
-.pn-inbox .ib-fbk-acts .ib-left { padding-left: 8px; padding-right: 8px; }
+.ib-fbk-acts { margin-top: 20px; }
+.pn-inbox .ib-fbk-acts .ib-left { margin-left: -8px; padding-left: 8px; padding-right: 8px; }
 .pn-inbox .ib-fbk-acts .ib-left svg.ib-ic { width: 15px; height: 15px; }
+/* Common questions: one answer open at a time, on the Inbox's raised fill. */
+.ib-fbk-cq { margin-top: 16px; }
+.ib-fbk-faq { padding: 4px; border-radius: 10px; background: var(--ib-raise); }
+.pn-inbox .ib-fbk-q { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-fbk-q:hover { background: var(--ib-fill); }
+.pn-inbox .ib-fbk-q:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-fbk-q svg.ib-ic { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.pn-inbox .ib-fbk-qa[data-open] .ib-fbk-q svg.ib-ic { transform: rotate(90deg); }
+.ib-fbk-a { padding: 0 10px 12px 32px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-fbk-a p { margin: 0 0 8px; }
+.ib-fbk-a-acts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ib-fbk-a-link { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-fbk-a-link:hover { color: var(--foreground); }
+.ib-fbk-a-link:focus-visible, .pn-inbox .ib-fbk-back:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-fbk-cq-foot { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.ib-fbk-cq-foot p { margin: 0 auto 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-fbk-back { padding: 0; border: 0; background: none; font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .ib-fbk-sent { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 8px 0 0; }
 .pn-inbox .ib-fbk-sent > svg.ib-ic { color: var(--success); }
 .ib-fbk-sent h2 { margin-top: 10px; }
@@ -7558,13 +7613,19 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
+  /* A known answer wraps, so its action is never cut off; the action sits above the line's link target, a thumb high. */
+  .ib-fbk-rel li.ib-fbk-known { white-space: normal; line-height: 1.45; padding: 12px 0; }
+  .pn-inbox .ib-fbk-act { position: relative; z-index: 1; padding: 12px 4px; margin: -12px -4px; }
   /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
-  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head { display: none; }
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head, :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-tabs { display: none; }
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-form .ib-bfield { margin-top: 0; }
   :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
   :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: calc(33px + var(--ib-fs-12, 12px) * 1.5); }
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
   :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
   :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
+  /* Over a keyboard a known answer is one line too, so Send does not move. */
+  :root[data-ib-keyboard] .ib-fbk-rel li.ib-fbk-known { white-space: nowrap; line-height: 44px; padding: 0; }
   /* Cancel beside Send, the prompt button under them. */
   :root[data-ib-keyboard] .ib-fbk-acts { flex-direction: row; }
   :root[data-ib-keyboard] .ib-fbk-acts .ib-btn { flex: 1; }
@@ -7573,10 +7634,21 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
   .ib-fbk-contact { flex: none; height: 44px; font-size: var(--ib-fs-16-in, 16px); }
-  .pn-inbox .ib-fbk-acts .ib-left { justify-content: center; }
+  .pn-inbox .ib-fbk-acts .ib-left { margin-left: 0; justify-content: center; }
+  /* The switch spans the sheet, a thumb's height each half. */
+  .ib-seg.ib-fbk-tabs { display: flex; flex-wrap: nowrap; }
+  .ib-fbk-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-fbk-q { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
+  .ib-fbk-a { font-size: var(--ib-fs-14, 14px); }
+  .ib-fbk-cq-foot { flex-direction: column; align-items: stretch; }
+  .ib-fbk-cq-foot p { margin: 0; font-size: var(--ib-fs-14, 14px); line-height: 44px; }
+  .pn-inbox .ib-fbk-cq-foot .ib-btn { height: 44px; justify-content: center; }
 }
 @media (forced-colors: active) {
   .pn-inbox .ib-fbk-cat[aria-pressed="true"] { border-color: Highlight; color: Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-fbk-q svg.ib-ic { transition: none; }
 }
 
 /* Tidy (components/Tidy.tsx): the list's and the Board's ⋮ menu, its popover (a sheet on a phone), the thread note. */
@@ -7688,7 +7760,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   padding: 0 8px 8px;
 }
 .ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
-.ib-fcomp .ib-fcomp-slot[hidden] { display: none; }
+.ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment)[hidden] { display: none; }
 .ib-fcomp .ib-ccard > :is(.ib-kept, .ib-tipwrap:has(> :is(.ib-markup, .ib-vframe))) { grid-area: thumbs; justify-self: start; margin: 10px 0 0 4px; }
 .ib-fcomp .ib-ccard > :is(.ib-vtime, .ib-tipwrap:has(> .ib-vtime)) { grid-area: mid; justify-self: start; margin-left: 6px; }
 .pn-inbox .ib-fcomp .ib-ccard > .ib-ta { grid-area: field; width: 100%; min-width: 0; box-sizing: border-box; min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: var(--ib-fs-14, 14px); line-height: 1.5; outline: none; field-sizing: content; }
@@ -9575,6 +9647,17 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
 .ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
 .ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
+/* An older machine's Update dialog: the ask to an agent there, and the commands folded under it as the fallback. */
+.ib-dlg .ib-mask-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ib-dlg .ib-mask-line svg { color: var(--primary); flex: none; }
+.ib-dlg .ib-mask-line a { margin-left: auto; color: var(--primary); font-weight: 550; text-decoration: none; }
+.ib-dlg .ib-mask-line a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-dlg .ib-mask-held { margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-dlg details.ib-mhand { margin-top: 14px; }
+.ib-dlg details.ib-mhand > summary { cursor: pointer; width: fit-content; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); border-radius: 4px; }
+.ib-dlg details.ib-mhand[open] > summary { color: var(--foreground); font-weight: 550; }
+.ib-dlg details.ib-mhand > .ib-sum:first-of-type { margin-top: 8px; }
+.ib-dlg .ib-acts-row .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 .pn-inbox .ib-ctl .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
    picture's sheet over the diff, its corner card, and the Overview's picture. Shape's paper behind every drawing. */

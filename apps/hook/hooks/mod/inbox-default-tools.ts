@@ -9,7 +9,7 @@ import type { InboxToolInfo } from './inbox-contract'
 export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
   {
     "name": "send_message",
-    "description": "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). One message per real need.\n\n## Asking the reviewer questions\n\nAsk what only the reviewer can decide as a question block. Answers come back at the top of their feedback (\"Answers to your questions\", then \"Unanswered\").\n\n```markdown\n:::question\nWhere should we keep the edit that loses a sync conflict?\n\nWhen two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.\n\n- [ ] Nowhere — silent loss, as today\n- [ ] Local only, purged after 30 days — cheap\n- [ ] Server-side per user — survives reinstall, needs a retention policy\n\nRecommended: Local only, purged after 30 days\n:::\n```\n\n- `:::question` picks one choice, `:::question-multi` any number, `:::question-text` free text (so does a block with no choices).\n- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold, thinks at the level of the product, and does not know what you know.\n  - Say what the choice affects, what you know or tried, and why you recommend it, so they can decide without opening anything else.\n  - Be terse: one to three short sentences, plain words, no jargon or internal names.\n  - Add a screenshot (`![alt](path)`) for anything visual.\n  - Link a file that shows it better (a plan, a mock): `[the mock](mock.html)`. In the Inbox, attach it too; the link opens it beside the thread.\n- Choices: `- [ ] label`, optionally `- [ ] label — why`, in natural order. The reviewer can also answer \"Other\", add a note, or skip.\n- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Never move yours first.\n- Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.\n- `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.\n- Leave blank lines between the parts so the block reads well on GitHub.\n- Each answer comes back under its question (`### Q2. <question> (line N)`) as `Answer: <choice>`, marked `(your recommendation)` when the reviewer took yours, or as `Other: …`, free text in a quote, or `Skipped`, plus any `Note:`. A question you marked `- [x]` is settled and only comes back if the reviewer changed it or added a note.\n- In the Inbox, withdraw your own questions that are still open (read_thread state `open` or `picked`) as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in `supersedes` (or a `Replaces:` line) so they stop keeping the thread at the top of the person's list.\n",
+    "description": "Message the person in the Plannotator Inbox (markdown). With no reply_to or thread, it starts a new thread. One message per real need.\n\n## Asking the reviewer questions\n\nAsk what only the reviewer can decide as a question block. Answers come back at the top of their feedback (\"Answers to your questions\", then \"Unanswered\").\n\n```markdown\n:::question\nWhere should we keep the edit that loses a sync conflict?\n\nWhen two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.\n\n- [ ] Nowhere — silent loss, as today\n- [ ] Local only, purged after 30 days — cheap\n- [ ] Server-side per user — survives reinstall, needs a retention policy\n\nRecommended: Local only, purged after 30 days\n:::\n```\n\n- `:::question` picks one choice, `:::question-multi` any number, `:::question-text` free text (so does a block with no choices).\n- The first line is the question; the lines after it are context. Never send a bare question: the reviewer switches in cold, thinks at the level of the product, and does not know what you know.\n  - Say what the choice affects, what you know or tried, and why you recommend it, so they can decide without opening anything else.\n  - Be terse: one to three short sentences, plain words, no jargon or internal names.\n  - Add a screenshot (`![alt](path)`) for anything visual.\n  - Link a file that shows it better (a plan, a mock): `[the mock](mock.html)`. In the Inbox, attach it too; the link opens it beside the thread.\n- Choices: `- [ ] label`, optionally `- [ ] label — why`, in natural order. The reviewer can also answer \"Other\", add a note, or skip.\n- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Never move yours first.\n- Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.\n- `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.\n- Leave blank lines between the parts so the block reads well on GitHub.\n- Each answer comes back under its question (`### Q2. <question> (line N)`) as `Answer: <choice>`, marked `(your recommendation)` when the reviewer took yours, or as `Other: …`, free text in a quote, or `Skipped`, plus any `Note:`. A question you marked `- [x]` is settled and only comes back if the reviewer changed it or added a note.\n- In the Inbox, withdraw your own questions that are still open (read_thread state `open` or `picked`) as the thread moves on: when a newer message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, name them in `supersedes` (or a `Replaces:` line) so they stop keeping the thread at the top of the person's list.\n",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -24,11 +24,11 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "subject": {
-          "description": "A short one-line subject when this starts a thread (ignored when it joins one). Plain text: no line breaks. Default: the first question's prompt, else the first line.",
+          "description": "A short one-line subject when this starts a thread. Plain text: no line breaks. Default: the first question's prompt, else the first line.",
           "type": "string"
         },
         "thread": {
-          "description": "A short thread name (1-120 characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's `thread` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.",
+          "description": "A short thread name (1-120 characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's `thread` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.",
           "type": "string"
         },
         "reply_to": {
@@ -54,7 +54,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "agent_session": {
-          "description": "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" matches on it.",
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.",
           "type": "string"
         },
         "agent_name": {
@@ -160,7 +160,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           ]
         },
         "agent_session": {
-          "description": "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" matches on it.",
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.",
           "type": "string"
         }
       },
@@ -342,11 +342,11 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "subject": {
-          "description": "A short one-line subject when this starts a thread (ignored when it joins one). Plain text: no line breaks. Default: the first question's prompt, else the first line.",
+          "description": "A short one-line subject when this starts a thread. Plain text: no line breaks. Default: the first question's prompt, else the first line.",
           "type": "string"
         },
         "thread": {
-          "description": "A short thread name (1-120 characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's `thread` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.",
+          "description": "A short thread name (1-120 characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's `thread` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.",
           "type": "string"
         },
         "reply_to": {
@@ -372,7 +372,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "agent_session": {
-          "description": "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" matches on it.",
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.",
           "type": "string"
         },
         "agent_name": {

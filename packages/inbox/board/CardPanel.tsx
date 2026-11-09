@@ -31,9 +31,6 @@ import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
 import { CardInitiativeMenu } from './BoardFilter';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
-import { StepsLists } from '../steps/StepsList';
-import { stepsAsCardHeadSays } from '../steps/model';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -50,8 +47,6 @@ export interface CardPanelProps {
   /** Said with "Ask for an update" when it goes to another session (the card's own agent ended). */
   askNote?: string | null;
   rowOf: (threadId: string) => InboxListRow | null;
-  /** The card's threads' checklists, the latest first (approval "inbox-thread-steps", part 4); none while the switch is off. Read only. */
-  steps?: readonly InboxStepsWire[];
   phone: boolean;
   now: number;
   onClose: () => void;
@@ -260,14 +255,6 @@ export function CardPanel(props: CardPanelProps) {
             Cancelled {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
-        )}
-        {props.steps && props.steps.length > 0 && (
-          // The checklist (approval "inbox-thread-steps", part 4): the thread's steps as its foot shows them, read
-          // only. "Waiting on you ›" opens that list's thread, where the question is (with the way back here).
-          // Each list is its own named section (StepsLists), so the wrapper is not one more.
-          <div className="ib-crdp-sec ib-crdp-steps" data-card-checklist="">
-            <StepsLists lists={stepsAsCardHeadSays(props.steps, agent?.session ?? null, props.state)} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
-          </div>
         )}
         <Notes card={card} onSave={props.onNotes} text={text} />
         {card.threads.length > 0 && (

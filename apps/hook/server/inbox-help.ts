@@ -32,7 +32,7 @@ import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, inboxServedTools } from "@plan
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
@@ -190,6 +190,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `thread_id`: the thread (or a message id in it), from send_message's result. `steps`: the whole list, `[{ \"step\": \"Replay the failures in staging\", \"status\": \"doing\", \"note\": \"38 of 40 recovered\" }, ...]`; `[]` clears it. At most 12 steps, 80 characters per step and per note, one line each; past that nothing is written (`validation_error` naming the step).",
       "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
       "- A reply in that thread wakes you with one line, \"Your checklist here: 3 of 6 done; doing: X. If you're still working on this, keep it current.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
+      `- No list of yours in a thread yet: a reply that answers your questions there wakes you with one line, "${INBOX_STEPS_START_WAKE_LINE}"`,
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },
@@ -400,9 +401,9 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "1. `reply_to` (a message id): that message's thread, as a reply. Take the id from the Inbox (the wake's `(<reply id>)`, a read_thread result), never from memory or an earlier summary. " + INBOX_REPLY_TO_CHECK,
     `2. \`thread\` (a name, 1 to ${INBOX_THREAD_NAME_MAX} characters, one line): the newest open thread of that name in this project, from any session. With none open, a new thread under that name. Names compare without case, spacing or invisible characters.`,
-    "3. Neither: your session's own thread, the newest unnamed thread your session started in this project while it is open, else a new one. Without a session id, every message starts a thread.",
+    "3. Neither: a new thread. To add to a thread, reply_to its latest message, or use the same `thread` name.",
     "",
-    "Resolved means done: the next message starts a new thread, while `reply_to` still reaches a resolved thread. A thread keeps its first message's subject. Use `thread` to keep separate work apart, or to join another session's thread. A thread the person started takes the name an agent gives it (send_message, \"Name a thread the person started\"); from then on a send with that name joins it. A name another open thread of the project already has is refused, so naming never moves another thread's sends into this one.",
+    "Resolved means done: a send with a resolved thread's name starts a new thread, while `reply_to` still reaches it. A thread keeps its first message's subject. Use `thread` to keep one stream of work together, across sessions. A thread the person started takes the name an agent gives it (send_message, \"Name a thread the person started\"); from then on a send with that name joins it. A name another open thread of the project already has is refused, so naming never moves another thread's sends into this one.",
     "",
     "## Where replies go",
     "",

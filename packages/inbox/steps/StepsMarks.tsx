@@ -4,8 +4,8 @@
  *
  *  - todo: an empty ring (the quiet grey, 3:1 or better);
  *  - doing: the thin spinner: the todo ring's own circle as a faint track and a 28% arc in primary, the whole SVG
- *    turning in 0.9 s while its session works. Idle: still, the arc dimmed. Ended: still and grey. Reduced motion: the
- *    same arc, still (a partial ring, never the full todo ring);
+ *    turning in 0.9 s while the step is in progress, whether its session is busy or idle. Ended: still and grey.
+ *    Reduced motion: the same arc, still (a partial ring, never the full todo ring);
  *  - done: a check, no disc;
  *  - waiting on the person: an amber ring with a pause;
  *  - dropped: a small ×.

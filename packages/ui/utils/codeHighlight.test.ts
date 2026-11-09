@@ -5,6 +5,7 @@ import {
   codeBlockKeepsLayout,
   CODE_BLOCK_CLASS,
   applyHighlight,
+  ensureHighlight,
   highlightToHtml,
   __resetCodeHighlightCacheForTests,
 } from './codeHighlight';
@@ -80,6 +81,46 @@ describe('highlightToHtml', () => {
     // CONTRACT rather than whichever files happened to run first.
     __resetCodeHighlightCacheForTests();
     expect(highlightToHtml('const x = 1', 'typescript', 'pierre-dark')).toBeNull();
+  });
+});
+
+// Shiki gives each line 500 ms and leaves the rest of a line that runs over it plain. A grammar compiles its
+// regexes while its first fence is tokenized, and in JavaScriptCore (Safari, and Bun here) that took TypeScript's
+// first line past the budget: the page's first TypeScript fence coloured unlike every later one.
+describe('a pass that runs out of Shiki\'s time budget', () => {
+  const CODE = 'export function add(a: number, b: number): number {\n  return a + b;\n}\n';
+
+  test('a fence whose pass was cut short is tokenized again, so it gets every colour', async () => {
+    expect(await ensureHighlight('typescript', 'pierre-dark')).toBe(true);
+    const settled = highlightToHtml(CODE, 'typescript', 'pierre-dark');
+    expect(settled).toContain('>number</span>');
+    // One pass on a clock that jumps 200 ms at each read: Shiki cuts every line short, as a slow compile did.
+    const highlighter = (await import('@pierre/diffs')).getHighlighterIfLoaded()!;
+    const realDateNow = Date.now;
+    const realPerfNow = performance.now.bind(performance);
+    let skew = 0;
+    let jumping = false;
+    const own = highlighter as unknown as Record<string, unknown>;
+    const realTokens = highlighter.codeToTokens.bind(highlighter);
+    let passes = 0;
+    own.codeToTokens = (...args: Parameters<typeof realTokens>) => {
+      jumping = ++passes === 1;
+      try {
+        return realTokens(...args);
+      } finally {
+        jumping = false;
+      }
+    };
+    Date.now = () => realDateNow() + (jumping ? (skew += 200) : skew);
+    performance.now = () => realPerfNow() + skew;
+    try {
+      expect(highlightToHtml(CODE, 'typescript', 'pierre-dark')).toBe(settled);
+      expect(passes).toBe(2);
+    } finally {
+      Date.now = realDateNow;
+      performance.now = realPerfNow;
+      delete own.codeToTokens;
+    }
   });
 });
 

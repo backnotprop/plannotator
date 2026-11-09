@@ -498,8 +498,8 @@ export interface InboxMessage {
   /**
    * The `thread` name the agent sent this message with (send_message's
    * `thread`), else absent or null. On a root it is the thread's name: a
-   * named thread is joined by name across sessions; an unnamed root is its
-   * session's default thread. Added after step 1: older records lack it.
+   * named thread is joined by name across sessions; an unnamed root only by
+   * reply_to. Added after step 1: older records lack it.
    */
   thread_name?: string | null;
   /**
@@ -721,7 +721,7 @@ export interface InboxMessage {
   /**
    * On a thread's root the person wrote (compose: "send a new message to a
    * connected agent"): the thread was started by the person, addressed to
-   * one live agent session (`to`), and is no session's default thread. The
+   * one live agent session (`to`). The
    * agent's answer lands in it by `reply_to`. Absent on every other message.
    */
   started_by_person?: true;
@@ -1623,7 +1623,7 @@ export interface InboxListRow extends InboxThreadSummary {
    * machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
    */
   machine?: string;
-  /** The thread's name (send_message's `thread`), or null for a session's default thread. */
+  /** The thread's name (send_message's `thread`), or null for an unnamed thread. */
   thread_name: string | null;
   section: InboxSectionId;
   /**
@@ -1865,7 +1865,7 @@ export interface InboxThread {
    */
   project: InboxProject & { repo?: InboxProjectRepo | null };
   subject: string | null;
-  /** The thread's name, or null for a session's default thread. */
+  /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;
   resolved_at: string | null;
   /**
@@ -2893,9 +2893,9 @@ export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13268, tokens: 3634 } as cons
  * `steps` action and send_message's `steps` field; approval
  * "inbox-thread-steps"), for the switch's words. Measured on Pi's request
  * shape from a real Inbox, steps on minus steps off (checked within 5% by
- * inbox-steps-agent.test.ts): 854 bytes (the approved text on the field, a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
+ * inbox-steps-agent.test.ts): 901 bytes (the approved text on the field, with its line on when to start one, and a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
  */
-export const INBOX_TOOL_COST_STEPS = { bytes: 854, tokens: 235 } as const;
+export const INBOX_TOOL_COST_STEPS = { bytes: 901, tokens: 248 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

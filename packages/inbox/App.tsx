@@ -13,6 +13,7 @@
 import { threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
+import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -20,6 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
+import { shareUnchanged } from './shareUnchanged';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
@@ -55,12 +57,12 @@ import {
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
-import { MachineUpdateDialog } from './components/MachineUpdate';
+import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import {
@@ -120,7 +122,7 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
-import { createStepsBus, STEPS_REFRESH_MS } from './steps/useThreadSteps';
+import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
@@ -135,7 +137,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
@@ -178,6 +180,7 @@ import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
@@ -193,6 +196,7 @@ import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
+import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
@@ -201,7 +205,7 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
@@ -262,6 +266,11 @@ configurePlannotatorUI({
   refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
+  // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
+  // shows) and the rest in idle time, not all at once when the thread opens (utils/codeHighlight).
+  deferOffscreenCodeHighlight: true,
+  // Their tokens are made in a Web Worker; the page only writes the markup (codeHighlightWorker.ts).
+  codeHighlightWorker: createInboxCodeHighlightWorker(() => import('./codeHighlight.worker?worker&inline').then((module) => new module.default())),
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   // The `/` and `$` skill picker (composers and comments on attached files)
   // lists this computer's global skills (approval "inbox-skill-references").
@@ -1161,6 +1170,8 @@ function Inbox() {
    */
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   const composeOpener = useRef<HTMLElement | null>(null);
+  /** New message opened from an older machine's Update ("Start an agent on <machine>"): its Send tells that machine's row it was asked. */
+  const machineAskCompose = useRef<{ request: ComposeRequest; machine: string } | null>(null);
   /** Where focus goes once compose closes or a draft row goes: the opener, else `focusFallback(next)`. */
   const pendingFocus = useRef<{ opener: HTMLElement | null; next: string | null } | null>(null);
   const [drafts, setDrafts] = useState<DraftView[] | null>(null);
@@ -1609,11 +1620,18 @@ function Inbox() {
       if (unlistedSince.current?.threadId === threadId) unlistedSince.current = null;
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
-        threadLoaded.current = next.thread;
+        // A re-read of the thread on screen keeps what did not change as the same objects (shareUnchanged.ts):
+        // a window left open on a busy thread no longer holds a full copy of it per message that came in.
+        const reread = threadLoaded.current?.thread_id === threadId;
+        const read = reread ? shareUnchanged(threadLoaded.current, next.thread) : next.thread;
+        // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
+        // objects being new): a read that brought nothing new keeps the thread object, so it says so here.
+        if (reread) setFilesChanged((n) => n + 1);
+        threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
-        setThread(next.thread);
+        setThread(read);
         setThreadRow(next.row ?? null);
         setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
         setThreadLoad(null);
@@ -1821,52 +1839,6 @@ function Inbox() {
     void refreshCards();
   }, [boardEnabled, refreshCards]);
   const onBoard = route.page === 'board' && boardEnabled === true;
-  /**
-   * The Board's checklists (approval "inbox-thread-steps", part 4) ride on the cards read: while the Board shows and
-   * the switch is on, a steps change for a thread a card links (or a presence move, a catch-up) reads the cards
-   * again, and so does the switch turning, and a minute passing while a card wears a checklist (its presence ages).
-   */
-  const cardsNowRef = useRef(cards);
-  cardsNowRef.current = cards;
-  const stepsShownOn = settings?.steps?.on === true;
-  // The switch turning (here or in another window): the rows' amber pause (`steps_waiting`) comes or goes with it.
-  const stepsListOn = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (!settings) return;
-    if (stepsListOn.current !== null && stepsListOn.current !== stepsShownOn) void refreshList(false);
-    stepsListOn.current = stepsShownOn;
-  }, [settings, stepsShownOn, refreshList]);
-  const stepsBoardOn = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (!onBoard) {
-      stepsBoardOn.current = null;
-      return;
-    }
-    // The switch turned while the Board was in front: its marks come or go now (entering the Board reads the cards anyway).
-    if (stepsBoardOn.current !== null && stepsBoardOn.current !== stepsShownOn) void refreshCards();
-    stepsBoardOn.current = stepsShownOn;
-    if (!stepsShownOn) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = stepsBus.subscribe((change) => {
-      const now = cardsNowRef.current;
-      // Presence moving changes only a checklist a card wears; a thread's steps line, only a card that links it.
-      const wanted =
-        change === '*' ||
-        (change === 'presence' ? Object.keys(now?.steps ?? {}).length > 0 : !!now?.cards.some((card) => card.threads.includes(change)));
-      if (!wanted) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refreshCards(), 250);
-    });
-    const tick = setInterval(() => {
-      const steps = cardsNowRef.current?.steps;
-      if (steps && Object.keys(steps).length > 0) void refreshCards();
-    }, STEPS_REFRESH_MS);
-    return () => {
-      unsubscribe();
-      if (timer) clearTimeout(timer);
-      clearInterval(tick);
-    };
-  }, [onBoard, stepsShownOn, stepsBus, refreshCards]);
   /**
    * The project the Board is filtered to (`#board&project=prj_…`). A project the Inbox does not
    * know (a stale or hand-edited link) is no filter once the projects have loaded; before that the
@@ -2122,12 +2094,11 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a thread read.
-          // The list is read again (one read for a pause's events): a row wears the still amber pause while a step
-          // waits on the person (approval "inbox-checklist-spinners-2026-11-07", `steps_waiting`).
+          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
+          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
+          // 2026-11-09): no list row or Board card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
-            listAfterEvents(120);
             return;
           }
           // A thread's PRs (approval "inbox-pr-binding"): silent, like steps. The thread's button and an open card
@@ -4767,7 +4738,8 @@ function Inbox() {
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
-  const notice = heldNews?.text ? { count: heldNews.count, project: heldNews.project ?? null } : null;
+  // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
+  const notice = heldNews?.text && shown ? { count: heldNews.count, project: heldNews.project ?? null, lands: showLandsIn(filterShown(shown), filterShown(latestGroups)) } : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
   const staleNotice = stalePage.inbox && !restarting ? (
     <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />
@@ -4977,6 +4949,27 @@ function Inbox() {
     // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
+  // The grill-me tip (shared/inbox/grill-me-tip.ts), beside the line (settings `reveal.aside`; reveals.ts `lastResort`:
+  // only when the line has nothing else, so it moves no one): the Inbox gives it to someone who answered 3 question
+  // cards but never ran grill-me. Its moment, Bro mode's two keyed to answering: back on the list from
+  // a thread where the person answered a question block (`grillMeTipLeaveCounts`), or the page idle on one. Nothing to
+  // turn on: the claim stamps it and GrillMeTip says it once.
+  const grillMeTipReveal = useLineReveal({
+    id: 'grill_me_tip',
+    due: snoozeIntroLatch.current?.aside.includes('grill_me_tip') === true,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now, _row, next) => grillMeTipLeaveCounts(visit, now, next),
+    idle: pageIdle,
+    idleCounts: grillMeTipIdleCounts,
+    mayClaim: () => true,
+    holds: () => true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
@@ -5017,7 +5010,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -5099,6 +5092,8 @@ function Inbox() {
     stepsReveal.stage !== 'claimed' &&
     broReveal.stage !== 'open' &&
     broReveal.stage !== 'claimed' &&
+    grillMeTipReveal.stage !== 'open' &&
+    grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
     starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
@@ -5913,6 +5908,8 @@ function Inbox() {
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
+  /** Show was pressed: the list's next draw scrolls the first row it brought in into view. */
+  const scrollAfterShow = useRef(false);
   /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
   const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -5923,8 +5920,13 @@ function Inbox() {
     if (body && from) playSettle(body, from);
     const showBefore = showFrom.current;
     showFrom.current = null;
+    const pressedShow = scrollAfterShow.current;
+    scrollAfterShow.current = false;
+    // The rows Show (or a refresh) brought in, in the order they are drawn, their groups opened with the press.
+    let brought: HTMLElement[] = [];
     if (showBefore && shown) {
       const ids = showBroughtIn(showBefore, shown);
+      if (body) brought = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')].filter((el) => ids.has(el.getAttribute('data-thread-id')!) && el.getClientRects().length > 0);
       // A read that brings nothing in (Show again, a second refresh) leaves the light already on as it is.
       if (ids.size > 0) {
         clearLit();
@@ -5947,8 +5949,9 @@ function Inbox() {
     if (moved && lost) {
       moved.focus({ preventScroll: true });
     } else if (body && lost && shownAll) {
+      // The first row Show brought in; else the first row that was not drawn before (a group it opened), else the top.
       const rows = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')];
-      (rows.find((row) => !order.includes(row.getAttribute('data-thread-id')!)) ?? rows[0])?.focus({ preventScroll: true });
+      (brought[0] ?? rows.find((row) => !order.includes(row.getAttribute('data-thread-id')!)) ?? rows[0])?.focus({ preventScroll: true });
     } else if (body && lastInput() === 'keyboard' && gone && lost && rowElement(body, gone)) {
       // The row is still on screen but was drawn again (its section changed under a held list): focus follows it.
       rowElement(body, gone)?.focus({ preventScroll: true });
@@ -5957,6 +5960,8 @@ function Inbox() {
       const target = next ? rowElement(body, next) : ([...body.querySelectorAll<HTMLElement>('button.ib-band')].find((el) => el.getClientRects().length > 0) ?? null);
       target?.focus({ preventScroll: true });
     }
+    // Show scrolls the first row it brought in into view (no further than that), in one jump under reduced motion.
+    if (pressedShow) brought[0]?.scrollIntoView?.({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     listOrder.current = body ? [...body.querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!) : [];
     const open = routeRef.current.thread;
     if (open && order.includes(open) && !listOrder.current.includes(open)) openSlot.current = { thread: open, order };
@@ -6511,7 +6516,10 @@ function Inbox() {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
             focusAfterShow.current = lastInput() === 'keyboard';
             listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
-            if (latestRef.current) showFrom.current = shown;
+            if (latestRef.current) {
+              showFrom.current = shown;
+              scrollAfterShow.current = true;
+            }
             settleList('all', true);
           }}
           onOpen={openRow}
@@ -7005,7 +7013,24 @@ function Inbox() {
       )}
       {machineUpdateOpen && (() => {
         const target = machines.linked.find((m) => m.id === machineUpdateOpen.id);
-        return target ? <MachineUpdateDialog machine={target} snooze={machineUpdateOpen.snooze} onClose={() => setMachineUpdateOpen(null)} /> : null;
+        return target ? (
+          <MachineUpdateDialog
+            machine={target}
+            snooze={machineUpdateOpen.snooze}
+            onClose={() => setMachineUpdateOpen(null)}
+            onStartAgent={
+              plusOn
+                ? (machine) => {
+                    // A new agent there, in a scratch folder, with the ask as its first message: the person sends it.
+                    const request: ComposeRequest = { body: ASK_AGENT_TO_UPDATE, threadName: ASK_AGENT_TO_UPDATE_THREAD, start: { projectId: SCRATCH_PICK, machine, agent: composeLastAgent } };
+                    machineAskCompose.current = { request, machine };
+                    setMachineUpdateOpen(null);
+                    openCompose(request);
+                  }
+                : undefined
+            }
+          />
+        ) : null;
       })()}
       {updateDialog === 'update' && update && (
         <UpdateDialog
@@ -7103,6 +7128,10 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('bro', broReveal.close)}
         />
       )}
+      {grillMeTipReveal.stage === 'open' && (
+        // Got it, Escape or a click outside: closed for good (the claim stamped it). Not a Not now: no three-day wait.
+        <GrillMeTip phone={phone} onClose={grillMeTipReveal.close} />
+      )}
       {starReveal.stage === 'open' && (
         <StarAskCard
           shape="corner"
@@ -7190,6 +7219,18 @@ function Inbox() {
             const copied = copyTextToClipboard(feedbackPrompt(settings?.mcp_command ?? null, draft));
             setFeedbackOpen(false);
             void copied.then((ok) => showToast(feedbackCopiedToast(ok), ok ? 6000 : 4200));
+          }}
+          simpleListOn={listView === 'list'}
+          hiddenAnswers={hiddenKnownAnswers(settings)}
+          onAction={(kind) => {
+            // A known answer or a Common question (feedbackKnown.ts): the real setting, with the dialog closed so its result is in view.
+            setFeedbackOpen(false);
+            if (kind === 'simple-list') setListView('list');
+            else if (kind === 'settings-experimental') {
+              go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
+              // Lands on the Experimental group, as `#settings/experimental` does (the address never carries it).
+              setRoute((current) => (current.page === 'settings' ? { ...current, experimental: true } : current));
+            } else go({ page: 'settings', project: null, thread: null, section: kind.slice('settings-'.length) as SettingsSection });
           }}
           onClose={() => setFeedbackOpen(false)}
         />
@@ -7331,6 +7372,12 @@ function Inbox() {
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
+            // Sent from an older machine's "Start an agent on <machine>": that machine's row says Asked, then Updated.
+            const asked = machineAskCompose.current;
+            if (asked && asked.request === compose && sent.machine === asked.machine) {
+              machineAskCompose.current = null;
+              void inboxApi.machineUpdateAsked(asked.machine, sent.threadId, hostLabel(sent.host)).catch(() => {});
+            }
             // A New review opens beside the list, where it shows as Curating.
             if (compose.review) {
               writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: sent.threadId });

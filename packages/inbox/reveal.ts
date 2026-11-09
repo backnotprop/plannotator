@@ -19,7 +19,7 @@
  * and never opens once the settings say the feature is on.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { InboxListRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type InboxRevealClaimId, type InboxRevealId } from './api';
 import { LIST_INTRO_SETTLED_MS } from './listIntro';
 import { newUuid } from './uuid';
@@ -47,15 +47,15 @@ export const REVEAL_TIMES = {
  * person who keeps a thread open beside the list never makes: App counts idle only while one of them is armed (and
  * the list options' update-day dialog, which waits for the list the same way).
  */
-export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro']);
+export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip']);
 
 /**
  * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
  * `ahead`), or the list options' update-day dialog is due.
  */
-export function idleClockArmed(armed: Pick<RevealArmed, 'next' | 'ahead'> | null, listIntroDue: boolean): boolean {
+export function idleClockArmed(armed: (Pick<RevealArmed, 'next' | 'ahead'> & { aside?: readonly InboxRevealId[] }) | null, listIntroDue: boolean): boolean {
   if (armed === null) return false;
-  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || (armed.aside ?? []).some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
 }
 
 /** One visit to a thread: which, and when it opened. */
@@ -268,6 +268,8 @@ export interface RevealThreadFacts {
   mostFromOneAgent: number;
   /** Words in its last agent message. */
   lastAgentWords: number;
+  /** Question blocks the person answered in it: an answer sent at its latest revision, not a skip. */
+  answered: number;
 }
 
 const threadFacts = new Map<string, RevealThreadFacts>();
@@ -276,14 +278,26 @@ const threadFacts = new Map<string, RevealThreadFacts>();
 export function noteRevealThread(thread: InboxThread): void {
   const counts = new Map<string, number>();
   let lastAgentWords = 0;
+  let answered = 0;
   for (const message of thread.messages) {
     if (message.author.kind !== 'agent') continue;
+    for (const question of message.questions ?? []) if (revealQuestionAnswered(question)) answered += 1;
     const who = `${message.author.host ?? ''}\0${message.author.session ?? message.author.name ?? ''}`;
     counts.set(who, (counts.get(who) ?? 0) + 1);
     const body = message.body.trim();
     lastAgentWords = body === '' ? 0 : body.split(/\s+/).length;
   }
-  threadFacts.set(thread.thread_id, { mostFromOneAgent: Math.max(0, ...counts.values()), lastAgentWords });
+  threadFacts.set(thread.thread_id, { mostFromOneAgent: Math.max(0, ...counts.values()), lastAgentWords, answered });
+}
+
+/**
+ * The person answered this question block (the server's rule, shared/inbox/grill-me-tip.ts `grillMeTipAnswered`): an
+ * answer sent at its latest revision, not a skip; never an action item, nor a replaced or set-aside question.
+ */
+function revealQuestionAnswered(question: InboxQuestion): boolean {
+  if (question.kind === 'action' || question.superseded_by || question.set_aside_at) return false;
+  const answer = question.answer;
+  return !!answer && !answer.skipped && question.revision > 0 && question.sent_revision === question.revision;
 }
 
 /** What the window knows of a thread it loaded on this page, or null. */
@@ -410,6 +424,20 @@ export function broRevealLeaveCounts(visit: RevealVisit, now: number, next: stri
  */
 export function broRevealIdleCounts(thread: string | null): boolean {
   return thread !== null && (revealThreadFactsOf(thread)?.lastAgentWords ?? 0) >= BRO_REVEAL_MIN_WORDS;
+}
+
+/**
+ * The grill-me tip's moment (Bro mode's two moments, keyed to answering): back on the list after
+ * `REVEAL_TIMES.readMs` (5 s) or more on a thread where the person answered a question block (the thread as this page
+ * last loaded it). The Inbox decides who (shared/inbox/grill-me-tip.ts `revealGrillMeGap`).
+ */
+export function grillMeTipLeaveCounts(visit: RevealVisit, now: number, next: string | null): boolean {
+  return next === null && now - visit.at >= REVEAL_TIMES.readMs && (revealThreadFactsOf(visit.threadId)?.answered ?? 0) > 0;
+}
+
+/** The grill-me tip's idle moment: the page idle (20 s, idleClock.ts) on a thread where the person answered a question block. */
+export function grillMeTipIdleCounts(thread: string | null): boolean {
+  return thread !== null && (revealThreadFactsOf(thread)?.answered ?? 0) > 0;
 }
 
 /**

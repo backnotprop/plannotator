@@ -16,7 +16,6 @@ import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
-import { StepGlyph } from '../steps/StepsMarks';
 import { starPopping } from '../starPop';
 import { notePressPointer, pressRow } from '../starPress';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
@@ -67,9 +66,11 @@ export interface InboxListProps {
   selectedThreadId: string | null;
   /**
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
+   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
+   * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
+   * the rows it brings in are on screen (List has no groups to open).
    */
-  notice: { count: number; project?: string | null } | null;
+  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
   /**
    * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
    * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
@@ -392,20 +393,6 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       {!filtered && <RowProjectMark row={row} />}
       {!filtered && <ClipText className="ib-p" text={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
-      <StepsWaitMark row={row} />
-    </span>
-  );
-}
-
-/**
- * The checklist on a row (approval "inbox-checklist-spinners-2026-11-07", the calm row): the row never moves. Nothing
- * while an agent works on a step; only the still amber pause, after the project, while a step waits on the person.
- */
-function StepsWaitMark({ row }: { row: InboxListRow }) {
-  if (!row.steps_waiting) return null;
-  return (
-    <span className="ib-strow" role="img" aria-label="Checklist: waiting on you" title="Checklist: waiting on you" data-row-steps-waiting="">
-      <StepGlyph status="waiting" size={12} />
     </span>
   );
 }
@@ -434,7 +421,6 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
           </span>
         ))}
       <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
-      <StepsWaitMark row={row} />
     </span>
   );
 }
@@ -1244,45 +1230,28 @@ function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: 
   );
 }
 
-/** How long the pointer rests on a group's header before its chevron shows (GroupBand). */
-export const GROUP_CHEV_DWELL_MS = 500;
-
 /**
- * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron stays hidden
- * until the pointer rests on the header for GROUP_CHEV_DWELL_MS, or keyboard focus lands on it (owner, 2026-11-08):
- * passing over a header shows nothing, staying a moment says it closes. A touch never shows it, as before.
- * `data-chev` shows it; inbox.css fades it in and out. Its own state, so only this header redraws.
+ * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron shows at once
+ * while the pointer is on the header, as the sidebar's sections do (owner, 2026-11-08: no wait), or while keyboard
+ * focus is on it. A touch never shows it, as before. `data-chev` shows it; inbox.css fades it in and out. Its own
+ * state, so only this header redraws.
  */
 function GroupBand({ open, onToggle, children }: { open: boolean; onToggle: (band: HTMLButtonElement) => void; children: ReactNode }) {
-  const [dwelt, setDwelt] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [focusShown, setFocusShown] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stop = () => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  useEffect(() => stop, []);
   return (
     <button
       type="button"
       className="ib-band"
       aria-expanded={open}
-      data-chev={dwelt || focusShown ? '' : undefined}
+      data-chev={hovered || focusShown ? '' : undefined}
       onClick={(event) => onToggle(event.currentTarget)}
       onPointerEnter={(event) => {
-        if (event.pointerType === 'touch') return;
-        stop();
-        timer.current = setTimeout(() => {
-          timer.current = null;
-          setDwelt(true);
-        }, GROUP_CHEV_DWELL_MS);
+        if (event.pointerType !== 'touch') setHovered(true);
       }}
-      onPointerLeave={() => {
-        stop();
-        setDwelt(false);
-      }}
+      onPointerLeave={() => setHovered(false)}
       onFocus={(event) => {
-        // Keyboard focus only: a click's focus (or a tap's) waits for the dwell like the pointer does.
+        // Keyboard focus only: a click's focus (or a tap's) shows nothing by itself.
         let keyboard = true;
         try {
           keyboard = event.currentTarget.matches(':focus-visible');
@@ -1693,7 +1662,19 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
+          {props.notice && (
+            <HeldNoticeLine
+              count={props.notice.count}
+              project={props.notice.project ?? null}
+              onShow={() => {
+                // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
+                // rows: closed, they would come in out of sight and Show would seem to do nothing.
+                const lands = props.notice?.lands;
+                if (lands && !asList) groups.open(lands);
+                props.onShowNew();
+              }}
+            />
+          )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}

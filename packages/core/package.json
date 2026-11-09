@@ -41,6 +41,7 @@
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",
     "./skill-reference-block": "./skill-reference-block.ts",
+    "./grill-me": "./grill-me.ts",
     "./server-session": "./server-session.ts",
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",

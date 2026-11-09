@@ -251,6 +251,8 @@ import {
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
+import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
+import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -2712,6 +2714,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     steps: stepsUndecided,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
+    // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
+    // read in `revealState`, only while it is unshown and could go today.
+    grill_me_tip: () => true,
     star: starUndecided,
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
@@ -2731,6 +2736,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
     }
   };
+  /**
+   * What the grill-me tip's gap reads (shared/inbox/grill-me-tip.ts `revealGrillMeGap`), lazily, in its order: every
+   * question block, then the skills the person's own messages named, then thread subjects and names
+   * and agent messages. The rule stops reading as soon as it knows (fewer than three answers: no message is read).
+   */
+  const grillMeUse = () => ({
+    questions: (function* (): Generator<GrillMeTipQuestion> {
+      for (const question of store.allQuestionRecords()) if (store.message(question.message_id)) yield question;
+    })(),
+    skills: (function* (): Generator<string> {
+      for (const threadId of store.threadIds())
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message?.author.kind !== "person" || !message.body.includes("**Skills referenced**")) continue;
+          for (const skill of splitInboxSkillsBlock(message.body)?.skills ?? []) yield skill.name;
+        }
+    })(),
+    texts: (function* (): Generator<string | null | undefined> {
+      for (const threadId of store.threadIds()) {
+        const root = store.message(threadId);
+        yield root?.subject;
+        yield root?.thread_name;
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message?.author.kind === "agent") yield message.body;
+        }
+      }
+    })(),
+  });
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
   /** The page loads seen, each with the one first seen before it (never a dialog on the load right after one). */
@@ -2754,7 +2788,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board need not be on.
       ...offers,
     };
-    return {
+    const state: RevealState = {
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
@@ -2768,7 +2802,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       threads: store.threadIds().length,
       open,
       waitingSince: reveals?.waitingSince,
+      // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
+      asideShownAt: reveals?.star?.shownAt ?? null,
     };
+    // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
+    // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
+    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
+    return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
   const lineStamp = (at: string, spaced: boolean, load: string | null): Partial<PlannotatorConfig> =>
@@ -2823,7 +2863,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const now = new Date();
     if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
     const at = now.toISOString();
-    saveConfig({ inboxReveals: { ...revealStamp(loadConfig().inboxReveals, at, { spaced: true, load }), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
+    // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
+    const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
+    const saved = loadConfig().inboxReveals;
+    saveConfig({ inboxReveals: { ...(aside ? saved : revealStamp(saved, at, { spaced: true, load })), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return lineOfferSaved(id)?.shownAt === at;
   };
@@ -3391,11 +3434,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
     // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
     // the person has steps on.
-    const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
     // A thread's PRs (approval "inbox-pr-binding"): what the person changed since the thread's owner last saw it, one line.
     const pulls = receiver ? pullsChangedFor(reply.thread_id, receiver) : null;
     const withPulls = pulls ? { pulls_changed: pulls } : {};
-    if (!list) return { ...command, ...context, ...withPulls };
+    // No list of the session's there yet: a reply that answers its questions carries the line that says when to start
+    // one (`steps_start`), never a plain reply or a 👍, and never once the session has kept a list there.
+    if (!stepsOn() || !receiver) return { ...command, ...context, ...withPulls };
+    const list = store.stepsOf(reply.thread_id, receiver);
+    if (!list) return { ...command, ...context, ...withPulls, ...(store.answersQuestionsOf(reply, receiver) ? { steps_start: true as const } : {}) };
     const { done, total, doing } = inboxStepsProgress(list.steps);
     return { ...command, ...context, ...withPulls, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
   };

@@ -22,6 +22,7 @@ import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
 import { copyImageToClipboard } from '../copyImage';
+import { useMessageArm } from '../messageArming';
 
 /**
  * "Open in" for an attachment (design record "inbox-open-in", approved
@@ -772,6 +773,8 @@ export function TileMenu({
   const source = useInboxFileSource();
   const apps = surface === 'apps';
   const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps);
+  const arm = useMessageArm();
+  const [open, setOpen] = useState(false);
   // A source that writes nothing (the tour): no Download, as the viewer's.
   const download = source.writes ? source.downloadUrl(attachment, version) : null;
   // Nothing leaves the window in the tour: no Copy image either.
@@ -802,9 +805,31 @@ export function TileMenu({
   const items = (
     <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
+  if (!arm.armed) {
+    // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet (and no right-click menu: the
+    // pointer arriving arms the message). A press arms its message and opens the menu.
+    const plain =
+      apps && !empty ? (
+        <button
+          type="button"
+          className="ib-att-more"
+          aria-label={`More: ${attachment.name}`}
+          aria-haspopup="menu"
+          aria-expanded={false}
+          data-open-in-more={attachment.id}
+          onClick={() => {
+            setOpen(true);
+            arm.arm();
+          }}
+        >
+          <Icon name="dots" size={16} />
+        </button>
+      ) : null;
+    return render(plain, <Status status={status} />);
+  }
   const more =
     apps && !empty ? (
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <Tip content="More">
           <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`More: ${attachment.name}`} data-open-in-more={attachment.id} />}>
             <Icon name="dots" size={16} />

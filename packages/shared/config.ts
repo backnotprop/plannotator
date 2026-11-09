@@ -607,13 +607,15 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
+    /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
+    grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };

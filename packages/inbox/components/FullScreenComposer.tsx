@@ -7,9 +7,11 @@
  *
  * - Two tabs on the card's top edge (a radio group): "Comment on this image"
  *   (the file's own comment row, drawn as is) and "Reply to <agent>" (the
- *   thread's reply). HTML is Reply only: its comments go on the page, with the
- *   pen. On a phone a pin or a selection gives it the Comment tab until the
- *   comment is saved or dropped (HtmlPageComment.tsx).
+ *   thread's reply), Comment first. On an HTML page the Comment tab is a
+ *   comment on the whole page (HtmlPageCommentRow); on a phone a pin or a
+ *   selection takes the tab until the comment is saved or dropped
+ *   (HtmlPageComment.tsx). A file that takes no comment (read-only, a linked
+ *   page) is Reply only.
  * - The reply is the thread's reply draft, not a copy: the field shows the
  *   thread's words, every keystroke goes through the reply box's own change
  *   (Thread.tsx `changeReply`), and Send is the thread's Send, with its rules

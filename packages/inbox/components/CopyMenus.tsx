@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react';
+import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
@@ -12,6 +12,7 @@ import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../co
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
+import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 
 /**
@@ -73,6 +74,7 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const arm = useMessageArm();
   const named = who(message);
   // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
   // ⋯ menu opens, focus on the first item, as a row's and a card's menus open by key.
@@ -129,6 +131,35 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       </Menu.Item>
     </>
   );
+  if (!arm.armed) {
+    // Far from the view (messageArming.tsx): the same ⋯ and head line, with no menus behind them yet. A press (or the
+    // menu key on the head) arms the message and opens its menu.
+    const plain = (
+      <button
+        type="button"
+        className="ib-mut ib-mmore"
+        aria-haspopup="menu"
+        aria-expanded={false}
+        aria-label={`More: ${named}`}
+        data-phone={phone ? '' : undefined}
+        data-message-more={message.id}
+        onClick={() => {
+          setOpen(true);
+          arm.arm();
+        }}
+      >
+        <Icon name="dots" size={16} />
+      </button>
+    );
+    const head = props.head(plain);
+    if (phone) return head;
+    return cloneElement(head as ReactElement<{ onKeyDown?: (event: ReactKeyboardEvent) => void }>, {
+      onKeyDown: (event: ReactKeyboardEvent) => {
+        onHeadKey(event);
+        if (event.defaultPrevented) arm.arm();
+      },
+    });
+  }
   const trigger = (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Tip content="More">

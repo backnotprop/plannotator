@@ -45,7 +45,7 @@ test("a picture in a message's text is served inline under its own file name", a
   expect((await serve(root, "![Empty cart](shots/empty-cart.png)", "shots/empty-cart.png", "HEAD")).headers.get("Content-Disposition")).toContain('filename="empty-cart.png"');
   const etag = res.headers.get("ETag")!;
   const result = await readInboxMessageImageAsync({ body: "![x](shots/empty-cart.png)", root, base: null, path: "shots/empty-cart.png", anywhere: true });
-  const again = inboxImageResponse(new Request("http://127.0.0.1/x", { headers: { "If-None-Match": etag } }), result);
+  const again = await inboxImageResponse(new Request("http://127.0.0.1/x", { headers: { "If-None-Match": etag } }), result);
   expect(again.status).toBe(304);
   expect(again.headers.get("Content-Disposition")).toContain('filename="empty-cart.png"');
 });
