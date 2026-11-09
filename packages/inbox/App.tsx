@@ -53,7 +53,11 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
+import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
+import { createOwnSaves } from './ownSaves';
+import { createSignal } from './signal';
+import { onlyQuestionsChanged } from './pickQueue';
+import { keepSame, sameListModel } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -881,8 +885,14 @@ function Inbox() {
    * (`event: deliveries`), a reconnect and a catch-up name every thread. The open thread's steps read again.
    */
   const [stepsBus] = useState(createStepsBus);
-  /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
-  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
+  /**
+   * The questions the open thread is saving, whether one's record came meanwhile (`held`: those records), and the
+   * reads they owe (`onPickSaves`): `read` everything, as for a record no one placed; `readHeld` what the held
+   * records owe, at once.
+   */
+  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, held: [] as InboxEvent[], read: () => {}, readHeld: (_held: InboxEvent[]) => {} });
+  /** What this window's own question saves brought back: their records are echoes, not news (ownSaves.ts). */
+  const [ownSaves] = useState(createOwnSaves);
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
@@ -891,7 +901,8 @@ function Inbox() {
     if (!decisionModeOnRef.current) return;
     try {
       const next = await inboxApi.decisions();
-      if (decisionModeOnRef.current) setDecisions(next.decisions);
+      // A read that brought nothing new keeps the decisions drawn (listSame.ts `keepSame`): nothing is drawn again.
+      if (decisionModeOnRef.current) setDecisions((current) => keepSame(current, next.decisions));
     } catch {
       // Off on the server (another window turned it off): the next settings read says so.
     }
@@ -1167,10 +1178,13 @@ function Inbox() {
   /** The reply drafts as last read, for the reads that run outside a render (draftsReads.ts). */
   const replyDraftsRef = useRef(replyDrafts);
   replyDraftsRef.current = replyDrafts;
-  /** Raised when the open thread's reply draft changed (`event: drafts`): the thread reads it again. */
-  const [draftChanged, setDraftChanged] = useState(0);
-  /** Raised when records needed only the open thread's files read again, not the thread (openThreadReads.ts). */
-  const [filesChanged, setFilesChanged] = useState(0);
+  /**
+   * The open thread's reply draft and its files read again (signal.ts): a draft saved or discarded (`event: drafts`),
+   * records that need only the files, a re-read of the thread. Signals draw nothing: a read that brings nothing new
+   * leaves the window as it is.
+   */
+  const [draftSignal] = useState(createSignal);
+  const [filesSignal] = useState(createSignal);
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
@@ -1443,6 +1457,14 @@ function Inbox() {
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
+  /** The newest list cursor taken, by Inbox run: a list read that brings nothing new keeps the list held, with its older cursor. */
+  const listCursor = useRef<{ session: string; cursor: number } | null>(null);
+  /** The open thread was not here, and the list names the machine that holds it: open it there. */
+  const retryMissingThread = () => {
+    const open = routeRef.current.thread;
+    const load = threadLoadRef.current;
+    if (open && machineOf(open) && load?.threadId === open && load.state === 'missing') setThreadRetry((n) => n + 1);
+  };
   /**
    * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
    * screen yet), sliding the rows to their places when `slide` says so.
@@ -1453,7 +1475,18 @@ function Inbox() {
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
       const held = latestRef.current;
-      if (held && next.serverSession === held.serverSession && next.cursor < held.cursor) return held;
+      // The newest cursor taken (a read with nothing new keeps the list held, and that list's older cursor).
+      const newest = held && listCursor.current?.session === held.serverSession ? Math.max(listCursor.current.cursor, held.cursor) : held?.cursor;
+      if (held && next.serverSession === held.serverSession && next.cursor < newest!) return held;
+      listCursor.current = { session: next.serverSession, cursor: next.cursor };
+      // Nothing new (listSame.ts): the list held stays, and nothing is drawn again. A row's own state shows in place
+      // as before (an own write's row put back by the read, the open thread's row).
+      if (!adopt && held && firstList.current!.done && sameListModel(held, next, { cursor: routeRef.current.page === 'settings' })) {
+        setShown((current) => (current === null || !hasRows(current) ? current : refreshHeldRows(current, listGroups(held), heldOpen())));
+        setLoadError(null);
+        retryMissingThread();
+        return held;
+      }
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
@@ -1467,10 +1500,7 @@ function Inbox() {
       }
       // Linked machines: the merged list names every machine and its state (an older Inbox names none).
       if (next.machines) setMachineViews(next.machines);
-      // The open thread was not here, and this list names the machine that holds it: open it there.
-      const open = routeRef.current.thread;
-      const load = threadLoadRef.current;
-      if (open && machineOf(open) && load?.threadId === open && load.state === 'missing') setThreadRetry((n) => n + 1);
+      retryMissingThread();
       if (adopt && slide) armSlide();
       // Show's light for a refresh (clicking Inbox): the rows it brings in, against the list on screen now.
       if (adopt && refresh?.light) showFrom.current = shownRef.current;
@@ -1611,18 +1641,21 @@ function Inbox() {
         threadReadApplied.current = mine;
         // A re-read of the thread on screen keeps what did not change as the same objects (shareUnchanged.ts):
         // a window left open on a busy thread no longer holds a full copy of it per message that came in.
-        const reread = threadLoaded.current?.thread_id === threadId;
-        const read = reread ? shareUnchanged(threadLoaded.current, next.thread) : next.thread;
+        const before = threadLoaded.current;
+        const reread = before?.thread_id === threadId;
+        const read = reread ? shareUnchanged(before, next.thread) : next.thread;
         // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
-        // objects being new): a read that brought nothing new keeps the thread object, so it says so here.
-        if (reread) setFilesChanged((n) => n + 1);
+        // objects being new): a read that brought nothing new keeps the thread object (and one that changed only
+        // questions keeps the pane's files revision), so it says so here. Any other change reads them by itself.
+        if (reread && onlyQuestionsChanged(before, read)) filesSignal.emit();
         threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
         setThread(read);
-        setThreadRow(next.row ?? null);
-        setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
+        // The row and the run line as drawn when this read brought them unchanged: nothing is drawn again for them.
+        setThreadRow((current) => keepSame(current, next.row ?? null));
+        setThreadRun((current) => keepSame(current, next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null }));
         setThreadLoad(null);
         perfThreadReadLanded(threadId, next.thread.messages.length, true);
         // The open's first fresh read: what the thread opened with (never a stale copy shown before it landed).
@@ -1738,8 +1771,9 @@ function Inbox() {
   const refreshDrafts = useCallback(async () => {
     try {
       const next = await inboxApi.drafts();
-      setDrafts(next.drafts);
-      setReplyDrafts(next.replies ?? []);
+      // A read that brought nothing new keeps the drafts drawn (listSame.ts `keepSame`): nothing is drawn again.
+      setDrafts((current) => keepSame(current, next.drafts));
+      setReplyDrafts((current) => keepSame(current, next.replies ?? []));
       setDraftsError(null);
     } catch (cause) {
       setDraftsError(cause instanceof Error ? cause.message : String(cause));
@@ -2004,12 +2038,19 @@ function Inbox() {
     let cancelled = false;
     /** The records since the last read: the open thread is read again only when they can change it (openThreadReads.ts). */
     let batch = newRecordBatch();
-    const readAfterRecord = (event: InboxEvent | null) => {
-      noteRecord(batch, event);
+    /**
+     * `own`: the record only echoes this window's own question save (ownSaves.ts): it owes the list, the decisions and
+     * the drafts, never the open thread or its files, which the pane drew from the save's answer. `now`: read at
+     * once, the records still waiting their pause too (a run of saves that just ended: its reads were held already).
+     */
+    const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean } = {}) => {
+      if (how.own) noteOwnRecord(batch, how.own);
+      else noteRecord(batch, event);
       if (timer) clearTimeout(timer);
       // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
       const heard = perfStart();
-      timer = setTimeout(() => {
+      const readNow = () => {
+        timer = null;
         const records = batch;
         batch = newRecordBatch();
         // This read starts after every event that asked for one meanwhile: it is theirs too.
@@ -2033,8 +2074,9 @@ function Inbox() {
           });
           if (read === 'thread') threadRead = refreshThread(open);
           else {
-            // What a read that brought nothing new did besides: the thread's files are read again.
-            setFilesChanged((n) => n + 1);
+            // What a read that brought nothing new did besides: the thread's files are read again. Not for an echo
+            // of the window's own saves alone: a pick moves no file.
+            if (read === 'files') filesSignal.emit();
             // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
             void listRead.then((next) => {
               if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
@@ -2054,10 +2096,24 @@ function Inbox() {
             // A failed list read says nothing: the drafts are read, as before.
             if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next)) void refreshDrafts();
           });
-      }, 80);
+      };
+      if (how.now) readNow();
+      else timer = setTimeout(readNow, 80);
     };
+    /** The question record's thread, when this window's own save explains it (ownSaves.ts); null: news. */
+    const ownEcho = (event: InboxEvent): string | null =>
+      event.kind === 'question' && typeof event.thread_id === 'string' && event.thread_id !== '' && ownSaves.explains(event.question) ? event.thread_id : null;
     // The window's own pick saves owe a read with no record of their own: everything is read, the open thread too.
     pickSaves.current.read = () => readAfterRecord(null);
+    // A run of saves ended with their records held: one read for them all, at once. An echo of the window's own save
+    // reads what shows the pick besides the pane (the list, the decisions, the drafts); anything else, what it owes.
+    pickSaves.current.readHeld = (held) => {
+      if (held.length === 0) return readAfterRecord(null, { now: true });
+      held.forEach((event, i) => {
+        const own = ownEcho(event);
+        readAfterRecord(own ? null : event, { ...(own ? { own } : {}), now: i === held.length - 1 });
+      });
+    };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
     void (async () => {
@@ -2104,9 +2160,13 @@ function Inbox() {
           // The record of a question this window is saving: read once, when the last of them lands (onPickSaves).
           if (event?.kind === 'question' && pickSaves.current.saving.has(`${event.question.message_id}/${event.question.key}`)) {
             pickSaves.current.owed = true;
+            pickSaves.current.held.push(event);
             return;
           }
-          readAfterRecord(event);
+          // The record of a save of this window that already landed (it came after the save's answer): it owes what
+          // shows the pick besides the pane, never the open thread or its files.
+          const own = event ? ownEcho(event) : null;
+          readAfterRecord(event, own ? { own } : {});
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
         },
@@ -2116,7 +2176,7 @@ function Inbox() {
         // new thread comes with its own record).
         onDrafts: (threadId) => {
           // The open thread's own copy of its draft follows at once (the foot's Send carries those words).
-          if (threadId !== null && threadId === routeRef.current.thread) setDraftChanged((n) => n + 1);
+          if (threadId !== null && threadId === routeRef.current.thread) draftSignal.emit();
           // A floating draft's window follows, and a draft set aside floats once its save landed.
           emitFloaterEvent('draft', threadId);
           if (draftsTimer) clearTimeout(draftsTimer);
@@ -2266,6 +2326,7 @@ function Inbox() {
     return () => {
       cancelled = true;
       pickSaves.current.read = () => {};
+      pickSaves.current.readHeld = () => {};
       discardPreparedInboxEvents();
       unsubscribe();
       if (timer) clearTimeout(timer);
@@ -2957,6 +3018,7 @@ function Inbox() {
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, thread: row.thread_id });
 
   const patchQuestions = (messageId: string, questions: InboxQuestion[]) => {
+    ownSaves.saved(questions);
     setThread((current) =>
       current
         ? { ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }
@@ -2981,10 +3043,16 @@ function Inbox() {
     // the list catches up when the thread closes (settle.ts).
     // With none open the same (approval "inbox-list-view", R7): a save shows on its row in place and never brings in
     // what waits behind "N new".
-    if (!paneClosed) void refreshList(false);
-    if (!pickSaves.current.owed) return;
+    const held = pickSaves.current.held;
+    pickSaves.current.held = [];
+    if (!pickSaves.current.owed) {
+      if (!paneClosed) void refreshList(false);
+      return;
+    }
     pickSaves.current.owed = false;
-    pickSaves.current.read();
+    // The held records' read starts now and reads the list: it is this list read too.
+    if (paneClosed) pickSaves.current.read();
+    else pickSaves.current.readHeld(held);
   }, [refreshList]);
 
   /**
@@ -6547,8 +6615,8 @@ function Inbox() {
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
             replyRequest={replyFor}
-            draftChanged={draftChanged}
-            filesChanged={filesChanged}
+            draftSignal={draftSignal}
+            filesSignal={filesSignal}
             onReplyOpened={() => setReplyFor(null)}
             askButton={ask.button}
             shapeButton={(() => {
