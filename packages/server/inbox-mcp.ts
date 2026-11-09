@@ -28,6 +28,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -811,6 +812,8 @@ export async function sendAgentMessage(
     const base = here && isAbsolute(here) ? here : project.root;
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
+  // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
+  const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
@@ -851,6 +854,7 @@ export async function sendAgentMessage(
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
+      ...(attachmentQuestions.length > 0 ? { attachment_questions: attachmentQuestions } : {}),
       inline_images: captured?.images,
       ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
       guide: guide ?? null,
@@ -869,7 +873,8 @@ export async function sendAgentMessage(
   else await captured?.commit();
   const message = result.message;
   const landed = store.project(message.project_id)!;
-  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  // A question inside an attached file (issue #2828) names the file it is in.
+  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt, ...(q.attachment ? { file: q.attachment.name } : {}) }));
   // Action items (`:::action`): their keys, so the agent can mark one done later.
   const actions = (message.questions ?? []).filter((q) => q.kind === "action").map((q) => ({ key: q.key, prompt: q.prompt }));
   const superseded = store.supersededBy(message.id);
