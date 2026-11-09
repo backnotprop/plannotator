@@ -41,10 +41,11 @@ mkdir -p "${work}/unpacked"
 bash "$(dirname "$0")/ci-fetch-release-asset.sh" \
   "https://github.com/oven-sh/bun/releases/download/bun-v${version}/${asset}.zip" "$zip"
 
+# From stdin: given a Windows path (backslashes), sha256sum escapes its output.
 if command -v sha256sum > /dev/null; then
-  actual="$(sha256sum "$zip" | cut -d' ' -f1)"
+  actual="$(sha256sum < "$zip" | cut -d' ' -f1)"
 else
-  actual="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+  actual="$(shasum -a 256 < "$zip" | cut -d' ' -f1)"
 fi
 if [[ "$actual" != "$sha256" ]]; then
   echo "Bun ${version} ${asset}.zip: SHA-256 ${actual}, expected ${sha256}" >&2
