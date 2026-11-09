@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
-import { INBOX_GUIDE_FEEDBACK_TITLE, INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_RECHECK_DRAWING_LINE, INBOX_REVIEW_SKILL_TEXTS, INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE, inboxThreadHadReview, type InboxReviewThreadMessage } from '@plannotator/core/inbox-review';
+import { INBOX_GUIDE_FEEDBACK_TITLE, INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE, INBOX_REVIEW_RECHECK_DRAWING_LINE, INBOX_REVIEW_SKILL_TEXTS, INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE, inboxThreadHadReview, type InboxReviewThreadMessage } from '@plannotator/core/inbox-review';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { inboxSkillFilter, inboxSkillsBlock, setReviewSkillsShape } from './skills';
 
@@ -79,15 +79,15 @@ describe('/review-recheck needs a review in the thread', () => {
   });
 });
 
-describe("the review skills' drawing lines ride Shape's switch", () => {
-  test('Shape off (the window\'s start): no drawing line; Shape on: the lines, as before', async () => {
+describe("the review skills' Shape words ride Shape's switch", () => {
+  test('Shape off (the window\'s start): the chapter lines in Mermaid only, no Shape word; Shape on: Mermaid preferred', async () => {
     const words = ['/review-curate', '/review-recheck'];
     const reviewed = inboxSkillFilter(true);
     try {
       setReviewSkillsShape(false);
       const off = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
       expect(off).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
-      expect([off.includes(INBOX_REVIEW_CURATE_DRAWING_LINE), off.includes(INBOX_REVIEW_RECHECK_DRAWING_LINE), off.includes('overview.diagram')]).toEqual([false, false, false]);
+      expect([off.includes(INBOX_REVIEW_CURATE_DRAWING_LINE), off.includes(INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE), off.includes(INBOX_REVIEW_RECHECK_DRAWING_LINE), off.includes('overview.diagram')]).toEqual([false, true, true, false]);
       setReviewSkillsShape(true);
       const on = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
       expect(on).toContain(INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE['review-curate']!.body);

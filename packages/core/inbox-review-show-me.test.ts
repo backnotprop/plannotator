@@ -9,6 +9,7 @@ import {
   INBOX_REVIEW_SKILL_TEXTS,
   INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE,
   INBOX_REVIEW_CURATE_DRAWING_LINE,
+  INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE,
   INBOX_REVIEW_RECHECK_DRAWING_LINE,
   inboxDrawingCodes,
   inboxDrawnViewOf,
@@ -125,8 +126,8 @@ describe("checkInboxDrawing", () => {
   });
 });
 
-describe("the review skills mention the overview's drawing only while Shape is on", () => {
-  test("Shape on: /review-curate ends with it; /review-recheck has it after its chapters paragraph", () => {
+describe("the review skills offer a chapter's diagram either way, and Shape's words only while Shape is on", () => {
+  test("Shape on: /review-curate ends with the chapter line (Mermaid preferred); /review-recheck has its line after its chapters paragraph", () => {
     const curate = inboxReviewSkill("review-curate", { shape: true })!.body;
     expect(curate).toBe(INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE["review-curate"]!.body);
     expect(curate.trimEnd()).toEndWith(INBOX_REVIEW_CURATE_DRAWING_LINE);
@@ -136,18 +137,20 @@ describe("the review skills mention the overview's drawing only while Shape is o
     expect(recheck.indexOf(INBOX_REVIEW_RECHECK_DRAWING_LINE)).toBeGreaterThan(chapters);
   });
 
-  test("Shape off (approval code-review-029-shape-off): no skill asks for a drawing, and the rest is the Shape-on text", () => {
+  test("Shape off (approval code-review-029-shape-off): no word of Shape; the curate line names Mermaid only, the rest is the Shape-on text", () => {
     const offered = inboxReviewSkills();
     expect(offered.map((skill) => skill.name)).toEqual(inboxReviewSkills({ shape: true }).map((skill) => skill.name));
     for (const name of Object.keys(INBOX_REVIEW_SKILL_TEXTS)) {
       const off = INBOX_REVIEW_SKILL_TEXTS[name]!.body;
-      for (const word of ["overview.diagram", "drawing", "Shape", "shape --help", "data-mark"]) expect([name, off.includes(word)]).toEqual([name, false]);
-      // Only the drawing line (and its blank line) goes.
+      for (const word of ["overview.diagram", "drawing", "Shape", "shape --help", "data-mark", "html", "preferred"]) expect([name, off.includes(word)]).toEqual([name, false]);
+      // Only the curate line differs: its Shape-off wording in place of the Shape-on one.
       const on = INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE[name]!.body;
-      const lines = (text: string) => text.split("\n").filter((line) => line !== "" && line !== INBOX_REVIEW_CURATE_DRAWING_LINE && line !== INBOX_REVIEW_RECHECK_DRAWING_LINE);
-      expect(lines(off)).toEqual(lines(on));
+      expect(off).toBe(on.replace(INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE));
     }
-    expect(inboxReviewSkill("review-curate")!.body).toBe(INBOX_REVIEW_SKILL_TEXTS["review-curate"]!.body);
+    const curate = inboxReviewSkill("review-curate")!.body;
+    expect(curate).toBe(INBOX_REVIEW_SKILL_TEXTS["review-curate"]!.body);
+    expect(curate.trimEnd()).toEndWith(INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE);
+    expect(inboxReviewSkill("review-recheck")!.body).toContain(INBOX_REVIEW_RECHECK_DRAWING_LINE);
   });
 });
 

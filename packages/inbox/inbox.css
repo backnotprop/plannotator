@@ -8826,6 +8826,10 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .gv-prose { max-width: 72ch; font-size: var(--ib-fs-14, 14px); line-height: 1.6; color: var(--foreground); }
 .gv-prose > * + * { margin-top: 8px; }
 .gv-chapters { display: flex; flex-direction: column; gap: 20px; margin-top: 28px; }
+/* The overview's diagram under its words, as wide as the title's column at most (the owner on #2887): the title's own
+   measure, 60ch at the title's size and weight (a ch is the title's own); the block inside keeps its own type. A phone is narrower than that: full width. */
+.gv-overview > [data-guide-overview-diagram] { max-width: 60ch; font-size: var(--ib-fs-20, 20px); font-weight: 650; }
+.gv-overview > [data-guide-overview-diagram] > * { font-size: var(--ib-fs-14, 14px); font-weight: 400; }
 /* The notes column, narrower than the review app's 440 px so the code keeps the room (approval r7); the cards sit closer to the window's edges. */
 @media (min-width: 768px) {
   .ib-rv-walk [data-guide-section-grid] { grid-template-columns: minmax(220px, 30%) minmax(0, 1fr); }
@@ -9567,6 +9571,17 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-ov-fig-b { padding: 10px 18px 6px; }
 .ib-ov-fig-b .shp-diagram { height: auto; }
 .ib-ov-fig-f { padding: 0 14px 10px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* A chapter's picture (ChapterFigure): its box keeps the drawing's aspect up to 320px tall and the canvas fits inside
+   it; the tall layout (flowing HTML, a narrow pane) keeps its own height. The popout fits it to the window. */
+.ib-ch-fig { margin: 0; }
+.ib-ch-fig-box { width: 100%; }
+.ib-ov-fig-b .ib-ch-fig-box > .shp-diagram { height: 100%; }
+.ib-ch-fig-box:has(.shp-drawn.tall) { aspect-ratio: auto !important; max-height: none !important; }
+.ib-ch-fig-box:has(.shp-drawn.tall) > .shp-diagram { height: auto; }
+.ib-ch-fig-pop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: color-mix(in oklab, var(--foreground) 35%, transparent); }
+.ib-ch-fig-pop-in { display: flex; flex-direction: column; width: min(1400px, 100%); height: min(900px, 100%); border-radius: 12px; background: var(--shp-paper, var(--background)); box-shadow: 0 0 0 1px var(--ib-line), 0 24px 60px rgb(0 0 0 / 0.25); overflow: hidden; }
+.ib-ch-fig-pop-in .ib-ov-fig-h { padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-ch-fig-pop-b { flex: 1; min-height: 0; padding: 16px; overflow: auto; }
 @media (prefers-reduced-motion: reduce) { .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }

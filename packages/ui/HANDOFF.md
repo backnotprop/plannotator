@@ -2996,3 +2996,9 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 
 - **New prop `at?: number`**: the place in `images` to open on. It is used only when `images[at].src === src`; otherwise the first match opens, as before.
 - **A host that passes nothing sees no change.** The Plannotator Inbox's decision mode passes the place of the tile zoomed.
+
+## `MermaidBlock` / `GraphvizBlock` `sourceOnError` (unreleased; additive, opt-in, no core change)
+
+- **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
+
+Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
