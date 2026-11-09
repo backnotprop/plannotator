@@ -72,7 +72,15 @@ import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
-import { hostLineNoteSignatures, NO_HOST_LINE_NOTES, projectHostLineNotes, type HostLineNote } from './hostLineNotes';
+import {
+  hostFileNoteSignatures,
+  hostLineNoteSignatures,
+  NO_HOST_FILE_NOTES,
+  NO_HOST_LINE_NOTES,
+  projectHostLineNotes,
+  type HostFileNote,
+  type HostLineNote,
+} from './hostLineNotes';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -210,6 +218,9 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself under lines (hostLineNotes.ts): read-only, never annotations, above them on a shared
    *  line. Absent: none, as before. */
   hostLineNotes?: readonly HostLineNote[];
+  /** What the host draws itself about a whole file (hostLineNotes.ts): under the file's header, above its first lines
+   *  and the person's own file comments; read-only, never annotations. Absent: none, as before. */
+  hostFileNotes?: readonly HostFileNote[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
@@ -777,6 +788,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   fontSize,
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
+  hostFileNotes = NO_HOST_FILE_NOTES,
   selectedAnnotationId,
   scrollTargetAnnotation,
   pendingSelection,
@@ -1136,10 +1148,24 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // Items whose header slot reports its real height: image previews and
   // Markdown preview cards.
-  const measuredHeaderItemIds = useMemo(
-    () => (previewItemIds.size === 0 ? imagePreviewItemIds : new Set([...imagePreviewItemIds, ...previewItemIds])),
-    [imagePreviewItemIds, previewItemIds],
-  );
+  // The host's notes on whole files, by path; their files' headers are measured too (the notes grow the header).
+  const hostFileNotesByPath = useMemo(() => {
+    const map = new Map<string, HostFileNote[]>();
+    for (const note of hostFileNotes) {
+      const list = map.get(note.filePath);
+      if (list) list.push(note);
+      else map.set(note.filePath, [note]);
+    }
+    return map;
+  }, [hostFileNotes]);
+  const hostFileNotesByPathRef = useRef(hostFileNotesByPath);
+  hostFileNotesByPathRef.current = hostFileNotesByPath;
+  const measuredHeaderItemIds = useMemo(() => {
+    if (previewItemIds.size === 0 && hostFileNotesByPath.size === 0) return imagePreviewItemIds;
+    const ids = new Set([...imagePreviewItemIds, ...previewItemIds]);
+    for (const path of hostFileNotesByPath.keys()) for (const id of filePathToItemIds.get(path) ?? []) ids.add(id);
+    return ids;
+  }, [imagePreviewItemIds, previewItemIds, hostFileNotesByPath, filePathToItemIds]);
   const imagePreviewItemIdsRef = useRef(measuredHeaderItemIds);
   imagePreviewItemIdsRef.current = measuredHeaderItemIds;
 
@@ -2458,6 +2484,35 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
   }, [hostLineNotes, annotations, aiMessages, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
+  // The host's notes on whole files: only headers whose notes moved are drawn again. A file left with none goes back to
+  // the fixed header height.
+  const prevHostFileNotesRef = useRef(hostFileNotes);
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevHostFileNotesRef.current;
+    if (handle == null) return;
+    prevHostFileNotesRef.current = hostFileNotes;
+    if (prev === hostFileNotes) return;
+    const nextSig = hostFileNoteSignatures(hostFileNotes);
+    const prevSig = hostFileNoteSignatures(prev);
+    const changedPaths = new Set<string>();
+    nextSig.forEach((sig, path) => {
+      if (prevSig.get(path) !== sig) changedPaths.add(path);
+    });
+    prevSig.forEach((_sig, path) => {
+      if (!nextSig.has(path)) changedPaths.add(path);
+    });
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        if (!nextSig.has(path) && !imagePreviewItemIdsRef.current.has(itemId)) {
+          measuredHeaderHeightsRef.current.delete(itemId);
+          syncHeaderMetrics(itemId);
+        }
+        refreshItem(itemId);
+      }
+    }
+  }, [hostFileNotes, filePathToItemIds, refreshItem, syncHeaderMetrics, workerPoolReady]);
+
   // Context notes come and go on their own (a host's agent wrote one, a note moved): only the files whose notes
   // changed are republished. No notes before or after: nothing runs.
   useEffect(() => {
@@ -3437,6 +3492,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             dirtyStore={editSession.dirtyStore}
           />
         )}
+        {/* The host's notes on the whole file (the PR page: others' comments on it), above the person's own, shown
+            only when the file is expanded. The header is measured while a file has any (measuredHeaderItemIds). */}
+        {!collapsed && (hostFileNotesByPathRef.current.get(filePath) ?? []).map((note) => (
+          <div key={note.id} data-host-file-note={note.id}>{note.render()}</div>
+        ))}
         {/* File-scoped comments live in the header (below the path), shown only
             when the file is expanded. They ride the sticky header — fine for a
             short guide note; long ones scroll within the banner. */}

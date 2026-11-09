@@ -2,7 +2,8 @@
  * A thread on its line in the PR page. What regresses: a resolved or bots-only thread folded without saying why, or a
  * human thread folded at all; a long thread cut with no way to the rest; a comment the forge hides shown open; a
  * thread with no link to the forge (the page never replies or resolves); a thread the person opened folding again when
- * the diff draws its line again; a thread's place (outdated, on the whole file) unsaid.
+ * the diff draws its line again; an outdated thread's place unsaid; a thread on a whole file not in its band, not
+ * folded to one line that names it, or not opening in place.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -13,7 +14,7 @@ import type { InboxPull, InboxPullDetailComment, InboxPullThread } from '@planno
 import type { PlacedThread } from './threadPlaces';
 
 const hasDom = typeof document !== 'undefined';
-const { LineThread, ThreadMemory } = (hasDom ? await import('./LineThreads') : {}) as typeof import('./LineThreads');
+const { FileThread, LineThread, ThreadMemory } = (hasDom ? await import('./LineThreads') : {}) as typeof import('./LineThreads');
 
 let host: HTMLDivElement;
 let root: Root;
@@ -90,13 +91,10 @@ test.if(hasDom)('only bots speaking: one line, marked bot, that says why; a bot 
   expect(box().hasAttribute('data-open')).toBe(true);
 });
 
-test.if(hasDom)('an outdated thread stays open and says a push moved its lines; one on the whole file says so', () => {
+test.if(hasDom)('an outdated thread stays open and says a push moved its lines', () => {
   draw(at(thread({ outdated: true, line: null }), 'outdated'));
   expect(box().hasAttribute('data-open')).toBe(true);
   expect(box().getAttribute('data-pull-thread-where')).toBe('outdated');
-  expect(box().querySelector('.ib-lt-top')!.textContent).toBeTruthy();
-  draw(at(thread({ id: 'T3', line: null }), 'file'));
-  expect(box().getAttribute('data-pull-thread-where')).toBe('file');
   expect(box().querySelector('.ib-lt-top')!.textContent).toBeTruthy();
   // On its line, with nothing to say: no line above the comments.
   draw(at(thread({ id: 'T4' })));
@@ -129,4 +127,31 @@ test.if(hasDom)('what the person opened stays open when the diff draws the line 
   root = createRoot(host);
   draw(at(thread({ resolved: true })), memory);
   expect(box().hasAttribute('data-open')).toBe(true);
+});
+
+test.if(hasDom)("a thread on a whole file: one line that says so, even unresolved; it opens in place and folds again, and stays as left", () => {
+  const memory = new ThreadMemory();
+  const whole = thread({ id: 'W1', line: null, comments: [said('w1', { author: 'sam', body: 'Use CREATE INDEX CONCURRENTLY here.' }), said('w2', { author: 'theo' })] });
+  const drawFile = () => act(() => root.render(<FileThread thread={whole} layer={layer} memory={memory} />));
+  drawFile();
+  const band = box() as HTMLButtonElement;
+  expect(band.tagName).toBe('BUTTON');
+  expect(band.getAttribute('aria-expanded')).toBe('false');
+  expect(band.getAttribute('data-pull-thread-where')).toBe('file');
+  expect(band.textContent).toContain('On this file');
+  expect(band.textContent).toContain('sam');
+  expect(band.textContent).toContain('Use CREATE INDEX CONCURRENTLY here.');
+  expect(band.querySelector('.ib-lt-at')).not.toBeNull();
+  expect(comments()).toEqual([]);
+  act(() => band.click());
+  expect(box().hasAttribute('data-open')).toBe(true);
+  expect(comments()).toEqual(['w1', 'w2']);
+  expect(host.querySelector('a[aria-label="Open this thread on GitHub"]')!.getAttribute('href')).toBe('https://github.com/acme/web/pull/7#discussion_w1');
+  // The header draws again (a read brings news): what was opened stays open.
+  act(() => root.render(<></>));
+  drawFile();
+  expect(box().hasAttribute('data-open')).toBe(true);
+  act(() => (host.querySelector('[data-pull-thread-refold]') as HTMLElement).click());
+  expect(box().getAttribute('aria-expanded')).toBe('false');
+  expect(comments()).toEqual([]);
 });

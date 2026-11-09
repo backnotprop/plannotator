@@ -89,6 +89,11 @@ export interface GuideReaderProps {
    */
   lineNotes?: readonly GuideLineNote[];
   /**
+   * What the host draws itself about whole files, under each file's header and above its first lines (the PR page:
+   * other people's comments on a whole file). Never comments, as `lineNotes`. Absent: none, as before.
+   */
+  wholeFileNotes?: readonly GuideFileNote[];
+  /**
    * Context notes (approval "inbox-context-notes"): agents' words on lines, drawn under their last line by
    * `renderContextNote` through review-editor's `contextNotes` seam, never as comments. Absent: nothing changes.
    */
@@ -104,6 +109,16 @@ export interface GuideLineNote {
   line: number;
   side: 'old' | 'new';
   /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
+  key: string;
+  render: () => ReactNode;
+}
+
+/** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */
+export interface GuideFileNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  /** Changes whenever what `render` draws changes; the same key leaves the file's header as it is. */
   key: string;
   render: () => ReactNode;
 }

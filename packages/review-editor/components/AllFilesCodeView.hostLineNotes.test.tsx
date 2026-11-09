@@ -2,7 +2,9 @@
  * The host's own notes under lines (`hostLineNotes`: the Inbox PR page's threads from the forge). What regresses: notes
  * that arrive after the diff drew never showing (the page reads the forge after the diff); a note drawn below the
  * person's own comment on its line; a note turned into an annotation the review counts; every file drawn again when
- * one file's thread changed; a host that passes no notes seeing any change.
+ * one file's thread changed; a host that passes no notes seeing any change. And the notes on whole files
+ * (`hostFileNotes`): drawn under the file's header, above the person's own comments on the file, never on a line or
+ * as an annotation; only the file whose note moved drawn again; a host with none seeing no change.
  *
  * CodeView is a stand-in that keeps the items it is given and records each `updateItem`; `renderAnnotation` is the
  * real one AllFilesCodeView hands it.
@@ -13,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
-import type { HostLineNote } from './hostLineNotes';
+import type { HostFileNote, HostLineNote } from './hostLineNotes';
 
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
@@ -36,10 +38,11 @@ let items = new Map<string, Item>();
 /** The ids of each `updateItem`, in order. */
 let updates: string[] = [];
 let renderAnnotation: (annotation: Ann, item: Item) => React.ReactNode = () => null;
+let renderCustomHeader: (item: Item) => React.ReactNode = () => null;
 
 mock.module('@pierre/diffs/react', () => ({
   CodeView: React.forwardRef(function MockCodeView(
-    props: { initialItems?: Item[]; containerRef?: React.Ref<HTMLDivElement>; className?: string; renderAnnotation: typeof renderAnnotation },
+    props: { initialItems?: Item[]; containerRef?: React.Ref<HTMLDivElement>; className?: string; renderAnnotation: typeof renderAnnotation; renderCustomHeader: typeof renderCustomHeader },
     ref: React.ForwardedRef<unknown>,
   ) {
     const seeded = useRef(false);
@@ -48,6 +51,7 @@ mock.module('@pierre/diffs/react', () => ({
       items = new Map((props.initialItems ?? []).map((item) => [item.id, { ...item, annotations: [...item.annotations] }]));
     }
     renderAnnotation = props.renderAnnotation;
+    renderCustomHeader = props.renderCustomHeader;
     useImperativeHandle(ref, () => ({
       addItems: () => {},
       getItem: (id: string) => items.get(id),
@@ -104,7 +108,7 @@ const files = [fileOf('a.ts'), fileOf('b.ts')];
 const mine: CodeAnnotation = { id: 'mine', type: 'comment', scope: 'line', filePath: 'a.ts', lineStart: 2, lineEnd: 2, side: 'new', text: 'my words', createdAt: 1 };
 const note = (id: string, filePath: string, key = id, line = 2): HostLineNote => ({ id, filePath, line, side: 'new', key, render: () => <i data-note={id}>{key}</i> });
 
-function draw(hostLineNotes?: readonly HostLineNote[], annotations: CodeAnnotation[] = [mine]) {
+function draw(hostLineNotes?: readonly HostLineNote[], annotations: CodeAnnotation[] = [mine], hostFileNotes?: readonly HostFileNote[]) {
   return act(async () => {
     root!.render(
       <AllFilesCodeView
@@ -112,6 +116,7 @@ function draw(hostLineNotes?: readonly HostLineNote[], annotations: CodeAnnotati
         diffStyle="unified"
         annotations={annotations}
         {...(hostLineNotes ? { hostLineNotes } : {})}
+        {...(hostFileNotes ? { hostFileNotes } : {})}
         selectedAnnotationId={null}
         scrollTargetAnnotation={null}
         pendingSelection={null}
@@ -187,5 +192,66 @@ describe.if(hasDom)("the host's notes under lines", () => {
     root = createRoot(host!);
     await draw(undefined);
     expect(kinds('a.ts')).toEqual(['annotation:mine']);
+  });
+});
+
+const fileNote = (id: string, filePath: string, key = id): HostFileNote => ({ id, filePath, key, render: () => <b data-file-note={id}>{key}</b> });
+const mineOnFile: CodeAnnotation = { id: 'mine-file', type: 'comment', scope: 'file', filePath: 'a.ts', lineStart: 0, lineEnd: 0, side: 'new', text: 'my words on the file', createdAt: 2 };
+/** The item's header as the slot would draw it, in the DOM. */
+async function header(id: string): Promise<string> {
+  const box = document.createElement('div');
+  document.body.appendChild(box);
+  const slot = createRoot(box);
+  await act(async () => slot.render(<>{renderCustomHeader(items.get(id)!)}</>));
+  // Generated ids differ from one drawing to the next.
+  const markup = box.innerHTML.replace(/base-ui-[^"]+/g, 'id');
+  await act(async () => slot.unmount());
+  box.remove();
+  return markup;
+}
+const fileNotesIn = (markup: string) => [...markup.matchAll(/data-file-note="([^"]+)"/g)].map((m) => m[1]);
+
+describe.if(hasDom)("the host's notes on whole files", () => {
+  test("under the file's header in the order given, above the person's own comment on the file; never on a line", async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await draw([], [mine, mineOnFile], [fileNote('w1', 'a.ts'), fileNote('w2', 'a.ts')]);
+    const a = await header('a.ts');
+    expect(fileNotesIn(a)).toEqual(['w1', 'w2']);
+    expect(a.indexOf('data-file-note="w2"')).toBeLessThan(a.indexOf('my words on the file'));
+    expect(fileNotesIn(await header('b.ts'))).toEqual([]);
+    expect(kinds('a.ts')).toEqual(['annotation:mine']);
+  });
+
+  test('notes that come later draw only their file again; the same keys draw nothing; a gone note leaves its header', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await draw([], [mine], []);
+    await draw([], [mine], [fileNote('w1', 'b.ts')]);
+    expect(updates).toEqual(['b.ts']);
+    expect(fileNotesIn(await header('b.ts'))).toEqual(['w1']);
+    await draw([], [mine], [fileNote('w1', 'b.ts')]);
+    expect(updates).toEqual(['b.ts']);
+    await draw([], [mine], [fileNote('w1', 'b.ts', 'w1-new comment')]);
+    expect(updates).toEqual(['b.ts', 'b.ts']);
+    expect(await header('b.ts')).toContain('w1-new comment');
+    await draw([], [mine], []);
+    expect(updates).toEqual(['b.ts', 'b.ts', 'b.ts']);
+    expect(fileNotesIn(await header('b.ts'))).toEqual([]);
+  });
+
+  test('a host that passes none: the headers are as before', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await draw(undefined, [mine]);
+    const before = await header('a.ts');
+    expect(before).not.toContain('data-host-file-note');
+    await act(async () => root?.unmount());
+    root = createRoot(host!);
+    await draw(undefined, [mine], []);
+    expect(await header('a.ts')).toBe(before);
   });
 });

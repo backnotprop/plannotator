@@ -7,10 +7,11 @@
  *
  * An open thread shows every comment, or its first and last with "N more" between when it is long; a long comment
  * shows its start and "Show all". A resolved thread, or one where only bots speak, is one line that says why and opens
- * in place. A comment the forge hides is one line too.
+ * in place. A comment the forge hides is one line too. A thread on a whole file is a band under the file's header
+ * (`FileThread`), folded to one line until opened.
  */
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { InboxPull, InboxPullDetailComment } from '@plannotator/core/inbox-types';
+import type { InboxPull, InboxPullDetailComment, InboxPullThread } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
@@ -126,36 +127,33 @@ function OneComment({ comment, layer, memory, headSha, link }: { comment: InboxP
 const WHERE_WORDS: Record<PlacedThread['where'], string | null> = {
   line: null,
   outdated: 'Outdated: a later push changed its lines',
-  file: 'On the whole file',
   elsewhere: 'On a line this diff does not show',
 };
 
-/** One thread on its line: open, or one line that says why it is folded. */
-export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
-  const { thread, where } = placed;
-  const why = foldedWhy(thread);
-  const [open, setOpen] = useRemembered(memory, `open:${thread.id}`, why === null);
-  const [whole, setWhole] = useRemembered(memory, `whole:${thread.id}`, false);
+/** A folded thread's one line: who started it, their first words, how many, and why it is folded. */
+function FoldedWords({ thread, layer }: { thread: InboxPullThread; layer: InboxPull }) {
   const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
   const first = thread.comments[0]!;
   const count = thread.comments.length;
+  const why = foldedWhy(thread);
   const whyWord = why === 'resolved' ? 'Resolved' : why === 'bot' ? 'Bots only' : null;
-  const whereWords = WHERE_WORDS[where];
-  const span = thread.start_line !== null && thread.line !== null && where === 'line' ? `Lines ${thread.start_line}–${thread.line}` : null;
-  const common = { 'data-pull-thread': thread.id, 'data-pull-thread-where': where, 'data-voice': why === 'bot' ? 'bot' : 'person' };
-  if (!open) {
-    return (
-      <button type="button" className="ib-lt ib-lt-fold" aria-expanded={false} onClick={() => setOpen(true)} data-pull-thread-folded={why ?? ''} {...common}>
-        <Face login={first.author} host={layer.host} size={20} bot={first.bot} />
-        <b className="ib-lt-name">{shortName(first.author || DELETED)}</b>
-        {first.bot && <span className="ib-lt-quiet">bot</span>}
-        <span className="ib-lt-line">{first.hidden !== undefined ? `Hidden on ${forge}` : firstLine(first.body)}</span>
-        {count > 1 && <span className="ib-lt-quiet ib-lt-n" aria-label={`${count} comments`}>{count}</span>}
-        {whyWord && <span className="ib-lt-quiet" data-pull-thread-why="">{whyWord}</span>}
-        <Icon name="chevR" size={13} />
-      </button>
-    );
-  }
+  return (
+    <>
+      <Face login={first.author} host={layer.host} size={20} bot={first.bot} />
+      <b className="ib-lt-name">{shortName(first.author || DELETED)}</b>
+      {first.bot && <span className="ib-lt-quiet">bot</span>}
+      <span className="ib-lt-line">{first.hidden !== undefined ? `Hidden on ${forge}` : firstLine(first.body)}</span>
+      {count > 1 && <span className="ib-lt-quiet ib-lt-n" aria-label={`${count} comments`}>{count}</span>}
+      {whyWord && <span className="ib-lt-quiet" data-pull-thread-why="">{whyWord}</span>}
+    </>
+  );
+}
+
+/** An open thread's comments: all of them, or the first and last with "N more" between. */
+function ThreadComments({ thread, layer, memory, headSha }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
+  const [whole, setWhole] = useRemembered(memory, `whole:${thread.id}`, false);
+  const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
+  const first = thread.comments[0]!;
   const { shown, between } = shownComments(thread.comments, whole);
   const link = first.url ? (
     <Tip content={`Open on ${forge}`}>
@@ -164,6 +162,39 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
       </a>
     </Tip>
   ) : null;
+  return (
+    <>
+      {shown.map((comment, index) => (
+        <div key={comment.id} className="ib-lt-step">
+          <OneComment comment={comment} layer={layer} memory={memory} headSha={headSha} link={index === 0 ? link : undefined} />
+          {between > 0 && index === 0 && (
+            <button type="button" className="ib-lt-between" onClick={() => setWhole(true)} data-pull-thread-between={between}>
+              {between} more
+            </button>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** One thread on its line: open, or one line that says why it is folded. */
+export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
+  const { thread, where } = placed;
+  const why = foldedWhy(thread);
+  const [open, setOpen] = useRemembered(memory, `open:${thread.id}`, why === null);
+  const whyWord = why === 'resolved' ? 'Resolved' : why === 'bot' ? 'Bots only' : null;
+  const whereWords = WHERE_WORDS[where];
+  const span = thread.start_line !== null && thread.line !== null && where === 'line' ? `Lines ${thread.start_line}–${thread.line}` : null;
+  const common = { 'data-pull-thread': thread.id, 'data-pull-thread-where': where, 'data-voice': why === 'bot' ? 'bot' : 'person' };
+  if (!open) {
+    return (
+      <button type="button" className="ib-lt ib-lt-fold" aria-expanded={false} onClick={() => setOpen(true)} data-pull-thread-folded={why ?? ''} {...common}>
+        <FoldedWords thread={thread} layer={layer} />
+        <Icon name="chevR" size={13} />
+      </button>
+    );
+  }
   return (
     <div className="ib-lt" data-open="" {...common}>
       {(why || whereWords || span || thread.outdated) && (
@@ -178,16 +209,49 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
           {span && <span>{span}</span>}
         </div>
       )}
-      {shown.map((comment, index) => (
-        <div key={comment.id} className="ib-lt-step">
-          <OneComment comment={comment} layer={layer} memory={memory} headSha={headSha} link={index === 0 ? link : undefined} />
-          {between > 0 && index === 0 && (
-            <button type="button" className="ib-lt-between" onClick={() => setWhole(true)} data-pull-thread-between={between}>
-              {between} more
-            </button>
-          )}
-        </div>
-      ))}
+      <ThreadComments thread={thread} layer={layer} memory={memory} headSha={headSha} />
+    </div>
+  );
+}
+
+/**
+ * A thread on a whole file: a band under the file's header, above its first lines (the owner's pick B, 2026-11-09).
+ * It starts folded to one line ("On this file", who, the first words, when), even unresolved, which the owner chose
+ * for this band only; a click opens it in place and its top line folds it again.
+ */
+export function FileThread({ thread, layer, memory, headSha }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
+  const why = foldedWhy(thread);
+  const [open, setOpen] = useRemembered(memory, `open:${thread.id}`, false);
+  const count = thread.comments.length;
+  const common = { 'data-pull-thread': thread.id, 'data-pull-thread-where': 'file', 'data-voice': why === 'bot' ? 'bot' : 'person' };
+  const on = (
+    <>
+      <Icon name="comment" size={13} />
+      <span className="ib-ft-on">On this file</span>
+      <span className="ib-ft-dot" aria-hidden="true">·</span>
+    </>
+  );
+  if (!open) {
+    return (
+      <button type="button" className="ib-lt ib-lt-fold ib-ft" aria-expanded={false} onClick={() => setOpen(true)} data-pull-thread-folded={why ?? ''} {...common}>
+        <Icon name="chevR" size={13} />
+        {on}
+        <FoldedWords thread={thread} layer={layer} />
+        <When at={thread.comments[0]!.at} />
+      </button>
+    );
+  }
+  return (
+    <div className="ib-lt ib-ft" data-open="" {...common}>
+      <button type="button" className="ib-ft-top" aria-expanded onClick={() => setOpen(false)} data-pull-thread-refold="">
+        <Icon name="chevD" size={13} />
+        {on}
+        <span className="ib-ft-n">{count === 1 ? '1 comment' : `${count} comments`}</span>
+        {why && <span className="ib-lt-quiet" data-pull-thread-why="">{why === 'resolved' ? 'Resolved' : 'Bots only'}</span>}
+      </button>
+      <div className="ib-ft-body">
+        <ThreadComments thread={thread} layer={layer} memory={memory} headSha={headSha} />
+      </div>
     </div>
   );
 }

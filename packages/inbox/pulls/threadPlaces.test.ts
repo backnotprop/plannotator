@@ -1,12 +1,12 @@
 /**
  * Where other people's threads go on the PR page's diff. What regresses: a thread on a line this diff shows drawn
- * anywhere else; a thread whose line moved, or on the whole file, dropped from the page (it goes to the top of its
- * file, saying why); a whole stack's diff drawing a base-side thread on a line of another base; a push or a count of
+ * anywhere else; a thread whose line moved dropped from the page (it goes to the top of its file, saying why); a thread
+ * on the whole file put on a line, or its band out of time order; a whole stack's diff drawing a base-side thread on a line of another base; a push or a count of
  * threads folding threads; a file's open threads miscounted; a long thread cut without saying how much.
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullDetailComment, InboxPullThread } from '@plannotator/core/inbox-types';
-import { foldedWhy, patchLines, placeThreads, shownComments, threadKey } from './threadPlaces';
+import { fileThreadKey, foldedWhy, patchLines, placeThreads, shownComments, threadKey } from './threadPlaces';
 
 // src/a.ts: line 3 changes; the hunk shows new lines 1-5 and old lines 1-5. src/gone.ts is deleted (old lines 1-2).
 const files = [
@@ -19,6 +19,8 @@ const thread = (id: string, fields: Partial<InboxPullThread> = {}): InboxPullThr
 });
 const where = (threads: InboxPullThread[], scope: 'layer' | 'stack' = 'layer') =>
   placeThreads(threads, files, scope).placed.map((p) => [p.thread.id, p.where, p.side, p.line]);
+const onFiles = (threads: InboxPullThread[], scope: 'layer' | 'stack' = 'layer') =>
+  placeThreads(threads, files, scope).onFiles.map((t) => [t.id, t.file]);
 
 describe('placing', () => {
   test('on the line it is about, either side', () => {
@@ -32,19 +34,38 @@ describe('placing', () => {
   test('a line this diff does not draw: at the top of its file, saying why, never dropped', () => {
     expect(where([
       thread('moved', { line: null, outdated: true }),
-      thread('file', { line: null }),
       thread('far', { line: 40 }),
       thread('pushed', { line: 40, outdated: true }),
     ])).toEqual([
       ['moved', 'outdated', 'new', 1],
-      ['file', 'file', 'new', 1],
       ['far', 'elsewhere', 'new', 1],
       ['pushed', 'outdated', 'new', 1],
     ]);
   });
 
+  test('on the whole file: never on a line, but in its file\'s bands, in the time they started, and counted', () => {
+    const at = (minute: number) => [said(`m${minute}`, { at: `2026-11-01T00:${String(minute).padStart(2, '0')}:00Z` })];
+    const threads = [
+      thread('later', { line: null, comments: at(30) }),
+      thread('on-line'),
+      thread('earlier', { line: null, comments: at(5), resolved: true }),
+      thread('gone', { file: 'src/gone.ts', line: null, comments: at(45) }),
+    ];
+    const { placed, onFiles: bands, open } = placeThreads(threads, files, 'layer');
+    expect(placed.map((p) => p.thread.id)).toEqual(['on-line']);
+    expect(bands.map((t) => [t.id, t.file])).toEqual([['earlier', 'src/a.ts'], ['later', 'src/a.ts'], ['gone', 'src/gone.ts']]);
+    // The resolved one is drawn but not counted.
+    expect(open.get('src/a.ts')).toBe(2);
+    expect(open.get('src/gone.ts')).toBe(1);
+    // An outdated one with no line is about lines a push moved: the top of its file, as before.
+    expect(onFiles([thread('o', { line: null, outdated: true })])).toEqual([]);
+    // In Whole stack too, and never for a file this diff does not change.
+    expect(onFiles([thread('s', { line: null })], 'stack')).toEqual([['s', 'src/a.ts']]);
+    expect(onFiles([thread('x', { file: 'src/other.ts', line: null })])).toEqual([]);
+  });
+
   test('a deleted file: its first removed line', () => {
-    expect(where([thread('d', { file: 'src/gone.ts', line: null })])).toEqual([['d', 'file', 'old', 1]]);
+    expect(where([thread('d', { file: 'src/gone.ts', line: 9 })])).toEqual([['d', 'elsewhere', 'old', 1]]);
     expect(where([thread('d', { file: 'src/gone.ts', line: 2, side: 'old' })])).toEqual([['d', 'line', 'old', 2]]);
   });
 
@@ -67,11 +88,14 @@ describe('placing', () => {
     expect(open.has('src/other.ts')).toBe(false);
   });
 
-  test('a file the diff draws no line of (a binary file): its thread is not drawn, so not counted', () => {
+  test('a file the diff draws no line of (a binary file): a thread on a line is not drawn, so not counted; one on the whole file has its band', () => {
     const binary = [{ path: 'img/logo.png', patch: 'diff --git a/img/logo.png b/img/logo.png\nBinary files differ\n' }];
-    const { placed, open } = placeThreads([thread('b', { file: 'img/logo.png', line: null })], binary, 'layer');
-    expect(placed).toEqual([]);
-    expect(open.has('img/logo.png')).toBe(false);
+    const lined = placeThreads([thread('b', { file: 'img/logo.png', line: 4 })], binary, 'layer');
+    expect(lined.placed).toEqual([]);
+    expect(lined.open.has('img/logo.png')).toBe(false);
+    const whole = placeThreads([thread('w', { file: 'img/logo.png', line: null })], binary, 'layer');
+    expect(whole.onFiles.map((t) => t.id)).toEqual(['w']);
+    expect(whole.open.get('img/logo.png')).toBe(1);
   });
 });
 
@@ -114,4 +138,11 @@ test('a very long deleted file: its first removed line, with no limit on how man
   const lines = patchLines(`diff --git a/big b/big\ndeleted file mode 100644\n--- a/big\n+++ /dev/null\n@@ -1,1000000 +0,0 @@\n${rows}\n`);
   expect(lines.first).toEqual({ line: 1, side: 'old' });
   expect(lines.old.size).toBe(1_000_000);
+});
+
+test("a thread on a whole file is drawn again when its words or state move, and not otherwise", () => {
+  const base = fileThreadKey(thread('w', { line: null }));
+  expect(fileThreadKey(thread('w', { line: null }))).toBe(base);
+  expect(fileThreadKey(thread('w', { line: null, comments: [said('w-1'), said('w-2')] }))).not.toBe(base);
+  expect(fileThreadKey(thread('w', { line: null, resolved: true }))).not.toBe(base);
 });

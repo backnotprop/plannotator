@@ -41,3 +41,26 @@ export function hostLineNoteSignatures(notes: readonly HostLineNote[]): Map<stri
   for (const note of notes) map.set(note.filePath, `${map.get(note.filePath) ?? ''}${JSON.stringify([note.id, note.line, note.side, note.key])}\n`);
   return map;
 }
+
+/**
+ * Something the host draws itself about a whole file (the Inbox's PR page: other people's comments on a whole file).
+ * Drawn under the file's header, above its first lines, before the person's own comments on the file. Read-only and
+ * never an annotation, as a `HostLineNote`. Absent: none, as before.
+ */
+export interface HostFileNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  /** Changes whenever what `render` draws changes, so the file's header is drawn again; the same key leaves it. */
+  key: string;
+  render: () => ReactNode;
+}
+
+export const NO_HOST_FILE_NOTES: readonly HostFileNote[] = [];
+
+/** Per file, what its file notes draw: a file whose signature moved has its header drawn again, and no other. */
+export function hostFileNoteSignatures(notes: readonly HostFileNote[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const note of notes) map.set(note.filePath, `${map.get(note.filePath) ?? ''}${JSON.stringify([note.id, note.key])}\n`);
+  return map;
+}

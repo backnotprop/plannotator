@@ -63,9 +63,9 @@ import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
-import { LineThread, ThreadMemory } from './LineThreads';
-import { placeThreads, threadKey } from './threadPlaces';
-import type { GuideLineNote } from '../guide/types';
+import { FileThread, LineThread, ThreadMemory } from './LineThreads';
+import { fileThreadKey, placeThreads, threadKey } from './threadPlaces';
+import type { GuideFileNote, GuideLineNote } from '../guide/types';
 import { RailScopeSwitch } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -531,6 +531,19 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             side: placed.side,
             key: `${layer.key}|${threadHead ?? ''}|${threadKey(placed)}`,
             render: () => <LineThread placed={placed} layer={layer} memory={threadMemory} headSha={threadHead} />,
+          }))
+        : undefined,
+    [threads, layer, threadHead, threadMemory],
+  );
+  // Threads on whole files: one band each under the file's header, in the time they started.
+  const wholeFileNotes = useMemo<GuideFileNote[] | undefined>(
+    () =>
+      threads && layer
+        ? threads.onFiles.map((thread) => ({
+            id: `forge:${thread.id}`,
+            filePath: thread.file,
+            key: `${layer.key}|${threadHead ?? ''}|${fileThreadKey(thread)}`,
+            render: () => <FileThread thread={thread} layer={layer} memory={threadMemory} headSha={threadHead} />,
           }))
         : undefined,
     [threads, layer, threadHead, threadMemory],
@@ -1085,6 +1098,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                     fileOpenIn={fileOpenIn}
                     fileContents={fileContents}
                     lineNotes={lineNotes}
+                    wholeFileNotes={wholeFileNotes}
                     {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
                   />
                 </ContextNotesProvider>

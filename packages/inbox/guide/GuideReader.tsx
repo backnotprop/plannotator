@@ -36,7 +36,7 @@ import type {
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
-import type { GuideLineNote, GuideReaderProps } from './types';
+import type { GuideFileNote, GuideLineNote, GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
@@ -58,6 +58,7 @@ type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
 
 const NO_ANNOTATIONS: never[] = [];
 const NO_LINE_NOTES: readonly GuideLineNote[] = [];
+const NO_FILE_NOTES: readonly GuideFileNote[] = [];
 const noop = () => {};
 
 /** One card's comment wiring: the review app's annotation props of `AllFilesCodeView`. */
@@ -110,11 +111,13 @@ export const GuideDiff: FC<
     fileOpenIn?: (filePath: string) => ReactNode;
     /** What the host draws under this file's lines (the PR page's threads). Absent: none. */
     lineNotes?: readonly GuideLineNote[];
+    /** What the host draws about this whole file, under its header (the PR page's threads on the file). Absent: none. */
+    wholeFileNotes?: readonly GuideFileNote[];
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -143,6 +146,7 @@ export const GuideDiff: FC<
       fontSize={fontSize || undefined}
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
       {...(lineNotes ? { hostLineNotes: lineNotes } : {})}
+      {...(wholeFileNotes ? { hostFileNotes: wholeFileNotes } : {})}
       selectedAnnotationId={comments?.selectedAnnotationId ?? null}
       scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
       pendingSelection={comments?.pendingSelection ?? null}
@@ -211,6 +215,7 @@ function Reader({
   hostDiffControls = false,
   collapseAll,
   lineNotes,
+  wholeFileNotes,
   contextNotes,
   renderContextNote,
 }: GuideReaderProps) {
@@ -416,6 +421,26 @@ function Reader({
     return next;
   }, [notesByFile]);
 
+  // The same for notes on whole files: each file's own, the same array while they stay the same.
+  const wholeByFile = useMemo(() => {
+    const map = new Map<string, GuideFileNote[]>();
+    for (const note of wholeFileNotes ?? []) {
+      const list = map.get(note.filePath);
+      if (list) list.push(note);
+      else map.set(note.filePath, [note]);
+    }
+    return map;
+  }, [wholeFileNotes]);
+  const keptWhole = useRef(new Map<string, readonly GuideFileNote[]>());
+  const wholeNotesFor = useCallback((path: string): readonly GuideFileNote[] => {
+    const next = wholeByFile.get(path) ?? NO_FILE_NOTES;
+    const kept = keptWhole.current.get(path);
+    const same = kept && kept.length === next.length && kept.every((note, i) => note.id === next[i]!.id && note.key === next[i]!.key);
+    if (same) return kept;
+    keptWhole.current.set(path, next);
+    return next;
+  }, [wholeByFile]);
+
   const getDiffRendererProps = useCallback(
     ({ file }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
@@ -427,10 +452,12 @@ function Reader({
       flushFiles?: boolean;
       headerKeepsFolder?: boolean;
       lineNotes?: readonly GuideLineNote[];
+      wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
+      ...(wholeFileNotes ? { wholeFileNotes: wholeNotesFor(file.path) } : {}),
       // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
       // A host's context notes: only a file that has one gets the seam (the others draw exactly as before).
@@ -456,7 +483,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes],
+    [bare, contextNotes, renderContextNote, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
