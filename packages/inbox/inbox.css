@@ -7536,7 +7536,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   padding: 0 8px 8px;
 }
 .ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
-.ib-fcomp .ib-fcomp-slot[hidden] { display: none; }
+.ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment)[hidden] { display: none; }
 .ib-fcomp .ib-ccard > :is(.ib-kept, .ib-tipwrap:has(> :is(.ib-markup, .ib-vframe))) { grid-area: thumbs; justify-self: start; margin: 10px 0 0 4px; }
 .ib-fcomp .ib-ccard > :is(.ib-vtime, .ib-tipwrap:has(> .ib-vtime)) { grid-area: mid; justify-self: start; margin-left: 6px; }
 .pn-inbox .ib-fcomp .ib-ccard > .ib-ta { grid-area: field; width: 100%; min-width: 0; box-sizing: border-box; min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: var(--ib-fs-14, 14px); line-height: 1.5; outline: none; field-sizing: content; }

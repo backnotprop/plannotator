@@ -14,8 +14,8 @@
  * gather into one control in the bottom right corner, which says "Draft"
  * while a reply draft waits and takes focus; one press brings everything back
  * with focus in the field and the words kept. Send goes from full screen,
- * which stays, the card says it went and the draft is gone. An HTML page is
- * Reply only. At 390 px (a phone) the card spans the width under the toolbar,
+ * which stays, the card says it went and the draft is gone. An HTML page has
+ * Comment (on the whole page) and Reply too. At 390 px (a phone) the card spans the width under the toolbar,
  * the tabs read Comment and Reply, Send is the icon, ⌄ gathers into a 44 px
  * corner control, and the reply comes back working after one tap.
  *
@@ -367,13 +367,27 @@ test('the paperclip attaches to the reply; Send goes from full screen with the f
   expect(world.errors).toEqual([]);
 });
 
-test('an HTML page is Reply only: no tabs, the reply field; ⌄ gathers it with the toolbar, and one press gives the field back', async () => {
+test('an HTML page: Comment on this page and Reply, as on an image; a comment is kept on the page; ⌄ gathers the card with the toolbar, and one press gives the field back', async () => {
   const page = world.page;
   await page.goto(fileUrl('checkout.html'));
   await expect(pane()).toHaveAttribute('data-full-view', '');
   await expect(card()).toBeVisible();
-  await expect(card().getByRole('radiogroup')).toHaveCount(0);
-  await expect(card()).toContainText('Reply to Claude Code');
+  await expect(card().getByRole('radiogroup').getByRole('radio')).toHaveCount(2);
+  await card().getByRole('radio', { name: 'Comment on this page' }).click();
+  await expect(card().getByRole('radio', { name: 'Comment on this page' })).toHaveAttribute('aria-checked', 'true');
+  const comment = card().getByRole('textbox', { name: 'Comment on checkout.html' });
+  await comment.fill('The footer reads as part of the form.');
+  await card().locator('[data-html-page-comment-save]').click();
+  await expect(comment).toHaveValue('');
+  // Kept on the page as a general comment (it rides the next Send); taken out again so the later tests' Sends carry none.
+  const pageComment = async () => {
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as { annotations: { id: string; attachment_id: string; annotation: { type: string; text: string } }[] };
+    return model.annotations.find((r) => r.attachment_id === world.ids['checkout.html'] && r.annotation.type === 'GLOBAL_COMMENT' && r.annotation.text === 'The footer reads as part of the form.') ?? null;
+  };
+  await expect.poll(async () => (await pageComment()) !== null).toBe(true);
+  const removed = await fetch(new URL(`/api/inbox/annotations/${(await pageComment())!.id}/remove`, world.url), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  expect(removed.status).toBe(200);
+  await card().getByRole('radio', { name: 'Reply to Claude Code' }).click();
   await replyField().click();
   await page.keyboard.type('The footer should stay, with room under the form.');
   await expect.poll(draftOnServer).toBe('The footer should stay, with room under the form.');
@@ -640,6 +654,7 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
       await page.goto(fileUrl('checkout.html'));
       await expect(pane(page)).toHaveAttribute('data-full-view', '');
       if (await pill(page).isVisible()) await pill(page).click();
+      await card(page).locator('[data-fcomp-mode="reply"]').click();
       await replyField(page).fill(WORDS);
       await page.locator('[data-full-view-comments]').first().click();
       const foot = page.locator('[data-full-view-foot]');

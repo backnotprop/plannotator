@@ -437,6 +437,8 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   await page.goto(fileUrl(world, t, t.page, 'full'));
   // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
   await page.locator('[data-fcomp-pill]').tap();
+  // It opens on Comment, as an image's card does: the count is the Reply tab's.
+  await page.locator('[data-fcomp-mode="reply"]').tap();
   await cardChip(page).tap();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).tap();
   await expect(rowOf(page, t.onMessage)).toHaveCount(0);
