@@ -110,16 +110,16 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
             </button>
           ))}
         </div>
+        {!compact && (
+          <p className="text-[11px] text-muted-foreground/70">
+            System uses your OS and switches between the two themes below.
+          </p>
+        )}
         {!compact && manageFavicon && (
           <div className="space-y-1.5 pt-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Favicon</label>
             <FaviconStyleControl selected={faviconStyle} />
           </div>
-        )}
-        {!compact && (
-          <p className="text-[11px] text-muted-foreground/70">
-            System uses your OS and switches between the two themes below.
-          </p>
         )}
         {compact && (
           <>
