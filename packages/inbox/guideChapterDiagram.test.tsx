@@ -15,8 +15,7 @@ import { plugin } from 'bun';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { FIXTURE_V1_LOCAL, FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
@@ -56,11 +55,6 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" data-d
 /** A source the stand-in runtime refuses, the way Mermaid refuses a parse error. */
 const BROKEN = 'flowchart LR\n  A -->';
 
-const overviewOf = (source: string): GuideSnapshot => {
-  const guide = FIXTURE_V2_OVERVIEW.guide;
-  return { ...FIXTURE_V2_OVERVIEW, guide: { ...guide, overview: { text: guide.overview!.text, diagram: { kind: 'mermaid', source } } } };
-};
-const DRAWN = (FIXTURE_V2_OVERVIEW.guide.overview!.diagram as { source: string }).source;
 let snapshot: GuideSnapshot = FIXTURE_V2_OVERVIEW;
 
 const message: InboxMessageWire = {
