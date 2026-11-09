@@ -126,7 +126,6 @@
   .ib-tour-coach.ib-ctip[data-side="above"]:not([data-leaving]) { animation: ib-ctip-in-down 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
   @keyframes ib-ctip-in-down { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 }
-}
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* ---------- The reply box: a card that floats ---------- */
