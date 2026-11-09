@@ -167,7 +167,8 @@ function normalizeAbsolute(path: string): string {
   const unc = /^\\\\([^\\/]+)[\\/]+([^\\/]+)/.exec(path)
   const root = unc ? `//${unc[1]}/${unc[2]}` : /^[A-Za-z]:/.test(path) ? path.slice(0, 2) : ''
   const out: string[] = []
-  for (const segment of path.slice(unc ? unc[0].length : root.length).split(/[\\/]/)) {
+  // A POSIX path splits on `/` alone: a backslash is an ordinary character in its names.
+  for (const segment of path.slice(unc ? unc[0].length : root.length).split(root ? /[\\/]/ : '/')) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') out.pop()
     else out.push(segment)
@@ -594,6 +595,10 @@ export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | re
 const PR_URL = /^https?:\/\/[^\s/]+\/.+\/(?:pull|pull-requests|merge_requests)\/(\d+)\b/i
 
 function baseName(path: string): string {
+  if (!onWindows()) {
+    const trimmed = path.replace(/\/+$/, '')
+    return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed
+  }
   const trimmed = path.replace(/[\\/]+$/, '')
   return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || trimmed
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Host } from './host'
 import { sessionProjectFolder } from './inbox'
-import { dataDirOf, modTargetFor } from './launch'
+import { dataDirOf, modTargetFor, subjectFor } from './launch'
 import { isAbsolutePath, trimTrailingSeparators } from './paths'
 import { isTrustablePlanPath } from './plan'
 
@@ -43,5 +43,15 @@ describe('a Windows path counts as absolute wherever the mod wants one', () => {
     expect(trimTrailingSeparators('/a/b//')).toBe('/a/b')
     expect(trimTrailingSeparators('C:\\')).toBe('C:\\')
     expect(trimTrailingSeparators('C:/x/')).toBe('C:/x')
+  })
+})
+
+// Off Windows a backslash is an ordinary character in a file name, so a POSIX
+// path keeps splitting on `/` alone, as before Windows support.
+describe('a POSIX path keeps its backslashes', () => {
+  test("a target and a subject read a backslash as part of the name, not a separator", () => {
+    expect(modTargetFor('annotate', ['/tmp/notes\\draft.md'], '/tmp')).toBe('/tmp/notes\\draft.md')
+    expect(modTargetFor('review', [], '/tmp/a\\..\\b')).toBe('/tmp/a\\..\\b')
+    expect(subjectFor('annotate', ['/tmp/notes\\draft.md'])).toBe('notes\\draft.md')
   })
 })
