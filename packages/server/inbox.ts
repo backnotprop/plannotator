@@ -3078,7 +3078,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
-      again_in: owner && snoozeIntroRelease ? againIn(revealAgainAt(state, now), now) : null,
+      // With `next` waiting from this read on (`revealNow` has just kept it), so the end of its patience is named too.
+      again_in:
+        owner && snoozeIntroRelease
+          ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
+          : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState(owner)),
     };
