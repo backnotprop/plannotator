@@ -879,7 +879,7 @@ export function MessageBody({
           <div className="ib-ctxn-msg" data-context-note-block="">
             <ContextNoteChip file={note.file} lines={`${note.side === 'old' ? 'removed ' : ''}${rangeWord([note.lineStart, note.lineEnd])}`} {...(open ? { onOpen: () => open(note) } : {})} />
             <div className="ib-ctxn-msg-t">
-              <InlineMarkdown text={note.text} />
+              <InlineMarkdown text={note.text} githubRepo={refRepo?.display} repoHost={refRepo?.host} />
             </div>
           </div>
         );
@@ -889,7 +889,7 @@ export function MessageBody({
       if (!run) return undefined;
       return run.first ? actionsRef.current?.render(run.records) : null;
     },
-    [actionRuns, noteAtLine],
+    [actionRuns, noteAtLine, refRepo],
   );
 
   // ── Comments on the text (approval "inbox-message-comments") ──────────────

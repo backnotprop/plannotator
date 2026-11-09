@@ -242,6 +242,9 @@ configurePlannotatorUI({
   componentTooltips: true,
   // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
   digitHexIssueRefs: true,
+  // An owner/repo#123 links on github.com even in a project with no git origin (no repo of its own to link
+  // bare #123 into): agents are told to write that form for another repo's PR or issue.
+  crossRepoRefsWithoutRepo: true,
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
   // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css

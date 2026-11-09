@@ -4,8 +4,8 @@
  * Links side of the Artifacts view (components/ThreadLinksView.tsx).
  *
  * What counts is what the message text draws as a link (`ui` InlineMarkdown):
- * `[text](url)`, `<url>`, a bare url, `owner/repo#12` and `#12` when the
- * project names its repo, and `<a href>` in a raw HTML block. Not: anything in
+ * `[text](url)`, `<url>`, a bare url, `owner/repo#12` (on github.com when the
+ * project has no repo) and `#12` when the project names its repo, and `<a href>` in a raw HTML block. Not: anything in
  * a code block or a code span, images, `@mentions`, local file links (they
  * have their own hover), links inside attachments. Nothing is fetched here: a
  * title is the words the message wrote for the link, when it wrote any.
@@ -168,10 +168,12 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[]): void {
         }
       }
     }
-    if (refs && !/[\w./@-]/.test(prev)) {
+    // A bare `#12` needs the project's repo; an `owner/repo#12` names its own, so with no repo it is on
+    // github.com (App.tsx's `crossRepoRefsWithoutRepo`, as the message draws it).
+    if ((refs || !repo) && !/[\w./@-]/.test(prev)) {
       if (ch === '#') {
-        const num = /^#([1-9]\d*)(?!\w)/.exec(text.slice(i));
-        if (num) {
+        const num = refs ? /^#([1-9]\d*)(?!\w)/.exec(text.slice(i)) : null;
+        if (refs && num) {
           out.push({ href: refs.issue(num[1]!), words: null, fromRef: true });
           i += num[0].length;
           continue;

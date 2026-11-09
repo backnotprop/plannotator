@@ -37,7 +37,7 @@ function message(body: string, author: InboxMessageWire['author']): InboxMessage
 
 const AGENT = { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Claude Code' } as const;
 
-async function render(body: string, repo: InboxProjectRepo | null | undefined, author: InboxMessageWire['author'] = AGENT) {
+async function render(body: string, repo: InboxProjectRepo | null | undefined, author: InboxMessageWire['author'] = AGENT, extra: { contextNotes?: object } = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
   await act(async () => {
@@ -52,6 +52,7 @@ async function render(body: string, repo: InboxProjectRepo | null | undefined, a
         answers={new Map()}
         onPick={() => {}}
         footerFor={() => null}
+        {...extra}
       />,
     );
   });
@@ -91,4 +92,31 @@ test.skipIf(!hasDom)("with the Inbox's own configuration, a digit-only #186379 i
   await render('Merged in #186379.', { display: 'home-assistant/core', host: 'github.com' });
   expect(host!.querySelector('a[href="https://github.com/home-assistant/core/issues/186379"]')).not.toBeNull();
   expect(host!.querySelector('[style*="background-color"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("with the Inbox's own configuration, owner/repo#N links on github.com in a project with no repo; #N stays plain", async () => {
+  // App.tsx turns on crossRepoRefsWithoutRepo: agents are told to write owner/repo#N for another repo's PR.
+  await import('./App');
+  for (const repo of [null, undefined]) {
+    await render('The crash fix (backnotprop/plannotator#2948) is merged, and #12 too.', repo);
+    const links = [...host!.querySelectorAll<HTMLAnchorElement>('a')];
+    expect(links.map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('target')])).toEqual([
+      ['backnotprop/plannotator#2948', 'https://github.com/backnotprop/plannotator/issues/2948', '_blank'],
+    ]);
+    expect(host!.textContent).toContain('#12');
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  }
+});
+
+test.skipIf(!hasDom)("with the Inbox's own configuration, a GitLab project's refs stay on its host, in the text and in a context note", async () => {
+  await import('./App');
+  const repo = { display: 'team/app', host: 'gitlab.example.com' };
+  await render('See group/project#7.\n\n:::note src/app.ts#L3\nSee group/project#8.\n:::', repo, AGENT, { contextNotes: {} });
+  expect(host!.querySelector('a[href="https://gitlab.example.com/group/project/-/issues/7"]')).not.toBeNull();
+  const note = host!.querySelector('[data-context-note-block]')!;
+  expect(note.querySelector('a')?.getAttribute('href')).toBe('https://gitlab.example.com/group/project/-/issues/8');
+  expect(host!.querySelector('a[href^="https://github.com"]')).toBeNull();
 });

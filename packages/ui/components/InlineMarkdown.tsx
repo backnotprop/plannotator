@@ -471,6 +471,30 @@ export function getDigitHexIssueRefs(): boolean {
 }
 
 /**
+ * Whether an `owner/repo#123` ref links when the caller names no repo of its
+ * own (no `githubRepo`): it names its repo in full, so it links on github.com
+ * (`forgeRefLinks`' rule for a repo with no host). Off by default: such refs
+ * stay plain text, exactly as before. A caller that names its repo is
+ * unchanged either way (that repo's forge host decides). The Plannotator
+ * Inbox turns it on through `configurePlannotatorUI({ crossRepoRefsWithoutRepo:
+ * true })`: a thread whose project has no git origin still links the refs
+ * agents are told to write.
+ */
+let crossRepoRefsWithoutRepo = false;
+
+export function setCrossRepoRefsWithoutRepo(on: boolean): void {
+  crossRepoRefsWithoutRepo = on;
+}
+
+export function resetCrossRepoRefsWithoutRepo(): void {
+  crossRepoRefsWithoutRepo = false;
+}
+
+export function getCrossRepoRefsWithoutRepo(): boolean {
+  return crossRepoRefsWithoutRepo;
+}
+
+/**
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
  * [label](url) / ![alt](src) / <autolink>, bare https:// URLs, [[wiki-links]],
@@ -517,11 +541,12 @@ export const InlineMarkdown: React.FC<{
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
-  // Cross-repo `owner/repo#123` refs: only for a caller that names its
-  // project's repo (it knows the forge); otherwise they stay plain text, never
-  // a guessed github.com link. With a code-file handler, an `owner/repo` that
-  // is a code path not known to be missing stays the file (`src/app.js#12`).
-  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  // Cross-repo `owner/repo#123` refs: for a caller that names its project's
+  // repo (it knows the forge); otherwise they stay plain text, never a guessed
+  // github.com link, unless the host opted in (`crossRepoRefsWithoutRepo`:
+  // github.com, the no-host rule). With a code-file handler, an `owner/repo`
+  // that is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoProject = githubRepo ? { host: repoHost } : crossRepoRefsWithoutRepo ? {} : null;
   const crossRepoAccept = (ref: CrossRepoRef): boolean =>
     !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];

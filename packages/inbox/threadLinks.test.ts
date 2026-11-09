@@ -61,9 +61,11 @@ describe('what the message draws as a link', () => {
     expect(hrefs(':::question\nWhich one? See https://q.example.com\n\n- [ ] A\n- [ ] B\n:::')).toEqual(['https://q.example.com']);
   });
 
-  test('refs link only where the project names its repo', () => {
-    expect(hrefs('fixed in #12 and other/lib#7')).toEqual([]);
+  test('a bare #12 links only where the project names its repo; other/lib#7 names its own, on github.com without one', () => {
+    expect(hrefs('fixed in #12 and other/lib#7, not docs/a.md#2 or `x/y#4`')).toEqual(['https://github.com/other/lib/issues/7']);
     expect(hrefs('fixed in #12 and other/lib#7, not a1#3 or `#4`', repo)).toEqual(['https://github.com/acme/web/issues/12', 'https://github.com/other/lib/issues/7']);
+    expect(hrefs('other/lib#7 and #3', { display: 'team/app', host: 'gitlab.example.com' })).toEqual(['https://gitlab.example.com/other/lib/-/issues/7', 'https://gitlab.example.com/team/app/-/issues/3']);
+    expect(hrefs('other/lib#7 and #3', { display: 'team/app', host: 'git.internal.example' })).toEqual([]);
   });
 });
 

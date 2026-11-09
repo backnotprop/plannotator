@@ -21,7 +21,7 @@ import { setComponentTooltips } from './components/HostTitle';
 import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
-import { setDigitHexIssueRefs } from './components/InlineMarkdown';
+import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
@@ -142,6 +142,15 @@ export interface PlannotatorUIConfig {
    */
   digitHexIssueRefs?: boolean;
   /**
+   * Link an `owner/repo#123` ref on github.com when the text's caller names
+   * no repo of its own (`InlineMarkdown` without `githubRepo`). Default:
+   * false, such refs stay plain text exactly as before. A caller that names
+   * its repo is unchanged (its forge host decides; an unknown self-hosted
+   * host still leaves refs plain), and bare `#123` still needs that repo.
+   * The Plannotator Inbox passes true.
+   */
+  crossRepoRefsWithoutRepo?: boolean;
+  /**
    * Make the selection toolbar's Copy button (Viewer and HtmlViewer) copy rich
    * text: text/html plus text/plain in one clipboard write, and show Copy
    * where `hideCopyButton` hid it (the Viewer on desktop). Default: false,
@@ -210,6 +219,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
+  if (config.crossRepoRefsWithoutRepo !== undefined) setCrossRepoRefsWithoutRepo(config.crossRepoRefsWithoutRepo);
   if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
   if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
