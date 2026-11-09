@@ -701,8 +701,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
 
       // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
-      // The thread has a chat: Ask's row in the corner opens it (the top bar has no Ask icon, the owner 2026-11-09).
-      await openAskFromCorner(page);
+      // Side on the message's words reopens the thread's chat (no Ask icon in the top bar, no row in the corner: the owner, 2026-11-09).
+      await sideOpensChat(page, message);
       const ask = page.locator('[data-chat-window]');
       await expect(ask).toContainText('from the table in');
       // Read once, the review's message is folded in the thread: the review opens by its address too.
@@ -741,7 +741,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     }
   });
 
-  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread and in Ask AI`, async ({ browser }) => {
+  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread, and no Ask`, async ({ browser }) => {
     await world.handPull(world.prReviewThread);
     const { context, page } = await windowAt(browser, 390, 844, colorScheme);
     try {
@@ -755,34 +755,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, `33-phone-review-thread-${colorScheme}`);
       await sheet.locator('[data-code-hover-close]').tap();
       await expect(sheet).toHaveCount(0);
-      await openAskFromCorner(page, true);
-      const ask = page.locator('[data-chat-window]');
-      // Ask AI's window on a phone is the whole screen, as it is with Code review off.
-      await expect(ask).toBeVisible();
-      await expect.poll(async () => JSON.stringify(await ask.boundingBox())).toBe(JSON.stringify({ x: 0, y: 0, width: 390, height: 844 }));
-      await ask.locator('code', { hasText: 'src/retry.ts:1-3' }).tap();
-      await expect(sheet).toContainText('BACKOFF_MS');
-      await page.waitForTimeout(250);
-      await shot(page, `34-phone-review-ask-${colorScheme}`);
-      await sheet.locator('[data-code-hover-close]').tap();
-      await expect(sheet).toHaveCount(0);
-      await expect(ask).toBeVisible();
+      // No Ask on a phone for now (the owner, 2026-11-09): no round button, so nothing opens Ask's window here.
+      await expect(page.locator('button[data-rf-corner], [data-rf-card="ask"], [data-ask-open]')).toHaveCount(0);
     } finally {
       await context.close();
     }
   });
 }
 
-/** A thread that has a chat: Ask's row in the corner opens it; a phone's round button may open its sheet first. */
-async function openAskFromCorner(page: Page, phone = false): Promise<void> {
-  if (!phone) {
-    await page.locator('[data-rf-card="ask"] .ib-rf-cardopen').click();
-    return;
-  }
-  // click, not tap: a 700 px window is the phone layout too, with a mouse.
-  await page.locator('button[data-rf-corner]').click();
-  const row = page.locator('[data-rf-sheet] [data-rf-row="ask"]');
-  if (await row.waitFor({ state: 'visible', timeout: 1_500 }).then(() => true, () => false)) await row.click();
+/** Side on a message's words opens (or reopens) the thread's chat. */
+async function sideOpensChat(page: Page, message: Locator): Promise<void> {
+  const side = page.locator('.annotation-toolbar [data-annotation-side]');
+  await expect(async () => {
+    await dragAcross(page, message.getByText('The schedule is in', { exact: false }).first());
+    await expect(side).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await side.click();
 }
 
 /** Press in the text before `words`, and drag past them into the text after. */
@@ -897,18 +885,18 @@ test('a saved comment across a link to a missing file: learning it is missing le
 
 test('Ask AI\'s window in a small window keeps its place, and a code span in it shows its code over it', async ({ browser }) => {
   await world.handPull(world.prReviewThread);
-  const { context, page } = await windowAt(browser, 700, 500, 'dark');
+  // 800 x 500: the smallest desktop layout (PHONE_QUERY is 767 px and under), where Side opens the chat.
+  const { context, page } = await windowAt(browser, 800, 500, 'dark');
   try {
     await page.goto(`${world.url}#thread=${world.prReviewThread}`);
-    // 700 px is the phone layout (PHONE_QUERY): no Side there, so the corner's round button opens the chat.
-    await openAskFromCorner(page, true);
+    await sideOpensChat(page, page.locator('.ib-body', { hasText: 'Start at' }));
     const ask = page.locator('[data-chat-window]');
     await expect(ask).toContainText('from the table in');
     const box = (await ask.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(500);
-    expect(box.x + box.width).toBeLessThanOrEqual(700);
+    expect(box.x + box.width).toBeLessThanOrEqual(800);
     await expect(ask.getByRole('button').first()).toBeInViewport();
     const inAsk = await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
     // Over Ask AI's window: the window's own header is under it, not over it.

@@ -214,9 +214,6 @@ function type(field: HTMLTextAreaElement, words: string) {
 }
 
 const side = () => document.querySelector<HTMLButtonElement>('.annotation-toolbar [data-annotation-side]');
-/** Ask's mark in the corner (floaters/useReplyFloaters.tsx): a thread that already has a chat, minimized. */
-const askCorner = () => document.querySelector<HTMLButtonElement>('[data-rf-card="ask"] button, button[data-rf-corner]');
-
 /** Selects the words of the thread's first message, as a drag does: the selection bar opens over them. */
 async function selectMessage() {
   // A thread with a reply folds the agent's earlier message: open it, so its words can be selected.
@@ -252,18 +249,13 @@ async function sideOffered(): Promise<boolean> {
   return offered;
 }
 
-/** Opens the thread's chat: Side on the message's words, or on a phone (no Side there) Ask's row in the corner. */
-async function openChat(phone = false) {
-  if (phone) {
-    await until(() => askCorner() !== null, 'Ask in the corner');
-    act(() => askCorner()!.click());
-  } else {
-    await until(async () => {
-      await selectMessage();
-      return side() !== null;
-    }, 'Side in the selection bar');
-    act(() => side()!.click());
-  }
+/** Opens the thread's chat with Side on the message's words: no Ask icon in the top bar, no row in the corner (the owner, 2026-11-09). */
+async function openChat() {
+  await until(async () => {
+    await selectMessage();
+    return side() !== null;
+  }, 'Side in the selection bar');
+  act(() => side()!.click());
   await until(() => askBox() !== null, 'the window');
 }
 
@@ -584,37 +576,17 @@ test('Reply in the thread joins the draft, and a window filling the screen moves
   expect(askWindow() === null).toBe(true);
 });
 
-test('on a touch phone Enter is a new line, and Reply in the thread leaves the reply in sight', async () => {
+test('no Ask on a phone for now: a thread with a chat has no Side, no corner row and no top bar icon', async () => {
   if (!hasDom) return;
   world = on;
   saveUnanswered(on.note, 'session-note', 'What was the plan?');
   aPhone();
   await openInbox(on, on.note);
-  await openChat(true);
-  type(askBox()!, 'one');
-  requests = [];
-  pressEnter(askBox()!);
-  await wait(200);
-  expect(asksPosted().length).toBe(0);
-  expect(askBox()!.value).toBe('one');
-  await until(() => buttonNamed('Reply in the thread') !== undefined, 'the note');
-  press(buttonNamed('Reply in the thread')!);
-  await until(() => document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')?.value.includes('What was the plan?') === true, 'the question in the reply');
-  expect(askWindow() === null).toBe(true);
-});
-
-test('on a touch phone a note button hands focus to the transcript, so the keyboard stays down', async () => {
-  if (!hasDom) return;
-  world = on;
-  saveUnanswered(on.note, 'session-note', 'What was the plan?');
-  aPhone();
-  await openInbox(on, on.note);
-  await openChat(true);
-  await until(() => buttonNamed('Ask again') !== undefined, 'the note');
-  press(buttonNamed('Ask again')!);
-  const focused = document.activeElement as HTMLElement | null;
-  expect(focused?.tagName ?? 'none').not.toBe('TEXTAREA');
-  expect(`${focused?.tagName} ${focused?.getAttribute('aria-label') ?? focused?.textContent?.slice(0, 30)}`).toBe('DIV Ask AI conversation');
+  await wait(400);
+  expect(await sideOffered()).toBe(false);
+  expect(document.querySelectorAll('[data-rf-card="ask"], [data-rf-corner], [data-rf-row="ask"]').length).toBe(0);
+  expect(askIcon()).toBeNull();
+  expect(askWindow()).toBeNull();
 });
 
 test('a refused question keeps its words, across a thread switch too', async () => {
