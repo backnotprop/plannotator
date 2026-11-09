@@ -2145,7 +2145,7 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-pane.ib-withfile .ib-annpop { width: 400px; }
 .ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
 .ib-pane.ib-withfile .ib-pfoot { padding: 12px 20px 14px; }
-/* The thread in full screen (the header's "Hide the sidebar and the list"): a reading measure, centred. */
+/* The thread in full screen (a click on the list column's edge): a reading measure, centred. */
 .pn-inbox .ib-pane[data-full] .ib-pbody,
 .pn-inbox .ib-pane[data-full] .ib-pfoot { padding-inline: max(30px, calc((100% - 760px) / 2)); }
 .ib-pane.ib-withfile .ib-msg { padding-left: 0; }

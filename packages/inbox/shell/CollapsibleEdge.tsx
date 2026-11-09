@@ -5,7 +5,7 @@
 // side is kept.
 
 import { Tooltip } from "@base-ui/react/tooltip";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { ResizeHandleProps } from "./useResizablePanel";
 
@@ -41,6 +41,7 @@ export function CollapsibleEdge({
 	controls,
 	isDragging,
 	resize,
+	tipActions,
 	children,
 }: {
 	onCollapse?: () => void;
@@ -53,6 +54,8 @@ export function CollapsibleEdge({
 	/** Mid-drag the tooltip is suppressed (the hint is for the idle edge). */
 	isDragging: boolean;
 	resize: EdgeKeyboardResize;
+	/** Inbox addition: closes the tooltip from outside (the list's edge stays drawn, hidden, after its click hides the list). */
+	tipActions?: RefObject<Tooltip.Root.Actions | null>;
 	children: ReactNode;
 }) {
 	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -74,7 +77,7 @@ export function CollapsibleEdge({
 
 	return (
 		<Tooltip.Provider delay={300}>
-			<Tooltip.Root trackCursorAxis="both">
+			<Tooltip.Root trackCursorAxis="both" actionsRef={tipActions}>
 				<Tooltip.Trigger
 					render={
 						<div

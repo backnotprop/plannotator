@@ -494,7 +494,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
       await press('Escape');
       await page.waitForTimeout(500);
 
-      // 9b. A full-screen thread: the Full screen button (keys), then Q.
+      // 9b. A full-screen thread: the list's edge (Enter on it), then Q.
       const fullIn = page.locator('.ib-listcol [role="separator"][aria-label="List width"]');
       if (await fullIn.count()) {
         await fullIn.focus();

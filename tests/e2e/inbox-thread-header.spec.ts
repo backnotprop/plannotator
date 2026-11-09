@@ -6,22 +6,22 @@
  * subject). Proved in a real browser against the compiled binary, in every
  * layout the header has:
  *
- *  - desktop beside the list: the thread's full screen ("Hide the sidebar and
- *    the list") leads, then the read button (Mark read) and the Snooze clock,
- *    then the subject; at the right, icons only (approval
+ *  - desktop beside the list: the read button (Mark read) and the Snooze
+ *    clock lead (no full-screen button: the list column's edge hides the
+ *    list), then the subject; at the right, icons only (approval
  *    "inbox-thread-artifacts"): Artifacts, Expand all (chevrons), ⋯ More
  *    (Archive is in its menu), a hairline, the ×;
  *  - the thread in full screen (approval "inbox-files-tabs", amendment
- *    2026-10-30, B): the sidebar and the list hide, the thread keeps a centred
- *    760 px measure, ‹ Inbox leads in the button's place and there is no ×;
+ *    2026-10-30, B; a click on the list's edge, or Enter on it, since the
+ *    owner's 2026-11-09 call): the sidebar and the list hide, the thread keeps
+ *    a centred 760 px measure, ‹ Inbox leads and there is no ×;
  *    ‹ Inbox, Escape or ⌘B brings them back (Escape leaves full screen before
  *    it closes the thread); a file opened there opens beside the thread and
  *    closing it returns to full screen (⌘B there leaves it alone); another
  *    thread keeps it, J and K included (the list stays drawn, hidden); G I
  *    brings the list back; a stacked window never counts as full screen; a
  *    window narrowed in full screen keeps the list beside the thread on the
- *    way out (the sidebar held closed); with the sidebar closed the button
- *    reads "Hide the list";
+ *    way out (the sidebar held closed);
  *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read and Snooze;
  *    ⋯ More (the copy menu, design record "inbox-copy-message") ends it;
  *  - a file beside the thread: the same, with ‹ Inbox closing the file;
@@ -163,7 +163,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop beside the list: full screen, then Mark read and Snooze lead before the subject, ⋯ More sits beside the close; Tab follows that order', async () => {
+test('desktop beside the list: Mark read and Snooze lead before the subject, ⋯ More sits beside the close; Tab follows that order', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
@@ -263,7 +263,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   expect(await leftOf(pane)()).toBeGreaterThan(400);
   const cookieBefore = await sidebarCookie(page);
 
-  // In: the list and the sidebar hide, the thread spans the window at a reading measure, ‹ Inbox in the button's place.
+  // In (a click on the list's edge): the list and the sidebar hide, the thread spans the window at a reading measure, ‹ Inbox leads.
   await enter.click();
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeHidden();
@@ -284,13 +284,13 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   expect(await sidebarCookie(page)).toBe(cookieBefore);
   await shot(page, '1b-thread-full-screen', ['light', 'dark']);
 
-  // ‹ Inbox: the list and the sidebar come back, the thread stays open, focus on the way in.
+  // ‹ Inbox: the list and the sidebar come back, the thread stays open, focus on its subject.
   await leave.click();
   await expect(pane).not.toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await expect(sidebar).toBeVisible();
   await expect.poll(leftOf(pane)).toBeGreaterThan(400);
-  await expect(enter).toBeFocused();
+  await expect(pane.locator('h2.ib-subject')).toBeFocused();
   await expect(pane.getByRole('button', { name: 'Close the thread' })).toBeVisible();
 
   // ⌘B leaves full screen too, and still writes no sidebar choice.
@@ -302,7 +302,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   await expect(pane).not.toHaveAttribute('data-full', '');
   expect(await sidebarCookie(page)).toBe(cookieBefore);
 
-  // The sidebar closed by the person: the button hides only the list, and leaving full screen leaves the sidebar closed.
+  // The sidebar closed by the person: the edge hides only the list, and leaving full screen leaves the sidebar closed.
   await page.keyboard.press('ControlOrMeta+b');
   await expect(sidebar).toBeHidden();
   await enter.click();
@@ -312,6 +312,16 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   await expect(sidebar).toBeHidden();
   await page.keyboard.press('ControlOrMeta+b');
   await expect(sidebar).toBeVisible();
+
+  // Enter on the focused edge hides the list too, and focus leaves the hidden edge for ‹ Inbox.
+  await leave.click();
+  await expect(page.locator('.ib-listcol')).toBeVisible();
+  await page.getByRole('separator', { name: 'List width' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ib-listcol')).toBeHidden();
+  await expect(leave).toBeFocused();
+  await leave.click();
+  await expect(page.locator('.ib-listcol')).toBeVisible();
 
   // Escape leaves full screen first (the thread stays), then closes the thread.
   await enter.click();
