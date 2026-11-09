@@ -27,7 +27,7 @@ import { formatInboxHelp } from "./inbox-help";
 import { formatSubcommandHelp, formatTopLevelHelp, SHAPE_COMMAND_USAGE } from "./cli";
 import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_DRAW_GONE_NO_SHAPE, INBOX_REVIEW_SKILLS, inboxReviewSkills } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS, inboxReviewSkills } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -112,11 +112,10 @@ test("Code review off: no agent text holds a Show me word", async () => {
 });
 
 test("Code review on and Shape off: no agent text holds a Show me word (no overview.diagram, no Shape drawing rules)", async () => {
-  // `review_draw_gone` stays: an older agent's `review draw` is still refused, in words that name no Shape.
-  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())].filter((word) => word !== "review_draw_gone");
+  // `review draw` is the review parse's here (the CLI test below), as with Code review off.
+  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
   const texts = {
     ...(await agentTexts(true, false)),
-    "review draw": INBOX_REVIEW_DRAW_GONE_NO_SHAPE,
     "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
   };
   const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
@@ -222,7 +221,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   }
 }, 120_000);
 
-test("Code review on: `shape` answers only with Shape on, and an old `review draw` names Shape only then", async () => {
+test("Code review on: `shape` answers only with Shape on, and an old `review draw` is refused only then (Shape off: the review parse's, as with Code review off)", async () => {
   const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
   const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
   const { SHAPE_OFF_TEXT } = await import("./shape-command");
@@ -250,7 +249,12 @@ test("Code review on: `shape` answers only with Shape on, and an old `review dra
   try {
     const codeReviewOnly = { inboxCodeReview: true, inboxShape: false };
     expect(await run(codeReviewOnly, ["shape", "--help"])).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
-    expect(await run(codeReviewOnly, draw)).toEqual({ stdout: "", stderr: `${INBOX_REVIEW_DRAW_GONE_NO_SHAPE}\n`, code: 1 });
+    for (const argv of [draw, ["review", "drawings", "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F"], ["review", "draw", "--help"]]) {
+      const shapeOff = await run(codeReviewOnly, argv);
+      const codeReviewOff = await run({ inboxCodeReview: false, inboxShape: false }, argv);
+      expect([argv, shapeOff]).toEqual([argv, codeReviewOff]);
+      expect(shapeOff.stderr).not.toContain("review_draw_gone");
+    }
     const both = { inboxCodeReview: true, inboxShape: true };
     expect((await run(both, ["shape", "--help"])).code).toBe(0);
     expect(await run(both, draw)).toEqual({ stdout: "", stderr: `${INBOX_REVIEW_DRAW_GONE}\n`, code: 1 });

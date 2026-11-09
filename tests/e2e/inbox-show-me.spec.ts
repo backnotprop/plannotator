@@ -793,7 +793,7 @@ test('a phone at 390 px: the popover, the board, a part lands on its line', asyn
   }
 });
 
-test("Shape off with Code review on: no Show me, no Overview picture, no Shape place, and an older agent's `review draw` names no Shape", async () => {
+test("Shape off with Code review on: no Show me, no Overview picture, no Shape place, and an older agent's `review draw` is the review parse's", async () => {
   test.setTimeout(150_000);
   const { page } = world;
   const drawArgs = [['review', 'draw', '--file', 'x.json', '--review', round1.message_id, '--turn', 'turn_x'], ['review', 'drawings', round1.message_id], ['review', 'draw', '--help']];
@@ -808,9 +808,12 @@ test("Shape off with Code review on: no Show me, no Overview picture, no Shape p
   const setShape = (on: boolean) => writeFileSync(configPath, JSON.stringify({ ...(JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>), inboxShape: on }));
   setShape(false);
   try {
+    // In a folder that is no repository: the review parse answers at once, nothing is reviewed.
     for (const args of drawArgs) {
-      const run = spawnSync(binary, args, { env: world.env, cwd: world.project, encoding: 'utf8', timeout: 30_000 });
-      expect([run.status, run.stdout, run.stderr]).toEqual([1, '', 'review_draw_gone: `plannotator review draw` is gone.\n']);
+      const run = spawnSync(binary, args, { env: world.env, cwd: world.root, encoding: 'utf8', timeout: 30_000 });
+      expect(run.status, run.stderr).not.toBeNull();
+      expect(run.stderr).not.toContain('review_draw_gone');
+      expect(run.stderr).not.toContain('plannotator shape');
     }
     const help = world.shape(['--help']);
     expect([help.status, help.stdout]).toEqual([1, '']);

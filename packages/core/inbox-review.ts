@@ -388,10 +388,11 @@ export function checkInboxDrawing(
   return { ok: true, ...(title ? { title } : {}), view };
 }
 
-/** What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are on: Show me makes a Shape now. */
+/**
+ * What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are on: Show me makes a
+ * Shape now. With Shape off the review parse takes them, as with Code review off (approval "code-review-029-shape-off").
+ */
 export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
-/** The same with Code review on and Shape off (approval "code-review-029-shape-off"): no Show me, and no word of Shape. */
-export const INBOX_REVIEW_DRAW_GONE_NO_SHAPE = 'review_draw_gone: `plannotator review draw` is gone.';
 
 /** get_guide_brief's field doc for the overview's drawing (AGENT-TEXT §4), served only while Code review and Shape are on. */
 export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [

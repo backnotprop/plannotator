@@ -246,7 +246,7 @@ import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } f
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_DRAW_GONE_NO_SHAPE } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
@@ -355,9 +355,13 @@ const rawArgs = process.argv.slice(2);
 // agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
 // while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
 // the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
-// With Shape off the refusal names no Shape (approval "code-review-029-shape-off").
-if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
-  process.stderr.write(`${loadConfig({ quiet: true }).inboxShape === true ? INBOX_REVIEW_DRAW_GONE : INBOX_REVIEW_DRAW_GONE_NO_SHAPE}\n`);
+// Shape off too (approval "code-review-029-shape-off"): the refusal points at Shape, so it is given only with both on;
+// otherwise the review parse takes the words, as with Code review off.
+if (isReviewDrawCommand(rawArgs, () => {
+  const config = loadConfig({ quiet: true });
+  return config.inboxCodeReview === true && config.inboxShape === true;
+})) {
+  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
   process.exit(1);
 }
 // `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
