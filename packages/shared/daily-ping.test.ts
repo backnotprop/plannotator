@@ -74,7 +74,7 @@ describe("the request", () => {
     expect(r!.method).toBe("POST");
     expect(r!.path).toBe("/ping");
     // The payload, byte for byte: version, install-age bucket (3 weeks: 2), tool, first of the day. Nothing else.
-    expect(r!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1}');
+    expect(r!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":"none"}');
     expect(r!.headers["content-type"]).toBe("application/json");
     expect(r!.headers["user-agent"]).toBe("plannotator");
     expect(Object.keys(r!.headers).filter((h) => !["accept", "accept-encoding", "connection", "content-length", "content-type", "host", "user-agent"].includes(h))).toEqual([]);
@@ -85,7 +85,7 @@ describe("the request", () => {
     expect(await check("plan", NOW + DAY)).toBe("sent");
     expect(received).toHaveLength(2);
     // A new day: the first ping of it carries first again.
-    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1}');
+    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":"none"}');
   });
 
   test("each tool sends its own ping once a day; only the day's first ping carries first: 1", async () => {
@@ -94,11 +94,11 @@ describe("the request", () => {
     for (const tool of tools) expect(await check(tool)).toBe("sent");
     for (const tool of tools) expect(await check(tool, NOW + 60_000)).toBe("sent-today");
     expect(received.map((r) => r.body)).toEqual([
-      '{"version":"0.28.46","age_week":2,"tool":"inbox","first":1}',
-      '{"version":"0.28.46","age_week":2,"tool":"plan","first":0}',
-      '{"version":"0.28.46","age_week":2,"tool":"review","first":0}',
-      '{"version":"0.28.46","age_week":2,"tool":"annotate","first":0}',
-      '{"version":"0.28.46","age_week":2,"tool":"last","first":0}',
+      '{"version":"0.28.46","age_week":2,"tool":"inbox","first":1,"favicon":"none"}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":0,"favicon":"none"}',
+      '{"version":"0.28.46","age_week":2,"tool":"review","first":0,"favicon":"none"}',
+      '{"version":"0.28.46","age_week":2,"tool":"annotate","first":0,"favicon":"none"}',
+      '{"version":"0.28.46","age_week":2,"tool":"last","first":0,"favicon":"none"}',
     ]);
   });
 
@@ -122,10 +122,41 @@ describe("the request", () => {
     expect(dailyPingAge(monday, "2027-04-19")).toBe(4);
   });
 
+  test("favicon is config.json's setting, read when the ping is sent: glass, yellow, totman is face, anything else (classic included) none", async () => {
+    // Weeks 5-24 (age_week 3) on every day this test sends.
+    writeState({ firstWeek: "2026-09-07" });
+    const config = (value: string) => writeFileSync(join(dataDir, "config.json"), value);
+    const sends: [string | null, string][] = [
+      [null, "none"],
+      ['{"favicon":"glass"}', "glass"],
+      ['{"favicon":"yellow"}', "yellow"],
+      ['{"favicon":"totman","displayName":"x"}', "face"],
+      ['{"favicon":"classic"}', "none"],
+      ['{"favicon":"Yellow"}', "none"],
+      ['{"favicon":"face"}', "none"],
+      ['{"favicon":"p"}', "none"],
+      ['{"favicon":true}', "none"],
+      ['{"theme":"dark"}', "none"],
+      ["null", "none"],
+      ["not json", "none"],
+    ];
+    let day = 0;
+    for (const [value, favicon] of sends) {
+      if (value !== null) config(value);
+      expect(await check("plan", NOW + day * DAY)).toBe("sent");
+      expect({ value, body: received.at(-1)!.body }).toEqual({ value, body: `{"version":"0.28.46","age_week":3,"tool":"plan","first":1,"favicon":"${favicon}"}` });
+      day++;
+    }
+    // Every tool's ping carries it, not only the day's first.
+    config('{"favicon":"totman"}');
+    expect(await check("review", NOW + (day - 1) * DAY)).toBe("sent");
+    expect(received.at(-1)!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"review","first":0,"favicon":"face"}');
+  });
+
   test("the first check sends at once (no notice, no wait); a new data folder is this week, age_week 1", async () => {
     expect(await check("review")).toBe("sent");
     expect(readDailyPingState(dataDir).firstWeek).toBe("2026-11-02");
-    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":1,"tool":"review","first":1}');
+    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":1,"tool":"review","first":1,"favicon":"none"}');
   });
 
   test("an existing user's first ping counts from first use: the oldest time in the data folder, never later than today", async () => {
@@ -136,7 +167,7 @@ describe("the request", () => {
     utimesSync(join(dataDir, "config.json"), ten, ten);
     expect(await check("plan")).toBe("sent");
     expect(readDailyPingState(dataDir).firstWeek).toBe("2026-08-24");
-    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"plan","first":1}');
+    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"plan","first":1,"favicon":"none"}');
     // ping.json only holds the week: nothing else about the folder.
     expect(Object.keys(JSON.parse(readFileSync(join(dataDir, "ping.json"), "utf8")))).toEqual(["firstWeek", "day", "sent"]);
   });
@@ -200,7 +231,7 @@ describe("failures and the lock", () => {
     expect(await check("annotate", NOW + 60_000)).toBe("sent");
     expect(received).toHaveLength(2);
     // The retry is still the day's first ping: the failed one did not count.
-    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"annotate","first":1}');
+    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"annotate","first":1,"favicon":"none"}');
   });
 
   test("offline (nothing listening) fails quietly and tries again next time", async () => {
