@@ -191,8 +191,9 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
                 return;
               }
               if (event.key !== 'Tab') return;
-              // Never an element under `inert` (the list options dialog's picture of real rows): it takes no focus.
-              const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((el) => !el.closest('[inert]'));
+              // Never an element under `inert` (the list options dialog's picture of real rows) or `hidden` (a tab panel not shown),
+              // or one Tab skips (a tab list's other tabs, tabindex -1): none of them takes focus from Tab.
+              const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((el) => !el.closest('[inert], [hidden]') && el.tabIndex >= 0);
               if (items.length === 0) return;
               const first = items[0]!;
               const last = items[items.length - 1]!;

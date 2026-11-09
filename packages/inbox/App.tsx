@@ -7070,6 +7070,13 @@ function Inbox() {
             setFeedbackOpen(false);
             void copied.then((ok) => showToast(feedbackCopiedToast(ok), ok ? 6000 : 4200));
           }}
+          simpleListOn={listView === 'list'}
+          onAction={(kind) => {
+            // Common questions (feedbackFaq.ts): the real setting, with the dialog closed so its result is in view.
+            setFeedbackOpen(false);
+            if (kind === 'simple-list') setListView('list');
+            else go({ page: 'settings', project: null, thread: null, section: kind === 'settings-rows' ? 'rows' : 'devices' });
+          }}
           onClose={() => setFeedbackOpen(false)}
         />
       )}

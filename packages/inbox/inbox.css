@@ -7361,24 +7361,31 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .pn-inbox .ib-att-t .ib-att-kbd + .ib-open { margin-left: 0; }
 /* A keycap's text (shortcuts/hint.tsx ShortcutHint): drawn from the attribute, never part of its button's words. */
 kbd[data-keycap]::after { content: attr(data-keycap); }
-/* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
-   saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
-   dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
-dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100vh - 580px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
+/* Sidebar → Feedback (components/FeedbackDialog.tsx, approval "inbox-feedback-faq"): a "Feedback" title, then the
+   Inbox's segmented switch (Message | Common questions). Message: the message, an optional category and email, the
+   line saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. Common
+   questions: an accordion, then "Not here? Tell us about it" and Close. One left edge for all of it (the footer's
+   ghost button hangs its padding outside). On a phone the dialog is a bottom sheet (the sheet corner on top, the
+   safe area below), 44 px targets. */
+dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100vh - 613px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
 /* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show; in a short window it starts higher, so five lines leave Send in view. */
 .ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
 .ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
-.ib-fbk-form .ib-bfield { margin-top: 14px; }
+.ib-fbk-tabs { margin-top: 16px; }
+.ib-fbk-form .ib-bfield { margin-top: 16px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
+/* A window too short for the dialog with five lines (589 px with its border, under the switch): a shorter box, so Send stays in view. */
+@media (max-height: 640px) {
+  dialog.ib-fbk:not(.ib-fbk-phone) .ib-bfield .ib-fbk-msg { min-height: 0; height: 104px; }
+}
 .ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-fbk-count.ib-fbk-over { color: var(--destructive); }
-.ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-.ib-fbk-cats { display: inline-flex; gap: 6px; flex: none; }
-.pn-inbox .ib-fbk-cat { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.ib-fbk-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.ib-fbk-cats { display: inline-flex; gap: 8px; flex: none; }
+.pn-inbox .ib-fbk-cat { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
 .pn-inbox .ib-fbk-cat:hover:not(:disabled) { background: var(--muted); }
 .pn-inbox .ib-fbk-cat[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 13%, transparent); border-color: color-mix(in oklch, var(--primary) 42%, transparent); color: var(--primary); }
 .pn-inbox .ib-fbk-cat:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -7386,12 +7393,29 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fbk-contact { flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
 .ib-fbk-contact::placeholder, .ib-fbk-msg::placeholder { color: var(--muted-foreground); opacity: 0.8; }
 .ib-fbk-contact:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-.ib-fbk-what { display: grid; grid-template-columns: 15px minmax(0, 1fr); column-gap: 8px; margin: 14px 0 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
-.pn-inbox .ib-fbk-what svg.ib-ic { width: 15px; height: 15px; margin-top: 1px; }
+.ib-fbk-row .ib-fbk-contact { padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); }
+.ib-fbk-what { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); line-height: 1.5; color: var(--muted-foreground); text-wrap: pretty; }
 .ib-callout.ib-fbk-err { margin: 12px 0 0; }
-.ib-fbk-acts { margin-top: 18px; }
-.pn-inbox .ib-fbk-acts .ib-left { padding-left: 8px; padding-right: 8px; }
+.ib-fbk-acts { margin-top: 20px; }
+.pn-inbox .ib-fbk-acts .ib-left { margin-left: -8px; padding-left: 8px; padding-right: 8px; }
 .pn-inbox .ib-fbk-acts .ib-left svg.ib-ic { width: 15px; height: 15px; }
+/* Common questions: one answer open at a time, on the Inbox's raised fill. */
+.ib-fbk-cq { margin-top: 16px; }
+.ib-fbk-faq { padding: 4px; border-radius: 10px; background: var(--ib-raise); }
+.pn-inbox .ib-fbk-q { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-fbk-q:hover { background: var(--ib-fill); }
+.pn-inbox .ib-fbk-q:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-fbk-q svg.ib-ic { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.pn-inbox .ib-fbk-qa[data-open] .ib-fbk-q svg.ib-ic { transform: rotate(90deg); }
+.ib-fbk-a { padding: 0 10px 12px 32px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-fbk-a p { margin: 0 0 8px; }
+.ib-fbk-a-acts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ib-fbk-a-link { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-fbk-a-link:hover { color: var(--foreground); }
+.ib-fbk-a-link:focus-visible, .pn-inbox .ib-fbk-back:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-fbk-cq-foot { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.ib-fbk-cq-foot p { margin: 0 auto 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-fbk-back { padding: 0; border: 0; background: none; font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .ib-fbk-sent { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 8px 0 0; }
 .pn-inbox .ib-fbk-sent > svg.ib-ic { color: var(--success); }
 .ib-fbk-sent h2 { margin-top: 10px; }
@@ -7407,7 +7431,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
   /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
-  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head { display: none; }
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head, :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-tabs { display: none; }
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-fbk-form .ib-bfield { margin-top: 0; }
   :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
   :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: calc(33px + var(--ib-fs-12, 12px) * 1.5); }
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
@@ -7421,10 +7446,21 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
   .ib-fbk-contact { flex: none; height: 44px; font-size: var(--ib-fs-16-in, 16px); }
-  .pn-inbox .ib-fbk-acts .ib-left { justify-content: center; }
+  .pn-inbox .ib-fbk-acts .ib-left { margin-left: 0; justify-content: center; }
+  /* The switch spans the sheet, a thumb's height each half. */
+  .ib-seg.ib-fbk-tabs { display: flex; flex-wrap: nowrap; }
+  .ib-fbk-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-fbk-q { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
+  .ib-fbk-a { font-size: var(--ib-fs-14, 14px); }
+  .ib-fbk-cq-foot { flex-direction: column; align-items: stretch; }
+  .ib-fbk-cq-foot p { margin: 0; font-size: var(--ib-fs-14, 14px); line-height: 44px; }
+  .pn-inbox .ib-fbk-cq-foot .ib-btn { height: 44px; justify-content: center; }
 }
 @media (forced-colors: active) {
   .pn-inbox .ib-fbk-cat[aria-pressed="true"] { border-color: Highlight; color: Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-fbk-q svg.ib-ic { transition: none; }
 }
 
 /* Tidy (components/Tidy.tsx): the list's and the Board's ⋮ menu, its popover (a sheet on a phone), the thread note. */
