@@ -654,6 +654,7 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
 packages/inbox/listFilterButton.test.tsx
 packages/inbox/prototypeWindow.test.tsx
@@ -663,3 +664,4 @@ packages/review-editor/components/guide/GuideDiffControls.test.tsx
 packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
+packages/inbox/agents/agentsSection.test.tsx

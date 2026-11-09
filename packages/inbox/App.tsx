@@ -151,7 +151,9 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
-import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark } from './sidebarLayout';
+import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
+import { sidebarTipDue, useSidebarTip } from './sidebarTip';
+import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
 import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
@@ -242,7 +244,7 @@ import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
-import { setReviewSkillsShape } from './skills';
+import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
@@ -1168,6 +1170,8 @@ function Inbox() {
    * with the dialogs App keeps itself, the load arms nothing else meanwhile (`lineLatch`). Set from the hooks' stages.
    */
   const [lineStagesBusy, setLineStagesBusy] = useState(false);
+  /** The Sidebar tip is claimed or up now (its hook comes after the others'). */
+  const [lineTipBusy, setLineTipBusy] = useState(false);
   /** When a date can next change the line, on this page's clock (settings `reveal.again_in` at its read), or null. */
   const [lineAgainAt, setLineAgainAt] = useState<number | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
@@ -1940,6 +1944,10 @@ function Inbox() {
   const boardsOn = shapeOn;
   // The review skills a Send pastes carry their drawing lines only while Shape is on.
   setReviewSkillsShape(shapeOn);
+  // Chapter diagrams (Settings → Capabilities, under Code review; on unless turned off): off, the review skills a Send
+  // pastes carry no diagram line, and a guide that still has a chapter diagram draws it folded.
+  const chapterDiagramsOn = settings?.chapter_diagrams?.on !== false;
+  setReviewSkillsDiagrams(chapterDiagramsOn);
   const shapes = useInboxShapes(boardsOn, subscribeShapeFrames);
   const wakeOnChange = useRef(codeReviewOn);
   wakeOnChange.current = codeReviewOn;
@@ -4686,6 +4694,19 @@ function Inbox() {
     }
   };
 
+  // Chapter diagrams, under Code review: every other window hears `event: capabilities`.
+  const toggleChapterDiagrams = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, chapter_diagrams: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveChapterDiagrams(next);
+      setSettings((current) => (current ? { ...current, chapter_diagrams: saved.chapter_diagrams ?? { on: next } } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleShape = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
@@ -4953,7 +4974,7 @@ function Inbox() {
   /** The Inbox keeps a line (a release build): its gap, not the page load, paces the dialogs. */
   const lineKept = settings?.reveal?.line === true;
   const lineBusy =
-    soundDialog === 'open' || typeof agentNote === 'object' || listIntro === 'claimed' || listIntro === 'open' || (listIntroAsked.current && !listIntroDecided) || lineStagesBusy;
+    soundDialog === 'open' || typeof agentNote === 'object' || listIntro === 'claimed' || listIntro === 'open' || (listIntroAsked.current && !listIntroDecided) || lineStagesBusy || lineTipBusy;
   const lineLatch = useLineLatch({
     read:
       settings && latest !== null
@@ -4976,9 +4997,11 @@ function Inbox() {
   // The idle clock (idleClock.ts): a calm moment for the dialogs whose own moment is "back on the list", which a person
   // who keeps a thread open beside the list never reaches (the owner, 2026-11-08). Counts only while one of them is
   // armed, on the Inbox page, the tab in front and nothing typed or open.
+  const sidebarTipSpent = useRef(false);
   const idleArmedNow = settings && latest !== null && !firstRun && route.page === 'inbox' ? revealArmed(settings) : null;
   const pageIdle = useIdleClock({
-    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')),
+    // The Sidebar tip (sidebarTip.ts) takes the idle moment too.
+    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')) || (idleArmedNow !== null && !phone && !sidebarTipSpent.current && sidebarTipDue(settings)),
     busy: () => revealHeldBack() || !listIntroClear,
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
@@ -5081,8 +5104,9 @@ function Inbox() {
     listIntro: lineKept && listIntro === 'shown' ? 'none' : listIntro,
     voiceWanted: voiceIntro.wanted && !(lineKept && voiceIntro.stage === 'shown'),
     voiceStage: lineKept && voiceIntro.stage === 'shown' ? 'none' : voiceIntro.stage,
-    // Another dialog of the line is claimed or open now, or one outside its hooks showed within the gap.
-    board: oneTimeDialogShownThisLoad() || lineStagesBusy,
+    // Another dialog of the line is claimed or open now, or one outside its hooks (the Board's welcome, the star
+    // ask's card, the Sidebar tip) showed within the gap.
+    board: oneTimeDialogShownThisLoad() || lineStagesBusy || lineTipBusy,
   });
   const snoozeIntro = useSnoozeIntro({
     due: lineLatch?.snoozeDue ?? false,
@@ -5975,6 +5999,29 @@ function Inbox() {
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
   const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
+  // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
+  // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
+  const sidebarDocked = !phone && route.page === 'inbox' && sidebarOpen && !fileOpen && !sidebarHeld && !full;
+  const sidebarCustomizing = useSidebarCustomizerOpen();
+  const sidebarTip = useSidebarTip({
+    due: !phone && !tourOn && sidebarTipDue(settings) && lineLatch !== null && !lineLatch.aside.includes('star'),
+    blocked: revealBlocked || otherRevealActive || starReveal.stage === 'open' || starReveal.stage === 'claimed' || sidebarCustomizing,
+    sidebar: sidebarDocked,
+    listLoaded: lineLatch !== null,
+    firstRun,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    rows: snoozeIntroRows,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+  });
+  if (sidebarTip.stage !== 'none') sidebarTipSpent.current = true;
+  // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
+  const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
+  useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
   threadFullRef.current = full;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
@@ -6232,7 +6279,9 @@ function Inbox() {
   }, [stack.thread, view, route.thread, phone]);
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
-  const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
+  const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.
@@ -6443,6 +6492,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
+        onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
@@ -7219,6 +7269,18 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
+            // The Agents section (approval "inbox-agents-section"): an agent opens its thread as a starred one does;
+            // Add agent is New message with a new session chosen (plain New message where nothing can be started
+            // from here), and Add machine is Settings → Machines, where a machine is linked.
+            agentRows={windowRows}
+            onOpenAgentThread={(threadId) => {
+              const now = routeRef.current;
+              if (now.page === 'inbox' && now.thread === threadId) return;
+              go({ page: 'inbox', project: now.page === 'inbox' ? now.project : null, thread: threadId });
+            }}
+            onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
+            onAddMachine={machines.self && !guestPage ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
             projectCounts={projectCounts}
             projectActivity={latestProjectActivity}
@@ -7456,6 +7518,7 @@ function Inbox() {
           onLeave={starReveal.close}
         />
       )}
+      {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
           groups={listViewChoiceGroups}
@@ -7781,6 +7844,7 @@ function Inbox() {
           guest={tailnetGuest(settings)}
           codeReview={codeReviewOn}
           shape={shapeOn}
+          chapterDiagrams={chapterDiagramsOn}
           // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
           onBack={() => {
             const now = routeRef.current;

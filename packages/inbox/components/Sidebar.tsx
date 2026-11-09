@@ -14,8 +14,9 @@ import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
 import { starPopping } from '../starPop';
-import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
-import { MachineSidebarWord } from './MachineUpdate';
+import type { MachinesModel } from '../machines';
+import { AgentsSection } from '../agents/AgentsSection';
+import { useInboxAgents } from '../agentsList';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
@@ -64,18 +65,30 @@ export interface SidebarProps {
   onShape?: () => void;
   shapeChanged?: number;
   projectId: string | null;
-  /** The machine the list shows (the Machines filter), or null for every machine. */
+  /** The machine the list shows (a machine's filter, its caption in Agents), or null for every machine. */
   machineId?: string | null;
   /**
-   * Linked machines (machines.ts): the Machines section above Projects, this machine first, each a filter of the
-   * list as a project is. No machine linked: no section at all.
+   * Linked machines (machines.ts): in the Agents section above Projects, each machine's agents under its name, this
+   * machine first; a machine's name is a filter of the list as a project is.
    */
   machines?: MachinesModel;
-  /** Rows waiting on the person, per machine id. */
+  /** Rows waiting on the person, per machine id (no longer drawn: the Agents section shows no counts). */
   machineCounts?: ReadonlyMap<string, number>;
   onMachine?: (machineId: string) => void;
   /** The word on a machine opens its update dialog. Absent on a page that offers no updates. */
   onMachineUpdate?: (machineId: string) => void;
+  /**
+   * The Agents section (approval "inbox-agents-section", agents/AgentsSection.tsx): shown while the list names agents
+   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's thread is
+   * found; `onOpenAgentThread` opens it; `onMessageAgent`: New message to a live agent with no thread here.
+   * `onAddAgent`: New message with a new session chosen (absent: no + button). `onAddMachine`: Settings → Machines
+   * (absent on an Inbox that cannot link).
+   */
+  agentRows?: readonly InboxListRow[];
+  onOpenAgentThread?: (threadId: string) => void;
+  onMessageAgent?: (session: string, opener: HTMLElement) => void;
+  onAddAgent?: (opener: HTMLElement) => void;
+  onAddMachine?: () => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
@@ -190,6 +203,9 @@ export interface SidebarProps {
   rememberSections?: boolean;
 }
 
+const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_ROWS: readonly InboxListRow[] = [];
+
 /**
  * Whether a scroll area has more below what it shows: the project list fades
  * at its foot while it does, so a list cut mid-name says it scrolls.
@@ -292,10 +308,13 @@ export function Sidebar(props: SidebarProps) {
   const pinnedBodyId = useId();
   const projectsLabelId = useId();
   const projectsBodyId = useId();
-  const machinesLabelId = useId();
-  const machinesBodyId = useId();
+  const agentsLabelId = useId();
+  const agentsBodyId = useId();
   const machineList = props.machines?.all ?? [];
-  const machinesClosed = sections.closed('machines');
+  const agentsClosed = sections.closed('agents');
+  // Agents shows while the list names agents (an Inbox from before them names none) or a machine is linked.
+  const agentsRead = useInboxAgents();
+  const agentsShown = agentsRead !== null || machineList.length > 0;
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
@@ -323,7 +342,7 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const track = (event: FocusEvent) => {
       const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
-      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-machines-section]') ? 'machines' : target?.closest('.ib-projs') ? 'projects' : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
     };
     document.addEventListener('focusin', track);
     return () => document.removeEventListener('focusin', track);
@@ -621,49 +640,37 @@ export function Sidebar(props: SidebarProps) {
             </section>
           </>
         )}
-        {machineList.length > 0 && props.onMachine && (
-          <>
-            {/* Linked machines: a filter as a project is, this machine first. A machine that is away reads quiet, as a
-                project with nothing waiting does, and its tooltip says since when. */}
-            <SectionHeader
-              section="machines"
-              id={machinesLabelId}
-              controls={machinesBodyId}
-              label="Machines"
-              icon="system"
-              open={!machinesClosed}
-              count={0}
-              onToggle={() => sections.toggle('machines')}
-            />
-            <div className="ib-projs" id={machinesBodyId} role="group" aria-labelledby={machinesLabelId} data-machines-section="" data-closed={machinesClosed ? '' : undefined}>
-              {machineList.map((machine) => {
-                const n = props.machineCounts?.get(machine.id) ?? 0;
-                const on = props.page === 'inbox' && props.machineId === machine.id && props.projectId === null;
-                if (machinesClosed && !on) return null;
-                const away = isAway(machine);
-                const notice = props.onMachineUpdate ? machineNotice(machine) : null;
-                return (
-                  <div key={machine.id} className="ib-mside" data-machine-notice={notice?.kind ?? undefined}>
-                    <Tip content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
-                      <button
-                        type="button"
-                        className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
-                        onClick={pick(() => props.onMachine?.(machine.id))}
-                        aria-current={on ? 'page' : undefined}
-                        data-machine={machine.id}
-                        data-away={away ? '' : undefined}
-                      >
-                        <span className="ib-name" dir="auto">{machine.name}</span>
-                        {away && <span className="ib-sr">, {awayLine(machine)}</span>}
-                        {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
-                      </button>
-                    </Tip>
-                    {notice && <MachineSidebarWord notice={notice} name={machine.name} onPress={pick(() => props.onMachineUpdate?.(machine.id))} />}
-                  </div>
-                );
-              })}
-            </div>
-          </>
+        {agentsShown && (
+          <AgentsSection
+            machines={props.machines ?? NO_MACHINES}
+            rows={props.agentRows ?? NO_ROWS}
+            machineId={props.machineId ?? null}
+            openThreadId={props.openThreadId ?? null}
+            page={props.page}
+            closed={agentsClosed}
+            onToggle={() => sections.toggle('agents')}
+            labelId={agentsLabelId}
+            bodyId={agentsBodyId}
+            header={(icon) => (
+              <SectionHeader
+                section="agents"
+                id={agentsLabelId}
+                controls={agentsBodyId}
+                label="Agents"
+                iconNode={icon}
+                open={!agentsClosed}
+                count={0}
+                onToggle={() => sections.toggle('agents')}
+              />
+            )}
+            onMachine={props.onMachine}
+            onMachineUpdate={props.onMachineUpdate}
+            onOpenThread={(threadId) => props.onOpenAgentThread?.(threadId)}
+            onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
+            onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
+            onAddMachine={props.onAddMachine}
+            pick={pick}
+          />
         )}
         {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
         <div className="ib-secrow">
@@ -809,7 +816,9 @@ function SectionHeader(props: {
   id: string;
   controls: string;
   label: string;
-  icon: IconName;
+  /** The section's icon, or `iconNode` (Agents' goggles, a mark of its own). */
+  icon?: IconName;
+  iconNode?: ReactNode;
   iconClass?: string;
   /** The section's star takes the little pop: a thread was starred just now. */
   pop?: boolean;
@@ -827,7 +836,7 @@ function SectionHeader(props: {
       data-sidebar-section={props.section}
       onClick={props.onToggle}
     >
-      <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />
+      {props.iconNode ?? (props.icon && <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />)}
       <span className="ib-side-sec-l">{props.label}</span>
       <span className="ib-side-sec-tail">
         {props.count > 0 && (

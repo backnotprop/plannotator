@@ -137,6 +137,10 @@ export function noteOneTimeDialogShown(): void {
 export function oneTimeDialogShownThisLoad(): boolean {
   return otherOneTimeDialogAt !== null && Date.now() - otherOneTimeDialogAt < REVEAL_TIMES.otherDialogMs;
 }
+/** A test starts each case as a fresh load. */
+export function resetOneTimeDialogShownForTests(): void {
+  otherOneTimeDialogAt = null;
+}
 
 export function useRevealMoment(input: RevealMomentInput) {
   const [stage, setStage] = useState<RevealStage>('none');
@@ -572,7 +576,7 @@ export function useStepsReveal(input: StepsRevealInput) {
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
-  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip'>;
+  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip'>;
   /**
    * The Inbox has it for this page, as the load's latch holds it (`useLineLatch`): `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.
@@ -675,7 +679,7 @@ export function useStarReveal(input: StarRevealInput) {
       return answer.show;
     },
   });
-  // The card is up: the other reveals hold back for the rest of this load (App's `revealBlocked`), without a stamp.
+  // The card is up: the other reveals hold back for the gap (App's `revealBlocked`, `REVEAL_TIMES.otherDialogMs`); the Inbox keeps the same gap from its stamp.
   useEffect(() => {
     if (moment.stage === 'open') noteOneTimeDialogShown();
   }, [moment.stage]);

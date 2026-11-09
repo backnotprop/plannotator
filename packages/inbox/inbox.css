@@ -4478,32 +4478,39 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
  * The Launch tip (approval "launch-tip", variant Beside; compose/launchTip.ts): the tour's coach card, drawn inside the
  * To row (so inside the modal dialog), beside the box level with To, or under To when the window has no room (or on a
  * phone). Its ring and arrow mix in srgb: oklch swings the primary's hue against the hueless popover.
+ * Its classes are `ib-ctip…`, never `ib-lt…`: that name is the pull request page's line threads (pulls/LineThreads.tsx),
+ * whose `.ib-lt` rule (a flat surface with hairlines) once repainted this card and left its arrow a different colour.
  */
-.ib-tour-coach.ib-lt { position: absolute; z-index: 6; right: auto; bottom: auto; width: 284px; max-width: none; max-height: none; padding: 12px 14px 10px; animation: none; text-align: left; --ib-lt-ring: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: 0 0 0 1px var(--ib-lt-ring), var(--ib-float-shadow, 0 16px 40px -12px rgb(0 0 0 / 0.45)); }
-.ib-tour-coach.ib-lt[data-phone] { right: 12px; width: auto; }
-.ib-tour-coach.ib-lt h2 { margin: 0 0 2px; font-size: var(--ib-fs-14-5, 14.5px); }
-.ib-tour-coach.ib-lt p { font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
-.ib-tour-coach.ib-lt .ib-tc-eb { margin-bottom: 1px; }
-.ib-tour-coach.ib-lt .ib-tc-acts { margin-top: 10px; }
+.ib-tour-coach.ib-ctip { position: absolute; z-index: 6; right: auto; bottom: auto; width: 284px; max-width: none; max-height: none; padding: 12px 14px 10px; animation: none; text-align: left; --ib-ctip-ring: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: 0 0 0 1px var(--ib-ctip-ring), var(--ib-float-shadow, 0 16px 40px -12px rgb(0 0 0 / 0.45)); }
+.ib-tour-coach.ib-ctip[data-phone] { right: 12px; width: auto; }
+.ib-tour-coach.ib-ctip h2 { margin: 0 0 2px; font-size: var(--ib-fs-14-5, 14.5px); }
+.ib-tour-coach.ib-ctip p { font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
+.ib-tour-coach.ib-ctip .ib-tc-eb { margin-bottom: 1px; }
+.ib-tour-coach.ib-ctip .ib-tc-acts { margin-top: 10px; }
 /* A desktop's Got it is the mock's 28 px; a phone keeps the coach card's 44 px tap target. */
-.pn-inbox .ib-tour-coach.ib-lt:not([data-phone]) .ib-tc-next { height: 28px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); }
-.ib-lt-arrow { position: absolute; width: 10px; height: 10px; background: var(--popover); transform: rotate(45deg); }
-.ib-lt-arrow[data-side="left"] { left: -5px; top: 21px; box-shadow: -1px 1px 0 0 var(--ib-lt-ring); }
-.ib-lt-arrow[data-side="up"] { top: -5px; left: 24px; box-shadow: -1px -1px 0 0 var(--ib-lt-ring); }
+.pn-inbox .ib-tour-coach.ib-ctip:not([data-phone]) .ib-tc-next { height: 28px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); }
+.ib-ctip-arrow { position: absolute; width: 10px; height: 10px; background: var(--popover); transform: rotate(45deg); }
+.ib-ctip-arrow[data-side="left"] { left: -5px; top: 21px; box-shadow: -1px 1px 0 0 var(--ib-ctip-ring); }
+.ib-ctip-arrow[data-side="up"] { top: -5px; left: 24px; box-shadow: -1px -1px 0 0 var(--ib-ctip-ring); }
 /* Enter: a fade and a 4 px slide from the side it points at. Leave: shorter, a fade with a hair of scale. Reduced: fades only. */
 @media (prefers-reduced-motion: no-preference) {
-  .ib-tour-coach.ib-lt[data-side="right"] { animation: ib-lt-in-left 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
-  .ib-tour-coach.ib-lt[data-side="below"] { animation: ib-lt-in-up 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
-  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-out 120ms ease-out both; }
-  @keyframes ib-lt-in-left { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
-  @keyframes ib-lt-in-up { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-  @keyframes ib-lt-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.98); } }
+  .ib-tour-coach.ib-ctip[data-side="right"] { animation: ib-ctip-in-left 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-ctip[data-side="below"] { animation: ib-ctip-in-up 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-ctip[data-leaving] { animation: ib-ctip-out 120ms ease-out both; }
+  @keyframes ib-ctip-in-left { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-ctip-in-up { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-ctip-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.98); } }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ib-tour-coach.ib-lt { animation: ib-lt-fade 120ms linear both; }
-  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-fade 100ms linear reverse both; }
-  @keyframes ib-lt-fade { from { opacity: 0; } to { opacity: 1; } }
+  .ib-tour-coach.ib-ctip { animation: ib-ctip-fade 120ms linear both; }
+  .ib-tour-coach.ib-ctip[data-leaving] { animation: ib-ctip-fade 100ms linear reverse both; }
+  @keyframes ib-ctip-fade { from { opacity: 0; } to { opacity: 1; } }
 }
+/*
+ * The Sidebar tip (sidebarTip.ts): the Launch tip's card, fixed beside the sidebar with its arrow on the sidebar's
+ * edge. Under every menu and dialog (they are what a person opens over it).
+ */
+.ib-tour-coach.ib-ctip.ib-st { position: fixed; z-index: 60; }
 /* Create thread from a Board card: which card the new thread is for. */
 .ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
 .ib-cp-card b { color: var(--foreground); font-weight: 600; }

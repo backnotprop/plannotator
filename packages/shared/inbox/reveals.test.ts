@@ -126,6 +126,10 @@ describe("the spacing", () => {
     // A card that stands aside (the star ask, the grill-me tip) starts the gap too, so nothing stacks on it.
     expect(revealNext(state({ asideShownAt: ago(40 * MINUTE - 1) }), NOW)).toBeNull();
     expect(revealNext(state({ asideShownAt: ago(40 * MINUTE) }), NOW)).toBe("snooze");
+    // So does a tip outside the line (the Sidebar tip, the Launch tip): a dialog follows it 40 minutes later at the earliest.
+    expect(revealNext(state({ tipShownAt: ago(40 * MINUTE - 1) }), NOW)).toBeNull();
+    expect(revealMayClaim("snooze", state({ tipShownAt: ago(40 * MINUTE - 1) }), NOW)).toBe(false);
+    expect(revealNext(state({ tipShownAt: ago(40 * MINUTE) }), NOW)).toBe("snooze");
   });
 
   test("the clock is the latest stamp of any announcement, whatever key it is in", () => {

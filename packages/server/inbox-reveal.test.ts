@@ -21,6 +21,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { INBOX_SIDEBAR_DEFAULT } from "@plannotator/core/inbox-sidebar";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -877,12 +878,16 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect((await w.claim("launch_tip", KEY)).show).toBe(true);
     const saved = w.saved().inboxReveals;
     expect(saved.launch_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
-    // Not a dialog: the line's day, spacing and load stay as they were, and its next is untouched.
+    // Not a dialog of the line: none of the line's own stamps move. It starts the 40-minute gap all the same, so
+    // nothing follows it at once: the line has nothing next, and says when to ask again.
     expect(saved.dayShownAt).toBeUndefined();
     expect(saved.lastShownAt).toBeUndefined();
     expect(saved.shownLoad).toBeUndefined();
-    expect((await w.settings()).reveal.next).toBe(lineBefore);
-    expect((await w.settings()).reveal.launch_tip).toBe(false);
+    expect(lineBefore).toBe("board");
+    const after = (await w.settings()).reveal;
+    expect(after.next).toBeNull();
+    expect(after.again_in).toBeGreaterThan(39 * 60_000);
+    expect(after.launch_tip).toBe(false);
     // Another window or the phone: no. The same page's retry after a lost answer: yes, with no second write.
     expect((await w.claim("launch_tip", "another-key-22")).show).toBe(false);
     expect((await w.claim("launch_tip")).show).toBe(false);
@@ -912,5 +917,95 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect(tailnet.saved().inboxReveals.launch_tip.shownAt).toMatch(/^\d{4}-/);
 
     expect((await off.post("/api/inbox/reveal", { id: "launch_tip", answer: "not_now" })).status).toBe(422);
+  });
+});
+
+describe("the Sidebar tip: outside the line, stamped once when shown, never for someone who customized the sidebar", () => {
+  const KEY = "sidebar-tip-key-1";
+
+  test("the tips and the line keep one 40-minute gap, both ways, and never stack (the owner, 2026-11-09)", async () => {
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    const LAUNCH = { inboxLaunch: { enabled: true } };
+    // A tip, then a line dialog: not within 40 minutes of it, and 40 minutes on the Board is next again.
+    const tipFirst = await world();
+    expect((await tipFirst.claim("sidebar_tip", KEY)).show).toBe(true);
+    expect((await tipFirst.claim("board")).show).toBe(false);
+    expect(tipFirst.saved().inboxReveals.board).toBeUndefined();
+    const tipThen = await world({ config: { inboxReveals: { sidebar_tip: { shownAt: minutesAgo(41), key: KEY } } } });
+    expect(await tipThen.next()).toBe("board");
+    expect((await tipThen.claim("board")).show).toBe(true);
+    // A line dialog, then the tips: neither due nor claimable within 40 minutes of it; unspent, and due again after.
+    const dialogFirst = await world({ config: LAUNCH });
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal).toMatchObject({ sidebar_tip: false, launch_tip: false });
+    expect((await dialogFirst.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect((await dialogFirst.claim("launch_tip", KEY)).show).toBe(false);
+    expect(dialogFirst.saved().inboxReveals.sidebar_tip).toBeUndefined();
+    expect(dialogFirst.saved().inboxReveals.launch_tip?.shownAt).toBeUndefined();
+    const dialogThen = await world({ config: { ...LAUNCH, inboxReveals: { lastShownAt: minutesAgo(41), dayShownAt: minutesAgo(41), board: { shownAt: minutesAgo(41) } }, inboxBoard: true } });
+    expect((await dialogThen.settings()).reveal).toMatchObject({ sidebar_tip: true, launch_tip: true });
+    // One tip, then the other: the same gap.
+    expect((await dialogThen.claim("launch_tip", KEY)).show).toBe(true);
+    expect((await dialogThen.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await dialogThen.claim("sidebar_tip", "sidebar-key-2")).show).toBe(false);
+    // A dev build keeps no line and no gap: the tip goes by its own rule.
+    const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { lastShownAt: minutesAgo(1) } } });
+    expect((await dev.settings()).reveal.sidebar_tip).toBe(true);
+  });
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.sidebar_tip; a second window gets no; the same key is shown it again", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.sidebar_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.sidebar_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // Not a dialog of the line: none of the line's own stamps move. It starts the 40-minute gap all the same, so
+    // nothing follows it at once: the line has nothing next, and says when to ask again.
+    expect(saved.dayShownAt).toBeUndefined();
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.shownLoad).toBeUndefined();
+    expect(lineBefore).toBe("board");
+    const after = (await w.settings()).reveal;
+    expect(after.next).toBeNull();
+    expect(after.again_in).toBeGreaterThan(39 * 60_000);
+    expect(after.sidebar_tip).toBe(false);
+    // Another window: no. The same page's retry after a lost answer: yes, with no second write.
+    expect((await w.claim("sidebar_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("sidebar_tip")).show).toBe(false);
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.sidebar_tip.shownAt).toBe(saved.sidebar_tip.shownAt);
+    // The Launch tip is its own stamp.
+    expect(saved.launch_tip).toBeUndefined();
+  });
+
+  test("never once a sidebar layout was saved, also one set back to the default; a save between the read and the claim refuses it unstamped", async () => {
+    const customized = await world({ config: { inboxSidebar: { ...INBOX_SIDEBAR_DEFAULT, hidden: ["feedback"] }, inboxSidebarRev: 1 } });
+    expect((await customized.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await customized.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(customized.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+
+    const w = await world();
+    expect((await w.settings()).reveal.sidebar_tip).toBe(true);
+    // The person finds Customize by themselves and ends on the default again: they know it.
+    expect((await w.post("/api/inbox/settings", { sidebar: INBOX_SIDEBAR_DEFAULT })).status).toBe(200);
+    expect((await w.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+  });
+
+  test("never on the first day; never for a guest, or as a Not now", async () => {
+    const dayZero = await world({ days: 0 });
+    expect((await dayZero.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await dayZero.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(dayZero.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+
+    const tailnet = await world({ tailnet: "owner" });
+    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(false);
+    expect(tailnet.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+    expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(true);
+    expect(tailnet.saved().inboxReveals.sidebar_tip.shownAt).toMatch(/^\d{4}-/);
+
+    expect((await tailnet.post("/api/inbox/reveal", { id: "sidebar_tip", answer: "not_now" })).status).toBe(422);
   });
 });

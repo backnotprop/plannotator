@@ -109,6 +109,7 @@ import {
   INBOX_REMINDER_HOSTS,
   INBOX_TOOL_HOSTS,
   cookieHostState,
+  inboxChapterDiagramsOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -219,8 +220,9 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
-import { isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
@@ -253,6 +255,7 @@ import {
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
+import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
@@ -515,6 +518,8 @@ export interface InboxServerOptions {
   shape?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
   system?: boolean;
+  /** Chapter diagrams, decided here instead of config.json `inboxChapterDiagrams` (tests). Absent: config.json decides on every request (on unless false). */
+  chapterDiagrams?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -1408,6 +1413,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
         // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
         shapeOn: () => shapeOn(),
+        // Chapter diagrams: get_guide_brief and submit_guide name a chapter's diagram only while it is on.
+        chapterDiagramsOn: () => chapterDiagramsOn(),
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
         snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
         snoozeMade: () => markSnoozeUsed(),
@@ -2763,6 +2770,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const systemWire = system.wire;
   /** The open PRs' files by head commit, for "Open PRs that change this" (read again only for a PR that moved). */
   const systemFiles = systemFilesCache();
+  /**
+   * Chapter diagrams, under Code review (Settings → Capabilities): on unless the person turned it off (config.json
+   * `inboxChapterDiagrams`). Off, get_guide_brief, submit_guide's `guide` field and the review skills name no chapter
+   * diagram, and the window draws one that still arrives folded. Read on every request.
+   */
+  const chapterDiagramsOn = () => options.chapterDiagrams ?? inboxChapterDiagramsOn(loadConfig());
+  /** The switch's state for the window: present only while Code review is on (the row shows only then), as System's. */
+  const chapterDiagramsWire = (): { chapter_diagrams?: { on: boolean } } => (codeReviewOn() ? { chapter_diagrams: { on: chapterDiagramsOn() } } : {});
+  const saveChapterDiagrams = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "chapter_diagrams: { on: boolean }.", { field: "chapter_diagrams" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: chapterDiagramsOn() };
+    const was = chapterDiagramsOn();
+    saveConfig({ inboxChapterDiagrams: on });
+    if (inboxChapterDiagramsOn(loadConfig()) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Every window follows at once (its Settings switch, the review skills it pastes, a chapter diagram's fold).
+    if (was !== chapterDiagramsOn()) for (const listener of capabilityListeners) listener();
+    return { on: chapterDiagramsOn() };
+  };
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2935,6 +2963,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
     };
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
@@ -3034,9 +3064,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): the owner's, while Launch is on and no
-   * agent was ever started here, until it was shown once. Outside the line: its claim stamps only
-   * `inboxReveals.launch_tip`, never the line's day or spacing, and it waits for neither.
+   * agent was ever started here, until it was shown once. Outside the line's order: its claim stamps only
+   * `inboxReveals.launch_tip`. Since the gap replaced the one-a-day rule (2026-11-09) it keeps the gap as the Sidebar
+   * tip does (`tipFree`): never within 40 minutes of a dialog or the other tip, and no dialog within 40 minutes of it.
    */
+  /** A tip outside the line may show now: no dialog or tip within the gap (a release build; a dev build keeps none). */
+  const tipFree = (): boolean => lineFree("setup", null);
   /** An agent was started from this Inbox: kept in `inboxReveals.launch_tip.launchedAt`, so deleting that thread never brings the tip back. */
   const keepLaunchedOnce = () => {
     const kept = launchTipLaunched(loadConfig().inboxReveals?.launch_tip, new Date().toISOString());
@@ -3056,9 +3089,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const at = new Date().toISOString();
     const claim = launchTipClaim(launchTipState(owner), key, at);
     if (!claim.save) return claim.show;
+    if (!tipFree()) return false;
     saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, launch_tip: claim.save } });
     // Not written (a read-only data dir): showing it anyway would show it on every New message.
     return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
+  };
+  /**
+   * The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): the owner's, a day or more after first use, while no
+   * sidebar layout was ever saved, until it was shown once. Outside the line's order, as the Launch tip: its claim
+   * stamps only `inboxReveals.sidebar_tip`, and it keeps the gap both ways (`tipFree`; `revealState` `tipShownAt`).
+   */
+  const sidebarTipState = (owner: boolean): SidebarTipState => {
+    const config = loadConfig();
+    return {
+      owner,
+      customized: sidebarState().rev > 0 || config.inboxSidebar !== undefined,
+      firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+      tenure: snoozeIntroRelease,
+      saved: config.inboxReveals?.sidebar_tip,
+    };
+  };
+  const claimSidebarTip = (owner: boolean, key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = sidebarTipClaim(sidebarTipState(owner), key, at);
+    if (!claim.save) return claim.show;
+    // Inside the gap after a dialog or the other tip: not now (nothing is spent; a later moment asks again).
+    if (!tipFree()) return false;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, sidebar_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
   };
   /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
@@ -3084,7 +3143,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
           : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
-      launch_tip: launchTipDue(launchTipState(owner)),
+      launch_tip: launchTipDue(launchTipState(owner)) && revealLineFree("setup", state, now),
+      // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
+      sidebar_tip: sidebarTipDue(sidebarTipState(owner), now.toISOString()) && revealLineFree("setup", state, now),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -3223,6 +3284,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...heldSwitch("shape", shapeOn()),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
     ...systemWire(),
+    /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
+    ...chapterDiagramsWire(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -3405,7 +3468,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire() };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -3906,10 +3969,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
   // once each (inbox-codex-wake.ts). Worded like any bridge command.
+  /** The launch engine exists (the Codex wake is made before it). */
+  let launchReady = false;
+  /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
+  const launchedCodex = (session: string) =>
+    store.launchedRoots().some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
+    // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
+    // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
+    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
+    launched: (session) => launchedCodex(session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
@@ -4036,8 +4109,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
-  // Launch: compose starts Claude Code or Pi in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
+  // Launch: compose starts Claude Code, Pi or Codex in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
+  // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
+  const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
+    process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
   const launch = createInboxLaunch({
     store,
     live,
@@ -4054,7 +4130,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           env: () => process.env,
           log: (line) => process.stderr.write(`${line}\n`),
         }),
-    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env),
+    ownEnv: launchOwnEnv,
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
     // that is the Keychain's rule, so only on a Mac.
@@ -4073,6 +4149,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
     isGuest,
   });
+  launchReady = true;
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4267,6 +4344,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
+  // Settings → Agents' Codex account line: read from Codex when the page asks, never polled (inbox-codex-account.ts).
+  // The same `codex` and Codex home a launch finds (the plain env launch uses), so the line is the account a launch runs as.
+  const codexAccount = createInboxCodexAccount({
+    environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchOwnEnv() }),
+    ready: () => launch.availableFor(INBOX_CODEX_HOST),
+    dataDir,
+    ...(options.voice?.extraClis ? { extraClis: options.voice.extraClis } : {}),
+  });
   const voice = createInboxVoice({
     dataDir,
     environment: agentEnvironment,
@@ -5157,6 +5242,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ error: "Not found", code: "not_found" }, 404);
       }
+      // Codex's account (Settings → Agents): the person's own login, never a tailnet guest's to read.
+      if (path === "/api/inbox/codex/account") {
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+        return json({ account: await codexAccount.read() });
+      }
       // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
         // The person's own agent files: only theirs, never a tailnet guest's.
@@ -5247,11 +5339,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
+          body.chapter_diagrams === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -5268,6 +5361,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.shape !== undefined && !owner) return localOnly();
         // System too (the drawings, and from B9 the jobs that keep them current); a malformed value throws here.
         if (system.check(body, owner) === "local_only") return localOnly();
+        // Chapter diagrams too (what get_guide_brief and the review skills offer agents): the owner's to change.
+        if (body.chapter_diagrams !== undefined && !owner) return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -5317,6 +5412,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
+        if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -5344,9 +5440,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = system.answer(body);
+        // Present while Code review is on, and always to the save that set it.
+        const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -5429,8 +5527,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -5448,6 +5546,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Launch tip: outside the line, its own stamp only (packages/shared/inbox/launch-tip.ts).
         if (id === "launch_tip") {
           return json({ show: claimLaunchTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
+        if (id === "sidebar_tip") {
+          return json({ show: claimSidebarTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -6549,6 +6651,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     qwenWake.stop();
     t3Wake.stop();
     voice.stop();
+    codexAccount.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
     ask.stop();

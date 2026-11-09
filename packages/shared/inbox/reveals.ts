@@ -23,8 +23,10 @@
  *    next one"; it was "never on two page loads in a row", and a load that showed one showed no other): the gap is the
  *    only pace, on any load. `inboxReveals.shownLoad` is still stamped, as a record; nothing reads it.
  *  - Spacing (changed 2026-11-09: about 40 minutes; it was one day): `REVEAL_SPACING_MS` (40 minutes) after the last
- *    dialog of any kind: the line's own (`lastShownAt`), the agent note (`dayShownAt`) and the ones that stand aside
- *    (`asideShownAt`: the star ask, the grill-me tip), so none stacks on another (`revealGapFree`).
+ *    dialog of any kind: the line's own (`lastShownAt`), the agent note (`dayShownAt`), the ones that stand aside
+ *    (`asideShownAt`: the star ask, the grill-me tip) and the tips outside the line (`tipShownAt`: the Sidebar tip,
+ *    the Launch tip), so none stacks on another (`revealGapFree`). The tips keep the gap themselves the same way
+ *    (the server asks `revealLineFree("setup")` before it reports or claims one).
  *    `REVEAL_NOT_NOW_SPACING_MS` (3 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
  *    update-day dialog's Not now keeps the 40 minutes; the agent note does not wait for it). The clock also
  *    reads the announcements' own `shownAt` stamps from before that key existed (`revealLastShown`).
@@ -177,6 +179,11 @@ export interface RevealState {
   open: Partial<Record<RevealId, boolean>>;
   /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
+  /**
+   * When a tip outside the line was last shown (config.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`):
+   * the gap counts from it too, so no dialog follows a tip within 40 minutes, and a tip waits out the gap after a dialog.
+   */
+  tipShownAt?: string | null;
   /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
 }
@@ -205,8 +212,8 @@ export function revealSpaced(lastShownAt: string | null | undefined, now: Date, 
  * No dialog of any kind was shown within `REVEAL_SPACING_MS`: the line's own, the agent note, the ones that stand
  * aside. (Until 2026-11-09 this was "none today", a local calendar day.)
  */
-export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShownAt" | "asideShownAt">, now: Date): boolean {
-  return [state.lastShownAt, state.dayShownAt, state.asideShownAt].every((stamp) => {
+export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShownAt" | "asideShownAt" | "tipShownAt">, now: Date): boolean {
+  return [state.lastShownAt, state.dayShownAt, state.asideShownAt, state.tipShownAt].every((stamp) => {
     const at = time(stamp);
     return at === null || now.getTime() - at >= REVEAL_SPACING_MS;
   });
@@ -335,7 +342,7 @@ export function revealAgainAt(state: RevealState, now: Date, table: readonly Rev
     const at = time(stamp);
     moments.push(at === null ? null : at + ms);
   };
-  for (const stamp of [state.lastShownAt, state.dayShownAt, state.asideShownAt]) after(stamp, REVEAL_SPACING_MS);
+  for (const stamp of [state.lastShownAt, state.dayShownAt, state.asideShownAt, state.tipShownAt]) after(stamp, REVEAL_SPACING_MS);
   after(state.notNowAt, REVEAL_NOT_NOW_SPACING_MS);
   const first = time(state.firstUseAt);
   for (const entry of table) {
