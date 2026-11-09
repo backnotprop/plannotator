@@ -18,7 +18,7 @@
  */
 
 import { markTourDecided } from '../helpers/tour-decided';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -401,12 +401,22 @@ test('a row opens the thread as an email with the question cards, and no decisio
   await shot('2.1-thread');
 });
 
+/** A question card's edge as drawn: its border and its ring (the look decides which one carries the accent). */
+const cardEdge = (card: Locator) => card.evaluate((el) => `${getComputedStyle(el).borderTopColor} ${getComputedStyle(el).boxShadow}`);
+/** An open card's edge, read before the first pick. */
+let openCardEdge = '';
+
 test('a pick is saved at once and the agent reads it through read_thread', async () => {
   const { page } = world;
   const [claude] = world.agents;
   const pane = page.locator('section.ib-pane');
+  // An open card's edge, for the accent a draft pick puts on it and a sent answer takes off again (below).
+  const cards = pane.locator('fieldset.question-block');
+  openCardEdge = await cardEdge(cards.first());
   await pane.getByText('Retry with the same idempotency key', { exact: true }).click();
   await expect(pane.getByText(/^Picked \d{1,2}:\d{2} [AP]M · in your draft$/)).toBeVisible();
+  await expect.poll(() => cardEdge(cards.first())).not.toBe(openCardEdge);
+  expect(await cardEdge(cards.nth(1))).toBe(openCardEdge);
   await expect
     .poll(async () => {
       const thread = await claude!.readThread(world.threads.stopped!);
@@ -515,6 +525,11 @@ test('Send carries the picks and the words, read_thread returns them, and the th
   await expect(pane.locator('.ib-delivered')).toHaveAttribute('data-delivery', 'delivered');
   await expect(pane.locator('.ib-delivered')).toHaveText(/^Delivered to Claude Code, \d{1,2}:\d{2} [AP]M$/);
   await expect(pane.getByText(/^Sent \d{1,2}:\d{2} [AP]M$/)).toHaveCount(2);
+  // Sent, the cards settle in the open thread: locked, and the draft pick's accent is off, with no list read or reopen.
+  for (const card of await pane.locator('fieldset.question-block').all()) {
+    await expect(card).toHaveAttribute('aria-disabled', 'true');
+    await expect.poll(() => cardEdge(card)).toBe(openCardEdge);
+  }
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
   await shot('2.x-sent-delivered');
 });

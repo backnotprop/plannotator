@@ -5165,7 +5165,10 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox fieldset.question-block { --primary: var(--ib-qc-primary-s, var(--ib-primary0)); }
 }
 .pn-inbox :is(.ib-body, .ib-docscroll) fieldset.question-block { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--border) 85%, transparent)); border-radius: var(--ib-qc-r-s, 10px); background: var(--ib-qc-bg-s, color-mix(in oklab, var(--background) 35%, var(--card))); }
-.pn-inbox :is(.ib-body, .ib-docscroll) fieldset.question-block[data-question-status="answered"] { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--primary) 45%, transparent)); box-shadow: var(--ib-qc-answered-s, none); }
+/* The answered accent is for a pick that still waits in the draft. Once the answer is sent (or the question takes
+   none any more), the thread locks the card (ui sets aria-disabled on a read-only card) and it settles to the plain
+   border at once, so the accent never stays on a thread's finished cards. */
+.pn-inbox :is(.ib-body, .ib-docscroll) fieldset.question-block[data-question-status="answered"]:not([aria-disabled="true"]) { border-color: var(--ib-qc-border-s, color-mix(in oklab, var(--primary) 45%, transparent)); box-shadow: var(--ib-qc-answered-s, none); }
 .pn-inbox .question-block > div:first-child > span:first-child { font-weight: var(--ib-qc-eye-w-s, 600); letter-spacing: var(--ib-qc-eye-track-s, 0.08em); text-transform: var(--ib-qc-eye-case-s, uppercase); }
 /* The eyebrow's tags. Off, each keeps its tone (ui's Tag: rec primary/15, ok success/15, skip muted, open a
    dashed border); the tone's own values ride --ib-qt-*0, set below from ui's classes. */
