@@ -160,7 +160,7 @@ export function AgentsSection(props: AgentsSectionProps) {
   return (
     // Closed, it is a section like Projects: its heading only (and the row on show), no panel and no buttons (the
     // owner, 2026-11-09). Open, the inset panel wraps it and its heading carries Add agent and Add machine.
-    <div className={props.closed ? 'ib-agents' : 'ib-agents ib-sbagents'} data-agents-surface="" data-closed={props.closed ? '' : undefined}>
+    <div className={props.closed ? 'ib-agentsec' : 'ib-agentsec ib-sbagents'} data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />)}
         {!props.closed && (
