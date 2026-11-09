@@ -12,6 +12,7 @@
 
 import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
+import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -253,6 +254,11 @@ configurePlannotatorUI({
   refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
+  // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
+  // shows) and the rest in idle time, not all at once when the thread opens (utils/codeHighlight).
+  deferOffscreenCodeHighlight: true,
+  // Their tokens are made in a Web Worker; the page only writes the markup (codeHighlightWorker.ts).
+  codeHighlightWorker: createInboxCodeHighlightWorker(() => import('./codeHighlight.worker?worker&inline').then((module) => new module.default())),
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   // The `/` and `$` skill picker (composers and comments on attached files)
   // lists this computer's global skills (approval "inbox-skill-references").
