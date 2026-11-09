@@ -2,9 +2,9 @@
  * Every group in the list closes and opens by a click on its header
  * (approval "inbox-list-groups-close"). What is proved, on the window's own
  * InboxList: each group's header is a button with aria-expanded that hides and
- * shows its rows; its only chevron is a decorative one that shows after the
- * pointer rests on the header (GROUP_CHEV_DWELL_MS) or on keyboard focus, never
- * on a pass or a touch (owner, 2026-11-08); for someone
+ * shows its rows; its only chevron is a decorative one that shows at once
+ * while the pointer is on the header, or on keyboard focus, never on a touch
+ * (owner, 2026-11-08: no wait, as the sidebar's sections); for someone
  * who never closed one, Quiet and Snoozed start closed and every other group
  * open; the choice is this browser's (storage) and survives a remount, while
  * the tour's list ignores it; something new inside a closed group bolds its
@@ -26,7 +26,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListGroupId, InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { InboxList, GROUP_CHEV_DWELL_MS } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_GROUPS_COOKIE } = await import('./listGroups');
 const { listKeyTarget } = await import('./listKeys');
@@ -191,23 +191,17 @@ const pointer = (el: HTMLElement, type: 'pointerover' | 'pointerout', pointerTyp
   });
 const wait = (ms: number) => act(() => jest.advanceTimersByTime(ms));
 
-test.skipIf(!hasDom)('a header shows its chevron only once the pointer rests on it, at once on keyboard focus, never on a touch', () => {
+test.skipIf(!hasDom)('a header shows its chevron at once while the pointer is on it, at once on keyboard focus, never on a touch', () => {
   if (!hasDom) return;
   jest.useFakeTimers();
   try {
     draw(sections());
-    // Passing over: nothing before the dwell, and leaving early cancels it.
+    const cascade = loadCascade(CSS);
+    const chev = (id: InboxListGroupId) => header(id).querySelector('svg.ib-band-chev')!;
+    // The pointer on the header: shown with no wait, and drawn (opacity 1), open or closed; gone on leave.
     pointer(header('waiting'), 'pointerover');
-    expect(chevShown('waiting')).toBe(false);
-    wait(GROUP_CHEV_DWELL_MS - 50);
-    expect(chevShown('waiting')).toBe(false);
-    pointer(header('waiting'), 'pointerout');
-    wait(GROUP_CHEV_DWELL_MS);
-    expect(chevShown('waiting')).toBe(false);
-    // Resting: shown after the dwell, open or closed, and gone on leave.
-    pointer(header('waiting'), 'pointerover');
-    wait(GROUP_CHEV_DWELL_MS);
     expect(chevShown('waiting')).toBe(true);
+    expect(cascade.resolved(chev('waiting'), 'opacity')).toBe('1');
     expect(chevShown('stopped')).toBe(false);
     click(header('waiting'));
     expect(isOpen('waiting')).toBe(false);
@@ -215,15 +209,14 @@ test.skipIf(!hasDom)('a header shows its chevron only once the pointer rests on 
     pointer(header('waiting'), 'pointerout');
     expect(chevShown('waiting')).toBe(false);
     pointer(header('quiet'), 'pointerover');
-    wait(GROUP_CHEV_DWELL_MS);
     expect(isOpen('quiet')).toBe(false);
     expect(chevShown('quiet')).toBe(true);
     pointer(header('quiet'), 'pointerout');
     // A touch shows nothing, however long.
     pointer(header('new'), 'pointerover', 'touch');
-    wait(GROUP_CHEV_DWELL_MS * 4);
+    wait(2000);
     expect(chevShown('new')).toBe(false);
-    // Keyboard focus: at once, no dwell; gone when focus leaves.
+    // Keyboard focus: at once; gone when focus leaves.
     act(() => header('sent').focus());
     expect(chevShown('sent')).toBe(true);
     act(() => header('sent').blur());

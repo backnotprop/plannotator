@@ -1103,8 +1103,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
 /* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): at the header's right end, as the
-   chevrons were before (owner's pick). Hidden until the pointer rests on the header for a moment or keyboard focus
-   lands on it (data-chev, GroupBand in InboxList.tsx).
+   chevrons were before (owner's pick). Hidden until the pointer is on the header (at once, as the sidebar's sections)
+   or keyboard focus lands on it (data-chev, GroupBand in InboxList.tsx).
    It points right closed and down open, as the sidebar's sections do. It fades in over 200 ms with a 3 px slide, and
    goes in 100 ms; always drawn, so nothing moves when it shows. Reduced motion: the fade only. */
 .pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
