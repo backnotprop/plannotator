@@ -4,7 +4,8 @@
  * `broReveal.test.tsx` drives the gate alone.
  *
  * What regresses: App not drawing the card, or not arming it when the line says `bro`, at its moment (back on the list
- * from a long agent message); a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
+ * from a long agent message); a tab loaded while the line was held (the day after another dialog) never arming it
+ * however long it stays loaded, so only a reload ever shows it; a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
  * tailnet guest changing what every agent here reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -12,7 +13,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -179,6 +180,35 @@ test.skipIf(!hasDom)('the card opens in the window when the queue says bro, at t
   act(() => document.querySelector<HTMLButtonElement>('[data-bro-intro-on]')!.click());
   await until(() => config().inboxBro === true, 'config.json inboxBro true');
   await until(() => card() === null, 'the card to close');
+}, 30_000);
+
+test.skipIf(!hasDom)('a tab loaded the day after another dialog and left loaded shows the card once the line is free, with no reload', async () => {
+  // The line's last dialog, as config.json keeps it (the Inbox reads it live).
+  const lastDialog = (at: number) => {
+    const stamp = new Date(at).toISOString();
+    writeFileSync(join(server!.dataDir, 'config.json'), JSON.stringify({ ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } }));
+  };
+  // A dialog showed a moment ago: this load may arm nothing.
+  lastDialog(Date.now());
+  reveal.REVEAL_TIMES.lineReadMs = 200;
+  await readAndLeave();
+  await wait(TIMES.settledMs + 400);
+  expect(openDialogs()).toEqual([]);
+  expect(config().inboxReveals.bro).toBeUndefined();
+  // More than a day passes on the same tab: the Inbox has Bro mode next, and the tab asks it for the line again.
+  lastDialog(Date.now() - 26 * 3_600_000);
+  await wait(reveal.REVEAL_TIMES.lineReadMs + 300);
+  act(() => {
+    window.location.hash = `#thread=${server!.thread}`;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await wait(TIMES.broReadMs + 150);
+  act(() => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => card() !== null, 'the card on the tab left loaded');
+  expect(typeof config().inboxReveals.bro.shownAt).toBe('string');
 }, 30_000);
 
 test.skipIf(!hasDom)("a click outside is Not now: no switch, the line's gap stamped, and it does not come back", async () => {

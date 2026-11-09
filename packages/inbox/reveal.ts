@@ -40,6 +40,8 @@ export const REVEAL_TIMES = {
   claimRetryMs: 1_500,
   /** Bro mode's moment: the long agent message was open this long before the person went back to the list. */
   broReadMs: 20_000,
+  /** A load that has shown no one-time dialog reads the line again this often (`useLineLatch`). */
+  lineReadMs: 10 * 60_000,
 };
 
 /**
@@ -305,7 +307,7 @@ export function revealThreadFactsOf(threadId: string): RevealThreadFacts | null 
   return threadFacts.get(threadId) ?? null;
 }
 
-/** What a load arms, read once from settings: the reveal that is next, and whether that is Snooze's announcement. */
+/** What a load arms, from one settings read (`useLineLatch` keeps it): the reveal that is next, and whether that is Snooze's announcement. */
 export interface RevealArmed {
   next: InboxRevealId | null;
   /** Snooze's own `due`, armed only while it is next. */
@@ -326,6 +328,48 @@ export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ah
   return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [], aside: settings.reveal?.aside ?? [] };
 }
 
+/**
+ * What a load arms of the line, kept as the newest settings read has it until the load is spent (App's latches).
+ *
+ * The line moves while a tab stays loaded: the spacing ends, the day turns, tenure passes, another dialog is shown
+ * elsewhere. A tab left loaded for hours or days used to keep what its first read said, so a load that began while the
+ * line was held (the day after a dialog, say) armed nothing for the rest of its life, whatever the Inbox answered later.
+ * So the latch follows each later read, and the load reads the line again every `REVEAL_TIMES.lineReadMs` while the tab
+ * is in front (and when it comes back in front after that long), until it is spent.
+ *
+ * Spent: this load showed or claimed a one-time dialog, or had the tour or an update on screen. Then what it holds
+ * stays and it reads no more: a load shows one dialog at most, as before. The Inbox still decides every claim (one a
+ * day, the spacing, never the load right after one that showed a dialog).
+ *
+ * `read`: what the newest settings arm, null until the first list and settings are in. `line`: the Inbox keeps a line
+ * (settings `reveal.line`; without one nothing moves with time, so nothing is read again).
+ */
+export function useLineLatch<T>(input: { read: T | null; spent: boolean; line: boolean; reread: () => void }): T | null {
+  const held = useRef<T | null>(null);
+  if (input.read !== null && (held.current === null || !input.spent)) held.current = input.read;
+  const reread = useRef(input.reread);
+  reread.current = input.reread;
+  const watching = held.current !== null && input.line && !input.spent;
+  useEffect(() => {
+    if (!watching) return;
+    let last = Date.now();
+    // Never while the tab is hidden: it reads once it is in front again, when the last read is that old.
+    const read = (after: number) => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < after) return;
+      last = Date.now();
+      reread.current();
+    };
+    const timer = setInterval(() => read(0), REVEAL_TIMES.lineReadMs);
+    const front = () => read(REVEAL_TIMES.lineReadMs);
+    document.addEventListener('visibilitychange', front);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', front);
+    };
+  }, [watching]);
+  return held.current;
+}
+
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
 export const BOARD_REVEAL_MIN_ROWS = 5;
 /** And they are in this many projects or more (approval "inbox-one-time-dialogs": "5+ open threads, 2+ projects"). */
@@ -333,9 +377,9 @@ export const BOARD_REVEAL_MIN_PROJECTS = 2;
 /** The Checklist's moment: the thread just left has this many messages or more from one agent ("a long agent run"). */
 export const STEPS_REVEAL_MIN_RUN = 5;
 
-/** What one load knows for the Board reveal (read once: `due`) and what holds now. */
+/** What one load knows for the Board reveal (`due`: the load's latch, `useLineLatch`) and what holds now. */
 export interface BoardRevealInput {
-  /** The Inbox has the Board next for this page (settings `reveal.next === 'board'`), read once per load. */
+  /** The Inbox has the Board next for this page (settings `reveal.next === 'board'`), as the load's latch holds it. */
   due: boolean;
   listLoaded: boolean;
   firstRun: boolean;
@@ -514,7 +558,7 @@ export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
   id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip'>;
   /**
-   * The Inbox has it for this page, read once per load: `reveal.next === id`, or (an `ahead` offer such as List view)
+   * The Inbox has it for this page, as the load's latch holds it (`useLineLatch`): `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.
    */
   due: boolean;

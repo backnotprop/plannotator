@@ -16,7 +16,7 @@ import { faviconPickedHere } from './faviconChoice';
 import { REVEAL_TIMES, useLineReveal } from './reveal';
 
 export interface TabIconChoiceInput {
-  /** The Inbox has it next for this page (settings `reveal.next === 'tab_icon'`), read once per load. */
+  /** The Inbox has it next for this page (settings `reveal.next === 'tab_icon'`), as the load's latch holds it (reveal.ts `useLineLatch`). */
   due: boolean;
   /** The tour, an update or another one-time dialog was on screen (or due) on this load. */
   blocked: boolean;

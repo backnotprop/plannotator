@@ -16,7 +16,7 @@ import { useRef } from 'react';
 import { useLineReveal, type RevealStage } from './reveal';
 
 export interface CodeReviewOfferInput {
-  /** The Inbox has it next for this page (settings `reveal.next === 'code_review'`), read once per load. */
+  /** The Inbox has it next for this page (settings `reveal.next === 'code_review'`), as the load's latch holds it (reveal.ts `useLineLatch`). */
   due: boolean;
   /** An update, the sound or another one-time dialog was on screen on this load. */
   blocked: boolean;
