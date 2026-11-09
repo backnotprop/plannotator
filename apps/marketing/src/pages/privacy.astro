@@ -35,16 +35,16 @@ import Footer from '../components/Footer.astro';
 
         <h3>The daily ping</h3>
         <p>Once a day, each Plannotator tool you use (Inbox, plan review, code review, annotate, last) sends one anonymous ping to <code>ping.plannotator.ai</code>. It helps us see how many people use Plannotator and where to put our effort. This is the whole message:</p>
-        <pre><code>&#123;"version":"0.28.46","age_week":2,"tool":"plan","first":1&#125;</code></pre>
+        <pre><code>&#123;"version":"0.28.58","age_week":2,"tool":"plan","first":1,"favicon":"glass"&#125;</code></pre>
         <ul>
           <li><code>version</code> is the Plannotator version.</li>
           <li><code>age_week</code> is how many weeks since this computer first used Plannotator, in four groups: <code>1</code> in the first week, <code>2</code> in weeks 2 to 4, <code>3</code> in weeks 5 to 24, <code>4</code> after that.</li>
           <li><code>tool</code> is the tool that ran: <code>inbox</code>, <code>plan</code>, <code>review</code>, <code>annotate</code>, or <code>last</code>.</li>
           <li><code>first</code> is <code>1</code> on this computer's first ping of the day, from any tool, and <code>0</code> on the others. It lets us count how many people used Plannotator that day without an ID.</li>
-          <li><code>favicon</code> is the favicon set in Settings: <code>glass</code>, <code>yellow</code> or <code>face</code>, or <code>none</code> if you never picked one.</li>
+          <li><code>favicon</code> is the favicon set in Settings: <code>glass</code>, <code>yellow</code> or <code>face</code>, or <code>none</code> if you never picked one. We count it to learn which icon people prefer.</li>
         </ul>
         <p>So a computer sends at most five pings a day. A ping never sends an ID of any kind, your name, user name or computer name, your operating system, file names or paths, plans, documents, code, diffs, annotations, or anything else about you or your work. The request comes from the Plannotator program on your computer, never from a page in your browser.</p>
-        <p><strong>What we keep:</strong> the server adds 1 to that day's count for the version, the week group, and the tool. When <code>first</code> is <code>1</code>, it also adds 1 to that day's count of people. It keeps only those daily totals. It does not store your IP address, request headers, location, or the time of the request. Cloudflare runs the server; like any web request, Cloudflare sees your IP address while it delivers the ping and may keep security records under its own policy. Because we keep no ID and no IP address, we cannot find or delete one person's pings: there is nothing to find them by. The daily totals are public at <code>ping.plannotator.ai/totals</code>.</p>
+        <p><strong>What we keep:</strong> the server adds 1 to that day's count for the version, the week group, and the tool. When <code>first</code> is <code>1</code>, it also adds 1 to that day's count of people and 1 to that day's count for the favicon. It keeps only those daily totals. It does not store your IP address, request headers, location, or the time of the request. Cloudflare runs the server; like any web request, Cloudflare sees your IP address while it delivers the ping and may keep security records under its own policy. Because we keep no ID and no IP address, we cannot find or delete one person's pings: there is nothing to find them by. The daily totals are public at <code>ping.plannotator.ai/totals</code>.</p>
         <p><strong>What stays on your computer:</strong> a small file, <code>ping.json</code> in the Plannotator data folder, with the week this computer first used Plannotator, today's date (UTC), and which tools have sent their ping today.</p>
         <p><strong>When it is sent:</strong> the ping is on by default. The app shows no message about it; this page, the release notes, and the Inbox's Settings → About describe it. The first time you use a tool on a day (UTC), that tool sends its ping in the background; the Inbox checks when it starts and then once an hour. Nothing waits for the ping. If a ping fails, for example because you are offline, that tool tries again the next time it runs. It is never sent from CI, from development builds, or from tests.</p>
         <p><strong>To turn it off,</strong> set <code>NO_ANON_PING=1</code> (any value except <code>0</code> works) in the environment Plannotator runs in, and restart Plannotator. Off means no request at all, and nothing is written to <code>ping.json</code>.</p>
@@ -91,7 +91,7 @@ import Footer from '../components/Footer.astro';
         <h2>6. Retention</h2>
         <ul>
           <li>Local Plannotator files remain on your machine until you delete them or use the applicable cleanup controls.</li>
-          <li>The daily ping's totals (day, version, week group, tool, and a count) are kept. They contain nothing that points to a person.</li>
+          <li>The daily ping's totals (day, version, week group, tool, and a count; and day, favicon, and a count) are kept. They contain nothing that points to a person.</li>
           <li>Hosted encrypted short-link ciphertext expires after seven days. A self-hosted operator can configure a different period.</li>
           <li>Workspaces waitlist entries are retained while needed to run the waitlist, contact applicants, and keep basic signup records. You can request deletion.</li>
           <li>Support emails are retained as needed to respond and keep a record of the conversation.</li>
