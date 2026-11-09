@@ -48,7 +48,7 @@ import {
   INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES,
   INBOX_REVIEW_FIELD_DESCRIPTION,
   INBOX_REVIEW_NOTES_RULE,
-  INBOX_REVIEW_CHAPTER_DIAGRAM_DOC,
+  inboxReviewChapterDiagramDoc,
   inboxReviewTitleLine,
 } from "@plannotator/core/inbox-review";
 import { checkGuideNotes, readGuideDiffNotes, type GuideDiffNote } from "@plannotator/core/inbox-context-notes";
@@ -562,14 +562,14 @@ export async function inboxGuideRoute(
 }
 
 /**
- * get_guide_brief's output_schema while Code review is on (`shapeOn`: Shape's switch, which on main is on whenever
- * Code review is): the guide's, plus
+ * get_guide_brief's output_schema while Code review is on (`shapeOn`: Shape's own switch, approval
+ * "code-review-029-shape-off"): the guide's, plus
  * an optional `overview: { text }` and a chapter's optional `diagram` (a
  * drawing: `kind: "html"` with source, css, width and height, tall; or
- * `kind: "mermaid"` with source). The overview's diagram is no longer offered
- * (approval "guide-chapter-diagrams"); submit_guide still takes one.
+ * `kind: "mermaid"` with source; with Shape off, Mermaid only). The overview's
+ * diagram is no longer offered (approval "guide-chapter-diagrams"); submit_guide still takes one.
  */
-function guideSchemaWithOverview(shapeOn = true): Record<string, unknown> {
+function guideSchemaWithOverview(shapeOn: boolean): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -623,11 +623,12 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
-        // Context notes ride the same switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_CHAPTER_DIAGRAM_DOC, INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        // Code review on: a chapter's diagram (approval "guide-chapter-diagrams"), Mermaid always and Shape's html kind
+        // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
+        // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
         example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
       }),
   );

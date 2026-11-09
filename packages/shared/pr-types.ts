@@ -213,6 +213,10 @@ export interface PRThreadComment {
   createdAt: string;
   url: string;
   diffHunk?: string;
+  /** The forge hides it (GitHub's minimized comment). */
+  isMinimized?: boolean;
+  /** Why, in the forge's words ("OFF_TOPIC", "outdated"), when it is hidden and says. */
+  minimizedReason?: string;
 }
 
 export interface PRReviewThread {
@@ -223,6 +227,8 @@ export interface PRReviewThread {
   line: number | null;
   startLine: number | null;
   diffSide: 'LEFT' | 'RIGHT' | null;
+  /** The side of `startLine` (GitHub), when the forge says: a range can start on a removed line and end on an added one. */
+  startDiffSide?: 'LEFT' | 'RIGHT' | null;
   comments: PRThreadComment[];
 }
 

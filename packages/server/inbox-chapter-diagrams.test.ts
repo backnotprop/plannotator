@@ -118,8 +118,8 @@ describe("submit_guide: a chapter's diagram", () => {
 
 describe("get_guide_brief offers a chapter's diagram, not the overview's", () => {
   type Registered = Record<string, { handler?: (input: unknown, ctx: unknown) => Promise<unknown> }>;
-  const brief = async (codeReview: boolean) => {
-    const server = createInboxMcpServer({ codeReviewOn: () => codeReview } as unknown as InboxMcpContext);
+  const brief = async (codeReview: boolean, shape = true) => {
+    const server = createInboxMcpServer({ codeReviewOn: () => codeReview, shapeOn: () => shape } as unknown as InboxMcpContext);
     const tools = (server as unknown as { _registeredTools: Registered })._registeredTools;
     return ((await tools.get_guide_brief!.handler!({}, {})) as { structuredContent: { output_schema: Record<string, any>; rules: string[] } }).structuredContent;
   };
@@ -136,6 +136,20 @@ describe("get_guide_brief offers a chapter's diagram, not the overview's", () =>
     const { output_schema: schema, rules } = await brief(false);
     expect(JSON.stringify(schema)).not.toContain("diagram");
     expect(rules.join("\n")).not.toContain("diagram");
+  });
+
+  test("Code review on and Shape off (#2974): the schema's chapter diagram is Mermaid only and no rule names Shape", async () => {
+    const { output_schema: schema, rules } = await brief(true, false);
+    expect(schema.properties.sections.items.properties.diagram.properties).toEqual({ kind: { enum: ["mermaid"] }, source: { type: "string" } });
+    expect(schema.properties.overview.properties).toEqual({ text: { type: "string" } });
+    expect(rules).toContain(inboxReviewChapterDiagramDoc(false));
+    const all = JSON.stringify({ schema, rules });
+    for (const word of ["html", "plannotator shape", "Shape", "\"css\"", "\"tall\""]) expect([word, all.includes(word)]).toEqual([word, false]);
+    // Shape's switch absent from the context: off.
+    const server = createInboxMcpServer({ codeReviewOn: () => true } as unknown as InboxMcpContext);
+    const tools = (server as unknown as { _registeredTools: Registered })._registeredTools;
+    const absent = ((await tools.get_guide_brief!.handler!({}, {})) as { structuredContent: { rules: string[] } }).structuredContent;
+    expect(absent.rules).toContain(inboxReviewChapterDiagramDoc(false));
   });
 
   test("with Shape off the rule offers Mermaid only: no html kind, no Shape rules", () => {

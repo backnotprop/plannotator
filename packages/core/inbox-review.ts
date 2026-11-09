@@ -13,7 +13,9 @@
  * - Show me (approval "code-review-launch-build", item 1: Show me makes a
  *   Shape): the request the window sends, the refusal an old `plannotator
  *   review draw` gets, and the guide brief's and the skills' lines for the
- *   overview's drawing.
+ *   overview's drawing. These ride Shape's own switch as well (approval
+ *   "code-review-029-shape-off"): with Code review on and Shape off, an agent
+ *   reads no word of Shape and no drawing.
  *
  * With the switch off, or never set, none of these reach an agent.
  * Browser-safe, no dependencies outside core: the server and the window both read it.
@@ -46,67 +48,82 @@ const OLD_SESSION = 'If submit_guide takes no `review` field in this session, se
  * overview), at the end of its instructions. AGENT TEXT: these words await the owner's OK and a clean-room test.
  */
 export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one diagram (`sections[].diagram`, Mermaid preferred). The guide brief has the format.';
+/** The same line with Shape off: Mermaid is the only kind, so nothing is "preferred" (no word of Shape's html kind). */
+export const INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one Mermaid diagram (`sections[].diagram`). The guide brief has the format.';
 
 /** /review-recheck's line for a chapter's diagram, after "Give one chapter to each comment you acted on…". AGENT TEXT: awaits the owner's OK. */
 export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If a chapter of the earlier review had a diagram and you changed what it shows, draw it again in the chapter of this review that covers that change (`sections[].diagram`).";
 
 /**
- * Every review skill Plannotator knows, by name. Which of them the "/" list
- * offers is `INBOX_REVIEW_SKILL_NAMES`: adding or removing one is one entry
- * there.
+ * Every review skill Plannotator knows, by name, as an agent reads it with Shape off or on. A chapter's diagram is
+ * offered either way (Mermaid needs no Shape; approval "guide-chapter-diagrams"); with Shape off the curate line names
+ * Mermaid only, and no skill asks for an overview drawing (approval "code-review-029-shape-off").
  */
-export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>> = {
-  'review-curate': {
-    name: 'review-curate',
-    description: 'A review of only the parts of the change that need you',
-    body: [
-      'Send the person a review of your code change for this thread, as a guided review they approve or send feedback on. By default it covers only the changes that need a person\'s judgment. If the person\'s words with this skill ask for something else (a full review, a focus, a part to leave out), do what they ask where it differs.',
-      '',
-      'By default, sort every changed file into two groups. Needs the person: logic, security, data, money, public interfaces, and anything you are unsure of. Safe to skim: renames, formatting, generated and lock files, and tests that only mirror the new code. Write chapters for the first group only, at most 6, the one you are least sure of first, and put the second group in `unplacedFiles`. In the overview, list the second group in one line per kind, with why it is safe. Start the message body with how many of the changed files need them. For a full review, every changed file goes in a chapter and `unplacedFiles` stays empty.',
-      '',
-      `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
-      '',
-      INBOX_REVIEW_CURATE_DRAWING_LINE,
-    ].join('\n'),
-  },
-  'review-recheck': {
-    name: 'review-recheck',
-    description: 'Only what changed since your last review',
-    afterReview: true,
-    body: [
-      'The person reviewed your earlier review in this thread and sent a verdict or comments. Send a review of only what you changed since then: the diff from the code that review showed to the code now, not the diff against the base branch. If you cannot separate the two, send the whole diff and say in the body which chapters changed.',
-      '',
-      'Give one chapter to each comment you acted on, titled with the comment\'s file and line. In the message body, list each comment you did not act on, with why.',
-      '',
-      INBOX_REVIEW_RECHECK_DRAWING_LINE,
-      '',
-      `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} If you changed nothing since that review, say so in one sentence instead.`,
-    ].join('\n'),
-  },
-  // Built, and not offered: the owner decides whether it ships (add its name to INBOX_REVIEW_SKILL_NAMES).
-  'review-guide': {
-    name: 'review-guide',
-    description: 'A review of the whole change, the riskiest part first',
-    body: [
-      'Send the person a review of your code change for this thread, as a guided review they approve or send feedback on. Use the diff of this work: your uncommitted changes, or your branch against the branch it started from. Put the riskiest change in the first chapter. If the person\'s words with this skill name a focus, start there.',
-      '',
-      `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
-    ].join('\n'),
-  },
-};
+function reviewSkillTexts(shape: boolean): Readonly<Record<string, InboxReviewSkill>> {
+  return {
+    'review-curate': {
+      name: 'review-curate',
+      description: 'A review of only the parts of the change that need you',
+      body: [
+        'Send the person a review of your code change for this thread, as a guided review they approve or send feedback on. By default it covers only the changes that need a person\'s judgment. If the person\'s words with this skill ask for something else (a full review, a focus, a part to leave out), do what they ask where it differs.',
+        '',
+        'By default, sort every changed file into two groups. Needs the person: logic, security, data, money, public interfaces, and anything you are unsure of. Safe to skim: renames, formatting, generated and lock files, and tests that only mirror the new code. Write chapters for the first group only, at most 6, the one you are least sure of first, and put the second group in `unplacedFiles`. In the overview, list the second group in one line per kind, with why it is safe. Start the message body with how many of the changed files need them. For a full review, every changed file goes in a chapter and `unplacedFiles` stays empty.',
+        '',
+        `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
+        '',
+        shape ? INBOX_REVIEW_CURATE_DRAWING_LINE : INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE,
+      ].join('\n'),
+    },
+    'review-recheck': {
+      name: 'review-recheck',
+      description: 'Only what changed since your last review',
+      afterReview: true,
+      body: [
+        'The person reviewed your earlier review in this thread and sent a verdict or comments. Send a review of only what you changed since then: the diff from the code that review showed to the code now, not the diff against the base branch. If you cannot separate the two, send the whole diff and say in the body which chapters changed.',
+        '',
+        'Give one chapter to each comment you acted on, titled with the comment\'s file and line. In the message body, list each comment you did not act on, with why.',
+        '',
+        INBOX_REVIEW_RECHECK_DRAWING_LINE,
+        '',
+        `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} If you changed nothing since that review, say so in one sentence instead.`,
+      ].join('\n'),
+    },
+    // Built, and not offered: the owner decides whether it ships (add its name to INBOX_REVIEW_SKILL_NAMES).
+    'review-guide': {
+      name: 'review-guide',
+      description: 'A review of the whole change, the riskiest part first',
+      body: [
+        'Send the person a review of your code change for this thread, as a guided review they approve or send feedback on. Use the diff of this work: your uncommitted changes, or your branch against the branch it started from. Put the riskiest change in the first chapter. If the person\'s words with this skill name a focus, start there.',
+        '',
+        `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
+      ].join('\n'),
+    },
+  };
+}
+
+/** Every review skill, as an agent reads it with Shape off (chapter diagrams in Mermaid only). Adding or removing one is one entry above. */
+export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false);
+/** Every review skill, as an agent reads it with Shape on too ("Mermaid preferred": the brief offers Shape's html kind as well). */
+export const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true);
 
 /** The review skills the "/" list offers, in the list's order. One entry adds or removes a skill. */
 export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-recheck'];
 
-/** The offered skills, in order. */
-export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = INBOX_REVIEW_SKILL_NAMES.map((name) => INBOX_REVIEW_SKILL_TEXTS[name]!);
+/** The offered skills, in order, as an agent reads them with Shape off (`{ shape: true }`: with Shape on). */
+export function inboxReviewSkills(options: { shape?: boolean } = {}): readonly InboxReviewSkill[] {
+  const texts = options.shape ? INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE : INBOX_REVIEW_SKILL_TEXTS;
+  return INBOX_REVIEW_SKILL_NAMES.map((name) => texts[name]!);
+}
+
+/** The offered skills, in order, with Shape off. The "/" list's names and descriptions are the same either way. */
+export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = inboxReviewSkills();
 
 /** The skill catalog's root for a built-in skill (the "/" list's right column: "Plannotator"). */
 export const INBOX_BUILTIN_SKILL_ROOT = 'plannotator';
 
-/** A built-in review skill by name, or undefined (offered skills only). */
-export function inboxReviewSkill(name: string): InboxReviewSkill | undefined {
-  return INBOX_REVIEW_SKILLS.find((skill) => skill.name === name);
+/** A built-in review skill by name, or undefined (offered skills only); its instructions as read with Shape off unless `shape`. */
+export function inboxReviewSkill(name: string, options: { shape?: boolean } = {}): InboxReviewSkill | undefined {
+  return inboxReviewSkills(options).find((skill) => skill.name === name);
 }
 
 /** The heading the person's comments on a guided review's diff ride under in their reply (the window's `guideFeedback`). */
@@ -379,14 +396,17 @@ export function checkInboxDrawing(
   return { ok: true, ...(title ? { title } : {}), view };
 }
 
-/** What an old `plannotator review draw` or `review drawings` gets while Code review is on: Show me makes a Shape now. */
+/**
+ * What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are on: Show me makes a
+ * Shape now. With Shape off the review parse takes them, as with Code review off (approval "code-review-029-shape-off").
+ */
 export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
 
 /**
  * get_guide_brief's field doc for a chapter's diagram, served only while Code review is on (it replaces the overview
  * diagram's doc: approval "guide-chapter-diagrams"). The Mermaid kind is offered whether Shape is on or off; the html
- * kind (a drawing by Shape's rules) only while Shape is on (ops, with #2974 "Code review: Shape stays off unless
- * Shape is on"). On main Shape is always on while Code review is (`shapeBoardsOn`), so the brief serves both today.
+ * kind (a drawing by Shape's rules), its words and its drawing only while Shape is on too (approval
+ * "code-review-029-shape-off": with Shape off an agent reads no word of Shape). get_guide_brief passes `shapeOn`.
  * AGENT TEXT: these words await the owner's OK and a clean-room test.
  */
 export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
@@ -402,7 +422,7 @@ export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
       : []),
   ].join('\n');
 }
-/** The doc as served on main (Shape is on whenever Code review is). */
+/** The doc with Shape on (Mermaid and the html kind). */
 export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = inboxReviewChapterDiagramDoc(true);
 
 /**
