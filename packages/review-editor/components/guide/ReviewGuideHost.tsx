@@ -2,7 +2,8 @@ import React, { useCallback, useMemo } from 'react';
 import { GuideHostProvider, type GuideDiffRendererContext, type GuideGlobalComments, type GuideHostValue } from '@plannotator/guide-viewer/host';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '../AllFilesCodeView';
-import { overviewDiagramRenderer } from './overviewDiagram';
+import { storage } from '@plannotator/ui/utils/storage';
+import { chapterDiagramRenderer, overviewDiagramRenderer } from './overviewDiagram';
 
 /**
  * The review app's guide host: adapts ReviewState into the narrow contract the
@@ -89,6 +90,7 @@ export const ReviewGuideHost: React.FC<{
   );
 
   const renderOverviewDiagram = useMemo(() => overviewDiagramRenderer(state.diagramEngine), [state.diagramEngine]);
+  const renderChapterDiagram = useMemo(() => chapterDiagramRenderer(state.diagramEngine), [state.diagramEngine]);
 
   const value = useMemo<GuideHostValue<InAppRendererProps>>(
     () => ({
@@ -100,10 +102,13 @@ export const ReviewGuideHost: React.FC<{
       activeSearchMatch: state.allFilesActiveSearchMatch,
       generatedFiles: state.generatedFiles,
       renderOverviewDiagram,
+      renderChapterDiagram,
+      // A chapter diagram's fold outlives the review server's random port (cookies, or a host's own backend).
+      diagramFoldStore: storage,
       ...(globalComments ? { globalComments } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram, globalComments, collapseAll],
+    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram, renderChapterDiagram, globalComments, collapseAll],
   );
 
   return <GuideHostProvider value={value}>{children}</GuideHostProvider>;

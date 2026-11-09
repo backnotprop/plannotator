@@ -162,3 +162,26 @@ test.skipIf(!hasDom)('Code review and Shape on: the drawn Overview picture is dr
   expect(document.querySelector('[data-overview-figure]')).not.toBeNull();
   expect(document.querySelector('[data-shape-layer="shp_a"]')).not.toBeNull();
 });
+
+test.skipIf(!hasDom)("a chapter's drawn html picture is drawn only with Shape on; with Shape off the chapter shows as with no diagram", async () => {
+  // Shape off: the pane draws none (null), so the guide chain shows the chapter as without a diagram.
+  const off = await openReview({ shape: false });
+  const offDrawn = off.renderChapterDiagram?.(DRAWN, 0) ?? null;
+  expect(offDrawn).toBeNull();
+  act(() => root?.unmount());
+  el?.remove();
+  root = null;
+  if (savedFetch) globalThis.fetch = savedFetch;
+  savedFetch = null;
+  // Shape on: the capped ChapterFigure.
+  const on = await openReview({ shape: true });
+  const drawn = on.renderChapterDiagram?.(DRAWN, 0) ?? null;
+  expect(drawn).not.toBeNull();
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const r = createRoot(host);
+  act(() => r.render(<>{drawn}</>));
+  expect(host.querySelector('[data-chapter-figure] .ib-ch-fig-box')).not.toBeNull();
+  act(() => r.unmount());
+  host.remove();
+});

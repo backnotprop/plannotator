@@ -65,7 +65,7 @@ import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost, ShapeReviewNarrow } from '@plannotator/ui/components/shape';
-import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
+import { ChapterFigure, OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { showMeFromShape, useShowMe } from '../review-drawing/useShowMe';
@@ -763,6 +763,17 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isReview, overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
+  // A chapter's drawn html picture (format version 5): ChapterFigure, capped as a chapter's Mermaid diagram is;
+  // anything else (Mermaid) is left to GuideReader, and a guide, a review with Code review off, or any review with
+  // Shape off draws none (the chapter shows as with no diagram; approval "code-review-029-shape-off").
+  const renderChapterDiagram = useCallback(
+    (diagram: GuideOverviewDiagram): ReactNode | null =>
+      isReview && shape && overviewPicture(diagram) ? (
+        <ChapterFigure drawn={inboxDrawnViewOf(diagram)} meta={`drawn by ${author} with the guide`} onCode={(target) => void openCode(target)} />
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isReview, shape, author, files, chapters, mode],
+  );
   // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
   const renderHeadActions = useCallback(
     (): ReactNode | null => (!overviewHtml && showMeOn ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
@@ -1249,6 +1260,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
+                renderChapterDiagram={renderChapterDiagram}
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading

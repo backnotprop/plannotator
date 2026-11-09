@@ -1367,28 +1367,37 @@ export class GuidesController implements vscode.Disposable {
   }
 
   /**
-   * A guide whose overview diagram was saved without a render check (no
-   * Guides webview was open during a background run) is checked once its tab
-   * is open, and the reader is told when it does not render.
+   * A guide whose diagrams (the overview's and each chapter's) were saved
+   * without a render check (no Guides webview was open during a background
+   * run) is checked once its tab is open, and the reader is told when one
+   * does not render.
    */
   private async recheckDiagram(): Promise<void> {
     const reader = this.reader;
     if (!reader || reader.model.loaded.sidecar.diagramCheck !== "unchecked") return;
-    const source = reader.model.overview?.diagram?.source;
+    const overview = reader.model.overview?.diagram;
+    const diagrams = [
+      ...(overview ? [{ where: "The overview diagram", source: overview.source }] : []),
+      ...reader.model.loaded.envelope.guide.sections.flatMap((s, i) => (s.diagram ? [{ where: `The diagram of chapter ${i + 1}`, source: s.diagram.source }] : [])),
+    ];
     const host = this.guidePanels.get(reader.model.id);
-    if (!source || !host) return;
-    let result: Awaited<ReturnType<ReaderPanel["checkMermaid"]>> = null;
-    for (let i = 0; i < 20 && !result; i++) {
-      result = await host.checkMermaid(source);
-      // Retry only while the tab is still loading; a tab without a diagram engine will not have one later.
-      if (!result && host.diagramEngineUnavailable) break;
-      if (!result) await new Promise((r) => setTimeout(r, 250));
+    if (diagrams.length === 0 || !host) return;
+    let failure: { where: string; message?: string; line?: number } | null = null;
+    for (const { where, source } of diagrams) {
+      let result: Awaited<ReturnType<ReaderPanel["checkMermaid"]>> = null;
+      for (let i = 0; i < 20 && !result; i++) {
+        result = await host.checkMermaid(source);
+        // Retry only while the tab is still loading; a tab without a diagram engine will not have one later.
+        if (!result && host.diagramEngineUnavailable) break;
+        if (!result) await new Promise((r) => setTimeout(r, 250));
+      }
+      if (!result || this.reader !== reader) return;
+      if (!result.ok && !failure) failure = { where, message: result.message, line: result.line };
     }
-    if (!result || this.reader !== reader) return;
     const loaded = reader.model.loaded;
-    loaded.sidecar.diagramCheck = result.ok ? "ok" : "failed";
+    loaded.sidecar.diagramCheck = failure ? "failed" : "ok";
     if (!this.sessionGuides.has(loaded.id)) writeSidecar(loaded.repoKey, loaded.id, loaded.sidecar);
-    if (!result.ok) void vscode.window.showWarningMessage(`The overview diagram of this guide does not render: ${result.message ?? "Mermaid refused it"}${result.line ? ` (line ${result.line})` : ""}.`);
+    if (failure) void vscode.window.showWarningMessage(`${failure.where} of this guide does not render: ${failure.message ?? "Mermaid refused it"}${failure.line ? ` (line ${failure.line})` : ""}.`);
   }
 
   private closeGuide(): void {

@@ -251,3 +251,90 @@ describe('GuideSectionCard', () => {
     expect(calls).toContain(1);
   });
 });
+
+describe('GuideSectionCard: a chapter\'s diagram (format version 5)', () => {
+  const diagram = { kind: 'mermaid' as const, source: 'flowchart LR\n  a --> b' };
+  const narrative = () => host!.querySelector('[data-guide-section-narrative]')!;
+  const card = () => host!.querySelector('[data-guide-section]')!;
+  const header = () => host!.querySelector<HTMLButtonElement>('[data-guide-chapter-diagram] > button');
+  async function mount(state: GuideHostValue<Record<string, unknown>>, props: Partial<React.ComponentProps<typeof GuideSectionCard>> = {}) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(renderCard(state, props));
+    });
+  }
+  async function unmount() {
+    await act(async () => root!.unmount());
+    host!.remove();
+    root = null;
+  }
+  /** A host's fold store in memory, so the test never writes the page's localStorage. */
+  function memoryStore() {
+    const kept = new Map<string, string>();
+    return { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value) };
+  }
+
+  test.skipIf(!hasDom)("is drawn by the host at the top of the chapter's code pane, above its first file, not in the chapter's text", async () => {
+    const asked: Array<[string, number]> = [];
+    const state = { ...makeState({ files: [makeFile()] }), diagramFoldStore: memoryStore(), renderChapterDiagram: (d: typeof diagram, index: number) => (asked.push([d.source, index]), <svg data-drawn-chapter="" />) };
+    await mount(state, { section: { ...section, diagram }, index: 2, total: 3 });
+    expect(asked).toEqual([[diagram.source, 2]]);
+    const box = card().querySelector('[data-guide-chapter-diagram="mermaid"]');
+    expect(box?.querySelector('svg[data-drawn-chapter]')).not.toBeNull();
+    expect(narrative().querySelector('[data-guide-chapter-diagram]')).toBeNull();
+    const firstFile = card().querySelector('[data-guide-file-shell]')!;
+    expect(box!.compareDocumentPosition(firstFile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(header()?.textContent).toBe('Diagram');
+    expect(header()?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)('a host that cannot draw it (no renderer, or null) shows the chapter exactly as one without a diagram', async () => {
+    await mount(makeState({ files: [makeFile()] }));
+    const plain = card().innerHTML;
+    await unmount();
+    for (const state of [makeState({ files: [makeFile()] }), { ...makeState({ files: [makeFile()] }), renderChapterDiagram: () => null }]) {
+      await mount(state, { section: { ...section, diagram } });
+      expect(card().innerHTML).toBe(plain);
+      await unmount();
+    }
+  });
+
+  test.skipIf(!hasDom)('a folded (reviewed) chapter does not draw it', async () => {
+    let asked = 0;
+    const state = { ...makeState({ files: [makeFile()] }), renderChapterDiagram: () => (asked++, <svg />) };
+    await mount(state, { section: { ...section, diagram }, reviewed: true });
+    expect(asked).toBe(0);
+    expect(host!.querySelector('[data-guide-chapter-diagram]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('its header folds it away, and it stays folded when the guide opens again; a redrawn diagram opens', async () => {
+    const store = memoryStore();
+    const state = { ...makeState({ files: [makeFile()] }), diagramFoldStore: store, renderChapterDiagram: () => <svg data-drawn-chapter="" /> };
+    await mount(state, { section: { ...section, diagram } });
+    await act(async () => header()!.click());
+    expect(header()!.getAttribute('aria-expanded')).toBe('false');
+    expect(card().querySelector('svg[data-drawn-chapter]')).toBeNull();
+    // The files are still there under the folded header.
+    expect(card().querySelector('[data-guide-file-shell]')).not.toBeNull();
+    await unmount();
+
+    await mount(state, { section: { ...section, diagram } });
+    expect(header()!.getAttribute('aria-expanded')).toBe('false');
+    expect(card().querySelector('svg[data-drawn-chapter]')).toBeNull();
+    await unmount();
+
+    // Another chapter, or the same one with a new drawing, is not folded by it.
+    await mount(state, { section: { ...section, diagram: { ...diagram, source: 'flowchart LR\n  a --> c' } } });
+    expect(card().querySelector('svg[data-drawn-chapter]')).not.toBeNull();
+    await unmount();
+
+    // Opened again, it stays open.
+    await mount(state, { section: { ...section, diagram } });
+    await act(async () => header()!.click());
+    await unmount();
+    await mount(state, { section: { ...section, diagram } });
+    expect(card().querySelector('svg[data-drawn-chapter]')).not.toBeNull();
+  });
+});

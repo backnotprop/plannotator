@@ -88,6 +88,11 @@ export interface DiagramBlockProps {
   onAskAI?: CommentAskAIHandler;
   /** The document's path, sent with an Ask AI question (`sourcePath`). */
   askAISourcePath?: string;
+  /** Opt-in: a diagram whose source does not render shows that source as the
+   * plain fence, not the error panel (a host showing a diagram the person did
+   * not write, such as a guide's overview). A renderer that failed to load
+   * keeps the panel and its Retry. Absent: the error panel, as before. */
+  sourceOnError?: boolean;
   /** Opt-in: a comment being written that the host kept, put back in the
    * inline diagram's composer (see `DiagramReopenRequest`). */
   reopenComment?: DiagramReopenRequest;
@@ -110,6 +115,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onRestoreReport,
   onAskAI,
   askAISourcePath,
+  sourceOnError = false,
   reopenComment,
   onComposerAnchor,
 }) => {
@@ -306,6 +312,9 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
+      if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
+        return <DiagramInlineSource block={block} kind={kind} />;
+      }
       if (state.error !== null) {
         return (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden">
@@ -338,7 +347,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // so this shows only before the first diagram lands.
       return <DiagramPending block={block} kind={kind} />;
     },
-    [block, kind, label],
+    [block, kind, label, sourceOnError],
   );
 
   const viewerProps = {

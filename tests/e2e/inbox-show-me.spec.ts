@@ -56,6 +56,7 @@ import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-a
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -352,7 +353,7 @@ async function pickChapter(page: Page, row: number | 'overview'): Promise<void> 
 /** A real crop of a diff's lines, from the first added line down, for the scripted agent's board. */
 async function cropLines(page: Page, shell: Locator, path: string): Promise<void> {
   await shell.scrollIntoViewIfNeeded();
-  const line = (await shell.locator('[data-line-type="change-addition"]').first().boundingBox())!;
+  const line = await diffRowBox(shell.locator('[data-line-type="change-addition"]').first());
   const box = (await shell.boundingBox())!;
   await page.screenshot({ path, clip: { x: box.x + 6, y: line.y, width: box.width - 12, height: Math.min(200, box.y + box.height - line.y) } });
 }

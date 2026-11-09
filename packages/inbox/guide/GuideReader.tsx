@@ -51,6 +51,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
+import { withChapterMermaid, withOverviewMermaid } from './overviewMermaid';
 import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
@@ -210,6 +211,7 @@ function Reader({
   fileOpenIn,
   selectionActions,
   renderOverviewDiagram,
+  renderChapterDiagram,
   renderOverviewFigure,
   renderHeadActions,
   highlight = null,
@@ -522,6 +524,10 @@ function Reader({
     // Only a new target moves the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTarget]);
+  // Every guide the Inbox opens draws its Mermaid overview diagram, whatever the host draws itself.
+  const drawOverviewDiagram = useMemo(() => withOverviewMermaid(renderOverviewDiagram), [renderOverviewDiagram]);
+  // And each chapter's diagram (format version 5), at the top of the chapter's code pane.
+  const drawChapterDiagram = useMemo(() => withChapterMermaid(renderChapterDiagram), [renderChapterDiagram]);
   const host = useMemo(
     () => ({
       files,
@@ -531,7 +537,8 @@ function Reader({
       ...(phone || asItIs || hostDiffControls ? {} : { renderSectionTab }),
       // A walkthrough's chapter can be words alone: nothing is missing, so it says that and not "out of date".
       ...(asItIs && { renderSectionEmpty: () => <p className="ib-rv-nocode" data-section-no-code="">No code in this chapter.</p> }),
-      ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
+      renderOverviewDiagram: drawOverviewDiagram,
+      renderChapterDiagram: drawChapterDiagram,
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
@@ -543,7 +550,7 @@ function Reader({
       ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
+    [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

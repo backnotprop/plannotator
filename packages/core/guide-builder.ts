@@ -70,6 +70,8 @@ export interface GuideDraftChapter {
   readonly title: string;
   readonly overview: string;
   readonly files: readonly GuideDraftFile[];
+  /** One diagram drawn at the top of the chapter's text. */
+  readonly diagram?: GuideOverviewDiagram;
 }
 
 /** A changed file the agent left out of every chapter on purpose. */
@@ -150,15 +152,14 @@ export function parseGuideDraft(input: unknown): GuideDraftParseResult {
   if (value.overview !== undefined) {
     const o = value.overview;
     if (!isRecord(o) || typeof o.text !== "string") return bad("The draft's overview is malformed.");
-    if (o.diagram !== undefined && (!isRecord(o.diagram) || (o.diagram.kind !== "mermaid" && o.diagram.kind !== "html") || typeof o.diagram.source !== "string")) {
-      return bad("The draft's overview diagram is malformed.");
-    }
+    if (o.diagram !== undefined && !isDraftDiagram(o.diagram)) return bad("The draft's overview diagram is malformed.");
   }
   if (!Array.isArray(value.chapters)) return bad("The draft's chapters must be a list.");
   for (const c of value.chapters) {
     if (!isRecord(c) || typeof c.id !== "string" || typeof c.title !== "string" || typeof c.overview !== "string" || !Array.isArray(c.files)) {
       return bad("A chapter in the draft is malformed.");
     }
+    if (c.diagram !== undefined && !isDraftDiagram(c.diagram)) return bad(`The diagram of chapter ${c.id} is malformed.`);
     for (const f of c.files) {
       if (!isRecord(f) || typeof f.file !== "string" || typeof f.summary !== "string") return bad(`A file in chapter ${c.id} is malformed.`);
       if (f.focus !== undefined && !Array.isArray(f.focus)) return bad(`The focus of ${f.file} is malformed.`);
@@ -174,6 +175,15 @@ export function parseGuideDraft(input: unknown): GuideDraftParseResult {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDraftDiagram(value: unknown): boolean {
+  return isRecord(value) && (value.kind === "mermaid" || value.kind === "html") && typeof value.source === "string";
+}
+
+/** The link syntax a diagram's source uses. */
+function diagramLinkSource(diagram: GuideOverviewDiagram): GuideLinkSource {
+  return diagram.kind === "mermaid" ? "mermaid" : "html";
 }
 
 // ---------------------------------------------------------------------------
@@ -705,48 +715,75 @@ export async function guideSetOverview(draft: GuideDraft, args: GuideSetOverview
   let diagram: GuideOverviewDiagram | undefined;
   const removedNotes: string[] = [];
   if (args.diagram) {
-    const kind = args.diagram.kind;
-    const source = (args.diagram.source ?? "").trim();
-    if (kind !== "mermaid" && kind !== "html") return refuse(draft, "The diagram's `kind` is `mermaid` or `html`.");
-    if (source.length === 0) return refuse(draft, "The diagram's `source` is empty.");
-    const bytes = utf8Bytes(source);
-    if (bytes > GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES) {
-      return refuse(draft, `The diagram is ${Math.ceil(bytes / 1024)} KB; keep it under ${GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES / 1024} KB.`);
-    }
-    if (kind === "mermaid") {
-      const structure = checkMermaidStructure(source);
-      if (structure) return refuse(draft, structure);
-      if (hooks?.checkMermaid) {
-        const rendered = await hooks.checkMermaid(source);
-        if ("error" in rendered) return refuse(draft, `The Mermaid diagram does not render: ${rendered.error}`);
-      }
-      diagram = { kind, source };
-    } else {
-      if (!hooks?.sanitizeHtml) {
-        return refuse(draft, "HTML diagrams cannot be checked here, so they are not accepted. Use a Mermaid diagram.");
-      }
-      const sanitized = await hooks.sanitizeHtml(source);
-      const html = sanitized.html.trim();
-      if (html.length === 0) return refuse(draft, "Nothing was left of the HTML diagram after sanitizing it.");
-      const storedBytes = utf8Bytes(html);
-      if (storedBytes > GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES) {
-        return refuse(draft, `The sanitized HTML is ${Math.ceil(storedBytes / 1024)} KB; keep it under ${GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES / 1024} KB.`);
-      }
-      if (sanitized.removed.length > 0) removedNotes.push(`Removed from the HTML: ${sanitized.removed.join(", ")}.`);
-      diagram = { kind, source: html };
-    }
+    const checked = await checkDiagram(args.diagram, hooks);
+    if ("error" in checked) return refuse(draft, checked.error);
+    diagram = checked.diagram;
+    removedNotes.push(...checked.notes);
   }
   const sources: Array<{ text: string; source: GuideLinkSource }> = [{ text: t.value, source: "markdown" }];
-  if (diagram) sources.push({ text: diagram.source, source: diagram.kind === "mermaid" ? "mermaid" : "html" });
+  if (diagram) sources.push({ text: diagram.source, source: diagramLinkSource(diagram) });
   const links = await checkLinks(sources, draft, hooks, draft.chapters.length);
   if (links.problems.length > 0) return refuse(draft, "These links do not resolve:", ...links.problems.map((p) => `- ${p}`));
   const overview: GuideOverview = diagram ? { text: t.value, diagram } : { text: t.value };
   return commit({ ...draft, overview }, hooks, [
-    `${draft.overview ? "Replaced" : "Set"} the overview${diagram ? ` with a ${diagram.kind === "mermaid" ? "Mermaid" : "HTML"} diagram` : ""}.`,
+    `${draft.overview ? "Replaced" : "Set"} the overview${diagram ? ` with a ${kindLabel(diagram)} diagram` : ""}.`,
     links.checked > 0 && `${plural(links.checked, "link")} checked.`,
     ...removedNotes,
     ...links.notes,
   ]);
+}
+
+type GuideDiagramArg = { readonly kind: "mermaid" | "html"; readonly source: string };
+
+function kindLabel(diagram: GuideOverviewDiagram): string {
+  return diagram.kind === "mermaid" ? "Mermaid" : "HTML";
+}
+
+/** "a Mermaid diagram", "an HTML diagram". */
+function aDiagram(diagram: GuideOverviewDiagram): string {
+  return diagram.kind === "mermaid" ? "a Mermaid diagram" : "an HTML diagram";
+}
+
+/**
+ * Check a diagram the agent gave (the overview's or a chapter's): its kind,
+ * that it is not empty, the size cap, then Mermaid's structure and rendering
+ * (when the host can render) or the host's HTML sanitizer. Answers the diagram
+ * to store and what the sanitizer removed, or the reason it is refused.
+ */
+async function checkDiagram(
+  arg: GuideDiagramArg,
+  hooks: GuideBuilderHooks | undefined,
+): Promise<{ ok: true; diagram: GuideOverviewDiagram; notes: string[] } | { ok: false; error: string }> {
+  const refused = (error: string) => ({ ok: false as const, error });
+  const kind = arg.kind;
+  const source = (arg.source ?? "").trim();
+  if (kind !== "mermaid" && kind !== "html") return refused("The diagram's `kind` is `mermaid` or `html`.");
+  if (source.length === 0) return refused("The diagram's `source` is empty.");
+  const bytes = utf8Bytes(source);
+  if (bytes > GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES) {
+    return refused(`The diagram is ${Math.ceil(bytes / 1024)} KB; keep it under ${GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES / 1024} KB.`);
+  }
+  if (kind === "mermaid") {
+    const structure = checkMermaidStructure(source);
+    if (structure) return refused(structure);
+    if (hooks?.checkMermaid) {
+      const rendered = await hooks.checkMermaid(source);
+      if ("error" in rendered) return refused(`The Mermaid diagram does not render: ${rendered.error}`);
+    }
+    return { ok: true, diagram: { kind, source }, notes: [] };
+  }
+  if (!hooks?.sanitizeHtml) {
+    return refused("HTML diagrams cannot be checked here, so they are not accepted. Use a Mermaid diagram.");
+  }
+  const sanitized = await hooks.sanitizeHtml(source);
+  const html = sanitized.html.trim();
+  if (html.length === 0) return refused("Nothing was left of the HTML diagram after sanitizing it.");
+  const storedBytes = utf8Bytes(html);
+  if (storedBytes > GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES) {
+    return refused(`The sanitized HTML is ${Math.ceil(storedBytes / 1024)} KB; keep it under ${GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES / 1024} KB.`);
+  }
+  const notes = sanitized.removed.length > 0 ? [`Removed from the HTML: ${sanitized.removed.join(", ")}.`] : [];
+  return { ok: true, diagram: { kind, source: html }, notes };
 }
 
 /** guide_clear_overview is not a tool; the host may drop the overview with this. */
@@ -761,10 +798,15 @@ export interface GuideAddChapterArgs {
   readonly overview: string;
   /** 1-based position in reading order; defaults to the end. */
   readonly position?: number;
+  /** One diagram at the top of the chapter. */
+  readonly diagram?: GuideDiagramArg | null;
 }
 
-async function checkChapterOverviewLinks(text: string, draft: GuideDraft, hooks: GuideBuilderHooks | undefined, chapterCount: number) {
-  return checkLinks([{ text, source: "markdown" }], draft, hooks, chapterCount);
+/** The link-bearing texts of a chapter: its overview and, when it has one, its diagram. */
+function chapterSources(overview: string, diagram: GuideOverviewDiagram | undefined): Array<{ text: string; source: GuideLinkSource }> {
+  const sources: Array<{ text: string; source: GuideLinkSource }> = [{ text: overview, source: "markdown" }];
+  if (diagram) sources.push({ text: diagram.source, source: diagramLinkSource(diagram) });
+  return sources;
 }
 
 /** guide_add_chapter: a new chapter; answers its id (`c3`). */
@@ -780,15 +822,24 @@ export async function guideAddChapter(draft: GuideDraft, args: GuideAddChapterAr
     problems.push(`The position is from 1 to ${draft.chapters.length + 1}.`);
   }
   if (problems.length > 0 || "error" in title || "error" in overview) return refuse(draft, ...problems);
-  const links = await checkChapterOverviewLinks(overview.value, draft, hooks, draft.chapters.length + 1);
+  let diagram: GuideOverviewDiagram | undefined;
+  const removedNotes: string[] = [];
+  if (args.diagram) {
+    const checked = await checkDiagram(args.diagram, hooks);
+    if ("error" in checked) return refuse(draft, checked.error);
+    diagram = checked.diagram;
+    removedNotes.push(...checked.notes);
+  }
+  const links = await checkLinks(chapterSources(overview.value, diagram), draft, hooks, draft.chapters.length + 1);
   if (links.problems.length > 0) return refuse(draft, "These links do not resolve:", ...links.problems.map((p) => `- ${p}`));
   const id = `c${draft.nextChapter}`;
   const chapters = [...draft.chapters];
-  chapters.splice(position - 1, 0, { id, title: title.value, overview: overview.value, files: [] });
+  const chapter: GuideDraftChapter = { id, title: title.value, overview: overview.value, files: [], ...(diagram && { diagram }) };
+  chapters.splice(position - 1, 0, chapter);
   return commit(
     { ...draft, chapters, nextChapter: draft.nextChapter + 1 },
     hooks,
-    [`Added chapter ${id} "${title.value}" at position ${position}.`, ...links.notes],
+    [`Added chapter ${id} "${title.value}" at position ${position}${diagram ? ` with ${aDiagram(diagram)}` : ""}.`, ...removedNotes, ...links.notes],
     { chapterId: id },
   );
 }
@@ -797,14 +848,21 @@ export interface GuideUpdateChapterArgs {
   readonly chapter: string;
   readonly title?: string;
   readonly overview?: string;
+  /** A new diagram (replaces any earlier one), or null to remove it. */
+  readonly diagram?: GuideDiagramArg | null;
 }
 
-/** guide_update_chapter: change a chapter's title and/or overview. */
+/** guide_update_chapter: change a chapter's title, overview and/or diagram. */
 export async function guideUpdateChapter(draft: GuideDraft, args: GuideUpdateChapterArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const found = findChapter(draft, args.chapter ?? "");
   if ("error" in found) return refuse(draft, found.error);
-  if (args.title === undefined && args.overview === undefined) return refuse(draft, "Give a new `title`, `overview`, or both.");
+  if (args.title === undefined && args.overview === undefined && args.diagram === undefined) {
+    return refuse(draft, "Give a new `title`, `overview` or `diagram`.");
+  }
   const current = draft.chapters[found.index];
+  if (args.title === undefined && args.overview === undefined && args.diagram === null && !current.diagram) {
+    return answer(draft, true, [`There is no diagram in ${describeChapter(draft, found.index)}.`]);
+  }
   let title = current.title;
   let overview = current.overview;
   const problems: string[] = [];
@@ -819,10 +877,32 @@ export async function guideUpdateChapter(draft: GuideDraft, args: GuideUpdateCha
     else overview = t.value;
   }
   if (problems.length > 0) return refuse(draft, ...problems);
-  const links = args.overview !== undefined ? await checkChapterOverviewLinks(overview, draft, hooks, draft.chapters.length) : null;
+  let diagram = current.diagram;
+  let diagramLine: string | undefined;
+  const removedNotes: string[] = [];
+  if (args.diagram === null) {
+    diagram = undefined;
+    if (current.diagram) diagramLine = "Removed its diagram.";
+  } else if (args.diagram !== undefined) {
+    const checked = await checkDiagram(args.diagram, hooks);
+    if ("error" in checked) return refuse(draft, checked.error);
+    diagram = checked.diagram;
+    removedNotes.push(...checked.notes);
+    diagramLine = current.diagram ? `Replaced its diagram with ${aDiagram(diagram)}.` : `Added ${aDiagram(diagram)}.`;
+  }
+  // Only the texts given now are checked again; the others passed when they were set.
+  const sources = [
+    ...(args.overview !== undefined ? [{ text: overview, source: "markdown" as const }] : []),
+    ...(args.diagram && diagram ? [{ text: diagram.source, source: diagramLinkSource(diagram) }] : []),
+  ];
+  const links = sources.length > 0 ? await checkLinks(sources, draft, hooks, draft.chapters.length) : null;
   if (links && links.problems.length > 0) return refuse(draft, "These links do not resolve:", ...links.problems.map((p) => `- ${p}`));
-  const chapters = draft.chapters.map((c, i) => (i === found.index ? { ...c, title, overview } : c));
-  return commit({ ...draft, chapters }, hooks, [`Updated ${describeChapter(draft, found.index)}.`, ...(links?.notes ?? [])]);
+  const chapters = draft.chapters.map((c, i) => {
+    if (i !== found.index) return c;
+    const { diagram: _old, ...rest } = c;
+    return { ...rest, title, overview, ...(diagram && { diagram }) };
+  });
+  return commit({ ...draft, chapters }, hooks, [`Updated ${describeChapter(draft, found.index)}.`, diagramLine, ...removedNotes, ...(links?.notes ?? [])]);
 }
 
 export interface GuideMoveChapterArgs {
@@ -837,10 +917,13 @@ function linkTexts(draft: GuideDraft, chapters: readonly GuideDraftChapter[]): A
   if (draft.overview) {
     out.push({ text: draft.overview.text, source: "markdown", where: "the overview" });
     if (draft.overview.diagram) {
-      out.push({ text: draft.overview.diagram.source, source: draft.overview.diagram.kind === "mermaid" ? "mermaid" : "html", where: "the overview diagram" });
+      out.push({ text: draft.overview.diagram.source, source: diagramLinkSource(draft.overview.diagram), where: "the overview diagram" });
     }
   }
-  for (const c of chapters) out.push({ text: c.overview, source: "markdown", where: `the overview of ${c.id}` });
+  for (const c of chapters) {
+    out.push({ text: c.overview, source: "markdown", where: `the overview of ${c.id}` });
+    if (c.diagram) out.push({ text: c.diagram.source, source: diagramLinkSource(c.diagram), where: `the diagram of ${c.id}` });
+  }
   return out;
 }
 
@@ -1084,6 +1167,7 @@ export async function guideRead(draft: GuideDraft): Promise<GuideBuilderAnswer> 
     draft.chapters.forEach((c, i) => {
       lines.push(`${i + 1}. ${c.id} · ${c.title}`);
       lines.push(indent(c.overview, "   "));
+      if (c.diagram) lines.push(`   Diagram (${c.diagram.kind}):`, indent(c.diagram.source, "     "));
       if (c.files.length === 0) lines.push("   Files: none yet.");
       for (const f of c.files) {
         lines.push(`   - ${f.file}: ${f.summary}${f.focus?.length ? ` [focus: ${focusText(f.focus)}]` : ""}`);
@@ -1123,11 +1207,12 @@ function finishProblems(draft: GuideDraft, opts?: { allowEmptyIntent?: boolean }
   if (draft.overview) {
     problems.push(...chapterLinkProblems(draft.overview.text, "markdown", count, "The overview"));
     if (draft.overview.diagram) {
-      problems.push(...chapterLinkProblems(draft.overview.diagram.source, draft.overview.diagram.kind === "mermaid" ? "mermaid" : "html", count, "The overview diagram"));
+      problems.push(...chapterLinkProblems(draft.overview.diagram.source, diagramLinkSource(draft.overview.diagram), count, "The overview diagram"));
     }
   }
   for (const [i, c] of draft.chapters.entries()) {
     problems.push(...chapterLinkProblems(c.overview, "markdown", count, `The overview of ${describeChapter(draft, i)}`));
+    if (c.diagram) problems.push(...chapterLinkProblems(c.diagram.source, diagramLinkSource(c.diagram), count, `The diagram of ${describeChapter(draft, i)}`));
   }
   return problems;
 }
@@ -1138,6 +1223,7 @@ export function guideDraftToOutput(draft: GuideDraft): CodeGuideOutput {
     title: c.title,
     overview: c.overview,
     diffs: c.files.map((f) => ({ file: f.file, summary: f.summary })),
+    ...(c.diagram && { diagram: c.diagram }),
   }));
   return {
     title: draft.title,
@@ -1179,8 +1265,19 @@ async function buildSnapshot(draft: GuideDraft, hooks: GuideBuilderHooks | undef
   if (authored.length > 0) return { ok: false, problems: authored };
   const validated = validateGuideOutput(output, patchFiles);
   if ("error" in validated) return { ok: false, problems: [validated.error] };
+  // The validator keeps only a section's title, overview and files; every
+  // chapter of a draft that passed finishProblems survives it, in order, so
+  // each chapter's diagram goes back on its section.
+  const sections =
+    validated.guide.sections.length === output.sections.length
+      ? validated.guide.sections.map((section, i) => {
+          const diagram = output.sections[i].diagram;
+          return diagram ? { ...section, diagram } : section;
+        })
+      : validated.guide.sections;
   const guide: CodeGuideOutput = {
     ...validated.guide,
+    sections,
     ...(draft.overview && { overview: draft.overview }),
   };
   const now = hooks?.now?.() ?? new Date().toISOString();
@@ -1234,7 +1331,7 @@ export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks
         ...(draft.overview.diagram && {
           diagram: {
             kind: draft.overview.diagram.kind,
-            source: dropDanglingChapterLinks(draft.overview.diagram.source, draft.overview.diagram.kind === "mermaid" ? "mermaid" : "html", count),
+            source: dropDanglingChapterLinks(draft.overview.diagram.source, diagramLinkSource(draft.overview.diagram), count),
           },
         }),
       }
@@ -1243,7 +1340,11 @@ export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks
     ...draft,
     title: draft.title.trim() || "Guided review",
     ...(overview && { overview }),
-    chapters: kept.map((c) => ({ ...c, overview: dropDanglingChapterLinks(c.overview, "markdown", count) })),
+    chapters: kept.map((c) => ({
+      ...c,
+      overview: dropDanglingChapterLinks(c.overview, "markdown", count),
+      ...(c.diagram && { diagram: { ...c.diagram, source: dropDanglingChapterLinks(c.diagram.source, diagramLinkSource(c.diagram), count) } }),
+    })),
     unplaced: [...draft.unplaced, ...remaining.map((file) => ({ file }))],
   };
   const result = await finish(adjusted, hooks, { allowEmptyIntent: true });
@@ -1268,11 +1369,22 @@ export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks
 // The tool dispatcher (what an MCP server calls)
 // ---------------------------------------------------------------------------
 
-const TOOL_ARGS: Record<GuideBuilderToolName, { readonly required: readonly string[]; readonly optional: readonly string[] }> = {
+const TOOL_ARGS: Record<
+  GuideBuilderToolName,
+  {
+    readonly required: readonly string[];
+    readonly optional: readonly string[];
+    /** Still accepted from an older session, but no longer offered (not listed in "It takes"). */
+    readonly retired?: readonly string[];
+    /** Arguments where `null` means something (remove), not "not given". */
+    readonly nullable?: readonly string[];
+  }
+> = {
   guide_set_header: { required: [], optional: ["title", "intent"] },
-  guide_set_overview: { required: ["text"], optional: ["diagram"] },
-  guide_add_chapter: { required: ["title", "overview"], optional: ["position"] },
-  guide_update_chapter: { required: ["chapter"], optional: ["title", "overview"] },
+  // The overview's diagram moved to chapters; an older session may still send one.
+  guide_set_overview: { required: ["text"], optional: [], retired: ["diagram"] },
+  guide_add_chapter: { required: ["title", "overview"], optional: ["diagram", "position"] },
+  guide_update_chapter: { required: ["chapter"], optional: ["title", "overview", "diagram"], nullable: ["diagram"] },
   guide_move_chapter: { required: ["chapter", "position"], optional: [] },
   guide_remove_chapter: { required: ["chapter"], optional: [] },
   guide_place_file: { required: ["file", "chapter", "summary"], optional: ["focus"] },
@@ -1289,8 +1401,8 @@ function checkArgs(name: GuideBuilderToolName, raw: unknown): { ok: true; args: 
   const args = raw === undefined || raw === null ? {} : raw;
   if (!isRecord(args)) return { ok: false, error: `The arguments of ${name} are an object.` };
   const spec = TOOL_ARGS[name];
-  const allowed = new Set([...spec.required, ...spec.optional]);
-  const takes = allowed.size > 0 ? `It takes: ${[...spec.required, ...spec.optional].join(", ")}.` : "It takes no arguments.";
+  const allowed = new Set([...spec.required, ...spec.optional, ...(spec.retired ?? [])]);
+  const takes = spec.required.length + spec.optional.length > 0 ? `It takes: ${[...spec.required, ...spec.optional].join(", ")}.` : "It takes no arguments.";
   for (const key of Object.keys(args)) {
     if (!allowed.has(key)) return { ok: false, error: `\`${key}\` is not an argument of ${name}. ${takes}` };
   }
@@ -1299,6 +1411,10 @@ function checkArgs(name: GuideBuilderToolName, raw: unknown): { ok: true; args: 
   }
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(args)) {
+    if (value === null && spec.nullable?.includes(key)) {
+      out[key] = null;
+      continue;
+    }
     if (value === undefined || value === null) continue;
     if (key === "chapter" && typeof value === "number") {
       out[key] = String(value);

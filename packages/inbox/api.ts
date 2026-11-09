@@ -6,6 +6,7 @@
  */
 
 import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
+import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
@@ -523,6 +524,11 @@ export interface SettingsModel {
   theme?: InboxThemeConfig | null;
   /** The window's text size in px (config.json `inboxTextSize`): 12 to 15, 14 unless chosen. Absent from an older Inbox. */
   text_size?: InboxTextSize;
+  /**
+   * The favicon (config.json `favicon`), shared with plan review, code review and annotate: 'glass' unless chosen,
+   * 'totman' (shown as Face) or 'classic' (shown as P). Absent from an older Inbox.
+   */
+  favicon?: FaviconStyle;
   /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved. Absent from an older Inbox. */
   reactions?: InboxReaction[];
   /** How many times `reactions` was saved (config.json `inboxReactionsRev`): a window takes a list only when it is newer. */
@@ -1652,6 +1658,8 @@ export const inboxApi = {
   savePrompts: (change: InboxPromptsChange) => post<{ prompts: InboxPromptsSettings }>(inboxUrl('/settings'), { prompts: change }),
   /** The tour's curated fixture (packages/inbox/tour/content/fixture.json), served from the binary on demand. */
   tourFixture: () => get<unknown>(inboxUrl('/tour/fixture.json')),
+  /** The favicon, written to config.json `favicon` (shared with plan review, code review and annotate). */
+  saveFavicon: (favicon: FaviconStyle) => post<{ favicon: FaviconStyle }>(inboxUrl('/settings'), { favicon }),
   /** The window's text size, written to config.json `inboxTextSize`. */
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
   /**

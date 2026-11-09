@@ -18,6 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -848,6 +849,51 @@ describe("the window's routes: settings, restart, favicon", () => {
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" } });
       expect((await other.json()).text_size).toBe(13);
       expect(onDisk().inboxTextSize).toBe(13);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("the favicon saves into config.json `favicon`, glass unless chosen, and /favicon.png answers with it", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      const server = await start(dataDir);
+      const base = `http://127.0.0.1:${server.port}`;
+      const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()).favicon;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { favicon?: unknown; theme?: unknown };
+      const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      for (const bad of ["face", "Glass", "", null, 1, { style: "glass" }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      // A refused part saves nothing, the valid parts beside it included.
+      const mixed = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" }, favicon: "navy" });
+      expect(mixed.status).toBe(422);
+      expect(existsSync(join(dataDir, "config.json")) ? onDisk().theme : undefined).toBeUndefined();
+
+      for (const [style, bytes] of [
+        ["totman", FACE_FAVICON_PNG_BYTES],
+        ["classic", P_FAVICON_PNG_BYTES],
+        ["glass", FAVICON_PNG_BYTES],
+      ] as const) {
+        const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: style });
+        expect(saved.status).toBe(200);
+        expect((await saved.json()).favicon).toBe(style);
+        expect(onDisk().favicon).toBe(style);
+        expect(await read()).toBe(style);
+        expect(await icon()).toEqual(bytes);
+      }
+      // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
+      expect(await read()).toBe("totman");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
