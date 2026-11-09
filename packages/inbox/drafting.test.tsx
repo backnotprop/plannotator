@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { LiveDrawings } from './components/LiveDrawings';
-import { drawablePartialSvg, noteDrafting } from './drafting';
+import { DRAWING_ENTER_MS, drawablePartialSvg, noteDrafting } from './drafting';
 
 const hasDom = typeof document !== 'undefined';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -56,6 +56,35 @@ describe('drawablePartialSvg', () => {
     expect(svg).toContain('id="a"');
     expect(svg).not.toContain('circle');
     expect(svg).toContain('0 0 10 10');
+  });
+});
+
+describe('a shape comes in once', () => {
+  const styleOf = (svg: string, id: string) => new RegExp(`id="${id}"[^>]*style="([^"]*)"`).exec(svg)?.[1] ?? new RegExp(`style="([^"]*)"[^>]*id="${id}"`).exec(svg)?.[1] ?? null;
+
+  test.skipIf(!hasDom)('a new shape starts its entrance; in the next frame it carries on from its age, and a settled one has none', () => {
+    const seen = new Map<number, number>();
+    const first = drawablePartialSvg('<svg><defs><marker><path id="m"/></marker></defs><rect id="a"/>', { seen, now: 1000, reduced: false })!;
+    expect(styleOf(first, 'a')).toContain(`animation:pn-in ${DRAWING_ENTER_MS}ms`);
+    expect(styleOf(first, 'a')).toContain(' -0ms both');
+    // An arrowhead's shape is drawn with its line, never on its own.
+    expect(styleOf(first, 'm')).toBeNull();
+    const next = drawablePartialSvg('<svg><defs><marker><path id="m"/></marker></defs><rect id="a"/><rect id="b"/>', { seen, now: 1120, reduced: false })!;
+    expect(styleOf(next, 'a')).toContain(' -120ms both');
+    expect(styleOf(next, 'b')).toContain(' -0ms both');
+    const later = drawablePartialSvg('<svg><rect id="a"/><rect id="b"/>', { seen, now: 1000 + DRAWING_ENTER_MS, reduced: false })!;
+    expect(styleOf(later, 'a')).toBeNull();
+    expect(styleOf(later, 'b')).not.toBeNull();
+    // Nothing left to come in: no keyframes either.
+    expect(drawablePartialSvg('<svg><rect id="a"/><rect id="b"/>', { seen, now: 9000, reduced: false })).not.toContain('keyframes');
+  });
+
+  test.skipIf(!hasDom)('a shape with its own transform, or any shape under reduced motion, only fades; its own style is kept', () => {
+    const moved = drawablePartialSvg('<svg><rect id="a" transform="rotate(10)" style="fill:red"/>', { seen: new Map(), now: 0, reduced: false })!;
+    expect(styleOf(moved, 'a')).toContain('fill:red;animation:pn-fade');
+    expect(styleOf(moved, 'a')).not.toContain('transform-origin');
+    const calm = drawablePartialSvg('<svg><rect id="a"/>', { seen: new Map(), now: 0, reduced: true })!;
+    expect(styleOf(calm, 'a')).toContain('animation:pn-fade');
   });
 });
 

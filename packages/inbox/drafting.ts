@@ -71,15 +71,72 @@ export function useLiveDrafts(threadId: string): readonly LiveDraft[] {
  * does the closing, as it would for a page; nothing it reads runs. Null while
  * there is no `<svg>` yet.
  */
-export function drawablePartialSvg(source: string): string | null {
+export function drawablePartialSvg(source: string, entering?: DrawingEntrances): string | null {
   if (typeof DOMParser === 'undefined' || typeof XMLSerializer === 'undefined') return null;
   const lastOpen = source.lastIndexOf('<');
   const whole = lastOpen > source.lastIndexOf('>') ? source.slice(0, lastOpen) : source;
   if (!/<svg[\s>]/i.test(whole)) return null;
   try {
     const svg = new DOMParser().parseFromString(`<!doctype html><body>${whole}</body>`, 'text/html').querySelector('svg');
-    return svg ? new XMLSerializer().serializeToString(svg) : null;
+    if (!svg) return null;
+    if (entering) markEntrances(svg, entering);
+    return new XMLSerializer().serializeToString(svg);
   } catch {
     return null;
   }
+}
+
+/** How long a shape takes to come in. */
+export const DRAWING_ENTER_MS = 380;
+/** Ease-out with a slight overshoot: the shape pops in and settles. */
+const ENTER_EASING = 'cubic-bezier(0.34, 1.36, 0.64, 1)';
+const ENTER_SHAPES = 'rect,circle,ellipse,line,polyline,polygon,path,text,image,use';
+const ENTER_NEVER_INSIDE = 'defs,marker,symbol,clipPath,mask,pattern,linearGradient,radialGradient,filter';
+
+/**
+ * Which shapes of one drawing are still coming in. `seen` is kept between
+ * frames by the caller: a shape's place among the drawing's shapes (a drawing
+ * being written only grows at its end) to when it was first drawn.
+ */
+export interface DrawingEntrances {
+  seen: Map<number, number>;
+  now: number;
+  /** The person asked for less motion: a shape fades in and does not grow. */
+  reduced: boolean;
+}
+
+/**
+ * Each shape scales and fades in once, when it first appears. The drawing is
+ * an image whose document is replaced with every frame, which would start
+ * every animation again; so a shape's animation is written with a negative
+ * delay equal to its age, and each new document carries it on from where the
+ * last one left it. A shape past its time gets nothing. A shape with its own
+ * `transform` only fades: growing it from its center would move it.
+ */
+function markEntrances(svg: Element, entering: DrawingEntrances): void {
+  let any = false;
+  let index = 0;
+  for (const shape of Array.from(svg.querySelectorAll(ENTER_SHAPES))) {
+    if (shape.closest(ENTER_NEVER_INSIDE)) continue;
+    const place = index++;
+    let first = entering.seen.get(place);
+    if (first === undefined) {
+      first = entering.now;
+      entering.seen.set(place, first);
+    }
+    const age = Math.max(0, Math.round(entering.now - first));
+    if (age >= DRAWING_ENTER_MS) continue;
+    any = true;
+    const grows = !entering.reduced && !shape.hasAttribute('transform');
+    const own = shape.getAttribute('style');
+    const enter = grows
+      ? `animation:pn-in ${DRAWING_ENTER_MS}ms ${ENTER_EASING} -${age}ms both;transform-box:fill-box;transform-origin:center`
+      : `animation:pn-fade ${DRAWING_ENTER_MS}ms ease-out -${age}ms both`;
+    shape.setAttribute('style', own ? `${own};${enter}` : enter);
+  }
+  if (!any) return;
+  const style = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'style');
+  // `scale`, not `transform`: it never replaces a transform the drawing set in CSS.
+  style.textContent = '@keyframes pn-in{from{opacity:0;scale:.86}}@keyframes pn-fade{from{opacity:0}}';
+  svg.insertBefore(style, svg.firstChild);
 }
