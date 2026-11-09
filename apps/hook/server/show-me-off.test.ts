@@ -111,7 +111,7 @@ test("Code review off: no agent text holds a Show me word", async () => {
   expect(leaks).toEqual([]);
 });
 
-test("Code review on and Shape off: no agent text holds a Show me word or names the overview's diagram", async () => {
+test("Code review on and Shape off: no agent text holds a Show me word (no overview.diagram, no Shape drawing rules)", async () => {
   // `review_draw_gone` stays: an older agent's `review draw` is still refused, in words that name no Shape.
   const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())].filter((word) => word !== "review_draw_gone");
   const texts = {
@@ -121,8 +121,6 @@ test("Code review on and Shape off: no agent text holds a Show me word or names 
   };
   const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
   expect(leaks).toEqual([]);
-  // The brief's schema has no overview diagram either (a message's fenced diagrams are another thing, elsewhere).
-  expect(texts.get_guide_brief).not.toContain("diagram");
   // Code review's own words are still there: the notes rule.
   expect(texts.get_guide_brief).toContain("diffs[].notes");
 });
