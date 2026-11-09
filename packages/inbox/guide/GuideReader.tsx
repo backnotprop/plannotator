@@ -194,6 +194,7 @@ function Reader({
   snapshot,
   reviewed,
   onReviewedChange,
+  chapterTicks = true,
   comments,
   mode = 'walkthrough',
   reveal = null,
@@ -500,6 +501,7 @@ function Reader({
         guide={guide}
         reviewed={ticks}
         onToggleReviewed={toggle}
+        showReviewed={chapterTicks}
         // All files under the thread's heading: the repository, branch and range alone (no agent's chapters to credit).
         engineLabel={threadHeading && mode === 'files' ? undefined : engineLabel(snapshot.generator?.engine, snapshot.generator?.model)}
         focusedFile={focusedFile}

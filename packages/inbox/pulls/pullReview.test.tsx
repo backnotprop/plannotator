@@ -1090,8 +1090,12 @@ test.skipIf(!hasDom)('the box as a Walkthrough: no changes or PR to pick, words 
   changedFiles = { prj_9: 0, prj_2: 0 };
   mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
   await settle();
+  // The button names what it starts: a review on Local, a walkthrough on Walkthrough.
+  expect(el('[data-compose-send]').textContent).toContain('Start review');
   await act(async () => el('[data-review-choice="walkthrough"]').click());
   await settle();
+  expect(el('[data-compose-send]').textContent).toContain('Start walkthrough');
+  expect(el('[data-compose-send]').textContent).not.toContain('Start review');
   expect(document.querySelector('[data-review-choice="branch"]')).toBeNull();
   expect(document.querySelector('[data-review-pick]')).toBeNull();
   expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');

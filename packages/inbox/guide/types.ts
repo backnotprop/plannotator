@@ -32,6 +32,8 @@ export interface GuideReaderProps {
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;
+  /** False: the chapters take no "Reviewed" tick (a walkthrough: code as it is, nothing to review). Default true. */
+  chapterTicks?: boolean;
   /** Line comments on the diffs; absent, the diffs are read-only (a resolved thread). */
   comments?: GuideReaderComments;
   /**

@@ -1086,7 +1086,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     };
   });
   // Another machine asleep: the Send waits for it, and says so.
-  const sendLabel = trust ? 'Trust and start' : start && startAsleep && startMachineName ? `Start when ${startMachineName} is back` : box ? 'Start review' : 'Send';
+  const sendLabel = trust ? 'Trust and start' : start && startAsleep && startMachineName ? `Start when ${startMachineName} is back` : box ? (reviewKind === 'walkthrough' ? 'Start walkthrough' : 'Start review') : 'Send';
   // The details cover the error line, and on a phone the whole footer: open, they say it.
   const errorInDetails = trustInfoOpen && !conflict;
   const status = start

@@ -564,4 +564,6 @@ test.skipIf(!hasDom)("opened from Reviews, a review thread's bar says the review
   expect(reviewRowTitle(curating, () => '')).toBe('Webhook delivery');
   expect(title()!.textContent).toBe('Webhook delivery');
   expect(heading()!.textContent).toBe('Webhook delivery');
+  // Under the request, a walkthrough being written says so in its own words, not "Curating the review…".
+  expect(document.querySelector('[data-review-curating]')?.textContent).toBe('Writing the walkthrough…');
 });

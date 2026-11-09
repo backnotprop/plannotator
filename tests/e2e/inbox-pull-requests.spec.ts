@@ -3615,6 +3615,7 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await words.fill('How does a failed charge get retried? Start from the webhook.');
   await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
   await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Failed charge');
+  await expect(box.locator('[data-compose-send]')).toContainText('Start walkthrough');
   await shot(page, 'w-box');
   for (const [width, height] of [[390, 844], [320, 700]] as const) {
     await page.setViewportSize({ width, height });
@@ -3630,7 +3631,10 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(box.locator('[data-compose-thread-name] input')).toHaveCount(0);
   const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Failed charge' });
   await expect(row).toContainText('Walkthrough');
-  await expect(row).toContainText('Curating');
+  // Being written, not curated: the row and the thread say so.
+  await expect(row).toContainText('Writing…');
+  await expect(row).not.toContainText('Curating');
+  await expect(page.locator('[data-review-curating]')).toHaveText('Writing the walkthrough…');
   await expect(page.getByText('/review-walkthrough').first()).toBeVisible();
   const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
   await shot(page, 'w-curating');
@@ -3679,6 +3683,13 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
   await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
   await expect(page.getByText('unmodified line')).toHaveCount(0);
+  // No ticks: no chapter Reviewed, no file Viewed, and no "N of M" line in the chapter menu.
+  await expect(page.locator('[data-review-message]').getByRole('button', { name: /viewed/i })).toHaveCount(0);
+  await page.locator('[data-review-jump]').first().click();
+  await expect(page.locator('[data-review-jump-menu] [data-review-jump-row]').first()).toBeVisible();
+  await expect(page.locator('[data-review-progress]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
   // Two ranges in a file leave no room over its header for a separator that isn't there: it sits as a one-range file's does.
   const gapOver = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().evaluate((shell) => {
     const body = [shell, ...shell.querySelectorAll('*')].flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];

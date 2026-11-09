@@ -133,7 +133,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
   const agent = row.reviewed && name ? { host, name } : null;
   const { status, tone } = statusOf(row);
-  if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status: row.reason === 'review_ready' ? 'Ready' : status, tone };
+  // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
+  if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status: row.reason === 'review_ready' ? 'Ready' : row.reason === 'curating' ? 'Writing…' : status, tone };
   if (stack) {
     const many = stack.layers.length > 1;
     if (many) {
@@ -190,8 +191,11 @@ export interface ReviewView {
   firstReviewId: string | null;
   /** The latest review: open in this view however long ago it was read. */
   latestReviewId: string | null;
-  /** An agent is still curating the first review: the thread says so under the request. */
-  curating: boolean;
+  /**
+   * An agent is still writing the first review: what the thread says under the request ("Curating the review…", for a
+   * walkthrough "Writing the walkthrough…"). Null once a review arrived.
+   */
+  curating: string | null;
   /** New review's own label on the request: "New review · Guided review". */
   asked: string | null;
   /** The thread the review came from, when it was an ordinary one. */
@@ -278,7 +282,7 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason === 'curating',
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
     asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
