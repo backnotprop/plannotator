@@ -1376,6 +1376,13 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   /** Shift+R's name on the ↻ (approval "inbox-refresh-key"), gone with single keys off. */
   const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
+  const refreshTip = withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' });
+  /** The name's tooltip without a project: the name while the header cuts it, else the ↻'s own "Refresh ⇧R". */
+  const [titleCut, setTitleCut] = useState(false);
+  const titleTipWhen = useCallback((trigger: Element) => {
+    setTitleCut(isTextCut(trigger));
+    return true;
+  }, []);
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
@@ -1544,10 +1551,11 @@ export function InboxList(props: InboxListProps) {
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
-            {/* Two tooltips, each on its own part: the name's, as a header without the ↻ has (a project's full name and
-                folder, never beside the name; else the name when the header cuts it), and the ↻'s, below it: "Refresh"
-                with Shift+R's two keycaps (the owner, on #2911; withShortcut leaves the keys out with single keys or
-                Show keys on buttons off, and Tip opens on no touch screen). */}
+            {/* Two tooltips, each on its own part: the name's (a project's full name and folder, never beside the name;
+                else the name when the header cuts it, else the ↻'s), and the ↻'s, below it: "Refresh" with Shift+R's
+                two keycaps (the owner, on #2911; withShortcut leaves the keys out with single keys or Show keys on
+                buttons off, and Tip opens on no touch screen). The ↻'s box takes the gap, so no part of the button
+                is without a tooltip. */}
             <button
               type="button"
               className="ib-lhead-title"
@@ -1557,10 +1565,16 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
-              <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
-                <span className="ib-lhead-tt">{props.title}</span>
-              </Tip>
-              <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })} side="bottom">
+              {props.path ? (
+                <Tip content={<ProjectTipText name={props.title} root={props.path} />}>
+                  <span className="ib-lhead-tt">{props.title}</span>
+                </Tip>
+              ) : (
+                <Tip content={titleCut ? props.title : refreshTip} when={titleTipWhen} side={titleCut ? 'top' : 'bottom'}>
+                  <span className="ib-lhead-tt">{props.title}</span>
+                </Tip>
+              )}
+              <Tip content={refreshTip} side="bottom">
                 <span className="ib-lhead-ic" data-list-refresh-icon="">
                   <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
                 </span>
