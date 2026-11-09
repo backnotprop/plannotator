@@ -29,6 +29,11 @@ const MARKETING_ICON_SHA256: Record<string, string> = {
     "47cb128c12a479dd1f5d13fe56be141393b04c845e5a7fd6941538a951bd9fd6",
   "apps/marketing/public/apple-touch-icon.png":
     "5f5d84c3c72bf0acbcc6e634e037108754794ff9f9c8e3b596d0e7b7c088f4fb",
+  // Not linked from the head. Outside sites and caches still ask for
+  // https://plannotator.ai/favicon.png, so that URL keeps answering, now with
+  // the studio's web/icon-512.png.
+  "apps/marketing/public/favicon.png":
+    "801d533f995fa75efd4d3521fabeb90e98427a444b61f125d91a471c26745333",
 };
 
 interface PngStats {
@@ -178,5 +183,7 @@ describe("favicon surfaces", () => {
     }
     const touch = inspectPng(await readRepoFile("apps/marketing/public/apple-touch-icon.png"));
     expect(touch).toMatchObject({ width: 180, height: 180 });
+    const legacy = inspectPng(await readRepoFile("apps/marketing/public/favicon.png"));
+    expect(legacy).toMatchObject({ width: 512, height: 512 });
   });
 });
