@@ -46,6 +46,8 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  // The set's test runs without happy-dom too (the unit lanes): nothing was drawn.
+  if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
