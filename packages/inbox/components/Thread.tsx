@@ -40,6 +40,9 @@ import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
+import { FileRefCodeSpans } from './FileRefSpan';
+import type { FileRef } from '../fileRefs';
+import { ReferencedFilePane, type OpenFileRef } from './ReferencedFilePane';
 import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
@@ -462,6 +465,7 @@ export function MessageBody({
   pictureBadge,
   inlineRefOf,
   replyFiles,
+  onOpenFileRef,
   contextNotes,
   onTryPrototype,
 }: {
@@ -472,6 +476,11 @@ export function MessageBody({
    * chip naming its file and lines, with its words; `onOpen` opens the review at them. Absent: the text as it is.
    */
   contextNotes?: { onOpen?: (note: InboxNoteBlock) => void };
+  /**
+   * A file this agent message names (approval "inbox-file-refs-open-viewer": a link that is not attached, a code span
+   * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
+   */
+  onOpenFileRef?: (ref: FileRef) => void;
   /**
    * The action items this person's message carried (approval
    * "inbox-action-items-in-reply"): listed as "You did 1 action item", and the
@@ -718,7 +727,12 @@ export function MessageBody({
     (src: string | null, alt: string): boolean => {
       if (!src || refOf(src) === null) return false;
       // An image that failed to load (outside the project, gone) opens nothing: an empty lightbox helps no one.
-      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) return true;
+      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) {
+        // The pane says why it is not here.
+        const named = openFileRefRef.current ? refOf(src) : null;
+        if (named) openFileRefRef.current?.({ path: named });
+        return true;
+      }
       const image = imageOf(src);
       if (image && openImageRef.current) openImageRef.current(image);
       else setFallback({ src, alt });
@@ -827,6 +841,21 @@ export function MessageBody({
   openRef.current = onOpenAttachment;
   const openReplyFileRef = useRef(replyFiles?.onOpen);
   openReplyFileRef.current = replyFiles?.onOpen;
+  // The person's own words keep their links as they are: only an agent's message opens what it names.
+  const refsOn = !!onOpenFileRef && message.author.kind === 'agent';
+  // The host's callback, read through a ref (see the note above renderFooter): named here, every closure React keeps
+  // from this render would pin the thread view of its read.
+  const hostOpenFileRef = useRef(onOpenFileRef);
+  hostOpenFileRef.current = onOpenFileRef;
+  const openFileRefRef = useRef<((ref: FileRef) => void) | undefined>(undefined);
+  // A file the message carries opens as that attachment (comments and all); any other file read only.
+  openFileRefRef.current = refsOn
+    ? (ref) => {
+        const attached = attachmentForLink(ref.path, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+        if (attached) openRef.current(attached);
+        else hostOpenFileRef.current?.(ref);
+      }
+    : undefined;
   const resolveLocalLink = useCallback<LocalLinkResolver>(
     (href) => {
       // A file the person's reply commented on (its feedback heading), or a drawing it carried.
@@ -846,6 +875,24 @@ export function MessageBody({
         return { kind: 'open', title: 'Show the drawing', href: src, open: () => setFallback({ src, alt: 'Your drawing' }) };
       }
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+      const named = !attachment && openFileRefRef.current ? projectFileOfLink(href) : null;
+      if (named) {
+        // A click opens it beside the thread; with Code review on, its code still shows on hover, with Open in.
+        return {
+          kind: 'open',
+          title: openAttachmentTitle(named.path),
+          open: () => openFileRefRef.current?.(named),
+          ...(openInFiles
+            ? {
+                wrap: (link: ReactNode) => (
+                  <OpenInCodeHover scope={{ thread: message.thread_id, message: message.id }} path={named.path} line={named.line} lineEnd={named.lineEnd}>
+                    {link}
+                  </OpenInCodeHover>
+                ),
+              }
+            : {}),
+        };
+      }
       if (!attachment) {
         // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
         const projectFile = openInFiles ? projectFileOfLink(href) : null;
@@ -870,7 +917,7 @@ export function MessageBody({
         open: () => openRef.current(attachment),
       };
     },
-    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
+    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],
   );
   // The host's callbacks are new on every render of the thread. A closure here that React keeps (an effect, a
   // memoized callback, a listener) holds this render's scope, so none names them directly: they are read through
@@ -1099,6 +1146,7 @@ export function MessageBody({
     <ImageResolverContext.Provider value={resolveImage}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
+    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -1169,6 +1217,7 @@ export function MessageBody({
       <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
@@ -1371,6 +1420,10 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
+  /** A file a message names, open beside the thread, read only (the route's `ref=`; approval "inbox-file-refs-open-viewer"). */
+  namedFile?: OpenFileRef | null;
+  /** Open (or, with null, close) a file a message names beside the thread. Absent: references stay as before. */
+  onOpenNamedFile?: (ref: OpenFileRef | null) => void;
   /**
    * This page came through the tailnet ("Over your tailnet"): "Open in" is a
    * new tab only, never an app on the computer. Null until the settings say
@@ -1678,7 +1731,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, askButton = null, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -2938,6 +2991,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     };
     const pane = paneRef.current;
     if (pane && file && file.id !== attachment.id) pane.leave(attachment.name ?? allFiles.find((a) => a.id === attachment.id)?.name ?? 'that file', go);
+    else go();
+  };
+  /** A file a message names, beside the thread; an open file with a comment not saved yet asks first. */
+  const openRefFromMessage = (ref: OpenFileRef) => {
+    const go = () => onOpenNamedFile?.(ref);
+    const pane = paneRef.current;
+    if (pane && file) pane.leave(ref.path.split('/').pop() ?? ref.path, go);
     else go();
   };
   /** A file the person's sent reply names (its feedback heading): beside the thread, at the version the comments were on. */
@@ -5864,10 +5924,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  const fileOpen = openAttachment !== null;
+  const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
-  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backBesideFile = (file !== null || namedFile !== null) && !phone && !stacked && !fileStacked && onBackToList !== undefined;
   // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
   // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
@@ -6787,6 +6847,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
+                  // The owner's: a tailnet guest reads no file a message names (the routes are owner only).
+                  onOpenFileRef={onOpenNamedFile && !guest ? (ref) => openRefFromMessage({ ...ref, messageId: message.id }) : undefined}
                   onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
@@ -7508,6 +7570,25 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           onWriteReply: writeReplyFromFile,
         }}
         composer={composer}
+      />
+    )}
+    {!openAttachment && file === null && namedFile && (
+      <ReferencedFilePane
+        threadId={thread.thread_id}
+        fileRef={namedFile}
+        agent={asker}
+        phone={phone}
+        full={phone || fileStacked}
+        onOpen={(ref) => onOpenNamedFile?.(ref)}
+        onClose={() => onOpenNamedFile?.(null)}
+        // A comment made it an attachment of its message (or it already was one): that attachment opens in its place.
+        onAttached={async (attachmentId, focus) => {
+          await reloadFiles();
+          void onChanged();
+          onOpenFile({ id: attachmentId, version: 'current', focus, view: null }, { replace: true });
+        }}
+        // Another machine's thread: its files are read there, and a comment never attaches through the forward.
+        commentable={!machineOf(thread.thread_id)}
       />
     )}
     </>

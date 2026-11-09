@@ -158,4 +158,52 @@ describe.if(hasDom)('CodeFileView with a referenced line', () => {
     const scrolled = await renderView({});
     expect(scrolled).toEqual([]);
   });
+
+  test('a host that passes nothing scrolls as it always did; the Inbox opts into vertical only', async () => {
+    const asked: unknown[] = [];
+    const stub = function (this: HTMLElement, options?: unknown) {
+      scrolled.push(this.getAttribute('data-line') ?? this.tagName);
+      asked.push(options);
+    };
+    const { CodeFileView } = await import('./CodeFilePopout');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    scrolled = [];
+    HTMLElement.prototype.scrollIntoView = stub;
+    await act(async () => root!.render(<CodeFileView filepath="/repo/src/big.ts" contents={contents} line={250} />));
+    await waitForScroll(1);
+    expect(asked).toEqual([{ behavior: 'smooth', block: 'center' }]);
+    // The opt-in: no ancestor scrolls here, so the line is brought on screen with nothing slid sideways.
+    await act(async () => root!.render(<CodeFileView filepath="/repo/src/big.ts" contents={contents} line={250} revealKey={2} lineScroll="vertical" />));
+    await waitForScroll(2);
+    expect(asked).toEqual([{ behavior: 'smooth', block: 'center' }, { block: 'center', inline: 'nearest' }]);
+  });
+});
+
+describe.if(hasDom)('scrollCodeLineIntoView', () => {
+  test('a short file with nothing to scroll down: the line is brought on screen, never slid sideways', async () => {
+    const { scrollCodeLineIntoView } = await import('../utils/codeLineScroll');
+    // A code block scrolled sideways by nothing, inside Pierre's shadow root, and a line wider than it.
+    const area = document.createElement('div');
+    document.body.appendChild(area);
+    // (A plain host: Pierre's own element is registered by now and makes its own shadow root.)
+    const container = document.createElement('div');
+    const shadow = container.attachShadow({ mode: 'open' });
+    const pre = document.createElement('pre');
+    const row = lineDiv(3);
+    pre.appendChild(row);
+    shadow.appendChild(pre);
+    area.appendChild(container);
+    let asked: ScrollIntoViewOptions | boolean | undefined;
+    // The browser's scrollIntoView slides the block to the long row's start (the gutter's width).
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: ScrollIntoViewOptions | boolean) {
+      asked = options;
+      pre.scrollLeft = 64;
+    };
+    scrollCodeLineIntoView(row);
+    expect(asked).toEqual({ block: 'center', inline: 'nearest' });
+    expect(pre.scrollLeft).toBe(0);
+    area.remove();
+  });
 });

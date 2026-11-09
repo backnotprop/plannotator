@@ -10577,6 +10577,25 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
 
+/* A file an agent's message names, beside the thread (ReferencedFilePane.tsx; approval "inbox-file-refs-open-viewer"). */
+.ib-refmissing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
+.ib-refmissing-ic { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 12px; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 80%, transparent); }
+.ib-refmissing-name { max-width: 46ch; font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); color: var(--foreground); overflow-wrap: anywhere; }
+.ib-refmissing-t { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-refview.ib-phone .ib-vhead { padding-left: 6px; gap: 8px; }
+/* A comment not kept (the attach or the save failed): its words stay, with Try again. */
+.ib-refview .ib-view-error { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--card); box-shadow: 0 2px 12px color-mix(in oklch, var(--foreground) 12%, transparent); }
+.ib-ref-unsaved { display: block; max-height: 8em; overflow: auto; font-size: var(--ib-fs-13, 13px); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The words that name a file: a code span, and a bare path (ui's BarePathContext, fileRefs.ts). */
+.ib-fileref { cursor: pointer; border-radius: 4px; }
+.ib-fileref code { text-decoration: underline dotted color-mix(in oklch, var(--primary) 55%, transparent); text-underline-offset: 3px; }
+.ib-fileref:hover code { color: var(--primary); }
+.ib-fileref-bare { color: var(--primary); text-decoration: underline dotted color-mix(in oklch, var(--primary) 55%, transparent); text-underline-offset: 3px; overflow-wrap: anywhere; }
+.ib-fileref:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* A narrow window hides the attachment header's sender line; a referenced file keeps its path and line there. */
+.ib-refview .ib-vhead .ib-from { display: block; min-width: 0; flex: 0 1 auto; }
+.ib-refview.ib-phone .ib-vhead .ib-fn { flex: 0 1 auto; }
+.ib-refview.ib-phone .ib-vhead .ib-from { flex: 1 1 auto; }
 /* System in Settings and Reviews (approval "system-inbox", screens 1, 3, 4a and 4b; packages/inbox/system).
    A picked row or a project that is open takes the filled highlight (--ib-cur-bg, --ib-sel), never a border or outline. */
 .ib-prow.ib-sysrow { flex-direction: column; align-items: stretch; gap: 10px; }

@@ -27,7 +27,7 @@ const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/
 
 const MOCK = '<!doctype html><html><head><meta charset="utf-8"><title>settings mock</title></head><body><h1>Settings, two columns</h1></body></html>';
 
-test('a link to an attached file opens it beside the thread; an unattached one is inert; an external one is unchanged', async ({ browser }) => {
+test('a link to an attached file opens it beside the thread; an unattached one opens read only; an external one is unchanged', async ({ browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-links-e2e-');
   const dataDir = join(root, 'data');
@@ -63,8 +63,6 @@ test('a link to an attached file opens it beside the thread; an unattached one i
     });
     const id = sent.message_id as string;
     const page = await context.newPage();
-    const requested: string[] = [];
-    page.on('request', (request) => requested.push(new URL(request.url()).pathname + new URL(request.url()).search));
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const body = page.locator(`[data-message-id="${id}"]`);
 
@@ -104,16 +102,21 @@ test('a link to an attached file opens it beside the thread; an unattached one i
     await expect(page.locator('[data-attachment-pane]')).not.toHaveAttribute('data-full-view', '');
     await page.getByRole('button', { name: 'Close mock.html' }).click();
 
-    // Not attached: inert text with its reason, never requested.
-    const notes = body.locator('[data-local-link="unavailable"]', { hasText: 'working notes' });
+    // Not attached (approval "inbox-file-refs-open-viewer"): an agent's link to a file of the project is a link too;
+    // a click opens it read only beside the thread, never as an attachment.
+    const notes = body.getByRole('link', { name: 'working notes' });
+    await expect(notes).toHaveAttribute('data-local-link', 'open');
     await expect(notes).not.toHaveAttribute('title', /./);
     await notes.hover();
-    await expect(page.locator('[data-side].bg-popover')).toContainText('Not attached');
+    await expect(page.locator('[data-side].bg-popover')).toHaveText('Open notes.md beside the thread');
     await page.mouse.move(1, 1);
-    expect(await notes.evaluate((el) => el.tagName)).toBe('SPAN');
     await notes.click();
+    const named = page.locator('[data-referenced-file="notes.md"]');
+    await expect(named).toBeVisible();
+    await expect(named).toHaveAttribute('aria-label', 'notes.md');
     await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
-    expect(requested.filter((path) => path.includes('notes.md'))).toEqual([]);
+    await page.getByRole('button', { name: 'Close notes.md' }).click();
+    await expect(named).toHaveCount(0);
 
     // External: a new tab without an opener, as before.
     const external = body.getByRole('link', { name: 'style guide' });

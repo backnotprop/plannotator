@@ -30,6 +30,7 @@ import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { isShapeProjectPath } from "@plannotator/core/shape";
+import { isNetworkPath } from "./network-paths";
 import {
   INBOX_VIEW_MAX_BYTES,
   inboxAttachmentId,
@@ -527,6 +528,76 @@ export async function checkInboxProjectFile(places: readonly InboxProjectFilePla
     }
   }
   return { ok: false, code: refused ? "refused" : "missing" };
+}
+
+export type InboxReadableFile =
+  | { ok: true; path: string; kind: InboxAttachmentKind; size: number; handle?: FileHandle }
+  | { ok: false; code: "missing" | "refused" };
+
+/**
+ * A file a message names, wherever it is on this computer (approval "inbox-file-refs-open-viewer": no project
+ * boundary). Each candidate is an absolute path, tried in order; the first regular file wins.
+ *
+ * - A path that reaches another computer when touched (`isNetworkPath`: UNC, a macOS mount-on-touch folder) is
+ *   refused as written, before anything touches it, and the realpath is never a blocking call.
+ * - A dotenv-family name, or a path `refused` takes (a secret: SSH keys, credential stores), is refused as named and
+ *   again at its realpath, before anything is read, so a symlink to a secret is refused too.
+ * - Once open, the realpath is asked again and must name the same file (`dev` and `ino`): a folder swapped for a link
+ *   between the check and the open is refused. A hard link to a secret has a path of its own and is not told apart.
+ * - `keep`: the open handle comes back with the answer, so the caller reads the very file that was checked (it closes it).
+ *
+ * The kind comes from its name and first bytes, as a send decides it (a text file past the view cap is a `file`).
+ */
+export async function checkInboxReadableFile(
+  candidates: readonly string[],
+  refused: (path: string) => boolean,
+  options: { keep?: boolean; platform?: NodeJS.Platform } = {},
+): Promise<InboxReadableFile> {
+  const platform = options.platform ?? process.platform;
+  let refusedAny = false;
+  for (const named of candidates) {
+    if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) continue;
+    if (isNetworkPath(named, platform) || inboxAttachmentNameRefusal(named) || refused(named)) {
+      refusedAny = true;
+      continue;
+    }
+    let real: string;
+    try {
+      real = await realpath(named);
+    } catch {
+      continue;
+    }
+    if (isNetworkPath(real, platform) || inboxAttachmentNameRefusal(real) || refused(real)) {
+      refusedAny = true;
+      continue;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(real, OPEN_FLAGS);
+    } catch {
+      continue;
+    }
+    let kept = false;
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const again = await realpath(real).catch(() => null);
+      const there = again === real ? await lstat(real).catch(() => null) : null;
+      if (!there || there.dev !== stat.dev || there.ino !== stat.ino) {
+        refusedAny = true;
+        continue;
+      }
+      const head = await readHead(handle);
+      const decision = decideInboxAttachmentKind(basename(real), head, isTextHead(head), stat.size);
+      kept = options.keep === true;
+      return { ok: true, path: real, kind: decision.kind, size: stat.size, ...(kept ? { handle } : {}) };
+    } catch {
+      continue;
+    } finally {
+      if (!kept) await handle.close().catch(() => {});
+    }
+  }
+  return { ok: false, code: refusedAny ? "refused" : "missing" };
 }
 
 /** Whether a file's first bytes read as text: no NUL, and UTF-8 (a character cut at the end of the head is fine). */

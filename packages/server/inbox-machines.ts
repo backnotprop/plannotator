@@ -350,6 +350,32 @@ export function forwardedReadSearch(search: string, guest: boolean): string {
   for (const name of GUEST_STRIPPED) query.delete(name);
   return query.size > 0 ? `?${query}` : "";
 }
+/** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
+const FILE_READ_ROUTE = /^open-in\//;
+/** A forwarded file read, refused: a guest, or a call that is not a press in this Inbox's window. */
+export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
+
+/**
+ * Whether a forwarded read of a file on another machine is refused, and how. That machine hands the read to its own
+ * route as its owner's, so the owner check is made here: a tailnet guest of this Inbox reads nothing there (as it gets
+ * `403` from this computer's own route). And only this Inbox's window asks: a browser's own request (`Sec-Fetch-Site:
+ * same-origin`, and an Origin, when sent, of this host). An agent's or a script's bare call sends neither, so it cannot
+ * read the other machine's files through this one (the remote launch rule; a tightening, not a secret).
+ */
+export function forwardedFileReadRefusal(route: string, req: Request, guest: boolean): { status: 403; body: Record<string, string> } | null {
+  if (!FILE_READ_ROUTE.test(route)) return null;
+  if (guest) return { status: 403, body: OWNER_ONLY_BODY };
+  const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
+  const origin = req.headers.get("origin");
+  let originHost: string | null = null;
+  try {
+    originHost = origin ? new URL(origin).host : null;
+  } catch {
+    originHost = "";
+  }
+  const window = site === "same-origin" && (origin === null || originHost === (req.headers.get("host") ?? ""));
+  return window ? null : { status: 403, body: INBOX_MACHINE_FILE_WINDOW_ONLY_BODY };
+}
 /** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 
@@ -795,6 +821,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const offline = () =>
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
+    const fileRead = forwardedFileReadRefusal(route, req, context.isGuest(req, via));
+    if (fileRead) return json(fileRead.body, fileRead.status);
     if (req.method === "GET") {
       const search = forwardedReadSearch(url.search, context.isGuest(req, via));
       const headers = pick(req.headers, PASS_REQUEST);
