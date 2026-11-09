@@ -1483,6 +1483,22 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await other.context.close();
     rmSync(join(dir, 'details-fail'), { force: true });
     for (const name of [`ctx-${number}.json`, `ctxg-${number}.json`, `req-${number}.json`]) rmSync(join(dir, name), { force: true });
+    // The server keeps a details read a minute, keyed by the PR's last update: this read's thread on src/app.ts would
+    // show on the rail of the next tests that open #880 within it. The PR updated a second later and the list read
+    // again (at most every 20 s), that read is never reached, however soon the next test opens #880.
+    const pulls = join(dir, 'gh-pulls.json');
+    const listed = readFileSync(pulls, 'utf8');
+    const updated = listed.replace(new RegExp(`("number":${number},[^}]*?"updatedAt":")([^"]+)`), (_, head: string, at: string) => `${head}${new Date(Date.parse(at) + 1_000).toISOString()}`);
+    expect(updated).not.toBe(listed);
+    writeFileSync(pulls, updated);
+    const listReads = () => forgeCalls().filter((call) => call === 'gh pulls').length;
+    const before = listReads();
+    await expect
+      .poll(async () => {
+        await fetch(`${world.url}api/inbox/pulls?refresh=1`);
+        return listReads();
+      }, { timeout: 60_000, intervals: [2_000] })
+      .toBeGreaterThan(before);
   }
 });
 
