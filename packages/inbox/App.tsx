@@ -151,7 +151,9 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
-import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark } from './sidebarLayout';
+import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
+import { sidebarTipDue, useSidebarTip } from './sidebarTip';
+import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
 import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
@@ -4939,9 +4941,11 @@ function Inbox() {
   // The idle clock (idleClock.ts): a calm moment for the dialogs whose own moment is "back on the list", which a person
   // who keeps a thread open beside the list never reaches (the owner, 2026-11-08). Counts only while one of them is
   // armed, on the Inbox page, the tab in front and nothing typed or open.
+  const sidebarTipSpent = useRef(false);
   const idleArmedNow = settings && latest !== null && !firstRun && route.page === 'inbox' ? revealArmed(settings) : null;
   const pageIdle = useIdleClock({
-    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')),
+    // The Sidebar tip (sidebarTip.ts) takes the idle moment too.
+    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')) || (idleArmedNow !== null && !phone && !sidebarTipSpent.current && sidebarTipDue(settings)),
     busy: () => revealHeldBack() || !listIntroClear,
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
@@ -5933,6 +5937,26 @@ function Inbox() {
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
   const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
+  // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
+  // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
+  const sidebarDocked = !phone && route.page === 'inbox' && sidebarOpen && !fileOpen && !sidebarHeld && !full;
+  const sidebarCustomizing = useSidebarCustomizerOpen();
+  const sidebarTip = useSidebarTip({
+    due: !phone && !tourOn && sidebarTipDue(settings) && snoozeIntroLatch.current !== null && !snoozeIntroLatch.current.aside.includes('star'),
+    blocked: revealBlocked || otherRevealActive || starReveal.stage === 'open' || starReveal.stage === 'claimed' || sidebarCustomizing,
+    sidebar: sidebarDocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    rows: snoozeIntroRows,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+  });
+  if (sidebarTip.stage !== 'none') sidebarTipSpent.current = true;
   threadFullRef.current = full;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
@@ -7429,6 +7453,7 @@ function Inbox() {
           onLeave={starReveal.close}
         />
       )}
+      {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
           groups={listViewChoiceGroups}

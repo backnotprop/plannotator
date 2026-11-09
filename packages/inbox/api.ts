@@ -103,8 +103,8 @@ import { newUuid } from './uuid';
 export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
-/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
@@ -557,9 +557,11 @@ export interface SettingsModel {
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
    * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
    * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
-   * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
+   * line; absent from an older Inbox: it never shows); `sidebar_tip`: the Sidebar tip may show at a calm moment beside
+   * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
+   * older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
