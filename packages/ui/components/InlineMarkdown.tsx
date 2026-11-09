@@ -431,7 +431,8 @@ const HostResolvedImage: React.FC<{
         aria-hidden={failed || undefined}
         className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
         loading="lazy"
-        decoding="async"
+        // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
+        decoding={width ? 'async' : undefined}
         onError={() => setFailedSrc(src)}
         onClick={(e) => {
           e.stopPropagation();
@@ -1060,7 +1061,6 @@ export const InlineMarkdown: React.FC<{
             data-image-src={src}
             className="max-w-full rounded my-2 cursor-zoom-in"
             loading="lazy"
-            decoding="async"
             onClick={(e) => {
               e.stopPropagation();
               onImageClick?.(imgSrc, alt);

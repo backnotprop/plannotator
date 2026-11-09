@@ -177,6 +177,10 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     // A resolution without a width leaves the picture at its own size, as before.
     const plain = await render(<RenderedMarkdown markdown="![shot](img/a.png)" resolveImage={(src) => ({ kind: 'src', src: `/copy/${src}` })} />);
     expect(plain.querySelector('img')?.hasAttribute('width')).toBe(false);
+    // ...and decodes as the browser chooses, as before: async decoding is part of the smaller copy's opt-in only.
+    expect(plain.querySelector('img')?.hasAttribute('decoding')).toBe(false);
+    const none = await render(<RenderedMarkdown markdown="![shot](img/a.png)" />);
+    expect(none.querySelector('img')?.hasAttribute('decoding')).toBe(false);
   });
 
   // A `data:` candidate's comma is part of its URL. Split there, the tail
