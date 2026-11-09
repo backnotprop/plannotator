@@ -23,14 +23,15 @@ const all = [...reachable, ...fromFullScreenStart];
 const HELD: Partial<Record<ModelKey, string>> = {};
 
 const at = (path: ModelKey[]) => (path.length === 0 ? '(start)' : path.join(' → '));
-const view = (s: KeyState) => ({ page: s.page, thread: s.thread, file: s.file, fullFrom: s.fullFrom, box: s.box, overlay: s.overlay });
+const view = (s: KeyState) => ({ page: s.page, thread: s.thread, artifacts: s.artifacts, file: s.file, fullFrom: s.fullFrom, box: s.box, overlay: s.overlay });
 
 describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () => {
   test('explores enough of the window to mean something', () => {
     const pages = new Set(all.map(({ state }) => `${state.page}/${state.thread}/${state.file}/${state.box}/${state.overlay}`));
     expect(all.length).toBeGreaterThan(500);
-    for (const must of ['inbox/true/side/false/none', 'inbox/true/full/false/none', 'inbox/true/none/true/none', 'settings/false/none/false/none', 'board/false/none/false/none', 'inbox/false/none/false/map', 'inbox/true/none/false/search'])
+    for (const must of ['inbox/true/side/false/none', 'inbox/true/full/false/none', 'inbox/true/none/true/none', 'settings/false/none/false/none', 'board/false/none/false/none', 'reviews/false/none/false/none', 'drafts/false/none/false/none', 'inbox/false/none/false/map', 'inbox/true/none/false/search', 'inbox/false/none/false/compose', 'inbox/true/none/false/snooze'])
       expect([must, pages.has(must)]).toEqual([must, true]);
+    expect(all.some(({ state }) => state.artifacts && state.file === 'side')).toBe(true);
   });
 
   test('focus is never left on the page', () => {
@@ -80,7 +81,7 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
     const flaws: string[] = [];
     for (const { state, path } of all) {
       if (state.overlay !== 'none' || typing(state)) continue;
-      for (const key of ['?', '/', 'Mod+K'] as const) {
+      for (const key of ['?', '/', 'Mod+K', 'C', 'H'] as const) {
         const opened = press(state, key);
         if (opened.overlay === 'none') continue;
         if (JSON.stringify(press(opened, 'Escape')) !== JSON.stringify(state)) flaws.push(`${at(path)}: ${key} then Escape`);
@@ -90,15 +91,23 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
         const back = press(press(state, 'G S'), 'Escape');
         if (JSON.stringify(view({ ...back, box: state.box })) !== JSON.stringify(view(state))) flaws.push(`${at(path)}: G S then Escape`);
       }
-      if (state.page === 'inbox' && state.thread && state.file === 'none' && !state.box && state.focus !== 'file') {
+      if (state.page === 'inbox' && state.thread && state.file === 'none' && !state.box && !state.artifacts && state.focus !== 'file') {
         for (const key of ['O', 'F'] as const) {
           const back = press(press(state, key), 'Escape');
           if (JSON.stringify(view(back)) !== JSON.stringify(view(state))) flaws.push(`${at(path)}: ${key} then Escape`);
         }
       }
-      if (state.page === 'inbox' && state.file === 'side' && state.focus !== 'file') {
+      if (state.page === 'inbox' && state.file === 'side' && !state.artifacts && state.focus !== 'file') {
         const back = press(press(state, 'F'), 'Escape');
         if (JSON.stringify(view(back)) !== JSON.stringify(view(state))) flaws.push(`${at(path)}: F then Escape from beside the thread`);
+      }
+      // Shift+O opens the grid; Shift+O again, or Escape, puts the thread back as it was, focus on the Artifacts button.
+      if (state.page === 'inbox' && state.thread && state.file === 'none' && !state.artifacts) {
+        const opened = press(state, 'Shift+O');
+        for (const close of ['Shift+O', 'Escape'] as const) {
+          const back = press(opened, close);
+          if (JSON.stringify(view(back)) !== JSON.stringify(view(state)) || back.focus !== 'artifacts-button') flaws.push(`${at(path)}: Shift+O then ${close}`);
+        }
       }
     }
     expect(flaws).toEqual([]);
@@ -118,8 +127,9 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
     expect(missing).toEqual([]);
     // Held keys must still be missing: once one lands in the registry, take it out of HELD.
     for (const key of Object.keys(HELD) as ModelKey[]) expect([key, registry.has(key)]).toEqual([key, false]);
-    // Every registry single key the model leaves out is one that only steps, undoes or opens the open-items list (no new view).
+    // Every registry single key the model leaves out is one that only steps, undoes, archives (the thread stays open,
+    // shown archived), refreshes (a read: view and focus stay) or opens the open-items list (no new view).
     const unmodelled = [...registry].filter((key) => !(MODEL_BARE_KEYS as readonly string[]).includes(key)).sort();
-    expect(unmodelled).toEqual(['E', 'K', 'Q', 'Shift+K', 'Z', '[', ']']);
+    expect(unmodelled).toEqual(['E', 'K', 'Q', 'Shift+E', 'Shift+K', 'Shift+R', 'Z', '[', ']']);
   });
 });

@@ -18,15 +18,25 @@
 @source "../../packages/inbox/review-drawing/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
+/* Floating reply drafts (packages/inbox/floaters/). */
+@source "../../packages/inbox/floaters/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
 @import "../../packages/ui/components/shape/shape.css";
 /* A document's contents rail (its own sheet: not in theme.css). */
 @import "../../packages/ui/contents-rail.css";
+/* The comment card and visible comment drafts (configurePlannotatorUI commentCard / visibleCommentDrafts, App.tsx). */
+@import "../../packages/ui/comment-card.css";
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
+@import "../../packages/inbox/prototype-window.css";
+/* System: the drawing's own sheet (sys- classes, packages/system), drawn in Reviews' System pane. */
+@import "../../packages/system/src/system.css";
+/* Floating reply drafts and Ask AI in the corner. */
+@import "../../packages/inbox/floaters/floaters.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 

@@ -530,12 +530,12 @@ async function expectBarFits(page: Page): Promise<void> {
     parts.forEach((part, i) => {
       if (part.box.right > window.innerWidth + 0.5 || part.box.left < -0.5) problems.push(`${part.name} leaves the window`);
       const next = parts[i + 1];
-      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name}`);
+      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name} (${Math.round(part.box.right)} > ${Math.round(next.box.left)})`);
     });
     if (head.scrollWidth > head.clientWidth + 1) problems.push('the bar overflows');
     return problems;
   });
-  expect(trouble).toEqual([]);
+  expect(trouble, `at ${page.viewportSize()?.width} px`).toEqual([]);
 }
 
 /** The tooltip showing now does not sit on the verdict's buttons. */
@@ -552,7 +552,8 @@ async function expectTipClearOfDecision(page: Page, words = 'Split view. Click f
 async function expectOverviewWhole(page: Page): Promise<void> {
   const name = page.locator('[data-review-message] .ib-rj-name');
   await expect(name).toHaveText('Overview');
-  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cut = await name.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${page.viewportSize()?.width} px`).toBe(true);
 }
 
 test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {
@@ -1220,22 +1221,22 @@ test('each file\'s name sits on the page above its code box: no fill at rest, un
   expect(world.errors).toEqual([]);
 });
 
-test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the diff controls before Close', async () => {
+test('Code review off: the same review opens in the full-window review, with no verdict, Viewed ticks or Show me, and Write the reply back to the thread', async () => {
   const { page, claude } = world;
   await setCodeReview(true);
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
-    await expect(page.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('[data-review-message]')).toHaveCount(0);
-    await expect(page.locator('[data-review-nav]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-section-tab]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-message] .ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
-    await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
+    const pane = page.locator(`[data-review-message="${review.message_id}"]`);
+    await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(pane.locator('[data-review-nav]')).toBeVisible();
+    await expect(pane.locator('[data-review-title]')).toHaveText('Retry failed payouts');
+    // The diff controls sit in the bar (approval "diff-controls-headers"), no card has a tab.
+    await expect(pane.locator('[data-guide-section-tab]')).toHaveCount(0);
+    await expect(pane.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
     // The 33 px file head is every reader's, this one's too.
-    const shell = page.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
     expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
 
@@ -1250,7 +1251,15 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await page.getByRole('button', { name: 'Add Comment' }).click();
     await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
     await expect(page.getByText(/\(me\)/)).toHaveCount(0);
-
+    // None of Code review's own parts.
+    await expect(pane.locator('[data-review-decision]')).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: /^Approve/ })).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: 'Show me' })).toHaveCount(0);
+    // The way out: the thread, its reply box open.
+    await pane.locator('[data-review-write-reply]').click();
+    await expect(pane).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /^Reply to / })).toBeFocused();
   } finally {
     await setCodeReview(true);
   }

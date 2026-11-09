@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -74,6 +74,14 @@ export interface RevealEntry {
    * line. It may be claimed at a calm moment while the line is free (`revealMayClaim`), so no other entry's day moves.
    */
   aside?: boolean;
+  /**
+   * An `aside` entry that waits for every other card (the grill-me tip; the owner, 2026-11-08: "Sooner: after 3
+   * answered questions, whatever the days, once"): claimed only at a moment the line has nothing else for: no card
+   * next and still within its patience (one that waited 3 days without its moment is passed, as the line's cards
+   * pass it), none ahead, no other `aside` entry still open, and no `aside` entry shown today (`asideShownAt`). Its
+   * claim stamps only its own record, so no other dialog's day can move.
+   */
+  lastResort?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -94,11 +102,16 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
   // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // "Choose how your list looks" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more threads, that's
+  // the point"): due for everyone, fresh installs too, once the machine holds five threads, with no day count.
+  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
-  // Bro mode (#2693) goes here: { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true }.
+  // Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use (`revealHeavyUse`:
+  // 10 or more threads read in 7 days, on 2 or more days), never on day 0 or 1 (2 days' tenure). Opt-in, as the Board:
+  // the claim only stamps it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
+  { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true },
   // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the
   // dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
@@ -106,6 +119,12 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
+  // The grill-me tip (the owner, 2026-11-08: "if we have any gap in like consistent use, we should say, hey, have you
+  // tried /grill-me yet?"; its cadence, the owner: "Sooner: after 3 answered questions, whatever the days, once"). No
+  // tenure, but it never costs another card its day (`lastResort`): it waits until the line has nothing else for the
+  // moment, and its claim stamps only its own record. Its need is its own (`open`): 3 answered question cards and no
+  // sign of grill-me (grill-me-tip.ts `revealGrillMeGap`). Nothing to turn on: `GrillMeTip` says it once.
+  { id: "grill_me_tip", kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true },
   // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
   // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
   // minimum), once across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the
@@ -154,6 +173,8 @@ export interface RevealState {
   open: Partial<Record<RevealId, boolean>>;
   /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
+  /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`), for a `lastResort` entry. */
+  asideShownAt?: string | null;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -266,13 +287,36 @@ export function revealAsideNow(state: RevealState, now: Date, table: readonly Re
 /** A claim for `id` may be spent now: it is still next, or an `ahead` offer at its moment. Anything else gets no. */
 export function revealMayClaim(id: RevealId, state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): boolean {
   const entry = table.find((e) => e.id === id);
-  if (entry?.aside) return revealQualifies(entry, state, now) && revealLineFree("spaced", state, now);
+  if (entry?.aside) {
+    if (!revealQualifies(entry, state, now) || !revealLineFree("spaced", state, now)) return false;
+    if (!entry.lastResort) return true;
+    const asideToday = time(state.asideShownAt);
+    return (
+      (asideToday === null || revealDay(asideToday) !== revealDay(now.getTime())) &&
+      !table.some((other) => other.aside && other.id !== entry.id && other.enabled && state.open[other.id] === true) &&
+      !revealFresh(state, now, table) &&
+      revealAhead(state, now, table).length === 0
+    );
+  }
   return revealNext(state, now, table) === id || revealAhead(state, now, table).includes(id);
+}
+
+/**
+ * Some card of the line is next and still within its patience: due, its moment still awaited. A card that has waited
+ * out its patience (3 days without its moment) is passed by the line's other cards, and by a `lastResort` one.
+ */
+function revealFresh(state: RevealState, now: Date, table: readonly RevealEntry[]): boolean {
+  if (!revealLineFree("spaced", state, now)) return false;
+  return table.some((entry) => {
+    if (entry.aside || !revealQualifies(entry, state, now)) return false;
+    const since = time(state.waitingSince?.[entry.id]);
+    return since === null || now.getTime() - since < REVEAL_PATIENCE_MS;
+  });
 }
 
 /** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual day. */
 export function revealNotNowAllowed(id: unknown, table: readonly RevealEntry[] = INBOX_REVEALS): id is RevealId {
-  return table.some((entry) => entry.id === id && entry.kind === "offer");
+  return table.some((entry) => entry.id === id && entry.kind === "offer" && !entry.lastResort);
 }
 
 /**

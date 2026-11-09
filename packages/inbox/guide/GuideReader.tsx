@@ -8,7 +8,7 @@
  * comments (`commentOnly`: nothing else of the review app, which needs its
  * server); without, they are read-only, as on guides.show and the phone.
  *
- * Mounted only through GuidePane's dynamic import (`#guide-reader`,
+ * Mounted only through lazyParts.tsx's dynamic import (`#guide-reader`,
  * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
@@ -110,8 +110,11 @@ export const GuideDiff: FC<
     fileOpenIn?: (filePath: string) => ReactNode;
     /** What the host draws under this file's lines (the PR page's threads). Absent: none. */
     lineNotes?: readonly GuideLineNote[];
+    /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
+    contextNotes?: AllFilesCodeViewProps['contextNotes'];
+    renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -150,6 +153,7 @@ export const GuideDiff: FC<
       onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
       {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
+      {...(contextNotes && renderContextNote ? { contextNotes, renderContextNote } : {})}
     />
   );
 };
@@ -203,9 +207,12 @@ function Reader({
   controlsHost = null,
   fileContents,
   threadHeading = false,
+  signComments = false,
   hostDiffControls = false,
   collapseAll,
   lineNotes,
+  contextNotes,
+  renderContextNote,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
@@ -264,15 +271,15 @@ function Reader({
     }
     setFocusedFile(highlight.path);
     setSelectionFile(highlight.path);
-    setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
+    setPendingSelection({ start: highlight.start, end: highlight.end, side: highlight.side === 'old' ? 'deletions' : 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
   pendingRef.current = pendingSelection;
-  // The PR page and the review sign a new comment with the person's name, as the review app does; a thread's guided
-  // review, there with Code review off, leaves it unsigned as on main.
-  const signs = bare || threadHeading;
+  // The PR page and a review with Code review on sign a new comment with the person's name, as the review app does; a
+  // guide, or any review with Code review off, leaves it unsigned as on main.
+  const signs = bare || signComments;
   const signed = useCallback((): { author?: string } => (signs ? { author: getIdentity() } : {}), [signs]);
   // Line comments go to the diffs; global comments (on the whole review) to the guide's header.
   const annotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope !== 'general') : NO_ANNOTATIONS), [comments?.annotations]);
@@ -420,10 +427,14 @@ function Reader({
       flushFiles?: boolean;
       headerKeepsFolder?: boolean;
       lineNotes?: readonly GuideLineNote[];
+      contextNotes?: AllFilesCodeViewProps['contextNotes'];
+      renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
+      // A host's context notes: only a file that has one gets the seam (the others draw exactly as before).
+      ...(contextNotes && renderContextNote && contextNotes.some((note) => note.filePath === file.path) ? { contextNotes, renderContextNote } : {}),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
@@ -445,7 +456,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes],
+    [bare, contextNotes, renderContextNote, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).

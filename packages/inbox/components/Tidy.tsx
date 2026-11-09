@@ -6,6 +6,8 @@ import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
+import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook';
 import { shortProjectNames } from '../projectLabels';
 import { THREAD_PANEL_LABEL } from '../threadPanel';
@@ -222,6 +224,8 @@ export function TidyMenu({
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [popOpen, setPopOpen] = useState(false);
+  // Shift+R runs Refresh here too (approval "inbox-refresh-key"): its key name, gone with single keys off.
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   // A stale plan read again as ⋮ is reached for (touch opens it at once): drawn as while it is first read, never its old count.
@@ -275,9 +279,10 @@ export function TidyMenu({
                 {count > 0 || !run ? 'Tidy' : runLabel(run)}
                 {count > 0 && <span className="ib-pmi-n">{formatCount(count)}</span>}
               </Menu.Item>
-              <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh}>
+              <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>
                 <Icon name="refresh" size={15} />
                 Refresh
+                <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-pmi-kbd" />
               </Menu.Item>
               {view && (
                 <>

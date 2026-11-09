@@ -311,6 +311,11 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
     const docked = await windowAt(browser, 1900, 900, false);
     try {
       await open(docked.page);
+      // A pull request's column starts closed, as in the review app: its Comments button opens it.
+      if (name === 'a pull request') {
+        await expect(docked.page.locator('.ib-gpanel')).toBeHidden();
+        await docked.page.locator('.ib-vcomments').click();
+      }
       const panel = (await docked.page.locator('.ib-gpanel').boundingBox())!;
       expect(panel.width).toBe(300);
       expect(panel.x + panel.width).toBe(await reviewRight(docked.page));

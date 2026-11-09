@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createProjectPictures, findRepoLogo, githubOwner, iconHref } from "./inbox-project-pictures";
+import { createProjectPictures, findRepoLogo, githubOwner, iconHref, pictureSources } from "./inbox-project-pictures";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const PNG_B = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
@@ -122,6 +122,20 @@ describe("the picture in order", () => {
     expect(readRepo).toBe(0);
     expect(await pictures.get(project, { logo: false, github: true, repo: () => ({ display: "team/infra", host: "gitlab.com" }) })).toBeNull();
     expect(gh.calls).toEqual([]);
+  });
+});
+
+describe("which pictures a read may use", () => {
+  // The list dialog's Detailed card draws a look the person has not saved: with `logo=1` it shows the repo's logo
+  // (a local file), but a request never turns GitHub on, so a page never makes the Inbox ask GitHub by itself.
+  test("the saved switches, plus the repo's logo when the window asks for it; GitHub only from the saved switch", () => {
+    const q = (query: string) => new URLSearchParams(query);
+    expect(pictureSources([], q("v=0-10"))).toEqual({ logo: false, github: false });
+    expect(pictureSources([], q("v=0-10&logo=1"))).toEqual({ logo: true, github: false });
+    expect(pictureSources(["repoLogo"], q("v=0-10"))).toEqual({ logo: true, github: false });
+    expect(pictureSources([], q("logo=1&github=1&githubPictures=1"))).toEqual({ logo: true, github: false });
+    expect(pictureSources(["githubPictures"], q(""))).toEqual({ logo: false, github: true });
+    expect(pictureSources([], q("logo=true"))).toEqual({ logo: false, github: false });
   });
 });
 

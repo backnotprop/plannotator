@@ -600,14 +600,16 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
     await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
     // Another browser (another cookie jar), no reload: the Detailed look.
-    await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b).
+    await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-roomy', 'ib-lk-pv2']);
     const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
-    expect(saved.rows).toEqual(['highlight', 'roomy', 'previewTwo']);
+    // Detailed also turns letter marks on, with the repo's logo (approval "inbox-rows-dialog").
+    expect(saved.rows).toEqual(['roomy', 'previewTwo', 'marksThreads', 'marksProjects', 'repoLogo']);
     // A wide row with Roomy is 60 px tall.
     expect(Math.round((await list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`).boundingBox())!.height)).toBe(60);
     await list.reload();
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
-    expect(await lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    expect(await lookClasses(list)).toEqual(['ib-lk-roomy', 'ib-lk-pv2']);
     await settings.screenshot({ path: join(proofDir, 'rows-settings-detailed.png') });
   } finally {
     await a.close();

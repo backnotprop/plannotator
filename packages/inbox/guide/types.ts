@@ -54,8 +54,8 @@ export interface GuideReaderProps {
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
   /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
   renderOverviewFigure?: () => ReactNode | null;
-  /** Paint these lines (new side) and bring them into view; a new token moves again. */
-  highlight?: { path: string; start: number; end: number; token: number } | null;
+  /** Paint these lines (new side; `side: 'old'`: removed lines' numbers) and bring them into view; a new token moves again. */
+  highlight?: { path: string; start: number; end: number; token: number; side?: 'old' } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
   /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
@@ -67,6 +67,11 @@ export interface GuideReaderProps {
    * thread's (GuideView `threadHeading`). Absent: as before.
    */
   threadHeading?: boolean;
+  /**
+   * Sign each new comment with the person's name, as the review app does (the full-window review while Code review is
+   * on). The PR page (`bare`) always signs. Absent: unsigned, as on main.
+   */
+  signComments?: boolean;
   /**
    * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
    * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.
@@ -83,6 +88,12 @@ export interface GuideReaderProps {
    * comments: nothing counts, sends or posts them. Absent: none, as before.
    */
   lineNotes?: readonly GuideLineNote[];
+  /**
+   * Context notes (approval "inbox-context-notes"): agents' words on lines, drawn under their last line by
+   * `renderContextNote` through review-editor's `contextNotes` seam, never as comments. Absent: nothing changes.
+   */
+  contextNotes?: readonly GuideContextNote[];
+  renderContextNote?: (id: string) => ReactNode;
 }
 
 /** One thing the host draws under a line (review-editor's `HostLineNote`, as the window's strict typecheck sees it). */
@@ -95,6 +106,15 @@ export interface GuideLineNote {
   /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
   key: string;
   render: () => ReactNode;
+}
+
+/** Where a context note sits (review-editor's `ContextNoteAnchor`, as the window's strict typecheck sees it). */
+export interface GuideContextNote {
+  id: string;
+  filePath: string;
+  side: 'old' | 'new';
+  lineStart: number;
+  lineEnd: number;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */

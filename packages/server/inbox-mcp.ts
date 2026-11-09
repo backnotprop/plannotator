@@ -17,10 +17,13 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { findQuestionBlocks, QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
-import { inboxQuestionKeysWithRecommendedMarker, parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
+import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck, type PrototypeAppTarget } from "@plannotator/core/inbox-questions";
+import { checkSendPrototypes } from "./inbox-prototypes";
+import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
+import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -30,7 +33,7 @@ import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpener
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
@@ -82,7 +85,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   INBOX_AGENT_RULES,
   "",
-  "- send_message posts markdown. Messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to (an id from the Inbox, never from memory) to answer a message. Question syntax: send_message's description.",
+  "- send_message posts markdown. With no reply_to or thread, a message starts a new thread; to add to a thread, reply_to its latest message (an id from the Inbox, never from memory) or use the same `thread` name. Question syntax: send_message's description.",
   "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
   "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
   "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
@@ -98,7 +101,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
  * own description, and the guide's rules on WHAT to ask still reach the model.
  */
 export const SEND_MESSAGE_DESCRIPTION = [
-  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). One message per real need.",
+  "Message the person in the Plannotator Inbox (markdown). With no reply_to or thread, it starts a new thread. One message per real need.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
@@ -108,14 +111,14 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
+  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
 
 /**
  * read_thread, as a raw MCP client reads it (the agent tool words its lead
  * itself, INBOX_AGENT_ACTION_LEADS). A thread read is a window, so a long
  * thread costs a few thousand tokens instead of the whole history.
  */
-export const READ_THREAD_DESCRIPTION = `Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices), the newest messages in full (\`limit\`, default ${INBOX_THREAD_WINDOW}), the person's earlier messages in full (up to ${sizeText(INBOX_EARLIER_PERSON_BYTES)}), and every other earlier message as one line with its questions' states and answers; a body over ${sizeText(INBOX_BODY_CUT_BYTES)} is cut. \`expand\` shows messages in full, \`before\` reads further back, \`after\` (the result's cursor, or a message id) returns only what is new; \`format: "full"\` returns every full record. A message the person marked 👍 Looks good carries \`ack\` (they read it and need nothing more; no reply is needed). Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, \`unread\`: the person wrote something you have not read): only the ones you sent in unless asked_by is "anyone", and only open ones unless include_resolved. ${INBOX_REPLY_TO_CHECK}`;
+export const READ_THREAD_DESCRIPTION = `Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices), the newest messages in full (\`limit\`, default ${INBOX_THREAD_WINDOW}), the person's earlier messages in full (up to ${sizeText(INBOX_EARLIER_PERSON_BYTES)}), and every other earlier message as one line with its questions' states and answers; a body over ${sizeText(INBOX_BODY_CUT_BYTES)} is cut. \`expand\` shows messages in full, \`before\` reads further back, \`after\` (the result's cursor, or a message id) returns only what is new; \`format: "full"\` returns every full record. A message the person reacted to carries \`ack\` with the person's \`reaction\`: a quick label. Decide from it whether to reply or act. Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, \`unread\`: the person wrote something you have not read): only the ones you sent in unless asked_by is "anyone", and only open ones unless include_resolved. ${INBOX_REPLY_TO_CHECK}`;
 
 /**
  * The Inbox-only `Stopped:` / `Holds up:` lines, as a whole block. The body
@@ -157,6 +160,29 @@ export const INBOX_CONTRACT_EXAMPLE = [
 ].join("\n");
 
 /**
+ * Option lines (approval "inbox-question-tradeoffs"): Pros, Cons and a
+ * prototype per option, one a running app and one an attached file. The help
+ * carries it (`plannotator inbox --help`, "Trade-offs and prototypes").
+ */
+export const INBOX_TRADEOFFS_EXAMPLE = [
+  ":::question",
+  "Which checkout should ship?",
+  "",
+  "- [ ] A · Classic — today's layout",
+  "    Pros: no retraining",
+  "    Cons: Pay sits below the fold on a phone",
+  "    Prototype: http://localhost:5173/checkout?v=a",
+  "- [ ] B · Total first — the amount and Pay at the top",
+  "    Pros: the amount due and Pay are seen first",
+  "    Cons: accounting checks a new layout; a long invoice runs to two pages",
+  "    Prototype: proto/checkout-b.html",
+  "",
+  "Recommended: B · Total first",
+  "Why: in the pilot, people paid faster with B.",
+  ":::",
+].join("\n");
+
+/**
  * send_message's `body`, as an agent reads it. The `Stopped:` and `Holds up:`
  * lines live here, not in QUESTION_AUTHORING_GUIDE (shared with plan review,
  * where they mean nothing) and not in send_message's own description (cut at
@@ -182,6 +208,7 @@ export const SEND_BODY_DESCRIPTION = [
   "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
+  INBOX_OPTION_LINES_RULE,
   "",
   INBOX_CONTRACT_EXAMPLE,
   "",
@@ -192,7 +219,7 @@ export const SEND_BODY_DESCRIPTION = [
 ].join("\n");
 
 const AGENT_SESSION_DESCRIPTION =
-  "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" matches on it.";
+  "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.";
 
 /**
  * The fields every sending tool takes beside its content (send_message and
@@ -200,12 +227,12 @@ const AGENT_SESSION_DESCRIPTION =
  */
 export const SEND_ROUTING_FIELDS = {
   project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
-  subject: z.string().optional().describe("A short one-line subject when this starts a thread (ignored when it joins one). Plain text: no line breaks. Default: the first question's prompt, else the first line."),
+  subject: z.string().optional().describe("A short one-line subject when this starts a thread. Plain text: no line breaks. Default: the first question's prompt, else the first line."),
   thread: z
     .string()
     .optional()
     .describe(
-      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.`,
+      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.`,
     ),
   reply_to: z.string().optional().describe(`A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`),
   supersedes: z
@@ -238,6 +265,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /**
+   * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
+   * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
+   * names one is refused.
+   */
+  checkPrototypeApps?: (apps: readonly PrototypeAppTarget[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** The clock (epoch ms) send_message's "not read since" line compares with (inbox-session-reads.ts). Default: Date.now. Tests inject. */
   now?: () => number;
   /** The ⌘K search index (packages/server/inbox-search.ts), for the agents' read-only search tool. */
@@ -280,6 +313,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * a `steps` call answers `steps_off` with nothing written. Absent: off.
    */
   stepsOn?: () => boolean;
+  /**
+   * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
+   * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
+   */
+  broOn?: () => boolean;
   /**
    * Whether code review is on (config.json `inboxCodeReview`, read on every
    * request; approval "inbox-code-review-direction"). Off: submit_guide has
@@ -746,7 +784,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -761,6 +799,15 @@ export async function sendAgentMessage(
   }
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
+  // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
+  // probed, before anything is written. A replay of a message already sent probes nothing: an app stopped since the
+  // first send must not make a retry read as "not sent".
+  const prototypes = await checkSendPrototypes(input.body, {
+    attachments: attachments ?? [],
+    bases: [here && isAbsolute(here) ? here : project.root, basePath ?? "", project.root],
+    checkApps: context.checkPrototypeApps,
+    probing: !(input.idempotency_key && store.agentMessageByKey(project.id, input.idempotency_key)),
+  });
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -791,6 +838,7 @@ export async function sendAgentMessage(
       thread: input.thread ?? null,
       attachments,
       inline_images: captured?.images,
+      ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
       guide: guide ?? null,
       base_path: basePath,
       from_project: fromProject,
@@ -838,6 +886,14 @@ export async function sendAgentMessage(
   // A question written with a recommended marker in a choice label (read
   // by the parser or not, with or without a `Recommended:` line).
   const recommendedInLabel = inboxQuestionKeysWithRecommendedMarker(message.body);
+  // A pick-one block with no choices: the result asks the agent to look again
+  // (the send and what the person sees are unchanged; a failure is left out).
+  let toCheck: InboxQuestionToCheck[] = [];
+  try {
+    toCheck = inboxQuestionsToCheck(message.body);
+  } catch {
+    toCheck = [];
+  }
   // A question with bare text choices under two or more pictures: send_message advises sending it again as picture choices.
   const choicesWithoutPictures = questionsWithoutPictureChoices(message.body);
   return {
@@ -846,6 +902,7 @@ export async function sendAgentMessage(
     questionOpenersWithText: openers,
     noStakes: noStakes.length,
     recommendedInLabel: recommendedInLabel.length,
+    questionsToCheck: toCheck,
     choicesWithoutPictures,
     superseded: superseded.length,
     actions: actions.length,
@@ -888,6 +945,8 @@ export async function sendAgentMessage(
       ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
       /** Keys of the questions that marked their recommendation in a choice label, not a `Recommended:` line (a nudge; the message was sent). */
       ...(recommendedInLabel.length > 0 ? { recommended_in_label: recommendedInLabel } : {}),
+      /** Questions to look at again: a pick-one block with no choices (`no_choices`, the directive as written) (advice; the message was sent). */
+      ...(toCheck.length > 0 ? { questions_to_check: toCheck } : {}),
     },
   };
 }
@@ -1054,7 +1113,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe(SEND_BODY_DESCRIPTION),
+          // Code review on: one more sentence, the thread agent's `:::note` (context notes, approval "inbox-context-notes").
+          // Bro mode on: its line in the body's description too.
+          body: z.string().min(1).describe(((body) => (context.broOn?.() ? inboxBodyWithBro(body) : body))(context.codeReviewOn?.() ? `${SEND_BODY_DESCRIPTION}\n\n${INBOX_NOTE_BLOCK_LINE}` : SEND_BODY_DESCRIPTION)),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())
@@ -1090,7 +1151,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
                 return record && record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
               })();
         // Named a thread (reply_to, or a thread name) this session has not looked at for hours (or ever):
-        // one line naming its subject. Not for a message routed to the session's own thread by default,
+        // one line naming its subject. Not for a message that starts a new thread,
         // never on a replay (the first answer stands), and it never blocks the send.
         const named = !!input.reply_to?.trim() || !!input.thread?.trim();
         const stale = sent.replayed || !named ? null : staleThreadOf(store, String(sent.structured.message_id), input.agent_session, clock());
@@ -1108,6 +1169,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
+          questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck),
           choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures),
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];

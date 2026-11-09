@@ -236,13 +236,15 @@ test.skipIf(!hasDom)('an archived thread its one agent came back to: the came-ba
   expect(el.querySelector('[data-came-back] .ib-st')?.textContent).toBe('Archived · Claude Code wrote after you archived it. Your reply goes to it; the thread stays archived.');
 });
 
-test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the last good "Saved" time; the next save that lands says Saved again', async () => {
+test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the last good "Saved" time; the next save that lands goes quiet again', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE)));
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Ship the usage panel');
   await settle(700);
-  expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toMatch(/^Saved \d{1,2}:\d{2} [AP]M$/);
+  // A computer saves silently (approval "inbox-reply-box", T6): no Saved time in the box, only a failure shows.
+  expect(serverDraft?.body).toBe('Ship the usage panel');
+  expect(el.querySelector('[data-draft-head]')).toBeNull();
 
   // The Inbox stops answering: the save fails and reading the draft back finds the older words.
   draftSave = () => {
@@ -265,8 +267,9 @@ test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the
   type(el, 'Ship the usage panel, and the totals fix, today.');
   await settle(700);
   await settle(50);
-  expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toMatch(/^Saved \d{1,2}:\d{2} [AP]M$/);
-  expect(el.querySelector('[data-draft-head]')?.hasAttribute('data-draft-failed')).toBe(false);
+  expect(serverDraft?.body).toBe('Ship the usage panel, and the totals fix, today.');
+  expect(el.querySelector('[data-draft-head]')).toBeNull();
+  expect(el.querySelector('[data-draft-failed]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('an emptied box whose save did not land: the restart guard does not ask, since a restart loses nothing', async () => {

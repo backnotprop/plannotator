@@ -607,8 +607,8 @@ describe("plannotator inbox mcp inside an agent session", () => {
     };
     expect(await author(registry.port, sent.thread_id, 0)).toEqual({ kind: "agent", host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" });
 
-    // The mod's plannotator_inbox tool fills exactly these (apps/hook/hooks/mod/inbox.ts): its message joins the
-    // same default thread with a byte-identical author, so the store reads both as one session.
+    // The mod's plannotator_inbox tool fills exactly these (apps/hook/hooks/mod/inbox.ts): its reply has a
+    // byte-identical author, so the store reads both as one session.
     const viaTool = await fetch(`http://127.0.0.1:${registry.port}/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
@@ -618,16 +618,16 @@ describe("plannotator inbox mcp inside an agent session", () => {
         method: "tools/call",
         params: {
           name: "send_message",
-          arguments: { body: "From the tool.", project_path: project, agent_session: CLAUDE_SESSION, agent_host: INBOX_HOST, agent_name: INBOX_AGENT_NAME },
+          arguments: { body: "From the tool.", reply_to: sent.message_id, project_path: project, agent_session: CLAUDE_SESSION, agent_host: INBOX_HOST, agent_name: INBOX_AGENT_NAME },
         },
       }),
     });
     expect(viaTool.status).toBe(200);
     expect(await viaTool.text()).toContain(sent.thread_id);
 
-    // A second process with the same tag (another command of the same session) joins the same thread.
+    // A second process with the same tag (another command of the same session) writes as the same session.
     const second = await shim(box, join(project, "worker"), tag);
-    const again = (await second.callTool({ name: "send_message", arguments: { body: "And the migration?", idempotency_key: "tag-2" } })).structuredContent as {
+    const again = (await second.callTool({ name: "send_message", arguments: { body: "And the migration?", reply_to: sent.message_id, idempotency_key: "tag-2" } })).structuredContent as {
       message_id: string;
       thread_id: string;
     };

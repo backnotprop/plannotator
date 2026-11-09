@@ -208,13 +208,16 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$6" = .merge_base_commit.sha ]; then',
     `  echo "gh merge-base $4" >> "$calls"; echo ${MERGE_BASE}; exit 0`,
     'fi',
-    // A PR read around its patch (`--jq`): the list's `headRefOid` for that number, and its description.
+    // A PR read around its patch (`--jq … | tojson`): the list's `headRefOid` for that number, and its description.
+    // A plain `.head.sha` read (the whole diff's) gets the head raw, as gh prints a string.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body"; exit 0',
+    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); case "$6" in *tojson*) printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body";; *) echo "$sha";; esac; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
     '  f="$dir/gh-$(name "$4").patch"',
+    // GitHub reads an owner or repository in any case (`Northwind/Payments` is `northwind/payments`); a case-sensitive disk does not.
+    '  [ -f "$f" ] || f="$dir/gh-$(name "$4" | tr A-Z a-z).patch"',
     '  if [ -f "$f" ]; then cat "$f"; exit 0; fi',
     '  echo "HTTP 404: Not Found" >&2; exit 1',
     'fi',
@@ -497,6 +500,13 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const rounding = ledger.diff('main', 'priya/rounding');
   forge.glab(`projects/${encodeURIComponent('northwind/ledger')}/merge_requests/61/raw_diffs`, csvPatch);
   forge.glab(`projects/${encodeURIComponent('northwind/ledger')}/merge_requests/58/raw_diffs`, rounding);
+  // Pull request links: a teammate's PR in a repository that is no project, read only as one link.
+  forge.gh('repos/northwind/payments/pulls/231', JSON.stringify({ state: 'open', title: 'Idempotent refunds', html_url: 'https://github.com/northwind/payments/pull/231', head: { ref: 'refunds', sha: 'a'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.gh('user', JSON.stringify({ login: 'dana' }));
+  forge.gh('repos/northwind/never-opened/pulls/77', JSON.stringify({ state: 'open', title: 'Never opened', html_url: 'https://github.com/northwind/never-opened/pull/77', head: { ref: 'x', sha: 'b'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.gh('repos/northwind/payments/pulls/234', JSON.stringify({ state: 'open', title: 'Yours', html_url: 'https://github.com/northwind/payments/pull/234', head: { ref: 'y', sha: 'd'.repeat(40) }, base: { ref: 'main' }, user: { login: 'dana' } }));
+  forge.gh('repos/northwind/payments/pulls/233', JSON.stringify({ state: 'open', title: 'Not yours', html_url: 'https://github.com/northwind/payments/pull/233', head: { ref: 'x', sha: 'c'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.glab(`projects/${encodeURIComponent('northwind/mobile')}/merge_requests/44`, JSON.stringify({ state: 'merged', merged_at: ago(90), title: 'Offline queue', web_url: 'https://gitlab.com/northwind/mobile/-/merge_requests/44', source_branch: 'offline', target_branch: 'main', author: { username: 'priya' } }));
 
   const billingRepo = 'northwind/billing-svc';
   const webRepo = 'northwind/web-app';
@@ -736,6 +746,9 @@ test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where
 test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
   const { page } = world;
   await setCodeReview(true);
+  // A fresh load: the page is still on #reviews from the test before, where Code review was off. A hash change alone
+  // can land before the switch reaches it, and an off window rightly forgets `&new`.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await expect(page.locator('dialog[data-compose]')).toBeVisible();
@@ -900,7 +913,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
 }
 
 /** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice, [data-compose-send]';
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice input, [data-compose-send]';
 
 test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
@@ -1062,10 +1075,17 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment is a quiet mark in the bar; Split | Unified sits in the review app's muted tab row over the code.
+  // Global comment is a quiet mark in the bar; the diff controls (one Split / Unified button, Collapse all, the gear) sit
+  // in the bar too, before it, as in a thread's review (the owner: in the Inbox they are always in the header).
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-pull-tabs] [data-diff-style-switch]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
+  await expect(review.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+  await expect(review.locator('[data-diff-controls]')).toHaveCount(1);
+  const barOrder = await review.locator('.ib-vhead').evaluate((bar) => {
+    const left = (selector: string) => Math.round(bar.querySelector(selector)!.getBoundingClientRect().left);
+    return [left('[data-diff-controls]') < left('[data-guide-global-comment-add]'), left('[data-guide-global-comment-add]') < left('[data-review-decision]')];
+  });
+  expect(barOrder).toEqual([true, true]);
+  await expect(review.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
   // one hairline under it, and the first header at the top of the code.
@@ -1090,22 +1110,21 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
   expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', cornerRight: '0px', barApart: true });
-  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it, the 33 px tab row over the
-  // code alone, in a fill of its own, the first file right under it.
+  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it and right under the bar:
+  // no row over the code (no empty band; the diff controls are in the bar).
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
-    const [bar, rail, body, tabs] = ['.ib-vhead', '.ib-rrail', '.ib-gbody', '[data-pull-tabs]'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
-    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
+    const [bar, rail, body] = ['.ib-vhead', '.ib-rrail', '.ib-gbody'].map(box) as [DOMRect, DOMRect, DOMRect];
     return {
       barHeight: bar.height,
       railTop: rail.top - bar.bottom,
       railFoot: root.getBoundingClientRect().bottom - rail.bottom,
       beside: body.left - rail.right,
-      tabs: { height: tabs.height, top: tabs.top - bar.bottom, overCode: [tabs.left, tabs.right, body.top - tabs.bottom].map(Math.round), apart: fill('[data-pull-tabs]') !== fill('.ib-gbody') && fill('[data-pull-tabs]') !== fill('.ib-vhead') },
+      codeTop: Math.round(body.top - bar.bottom),
+      row: root.querySelectorAll('[data-pull-tabs], .ib-prp-tabs').length,
     };
   });
-  const codeBox = (await review.locator('.ib-gbody').boundingBox())!;
-  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, tabs: { height: 33, top: 0, overCode: [Math.round(codeBox.x), Math.round(codeBox.x + codeBox.width), 0], apart: true } });
+  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, codeTop: 0, row: 0 });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1196,9 +1215,15 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   return { context, page };
 }
 
-/** The details over the code, from the bar or, on a phone, the title's row. */
+/**
+ * The way to the details: the bar's PR title on a computer (the owner's "title only", PullDetails.tsx
+ * `DETAILS_BUTTON`; it carries the checks' dot and the comments' count), the title's row on a phone.
+ */
+const detailsWayIn = (review: Locator) => review.locator('[data-pull-details-title], [data-pull-details-button]');
+
+/** The details over the code, from the bar's title or, on a phone, the title's row. */
 async function openDetails(review: Locator): Promise<Locator> {
-  await review.locator('[data-pull-details-button]').click();
+  await detailsWayIn(review).click();
   const panel = review.locator('[data-pull-details]');
   await expect(panel).toBeVisible();
   return panel;
@@ -1256,7 +1281,7 @@ test("the details as real gh answers them: a running check, a template for a bod
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, {}, 'layer', pull);
   try {
     const review = page.locator('[data-pull-review]');
-    const button = review.locator('[data-pull-details-button]');
+    const button = detailsWayIn(review);
     await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'pending', { timeout: 30_000 });
     const panel = await openDetails(review);
     await expect(panel.locator('[data-pull-details-check="pending"]')).toHaveCount(1);
@@ -1328,8 +1353,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    const button = review.locator('[data-pull-details-button]');
-    // The bar's control says how the checks stand and how many people's comments, bots not counted.
+    const button = detailsWayIn(review);
+    // The bar's title says how the checks stand and how many people's comments, bots not counted.
     await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'fail');
     await expect(button.locator('[data-pull-details-comments]')).toHaveText('3');
     const panel = await openDetails(review);
@@ -1384,13 +1409,22 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await expect(panel).toContainText('Coverage is up.');
     // A bot's report opening with a heading stays a comment's size.
     expect(await panel.locator('.ib-prd-cbody h2', { hasText: 'Coverage' }).evaluate((h) => parseFloat(getComputedStyle(h).fontSize))).toBeLessThanOrEqual(14);
-    // The tab behind the panel does not peek out.
-    await expect(review.locator('[data-guide-section-tab]').first()).toBeHidden();
-    // Escape closes it, back on its button; the tab returns.
+    // Nothing in the code behind the panel peeks out: across its top band, what is on screen is the panel's own.
+    // (Split | Unified is in the bar now, main 423fa3b92: no tab on the first file is left to check.)
+    expect(
+      await panel.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return [r.left + 24, r.left + r.width / 2, r.right - 24].every((x) => {
+          const hit = document.elementFromPoint(x, r.top + 12);
+          return !!hit && el.contains(hit);
+        });
+      }),
+    ).toBe(true);
+    // Escape closes it, back on its way in; the code is there again.
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(button).toBeFocused();
-    await expect(review.locator('[data-guide-section-tab]').first()).toBeVisible();
+    await expect(review.locator('[data-guide-file-shell] [data-file-header]').first()).toBeVisible();
     // One thing over the code at a time.
     await page.setViewportSize({ width: 1280, height: 900 });
     await button.click();
@@ -1967,7 +2001,7 @@ test('the next file\'s header right under the last code row, whatever separators
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
-    await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
+    await review.locator('.ib-vhead [data-diff-layout-toggle="split"]').click();
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
   } finally {
     await context.close();
@@ -2096,7 +2130,7 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
 
     // So does the global comment's.
     const addGlobal = review.locator('[data-guide-global-comment-add]');
-    const global = page.getByPlaceholder('Add a global comment...');
+    const global = page.locator('[data-comment-popover]').getByPlaceholder('Add a global comment…');
     await comments.click();
     await addGlobal.click();
     await expect(global).toBeFocused();
@@ -2478,11 +2512,18 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
-    // The bar has it at every width but a phone's, beside the title.
-    for (const width of [800, 1040, 1280, 1440]) {
+    // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
+    // gives way before the title does: the title's tip names the author as well.
+    for (const width of [1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     }
+    await page.setViewportSize({ width: 800, height: 900 });
+    const narrow = await review.evaluate((root) => {
+      const width = (selector: string) => root.querySelector(selector)!.getBoundingClientRect().width;
+      return { title: width('[data-pull-review-title]') > width('[data-pull-review-readonly]') + 24, overflow: root.querySelector('.ib-vhead')!.scrollWidth - root.querySelector('.ib-vhead')!.clientWidth };
+    });
+    expect(narrow).toEqual({ title: true, overflow: 0 });
     await page.setViewportSize({ width: 1440, height: 900 });
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
@@ -2501,7 +2542,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     }
     await note.evaluate((node, text) => (node.textContent = text), words);
 
-    // From 1500 wide the comments are a column beside the diff, with neither the card's fill nor the diff's; folded, a card.
+    // From 1500 wide the comments are a column beside the diff, closed at first and opened by the bar's Comments button;
+    // open, it is framed as the Guided Review's panel: the card's fill and a hairline down its left. Folded, a card.
     const fill = () =>
       review.evaluate((root) => {
         const token = (name: string) => {
@@ -2513,13 +2555,15 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
         };
         const panel = getComputedStyle(root.querySelector('.ib-gpanel')!);
         const inner = getComputedStyle(root.querySelector('.ib-gpanel > [data-annotation-panel]')!);
-        return { display: panel.display, panel: panel.backgroundColor, inner: inner.backgroundColor, card: token('--card'), ground: token('--background') };
+        return { display: panel.display, panel: panel.backgroundColor, inner: inner.backgroundColor, edge: panel.borderLeftWidth, card: token('--card') };
       });
     await page.setViewportSize({ width: 1800, height: 900 });
+    await expect.poll(async () => (await fill()).display).toBe('none');
+    await review.locator('.ib-vhead .ib-vcomments').click();
     await expect.poll(async () => (await fill()).display).toBe('flex');
     const column = await fill();
-    expect(column.inner).toBe(column.panel);
-    expect([column.card, column.ground]).not.toContain(column.panel);
+    expect([column.panel, column.inner, column.edge]).toEqual([column.card, column.card, '1px']);
+    // Crossing the fold closes it.
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect.poll(async () => (await fill()).display).toBe('none');
     await review.locator('.ib-vhead .ib-vcomments').click();
@@ -2985,8 +3029,8 @@ test("A guided review of a PR's own diff posts its comment inline, and what post
   const words = 'Should this fall back further?';
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('about:blank');
-  await page.goto(`${world.url}#pulls`);
-  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  // The PR's own page: its row opens its review thread now that it has one, so the stack is asked for by name.
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   const threadId = String(await page.locator('[data-pulls-stack] [data-pulls-thread]').first().getAttribute('data-pulls-thread'));
   await claude.submitGuide({
     project_path: world.projects.web,
@@ -3058,7 +3102,6 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
   await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
   await page.goto(`${world.url}#reviews`);
   await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
-  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
   await claude.submitGuide({
     project_path: world.projects.web,
     thread: 'jitter',
@@ -3073,11 +3116,15 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
     },
     review: true,
   } as never);
-  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
+  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count. The count is
+  // checked against the server's rows (its cached answer: no forge read), not a number read before the review: the
+  // tests before this one leave rows whose move can still settle on the page's next read, so that number may be stale.
   const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
-  await expect(row).toContainText('Add jitter to retries');
+  await expect(row).toContainText('Add jitter to retries', { timeout: 15_000 });
   await expect(row).toContainText('Review ready');
+  const onYou = () => page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.filter((r) => r.move === 'on_you'));
+  await expect.poll(async () => (await onYou()).some((r) => r.thread_id === first.thread_id), { message: 'the review is on the person' }).toBe(true);
+  await expect.poll(async () => (await page.locator('[data-pulls-nav] .ib-n').textContent()) === String((await onYou()).length), { message: "the sidebar's count is the rows on the person", timeout: 15_000 }).toBe(true);
   await expect(row).not.toHaveAttribute('data-pulls-row');
   await page.reload();
   await expect(row).toBeVisible();
@@ -3139,6 +3186,7 @@ test('New review, local changes: the + opens the box, the summary follows the ch
     await page.setViewportSize({ width: 390, height: 844 });
     await shot(page, 'n-box-local-phone');
     await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator('dialog.ib-cp[data-phone]')).toHaveCount(0);
     // Another choice, another size: the working copy's new file is not in the last commit.
     await box.locator('[data-review-choice="last"]').check({ force: true });
     await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: last commit on /);
@@ -3302,7 +3350,13 @@ test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR a
 
   await page.goto(`${world.url}#`);
   await page.reload();
-  await page.keyboard.press('ControlOrMeta+k');
+  // ⌘K before the page's keys are wired does nothing, and the words typed after it land on the list's own shortcuts:
+  // press it until the palette has the words' field, then type.
+  const field = page.locator('dialog[data-search-palette] [role="combobox"]');
+  await expect(async () => {
+    if (!(await field.isVisible())) await page.keyboard.press('ControlOrMeta+k');
+    await expect(field).toBeFocused({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   await page.keyboard.type('new review');
   await page.locator('[data-compose-action="review"]').click();
   await expect(box).toBeVisible();
@@ -3322,6 +3376,405 @@ test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR a
   await expect(page).toHaveURL(new RegExp(`#reviews.*thread=${threadId}`));
   const threadCount = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
   expect(threadCount).toBe(threads.length);
+});
+
+test('New review, a pull request link: what was found and how it was read, a repository that is no project, one read only, and a second link opens the same thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  // One Pull request row: its picker's search takes the link.
+  await expect(box.locator('[data-review-choice="link"]')).toHaveCount(0);
+  // No visible labels on what is reviewed: each control says what it asks, and keeps its name.
+  await expect(box.locator('.ib-cp-rvrow .ib-cp-tol')).toHaveCount(0);
+  await expect(box.getByRole('radiogroup', { name: 'Review' })).toBeVisible();
+  await expect(box.getByRole('radiogroup', { name: 'Changes' })).toBeVisible();
+  for (const [width, height] of [[390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-local-${width}`);
+  }
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await expect(box.locator('.ib-cp-rvrow .ib-cp-tol')).toHaveCount(0);
+  await expect(box.getByRole('button', { name: 'Pull request: none chosen' })).toBeVisible();
+  for (const [width, height] of [[320, 700], [390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-pr-empty-${width}`);
+  }
+  const openPicker = async () => {
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+  };
+  await openPicker();
+  await expect(box.locator('[data-review-pick]')).toContainText('Choose or paste a pull request');
+  const field = box.locator('[data-review-link]');
+  await expect(field).toBeFocused();
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  const read = box.locator('[data-review-link-read]');
+  const found = box.locator('[data-review-link-option]');
+
+  // Bitbucket and things that aren't links say so, and nothing can start.
+  const linkReads = () => forgeCalls().filter((call) => call.includes(' diff ')).length;
+  const before = linkReads();
+  await field.fill('https://bitbucket.org/acme/mobile/pull-requests/88');
+  await expect(read).toHaveText("Bitbucket links aren't supported yet.");
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await shot(page, 'l-box-bitbucket');
+  await field.fill('https://example.com/about');
+  await expect(read).toHaveText("That isn't a pull request link.");
+  expect(linkReads()).toBe(before);
+
+  // Words still search the list.
+  await field.fill('RTL');
+  await expect(read).toHaveCount(0);
+  await expect(box.locator('[data-review-pull]')).toHaveCount(1);
+  await expect(box.locator('[data-review-pull]')).toContainText('RTL layout');
+
+  // GitLab, through glab; a merged one says so.
+  await field.fill('https://gitlab.com/northwind/mobile/-/merge_requests/44');
+  await expect(found).toContainText('!44');
+  await expect(found).toContainText('Offline queue');
+  await expect(found).toContainText('merged');
+  await expect(read).toContainText('Read with glab, signed in to gitlab.com');
+  await shot(page, 'l-box-gitlab');
+
+  // A PR of no project where launching can: a new session in a new scratch folder is the default.
+  await page.route('**/api/inbox/sessions*', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({ response, json: { ...body, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [], scratch: { root: '/tmp/scratch' } } } });
+  });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(box).toBeVisible();
+  await openPicker();
+  await field.fill('northwind/payments#231');
+  await expect(found).toContainText('Idempotent refunds');
+  await expect(read).toContainText('Read with gh, signed in to github.com');
+  await shot(page, 'l-box-picker-link');
+  // Enter chooses it: the row then says what it is and how it was read.
+  await field.press('Enter');
+  await expect(field).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toContainText('northwind/payments');
+  await expect(box.locator('[data-review-pick]')).toContainText('#231');
+  await expect(box.locator('[data-review-pick]')).toContainText('Idempotent refunds');
+  await expect(read).toContainText('Read with gh, signed in to github.com');
+  await expect(box.locator('.ib-cp-to').last()).toContainText('New scratch folder');
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Review #231: Idempotent refunds');
+  await shot(page, 'l-box-link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'l-box-link-phone');
+  // No labels: the toggle takes its row, slim, as tall as the row below, with room for a third choice at 320 too.
+  await box.locator('[data-review-choices="kind"]').evaluate((group) => {
+    const third = group.lastElementChild!.cloneNode(true) as HTMLElement;
+    third.lastChild!.textContent = 'Walkthrough';
+    third.removeAttribute('data-on');
+    third.dataset.tryThird = '';
+    group.append(third);
+  });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 700 });
+    await shot(page, `l-box-three-choices-${width}`, ['light']);
+    const fit = await box.locator('[data-review-choices="kind"]').evaluate((group) => {
+      const row = group.parentElement!;
+      const toggle = group.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return { height: rect.height, inside: toggle.right <= rect.right, toRow: row.parentElement!.querySelector('.ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
+    });
+    expect(fit.inside).toBe(true);
+    expect(fit.height).toBeLessThanOrEqual(fit.toRow + 1);
+  }
+  await box.locator('[data-try-third]').evaluate((third) => third.remove());
+  // One chosen, at each size.
+  for (const [width, height] of [[320, 700], [390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-pr-picked-${width}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.unroute('**/api/inbox/sessions*');
+
+  // No launching: any live agent can take it, and the link typed is still there.
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await openPicker();
+  await field.fill('https://github.com/northwind/payments/pull/231/files');
+  await expect(found).toContainText('Idempotent refunds');
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await found.click();
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+  const reads = forgeCalls().filter((call) => call.includes('northwind/payments')).length;
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+
+  // The thread: the approved hand-off's words, and its row from the moment it starts, by number.
+  const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Review #231: Idempotent refunds' });
+  await expect(row.locator('.ib-pr-l3')).toContainText('#231');
+  await expect(row).toContainText('Curating');
+  await expect(page.getByText('https://github.com/northwind/payments/pull/231').first()).toBeVisible();
+  await shot(page, 'l-curating');
+  const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+
+  // Its one read: nothing else of that repository, whatever else happens on the page.
+  await page.reload();
+  await expect(row).toBeVisible();
+  expect(forgeCalls().filter((call) => call.includes('northwind/payments')).every((call) => call.endsWith('repos/northwind/payments/pulls/231'))).toBe(true);
+  expect(forgeCalls().filter((call) => call.includes('northwind/payments')).length).toBeGreaterThanOrEqual(reads);
+
+  // Its review arrives: the row is on the person, still by its number.
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'Ready for you.',
+    guide: {
+      title: 'Idempotent refunds, reviewed',
+      intent: 'Make refunds safe to retry.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      source: { kind: 'pr', pr: { url: 'https://github.com/northwind/payments/pull/999', number: 999, platform: 'github' } },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
+  await expect(reviewed).toContainText('Review ready', { timeout: 15_000 });
+  await expect(reviewed.locator('.ib-pr-l3')).toContainText('#231');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await shot(page, 'l-review-ready');
+
+  // The same link again: nothing starts, and choosing it opens that thread.
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await openPicker();
+  await field.fill('northwind/payments#231');
+  await expect(read).toContainText('Already in review');
+  await expect(found).toContainText('open it');
+  const rows = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
+  await found.click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`thread=${threadId}`));
+  expect(await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length)).toBe(rows);
+
+  // A PR the list has goes the picker's way: its stack's hand-off, from its own project.
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await openPicker();
+  await field.fill('https://github.com/northwind/web-app/pull/880');
+  await expect(found).toContainText('RTL layout');
+  await found.click();
+  await expect(box.locator('.ib-cp-rvfrompull')).toBeVisible();
+  const sent: Record<string, unknown>[] = [];
+  await page.route('**/api/inbox/messages', async (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.abort();
+  });
+  await box.locator('[data-compose-send]').click();
+  await expect.poll(() => sent.length).toBe(1);
+  await page.unroute('**/api/inbox/messages');
+  expect(sent[0]!.review).toBeUndefined();
+
+  // Left and opened again: the link chosen comes back with the words, read again.
+  await box.locator('[data-compose-text] textarea').fill('Only the sidebar');
+  await box.locator('[data-compose-cancel]').click();
+  await expect(box).toHaveCount(0);
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
+  await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Only the sidebar');
+  // A failed link can't be chosen, and picking from the list drops the link.
+  await box.locator('[data-review-pick]').click();
+  await field.fill('https://bitbucket.org/acme/mobile/pull-requests/88');
+  await expect(read).toHaveText("Bitbucket links aren't supported yet.");
+  await field.press('Enter');
+  await expect(field).toBeVisible();
+  await field.fill('');
+  await box.locator('[data-review-pull]').first().click();
+  await expect(field).toHaveCount(0);
+  await expect(read).toHaveCount(0);
+  await box.locator('[data-compose-text] textarea').fill('');
+  await box.locator('[data-compose-cancel]').click();
+});
+
+test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {
+  const { page } = world;
+  await setCodeReview(true);
+  const box = page.locator('[data-review-box]');
+  const field = box.locator('[data-review-link]');
+  const read = box.locator('[data-review-link-read]');
+  const found = box.locator('[data-review-link-option]');
+  const threads = () => page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null }[] }).rows.filter((row) => row.thread_id).map((row) => row.thread_id));
+  const openBox = async () => {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#reviews&new`);
+    await expect(box).toBeVisible();
+  };
+  const openPicker = async () => {
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+  };
+
+  // A review of #231, reached by its link, is on no list: its ending offers GitHub all the same, and it posts.
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Idempotent refunds' }).first().click();
+  // The thread's header and the dialog below both say #231, though the agent's guide named #999.
+  await expect(page.locator('[data-review-context]')).toContainText('#231');
+  await expect(page.locator('[data-review-context]')).not.toContainText('#999');
+  await page.locator('[data-review-start]').last().click();
+  const choice = page.locator('[data-review-destination-choice="forge"]');
+  await expect(page.locator('[data-review-destination], [data-review-posts="github"]').first()).toBeVisible({ timeout: 15_000 });
+  if (await choice.count()) await choice.click();
+  await expect(page.locator('[data-review-posts="github"]')).toBeVisible();
+  await shot(page, 'l-link-post');
+  await page.locator('[data-review-posts] [data-decision-primary]').click();
+  // The dialog says which PR, whatever PR the agent's guide named.
+  await expect(page.locator('[data-review-posting-to]')).toHaveText('Posting to northwind/payments#231');
+  await shot(page, 'l-link-approve-dialog');
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect.poll(() => forgeCalls().filter((call) => call.startsWith('gh post'))).toContain('gh post repos/northwind/payments/pulls/231/reviews');
+
+  // A PR nothing started a thread on isn't read or posted to, even by a plain local request.
+  const refused = await page.evaluate(async () => {
+    const res = await fetch('/api/inbox/pulls/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'github.com/northwind/never-opened#77', action: 'approve', body: '', head_sha: 'b'.repeat(40), fileComments: [] }) });
+    return res.status;
+  });
+  expect(refused).toBe(404);
+  expect(forgeCalls().filter((call) => call.includes('never-opened'))).toEqual([]);
+
+  // Capitals are the same PR: it opens the thread it's in, no second one.
+  await openBox();
+  await openPicker();
+  await field.fill('Northwind/Payments#231');
+  await expect(read).toContainText('Already in review');
+
+  // Hosts no CLI here is signed in to are never asked, and the line claims nothing about them.
+  const asked = () => forgeCalls().filter((call) => call.includes(' diff ') && !call.includes('payments')).length;
+  const askedBefore = asked();
+  for (const host of ['localhost', '169.254.169.254', 'github.com-evil.example']) {
+    await field.fill(`https://${host}/o/r/pull/1`);
+    await expect(read).toHaveAttribute('data-review-link-read', 'unreadable');
+    await expect(read).toContainText(host);
+    await expect(read).not.toContainText('Read with');
+  }
+  await field.fill('https://--hostname/o/r/pull/1');
+  await expect(read).toHaveAttribute('data-review-link-read', 'not_a_link');
+  expect(asked()).toBe(askedBefore);
+
+  // The Inbox not answering isn't the link's fault.
+  await page.route('**/api/inbox/reviews/link*', (route) => route.abort());
+  await field.fill('https://github.com/northwind/payments/pull/232');
+  await expect(read).toHaveAttribute('data-review-link-read', 'failed');
+  await page.unroute('**/api/inbox/reviews/link*');
+
+  // A stack's merged layer is about that PR, not the stack on top of it.
+  await field.fill('https://github.com/northwind/billing-svc/pull/411');
+  await expect(found).toContainText('merged');
+  await field.press('Enter');
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review #411/);
+
+  // Typing another and leaving: the link chosen stays, as a list pick does.
+  await box.locator('[data-review-pick]').click();
+  await field.fill('https://gitlab.com/northwind/ledger/-/merge_requests/58');
+  await field.press('Escape');
+  await expect(field).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toContainText('#411');
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+
+  // Typing a link leaves the agent the person chose; choosing it is what moves To.
+  await openBox();
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await box.locator('[data-compose-to]').click();
+  await box.locator('[data-compose-session="ses-billing-claude"]').click();
+  await box.locator('[data-review-pick]').click();
+  await field.fill('https://github.com/northwind/web-app/pull/869');
+  await expect(found).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', 'ses-billing-claude');
+  await field.press('Escape');
+
+  // A GitLab MR on the list goes the picker's way, with no read of its own; in review, it opens that thread.
+  const ledgerAgent = new Poll(world.dataDir, 'ses-ledger-claude', 'claude-code', world.projects.ledger, Date.now());
+  world.polls.push(ledgerAgent);
+  await expect.poll(() => page.evaluate(async () => JSON.stringify(await (await fetch('/api/inbox/sessions')).json()))).toContain('ses-ledger-claude');
+  await openBox();
+  await openPicker();
+  const mrReads = () => forgeCalls().filter((call) => call.endsWith('merge_requests/61')).length;
+  const mrBefore = mrReads();
+  await field.fill('https://gitlab.com/northwind/ledger/-/merge_requests/61');
+  await expect(found).toContainText('Export the ledger to CSV');
+  expect(mrReads()).toBe(mrBefore);
+  await field.press('Enter');
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', /^ses-ledger-/);
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(/thread=/);
+  const mrThread = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  const before = (await threads()).length;
+  await openBox();
+  await openPicker();
+  await field.fill('https://gitlab.com/northwind/ledger/-/merge_requests/61');
+  await expect(read).toContainText('Already in review');
+  expect(mrReads()).toBe(mrBefore);
+  await found.click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`thread=${mrThread}`));
+  expect((await threads()).length).toBe(before);
+  // Whose PR it is comes from the Inbox's read, not from what the window says.
+  const claimed = await page.evaluate(async () => {
+    const url = 'https://github.com/northwind/payments/pull/233';
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent(url)}`);
+    const res = await fetch('/api/inbox/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: { host: 'claude-code', session: 'ses-ledger-claude' }, body: 'Please review.', idempotency_key: '00000000-0000-4000-8000-000000000233', review: { kind: 'link', url, title: 'Not yours', mine: true, ask: 'guide' } }) });
+    const { thread_id } = (await res.json()) as { thread_id: string };
+    const rows = ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; started?: { pull?: { mine: boolean } } }[] }).rows;
+    return rows.find((row) => row.thread_id === thread_id)?.started?.pull?.mine;
+  });
+  expect(claimed).toBe(false);
+  // Another link read between reading a PR and starting it doesn't change whose the first one is.
+  const mine = await page.evaluate(async () => {
+    const url = 'https://github.com/northwind/payments/pull/234';
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent(url)}`);
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent('https://github.com/northwind/payments/pull/233')}`);
+    const res = await fetch('/api/inbox/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: { host: 'claude-code', session: 'ses-ledger-claude' }, body: 'Please review.', idempotency_key: '00000000-0000-4000-8000-000000000234', review: { kind: 'link', url, title: 'Yours', ask: 'guide' } }) });
+    const { thread_id } = (await res.json()) as { thread_id: string };
+    const rows = ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; started?: { pull?: { mine: boolean } } }[] }).rows;
+    return rows.find((row) => row.thread_id === thread_id)?.started?.pull?.mine;
+  });
+  expect(mine).toBe(true);
+  world.polls.splice(world.polls.indexOf(ledgerAgent), 1);
+  await ledgerAgent.stop();
+});
+
+test('A very long repository in a link: nothing on a phone scrolls sideways', async () => {
+  const { page } = world;
+  await setCodeReview(true);
+  const repo = `northwind/${'a-very-long-repository-name-'.repeat(4)}end`;
+  await page.route('**/api/inbox/reviews/link*', async (route) => {
+    await route.fulfill({ json: { serverSession: '', ok: true, cli: 'gh', projects: [], thread_id: null, pull: { key: `github.com/${repo}#7`, platform: 'github', host: 'github.com', repo, number: 7, url: `https://github.com/${repo}/pull/7`, title: 'A title', author: 'tomas', mine: false, requested: false, state: 'open', base: 'main', head: 'b', head_repo: null, additions: 0, deletions: 0, files: 0, review: null, approved_by: null, reviewers: [], checks: null, updated_at: '', merged_at: null } } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  const sideways = () => box.evaluate((dialog) => [dialog, ...dialog.querySelectorAll('*')].filter((el) => {
+    const style = getComputedStyle(el);
+    return /auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth + 1;
+  }).map((el) => el.className));
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await box.locator('[data-review-pick]').click();
+  await box.locator('[data-review-link]').fill(`https://github.com/${repo}/pull/7`);
+  await expect(box.locator('[data-review-link-option]')).toBeVisible();
+  expect(await sideways()).toEqual([]);
+  // The title still has room beside it.
+  expect((await box.locator('[data-review-link-option] .ib-cp-op').boundingBox())!.width).toBeGreaterThan(60);
+  await shot(page, 'l-long-repo-picker', ['light']);
+  await box.locator('[data-review-link]').press('Enter');
+  await expect(box.locator('[data-review-pick]')).toContainText('#7');
+  expect(await sideways()).toEqual([]);
+  expect((await box.locator('[data-review-pick] b').boundingBox())!.width).toBeGreaterThan(40);
+  await shot(page, 'l-long-repo-chosen', ['light']);
+  await page.unroute('**/api/inbox/reviews/link*');
+  await page.setViewportSize({ width: 1440, height: 900 });
 });
 
 test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {

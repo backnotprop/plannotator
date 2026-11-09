@@ -39,13 +39,13 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(times: InboxAskTimes = {}, askAi = true) {
+async function setup(times: InboxAskTimes = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-ask-live-")));
   roots.push(root);
   const project = join(root, "api");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, askAi, binaryPath: null, askTimes: { connectWaitMs: 1_500, ...times } });
+  const server = await startInboxServer({ dataDir, binaryPath: null, askTimes: { connectWaitMs: 1_500, ...times } });
   servers.push(server);
   const client = new Client({ name: "inbox-ask-live-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -240,32 +240,6 @@ async function query(server: InboxServer, providerId: string, threadId: string, 
 }
 
 const run = (server: InboxServer, sessionId: string, question = "Why?", busyPolicy?: "wait" | "interrupt") => runQuery(server, sessionId, question, busyPolicy);
-
-describe("off, the default", () => {
-  test("no question can wait, and the agent's routes and /api/ai are the unknown route", async () => {
-    const { server, client, project } = await setup({}, false);
-    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
-    const unknown = await fromWindow(server, "/api/no-such-route");
-    const answer = await unknown.json();
-    const bearer = { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" };
-    const base = `http://127.0.0.1:${server.port}`;
-    for (const response of [
-      await fromWindow(server, "/api/ai/capabilities"),
-      await fromWindow(server, "/api/ai/session", { context: { mode: "annotate" } }),
-      await fromWindow(server, "/api/ai/query", { sessionId: "x", prompt: "y" }),
-      await fromWindow(server, "/api/inbox/ask"),
-      await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/stop`, { turn_id: "turn-0001" }),
-      await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/seen`, { seen_at: "2026-11-01T10:00:00.000Z" }),
-      await fetch(`${base}${inboxAskBridgeBase("session-a")}${SESSION_BRIDGE_POLL_PATH}`, { method: "POST", headers: bearer, body: "{}" }),
-    ]) {
-      expect(response.status).toBe(404);
-      expect(await response.json()).toEqual(answer);
-    }
-    expect((await fromWindow(server, `/api/inbox/threads/${thread_id}/ask`, { turn_id: "turn-0001", question: "Why?" })).status).toBe(404);
-    const poll = await fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: bearer, body: JSON.stringify({ session: "session-a", host: "claude-code", waitMs: 0, [INBOX_ASK_POLL_FIELD]: true }) });
-    expect(await poll.json()).toEqual({ commands: [] });
-  });
-});
 
 describe("a question and its answer", () => {
   test("reaches the running session, comes back as it streams, and is saved when it ends", async () => {
@@ -854,7 +828,7 @@ describe("the agent cannot answer", () => {
   test("the default wait is five seconds, whatever the host does", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-ask-live-")));
     roots.push(root);
-    const server = await startInboxServer({ dataDir: join(root, "data"), askAi: true, binaryPath: null });
+    const server = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null });
     servers.push(server);
     const client = new Client({ name: "inbox-ask-live-test", version: "1.0.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -1072,7 +1046,7 @@ describe("the bridge's life", () => {
 
     server.stop();
     servers.length = 0;
-    const again = await startInboxServer({ dataDir, askAi: true, binaryPath: null });
+    const again = await startInboxServer({ dataDir, binaryPath: null });
     servers.push(again);
     expect(await turnsOf(again, thread_id)).toMatchObject([{ answer: "Partly", failure: "gone" }]);
     expect((await read(again, thread_id)).running).toBeNull();

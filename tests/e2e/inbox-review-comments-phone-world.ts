@@ -107,7 +107,9 @@ function writeForge(dir: string, patch: string): void {
     '  case "$*" in *"requested: search"*) cat "$dir/pulls.json"; exit 0;; esac',
     '  echo \'{"data":null}\'; exit 1',
     'fi',
-    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo ${PULL_HEAD}; exit 0; fi`,
+    // The PR read around its patch asks for its head and description as one JSON line (`| tojson`, inbox-pulls.ts
+    // `pullNow`); a plain `.head.sha` read (the whole diff's) is answered raw, as gh prints a string.
+    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo '{"sha":"${PULL_HEAD}","body":null}';; *) echo ${PULL_HEAD};; esac; exit 0; fi`,
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then cat "$dir/pull.patch"; exit 0; fi',
     'exit 1',
     '',

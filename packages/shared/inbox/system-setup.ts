@@ -18,6 +18,11 @@ export function systemProjectDir(dataDir: string, key: string): string {
   return join(dataDir, SYSTEM_DIR, key);
 }
 
+/** The project's drawing folder, `<data dir>/system/<project key>/drawing` (packages/system's `systemPaths().drawing`). */
+export function systemDrawingPath(dataDir: string, key: string): string {
+  return join(systemProjectDir(dataDir, key), "drawing");
+}
+
 export function systemSetupPath(dataDir: string, key: string): string {
   return join(systemProjectDir(dataDir, key), "setup.json");
 }

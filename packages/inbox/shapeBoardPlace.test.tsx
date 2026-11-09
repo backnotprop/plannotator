@@ -1,7 +1,7 @@
 /**
  * Grow brings the board back where the person left it (approval "review-show-me", q-db7db55f). A link on the board over
  * the thread opens the review with the board shrunk to the corner card; the review mounts a board of its own, so
- * without the kept place Grow showed the first view (Picture) instead of What's changed. What regresses:
+ * without the kept place Grow showed the first view instead of the one the person was on. What regresses:
  *  - the place the person was on is not kept at the link click, or is kept for another board;
  *  - the kept place outlives the board (a board opened again from its Pebble starts at its first view);
  *  - the review's board under the corner card does not start on the kept view and panel, so Grow lands elsewhere.
@@ -134,6 +134,7 @@ test.skipIf(!hasDom)("Grow from the corner card shows the board on the view and 
       <ReviewPane
         thread={thread}
         message={message}
+        codeReview
         onBack={() => {}}
         onClose={() => {}}
         onSent={() => {}}

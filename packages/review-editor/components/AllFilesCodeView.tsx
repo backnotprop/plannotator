@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
 import type {
@@ -411,6 +412,13 @@ export interface AllFilesCodeViewProps {
   onViewAIResponse?: (questionId?: string) => void;
   /** Line-scoped questions rendered as inline sparkle markers. */
   aiMessages?: AIChatEntry[];
+  /**
+   * A host's context notes (the Inbox's code review): an agent's words on lines, drawn under their last line by
+   * `renderContextNote`, as line annotations of their own (`context-note`), never as comments. Absent: nothing changes.
+   */
+  contextNotes?: readonly ContextNoteAnchor[];
+  /** Draws one context note by its id. Without it, `contextNotes` draws nothing. */
+  renderContextNote?: (id: string) => React.ReactNode;
   onClickAIMarker?: (questionId: string) => void;
   getAIHistoryForFile?: (filePath: string) => AIChatEntry[];
   /** Let wheel/touch gestures continue into a containing page when this nested
@@ -484,6 +492,28 @@ export interface AllFilesCodeViewProps {
   onAddEditorCommentForFile?: (filePath: string, comment: EditSelectionComment) => void;
 }
 
+/** Where a host's context note sits: its file, side and lines (it draws under `lineEnd`); in its own module. */
+export type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
+
+/** A file's context notes as line annotations of their own kind (never `CodeAnnotation`s: no comment chrome, no count). */
+export function projectFileContextNotes(
+  notes: readonly ContextNoteAnchor[],
+  filePath: string,
+): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  return notes
+    .filter((note) => note.filePath === filePath)
+    .map((note) => ({
+      side: note.side === 'new' ? ('additions' as const) : ('deletions' as const),
+      lineNumber: note.lineEnd,
+      metadata: {
+        annotationId: `context-note:${note.id}`,
+        type: 'comment' as CodeAnnotationType,
+        kind: 'context-note' as const,
+        contextNoteId: note.id,
+      },
+    }));
+}
+
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
 // normally one entry per (new) path, so ids are identity (id === path) in the
 // common case. Pathological patches (e.g. a delete + re-add of the same path,
@@ -538,13 +568,14 @@ export function projectFileAIMarkers(
     }));
 }
 
-function projectFileAnnotations(
+export function projectFileAnnotations(
   annotations: CodeAnnotation[],
   aiMessages: AIChatEntry[],
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
   hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
+  contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
   const reviewAnnotations = annotations
     .filter(
@@ -559,7 +590,11 @@ function projectFileAnnotations(
       metadata: lineAnnotationMetadata(ann),
     }));
   // The host's notes first: on a line with both, what others said reads above the person's own comment.
-  return [...projectHostLineNotes(hostLineNotes, filePath), ...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
+  const markers = projectFileAIMarkers(aiMessages, filePath);
+  const hostNotes = projectHostLineNotes(hostLineNotes, filePath);
+  // No context notes: the same array as before context notes existed.
+  if (contextNotes.length === 0) return [...hostNotes, ...reviewAnnotations, ...markers];
+  return [...hostNotes, ...projectFileContextNotes(contextNotes, filePath), ...reviewAnnotations, ...markers];
 }
 
 function buildItemIdentity(
@@ -574,6 +609,7 @@ function buildItemIdentity(
   generatedFiles: Set<string> | undefined,
   expandedGeneratedFiles: Set<string> | undefined,
   hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
+  contextNotes: readonly ContextNoteAnchor[] = EMPTY_CONTEXT_NOTES,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -622,7 +658,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, hostLineNotes);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, hostLineNotes, contextNotes);
     // Generated files (#1317) seed collapsed like GitHub's diff view, unless
     // the user already expanded them this session. A view-state seed only —
     // the item carries the full fileDiff either way.
@@ -725,6 +761,7 @@ const AUGMENT_APPLY_IDLE_MS = 150;
 const REVEAL_WAIT_MS = 30_000;
 
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
+const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
@@ -805,6 +842,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   isAILoading = false,
   onViewAIResponse,
   aiMessages = EMPTY_AI_MESSAGES,
+  contextNotes = EMPTY_CONTEXT_NOTES,
+  renderContextNote,
   onClickAIMarker,
   getAIHistoryForFile,
   allowScrollChaining = false,
@@ -978,6 +1017,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Previous line-card snapshots for the per-item annotation-sync effect (P4).
   const prevAnnotationsRef = useRef<CodeAnnotation[]>(annotations);
   const prevAIMessagesRef = useRef<AIChatEntry[]>(aiMessages);
+  const prevContextNotesRef = useRef<readonly ContextNoteAnchor[]>(contextNotes);
 
   // Order items to mirror whichever left panel is active: 'tree' replays the
   // file-tree's visual order (folders-first); 'list' keeps the files array
@@ -1023,6 +1063,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // The host's notes: seeded at build from the latest, then applied per file by their own sync effect below.
   const hostLineNotesRef = useRef(hostLineNotes);
   hostLineNotesRef.current = hostLineNotes;
+  const contextNotesRef = useRef(contextNotes);
+  contextNotesRef.current = contextNotes;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
@@ -1052,6 +1094,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       generatedFiles,
       expandedGeneratedRef.current,
       hostLineNotesRef.current,
+      contextNotesRef.current,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
@@ -1321,6 +1364,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         const id = annotation.metadata.annotationId;
         return hostLineNotesRef.current.find((note) => note.id === id)?.render() ?? null;
       }
+      if (annotation.metadata.kind === 'context-note') {
+        const id = annotation.metadata.contextNoteId;
+        const drawn = id && renderContextNote ? renderContextNote(id) : null;
+        return drawn ? <div className="context-note-slot" data-context-note={id}>{drawn}</div> : null;
+      }
       if (annotation.metadata.kind === 'ai-marker') {
         return (
           <InlineAIMarker
@@ -1397,6 +1445,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // both snapshots here to avoid a spurious refresh post-remount.
     prevAnnotationsRef.current = annotations;
     prevAIMessagesRef.current = aiMessages;
+    prevContextNotesRef.current = contextNotes;
     // Garbage-collect STALE-generation content fetches. Generation-aware on
     // purpose: this passive effect runs AFTER the remounted CodeView's seed
     // layout effect has already fired the new diff's first postRender wave —
@@ -2300,6 +2349,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         prUrl,
         prDiffScope,
         hostLineNotesRef.current,
+        contextNotesRef.current,
       );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
@@ -2407,6 +2457,35 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
     }
   }, [hostLineNotes, annotations, aiMessages, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
+
+  // Context notes come and go on their own (a host's agent wrote one, a note moved): only the files whose notes
+  // changed are republished. No notes before or after: nothing runs.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevContextNotesRef.current;
+    if (handle == null) return;
+    prevContextNotesRef.current = contextNotes;
+    if (prev === contextNotes) return;
+    const sig = (list: readonly ContextNoteAnchor[]) => {
+      const map = new Map<string, string>();
+      for (const n of list) map.set(n.filePath, `${map.get(n.filePath) ?? ''}${n.id}:${n.side}:${n.lineStart}-${n.lineEnd}\n`);
+      return map;
+    };
+    const before = sig(prev);
+    const after = sig(contextNotes);
+    const changedPaths = new Set<string>();
+    after.forEach((s, path) => {
+      if (before.get(path) !== s) changedPaths.add(path);
+    });
+    before.forEach((_s, path) => {
+      if (!after.has(path)) changedPaths.add(path);
+    });
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
+      }
+    }
+  }, [contextNotes, annotations, aiMessages, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
   // --- Header actions ---------------------------------------------------------
 

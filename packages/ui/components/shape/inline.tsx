@@ -1,4 +1,4 @@
-// The board's short text (the claim, What to know): links,
+// The board's short text (the claim, the Code view's source): links,
 // `code`, **bold**, and `[^n]` for reference bubble n. Nothing else, so an
 // agent's text cannot carry markup.
 import React from 'react';

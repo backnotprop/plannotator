@@ -1,6 +1,8 @@
 /**
- * What's changed through the store (approval "shape-whats-changed"). What regresses if these fail:
- * - a board's What's changed is lost or rewritten on its way to disk and back;
+ * `views.changed` through the store: once What's changed, now kept but never shown (approval
+ * "shape-whats-changed-removed"). What regresses if these fail:
+ * - a board that still sends it is refused, or it is lost or rewritten on its way to disk and back;
+ * - it is stored as parts again (a change in it would then light a dot);
  * - a board without it is stored differently than before (an older agent's board, every board on disk today).
  */
 import { afterEach, expect, test } from 'bun:test';
@@ -21,20 +23,18 @@ function store() {
 }
 const project = (dir: string) => ({ name: 'kettle', root: dir });
 
-test('What\'s changed is stored and read back as written, version after version', () => {
+test('views.changed is stored and read back as written, version after version, and is not a part', () => {
   const { dir, store: s } = store();
   const made = s.update({ board: kettleBoard(), project: project(dir) });
   if (!made.ok) throw new Error(JSON.stringify(made));
   expect(s.read(made.id)!.views.changed).toEqual(KETTLE_CHANGED);
+  expect(s.read(made.id)!.parts.some((p) => p.view === 'changed')).toBe(false);
   // A new version that drops one change: the stored one has exactly the rest.
   const fewer = { ...KETTLE_CHANGED, items: KETTLE_CHANGED.items.slice(1) };
   const next = s.update({ id: made.id, base: 1, board: kettleBoard(fewer), project: project(dir) });
   if (!next.ok) throw new Error(JSON.stringify(next));
   expect(s.read(made.id)!.views.changed).toEqual(fewer);
   expect(s.read(made.id, 1)!.views.changed).toEqual(KETTLE_CHANGED);
-  // A Change it on one change, by its id.
-  const note = s.addNote(made.id, { kind: 'change', v: 2, view: 'changed', part: 'setting', quote: 'The setting\'s name', text: 'Keep the old name' });
-  expect(note.ok).toBe(true);
 });
 
 test('a board without What\'s changed is stored as it always was', () => {
@@ -47,5 +47,6 @@ test('a board without What\'s changed is stored as it always was', () => {
   const stored = JSON.parse(line) as Record<string, unknown>;
   expect(line).not.toContain('changed');
   expect({ title: stored.title, claim: stored.claim, views: stored.views }).toEqual(KETTLE_OLD_BOARD as never);
-  expect((stored.parts as { view: string }[]).map((p) => p.view)).toEqual(['header', 'header', 'picture', 'know']);
+  // Its views.know is kept as written, but is not a part: nothing shows it.
+  expect((stored.parts as { view: string }[]).map((p) => p.view)).toEqual(['header', 'header', 'picture']);
 });
