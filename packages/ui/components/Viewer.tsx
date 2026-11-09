@@ -320,6 +320,16 @@ export interface ViewerProps {
    *  Plannotator Inbox passes true. The prompt, key, choices and numbering
    *  are the same either way. */
   questionContractLines?: boolean;
+  /** Whether `:::question` cards read a `Prototype:` line indented under a
+   *  `- [ ]` choice into that choice's `prototype` (see core
+   *  `ParseQuestionBlockOptions.prototypeLines`) and leave it out of the
+   *  choice's description. Default false: the line shows in the description,
+   *  as before. The Plannotator Inbox passes true. */
+  questionPrototypeLines?: boolean;
+  /** Host content right after a question's choices (the Plannotator Inbox's
+   *  "Try prototype" tab; see `QuestionBlock` `renderAfterChoices`). Absent:
+   *  today's card. */
+  renderQuestionAfterChoices?: (question: IndexedQuestion) => React.ReactNode;
   /** Whether picture choices (`- [ ] Label — ![alt](path)`) draw as picture
    *  tiles (default true; see `QuestionBlock` `pictureChoices`). False: text
    *  rows. */
@@ -886,6 +896,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionDecisionScope,
   questionDecisionLines = true,
   questionContractLines = false,
+  questionPrototypeLines = false,
+  renderQuestionAfterChoices,
   questionPictureChoices = true,
   questionPictureBadge,
   onQuestionPictureZoom,
@@ -1017,9 +1029,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
   const questionIndex = useMemo(() => {
-    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines });
+    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines, ...(questionPrototypeLines ? { prototypeLines: true } : {}) });
     return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
-  }, [blocks, questionDecisionLines, questionContractLines]);
+  }, [blocks, questionDecisionLines, questionContractLines, questionPrototypeLines]);
   // A host that keeps answers itself (`questionAnswers`) replaces the
   // annotation-derived map; each entry is validated like any other reader.
   const answersByKey = useMemo(
@@ -2166,6 +2178,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionStatusTag={questionStatusTag}
                   questionStatusLabel={questionStatusLabel}
                   renderQuestionBelowPrompt={renderQuestionBelowPrompt}
+                  renderQuestionAfterChoices={renderQuestionAfterChoices}
                   questionContractLines={questionContractLines}
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}

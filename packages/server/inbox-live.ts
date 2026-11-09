@@ -183,6 +183,18 @@ interface ProxyEntry {
   lastUsed: number;
 }
 
+/**
+ * How a refusal names what the agent wrote, for a site named somewhere other
+ * than `live_sites` (a question choice's `Prototype:` line): the field and the
+ * words before the reason, and the cap on how many one message may name.
+ */
+export interface LiveSitesAs {
+  field: string;
+  max: number;
+  /** "body: question "…", option "B": Prototype: http://…" — what a refusal says before its reason. */
+  name: (raw: string) => string;
+}
+
 export interface InboxLiveSitesOptions {
   store: InboxStore;
   serverSession: string;
@@ -210,7 +222,7 @@ export interface InboxLiveSites {
    * send_message's `live_sites`: checked and probed before anything is written; refusals are `validation_error` on `live_sites`.
    * `probing: false` (a replay of a message already sent): the shape checks only, no request to any site.
    */
-  recordLiveSites: (urls: readonly string[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
+  recordLiveSites: (urls: readonly string[], probing?: boolean, as?: LiveSitesAs) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** Stop every proxy; none starts after. Called when the Inbox stops. */
   stop: () => void;
   /** The proxies running now (tests, and the reserved ports). */
@@ -306,9 +318,11 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
     }
   };
 
-  const recordLiveSites = async (urls: readonly string[], probing = true): Promise<Omit<InboxLiveSiteRef, "opened_at">[]> => {
-    if (urls.length > INBOX_LIVE_SITES_MAX) {
-      throw new InboxError("validation_error", `live_sites: at most ${INBOX_LIVE_SITES_MAX} sites in one message.`, { field: "live_sites" });
+  const recordLiveSites = async (urls: readonly string[], probing = true, as?: LiveSitesAs): Promise<Omit<InboxLiveSiteRef, "opened_at">[]> => {
+    const field = as?.field ?? "live_sites";
+    const max = as?.max ?? INBOX_LIVE_SITES_MAX;
+    if (urls.length > max) {
+      throw new InboxError("validation_error", `${field}: at most ${max} ${as ? "running-app prototypes" : "sites"} in one message.`, { field });
     }
     const out: Omit<InboxLiveSiteRef, "opened_at">[] = [];
     for (const raw of urls) {
@@ -320,7 +334,8 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       } catch (error) {
         // One refusal refuses the whole send, naming the site, as an attachment does.
         if (error instanceof InboxError) {
-          throw new InboxError("validation_error", `live_sites: ${typeof raw === "string" ? raw : ""}: ${error.message.replace(/^url: /, "")}`, { field: "live_sites" });
+          const named = as ? as.name(typeof raw === "string" ? raw : "") : `live_sites: ${typeof raw === "string" ? raw : ""}`;
+          throw new InboxError("validation_error", `${named}: ${error.message.replace(/^url: /, "")}`, { field });
         }
         throw error;
       }
@@ -360,7 +375,11 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       }
       if (!action) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        return json({ site: wire(threadId, siteOf(threadId, siteId)) });
+        const site = siteOf(threadId, siteId);
+        // `?probe=1` (a question's prototype window): the site is asked first, so a stopped app answers
+        // `422 live_not_answering` and the window says so in a line, instead of framing the proxy's error.
+        if (new URL(req.url).searchParams.get("probe") === "1") await probe(checkInboxLiveUrl(site.url, []));
+        return json({ site: wire(threadId, site) });
       }
       if (action === "frame") {
         // The window's frame for the site: same origin only (the checks above), opening its proxy as GET .../live/:site does.

@@ -272,6 +272,12 @@ export interface QuestionBlockProps {
    *  <an earlier question>"), given the question. Return null for none.
    *  Absent: nothing is drawn there (today's card). */
   renderBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
+  /** Host content right after the choices (and Other), before Why (the
+   *  Plannotator Inbox's "Try prototype" tab). When it draws something, the
+   *  choices sit in a box marked `data-question-tray` with the host's content
+   *  right after it, so a host's CSS can draw them as one shape. Return null
+   *  for nothing. Absent: today's card. Not drawn on a text question. */
+  renderAfterChoices?: (question: IndexedQuestion) => React.ReactNode;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -323,6 +329,17 @@ export interface QuestionStatusLabel {
   tone?: 'ok' | 'open' | 'skip';
 }
 
+/** The choices as they are, or (a host's `renderAfterChoices` drew something) in a tray box with that content right after it. */
+const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.ReactNode }> = ({ on, after, children }) =>
+  on ? (
+    <div className="mt-2.5" data-question-tray-host="">
+      <div data-question-tray="">{children}</div>
+      {after}
+    </div>
+  ) : (
+    <>{children}</>
+  );
+
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
   indexed,
@@ -339,6 +356,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   statusTag = 'card',
   statusLabel,
   renderBelowPrompt,
+  renderAfterChoices,
   onOpenLinkedDoc,
   onOpenCodeFile,
   imageBaseDir,
@@ -430,6 +448,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     setNotePinned(null);
   };
   const hostFooter = renderFooter?.(indexed, savedAnswer);
+  const afterChoices = question.kind === 'text' ? null : renderAfterChoices?.(indexed);
+  const hasAfterChoices = afterChoices !== null && afterChoices !== undefined && afterChoices !== false;
   const hasHostFooter = hostFooter !== null && hostFooter !== undefined && hostFooter !== false;
   const uid = useId().replace(/:/g, '');
   const promptId = `q-prompt-${uid}`;
@@ -895,8 +915,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </>
       ) : (
         <>
+          <TrayIf on={hasAfterChoices} after={afterChoices}>
           <div
-            className={cx('mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
+            className={cx(hasAfterChoices ? 'grid gap-0.5' : 'mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
             role={inputType === 'radio' ? 'radiogroup' : 'group'}
             aria-labelledby={promptId}
           >
@@ -1024,6 +1045,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               </div>
             )}
           </div>
+          </TrayIf>
         </>
       )}
 

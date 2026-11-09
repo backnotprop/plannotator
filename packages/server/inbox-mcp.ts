@@ -33,6 +33,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxQuestion } from "@plannotator/core/inbox-types";
+import type { LiveSitesAs } from "./inbox-live";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
@@ -249,7 +250,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
   /** send_message's `live_sites`: checked (http, loopback, not Plannotator's own port) and probed before anything is written (inbox-live.ts). Absent: live sites are refused. */
-  recordLiveSites?: (urls: readonly string[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
+  recordLiveSites?: (urls: readonly string[], probing?: boolean, as?: LiveSitesAs) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** The clock (epoch ms) send_message's "not read since" line compares with (inbox-session-reads.ts). Default: Date.now. Tests inject. */
   now?: () => number;
   /** The ⌘K search index (packages/server/inbox-search.ts), for the agents' read-only search tool. */
@@ -725,6 +726,28 @@ export function choicesWithoutPicturesText(messageId: string, found: { keys: rea
 /** A message id (`msg_` and a 26-character ULID), as an agent might pass one as `thread` by mistake. */
 const MESSAGE_ID_SHAPE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/i;
 
+/** At most this many running-app prototypes (distinct addresses) in one message: a question's choices each may have one. */
+export const INBOX_PROTOTYPE_APPS_MAX = 12;
+
+/**
+ * The running-app prototypes a body's questions name (`Prototype: <address>`
+ * under a choice whose target has a scheme, `http://…`), each address once,
+ * with the first question and choice that name it. A path (an attached
+ * file) is not one. Pure; never throws.
+ */
+export function prototypeAppTargets(body: string): { target: string; prompt: string; label: string }[] {
+  if (typeof body !== "string" || !body.includes(":::question")) return [];
+  const out: { target: string; prompt: string; label: string }[] = [];
+  for (const question of parseInboxQuestionBlocks(body)) {
+    for (const choice of question.parsed.choices) {
+      const target = choice.prototype?.target;
+      if (!target || !/^[a-z][a-z0-9+.-]*:\/\//i.test(target) || out.some((p) => p.target === target)) continue;
+      out.push({ target, prompt: question.prompt, label: choice.label });
+    }
+  }
+  return out;
+}
+
 /**
  * `thread` is a name. A value shaped like a message id is an agent that meant
  * reply_to: refused, instead of silently starting a new thread named after
@@ -774,10 +797,30 @@ export async function sendAgentMessage(
   // stopped since the first send must not make a retry read as "not sent". The store still compares
   // the sites, so the same key with other sites is refused as reused.
   let liveSites: Omit<InboxLiveSiteRef, "opened_at">[] | undefined;
+  const replayed = () => (input.idempotency_key ? store.agentMessageByKey(project.id, input.idempotency_key) : null) !== null;
   if (input.live_sites && input.live_sites.length > 0) {
     if (!context.recordLiveSites) throw new InboxError("validation_error", "live_sites: not taken by this Inbox.", { field: "live_sites" });
-    const replay = input.idempotency_key ? store.agentMessageByKey(project.id, input.idempotency_key) : null;
-    liveSites = await context.recordLiveSites(input.live_sites, replay === null);
+    liveSites = await context.recordLiveSites(input.live_sites, !replayed());
+  }
+  // A choice's prototype that is a running app (`Prototype: http://localhost:3000/…`): the same checks and probe as
+  // live_sites, so each is a live site of this message, opened from its question's prototype window.
+  const prototypes = prototypeAppTargets(input.body);
+  if (prototypes.length > 0) {
+    if (!context.recordLiveSites) throw new InboxError("validation_error", "body: a Prototype: address is not taken by this Inbox.", { field: "body" });
+    const checked = await context.recordLiveSites(
+      prototypes.map((p) => p.target),
+      !replayed(),
+      {
+        field: "body",
+        max: INBOX_PROTOTYPE_APPS_MAX,
+        name: (raw) => {
+          const at = prototypes.find((p) => p.target === raw);
+          return at ? `body: question "${at.prompt}", option "${at.label}": Prototype: ${raw}` : `body: Prototype: ${raw}`;
+        },
+      },
+    );
+    const known = new Set((liveSites ?? []).map((site) => site.id));
+    liveSites = [...(liveSites ?? []), ...checked.filter((site) => !known.has(site.id))];
   }
   // Where relative paths start: the folder the agent works in, when its connection says (a cd away from its project).
   const working = !!input.working_folder && isAbsolute(input.working_folder);

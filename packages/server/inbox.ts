@@ -1329,7 +1329,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
         // send_message's live_sites, checked and probed before anything is written (inbox-live.ts).
-        recordLiveSites: (urls, probing) => liveSites.recordLiveSites(urls, probing),
+        recordLiveSites: (urls, probing, as) => liveSites.recordLiveSites(urls, probing, as),
         // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
         searchIndex: search.index,
         findProjects,

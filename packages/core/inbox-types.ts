@@ -1244,6 +1244,13 @@ export interface InboxQuestionChoice {
    * absent from records written before picture choices.
    */
   image?: { alt: string; src: string };
+  /**
+   * A prototype of this choice (`Prototype: <target>` indented under it), as
+   * written: an `http://` address on this computer opens live through the
+   * Inbox's live proxy (the message's `live_sites` holds it, checked at
+   * send). Absent when the choice names none, and on older records.
+   */
+  prototype?: { target: string; label?: string };
 }
 
 /**

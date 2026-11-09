@@ -38,7 +38,8 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
-import { optionOf, optionSetId, optionSetOf } from '../optionSets';
+import { choiceLetters, optionOf, optionSetId, optionSetOf } from '../optionSets';
+import { PrototypeWindow, TryPrototypeTab, prototypeSiteOf, type PrototypeOption } from './PrototypeWindow';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
@@ -387,6 +388,16 @@ async function inboxEmbedUrl(html: string): Promise<string | null> {
   return typeof answer.url === 'string' && answer.url.startsWith(inboxUrl('/embeds/')) ? answer.url : null;
 }
 
+/** SPIKE: the live sites a message's question choices name as prototypes (their tiles are left out: the tab opens them). */
+function prototypeSiteIds(message: InboxMessageWire): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const q of message.questions ?? []) for (const c of q.choices) {
+    const site = prototypeSiteOf(c.prototype?.target, message.live_sites);
+    if (site) ids.add(site.id);
+  }
+  return ids;
+}
+
 /** One message's text, with its question cards (exported for its DOM test). */
 export function MessageBody({
   message,
@@ -413,7 +424,10 @@ export function MessageBody({
   inlineRefOf,
   replyFiles,
   contextNotes,
+  onTryPrototype,
 }: {
+  /** SPIKE: a question whose choices have running-app prototypes was asked to open them (its key). Absent: no tab. */
+  onTryPrototype?: (key: string) => void;
   /**
    * Context notes (Code review on; approval "inbox-context-notes"): an agent's `:::note path#L…` block shows as a
    * chip naming its file and lines, with its words; `onOpen` opens the review at them. Absent: the text as it is.
@@ -932,6 +946,17 @@ export function MessageBody({
   // even while another question in the same message is still open. The store
   // would take a new pick on a sent question (it goes back to picked), but the
   // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
+  // SPIKE: "Try prototype" under a question whose choices name running apps the send checked (the message's live sites).
+  const tryRef = useRef(onTryPrototype);
+  tryRef.current = onTryPrototype;
+  const afterChoices = useCallback(
+    (indexed: IndexedQuestion) =>
+      indexed.question.choices.some((c) => prototypeSiteOf(c.prototype?.target, message.live_sites)) ? (
+        <TryPrototypeTab onOpen={() => tryRef.current?.(indexed.question.key)} />
+      ) : null,
+    [message.live_sites],
+  );
+
   const answerLocked = useCallback(
     (question: IndexedQuestion) => {
       // A message whose questions take no answers now (all sent, none, or closed): every card locked.
@@ -1038,6 +1063,9 @@ export function MessageBody({
         questionDecisionLines={false}
         // The Inbox draws the contract lines (Stakes, Shows, Why, Can't be undone), approval "inbox-decision-mode".
         questionContractLines
+        // SPIKE: a choice's `Prototype:` line is read, not shown in its meaning line.
+        questionPrototypeLines
+        renderQuestionAfterChoices={onTryPrototype ? afterChoices : undefined}
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
@@ -1666,6 +1694,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
+  // SPIKE: the question whose prototypes are open in the full window.
+  const [proto, setProto] = useState<{ messageId: string; key: string } | null>(null);
   const onPickSavesNow = useRef(onPickSaves);
   onPickSavesNow.current = onPickSaves;
   /** The pane closed: the window holds no read for its saves; a save still out says only when the last has landed. */
@@ -3826,6 +3856,44 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const reply = replyId ? thread.messages.find((m) => m.id === replyId) : undefined;
     return reply ? reply.created_at : null;
   };
+
+  // SPIKE: a question's running-app prototypes in one full window (PrototypeWindow.tsx).
+  const protoWindow = (() => {
+    if (!proto) return null;
+    const message = thread.messages.find((m) => m.id === proto.messageId);
+    const q = message?.questions?.find((x) => x.key === proto.key);
+    if (!message || !q) return null;
+    const letters = choiceLetters(q.choices.map((c) => c.label));
+    const options: PrototypeOption[] = q.choices.map((c, i) => {
+      const site = prototypeSiteOf(c.prototype?.target, message.live_sites);
+      return { label: c.label, ...letters[i]!, recommended: c.recommended, siteId: site?.id ?? null, url: site?.url ?? null };
+    });
+    if (!options.some((o) => o.siteId)) return null;
+    const recommended = options.findIndex((o) => o.recommended && o.siteId);
+    const start = recommended >= 0 ? recommended : options.findIndex((o) => o.siteId);
+    const answer = answersOf(message).get(q.key);
+    const locked = message.author.kind !== 'agent' || !liveMessage(message) || (q.state !== 'open' && q.state !== 'picked');
+    return (
+      <PrototypeWindow
+        key={`${message.id}/${q.key}`}
+        threadId={thread.thread_id}
+        options={options}
+        start={start}
+        picked={answer?.selected ?? []}
+        readOnly={locked}
+        records={records}
+        remote={remote === true}
+        onSaved={saveRecord}
+        onPick={(label) => {
+          const base = answer ?? emptyAnswerFor(message, { key: q.key, prompt: q.prompt, question: q });
+          // Pick one: the option alone (no Other); pick any: added to what is ticked. Never a skip.
+          const { other, skipped: _skipped, ...rest } = base;
+          pick(message.id, q.key, q.kind === 'multi' ? { ...rest, ...(other ? { other } : {}), selected: [...new Set([...base.selected, label])] } : { ...rest, selected: [label] });
+        }}
+        onClose={() => setProto(null)}
+      />
+    );
+  })();
 
   const footerFor = (message: InboxMessageWire) => (key: string): string | null => {
     const q = message.questions?.find((x) => x.key === key);
@@ -6573,6 +6641,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
                   onOpenOptionSet={(key, image) => openOptionSet(message.id, key, image)}
+                  onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
@@ -6624,7 +6693,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   />
                 )}
                 {onOpenLive &&
-                  (message.live_sites ?? []).map((site) => (
+                  (message.live_sites ?? []).filter((site) => !prototypeSiteIds(message).has(site.id)).map((site) => (
                     <LiveSiteTile key={site.id} url={site.url} open={liveSiteId === site.id} onOpen={() => onOpenLive(site.id)} />
                   ))}
                 {message.guide &&
@@ -7226,6 +7295,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {lineError && !errorAbove && errorLine}
       </div>
     </section>
+    {protoWindow}
     {!openAttachment && liveSiteId && onOpenLive && (
       <LiveSitePane
         threadId={thread.thread_id}

@@ -1,0 +1,71 @@
+/* SPIKE (spike/option-live-prototype): "Try prototype" on a question and its full window (components/PrototypeWindow.tsx).
+   Values from the approved mock (/tmp/question-tradeoffs/mock.html, v6 tab, v7 right, v8 C1 bar). Imported after inbox.css. */
+
+/* The options' tray (ui QuestionBlock `renderAfterChoices` marks it) and the tab hanging from its bottom edge, one tint. */
+.pn-inbox { --ib-qtray: color-mix(in oklch, var(--foreground) 7%, transparent); }
+:root.light .pn-inbox { --ib-qtray: color-mix(in oklch, var(--foreground) 4.5%, transparent); }
+.pn-inbox [data-question-tray-host] { margin-left: -6px; margin-right: -6px; }
+.pn-inbox [data-question-tray-host]:has(.ib-qtab:hover) { --ib-qtray: color-mix(in oklch, var(--foreground) 11%, transparent); }
+:root.light .pn-inbox [data-question-tray-host]:has(.ib-qtab:hover) { --ib-qtray: color-mix(in oklch, var(--foreground) 8%, transparent); }
+.pn-inbox [data-question-tray] { padding: 6px; border-radius: 10px; background: var(--ib-qtray); }
+.pn-inbox .ib-qtab-row { display: flex; justify-content: flex-end; padding-right: 20px; }
+.pn-inbox .ib-qtab {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border: 0; border-radius: 0 0 10px 10px;
+  background: var(--ib-qtray); color: var(--foreground); font: inherit; font-size: 12.5px; font-weight: 550; white-space: nowrap; cursor: pointer;
+}
+.pn-inbox .ib-qtab:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+.pn-inbox .ib-qtab-foot { position: absolute; top: 0; width: 11px; height: 10px; overflow: visible; pointer-events: none; fill: var(--ib-qtray); }
+.pn-inbox .ib-qtab-foot.l { left: -10px; transform: scale(1, -1); }
+.pn-inbox .ib-qtab-foot.r { right: -10px; transform: scale(-1, -1); }
+@media (max-width: 600px) {
+  .pn-inbox .ib-qtab { height: 44px; padding: 0 16px; gap: 8px; font-size: 14px; border-radius: 0 0 12px 12px; }
+}
+
+/* The window: its own top bar, the app, and its own bottom row for the option bar. The bar is never over the app. */
+.pn-inbox .ib-pw {
+  position: fixed; inset: 0; z-index: 45; display: grid; grid-template-rows: 48px minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr);
+  background: var(--background); color: var(--foreground);
+}
+.pn-inbox .ib-pw-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 10px 0 14px; background: var(--card); box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-pw-name { min-width: 0; font-size: 13.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-pw-pill { flex: none; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-pw-sp { flex: 1; }
+.pn-inbox .ib-pw-bar .ib-seg { flex: none; flex-wrap: nowrap; }
+.pn-inbox .ib-pw-stage { position: relative; min-height: 0; display: flex; }
+.pn-inbox .ib-pw-stage > * { flex: 1; min-width: 0; }
+.pn-inbox .ib-pw-line { flex: none; margin: auto; max-width: 520px; padding: 24px; text-align: center; font-size: 14px; color: var(--muted-foreground); }
+.pn-inbox .ib-pw-again { padding: 0; border: 0; background: none; font: inherit; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-pw-foot { display: flex; justify-content: center; padding: 10px 16px; background: var(--card); box-shadow: 0 -1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-pw-cap {
+  display: flex; align-items: center; gap: 10px; width: min(600px, 100%); height: 42px; padding: 0 6px; border-radius: 12px;
+  background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border);
+}
+.pn-inbox .ib-pw-step { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-pw-step:hover:not([aria-disabled="true"]) { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-pw-step[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.pn-inbox .ib-pw-step:focus-visible, .pn-inbox .ib-pw-pick:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-pw-letter { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-foreground); font-weight: 700; font-size: 12.5px; }
+.pn-inbox .ib-pw-mid { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.pn-inbox .ib-pw-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+.pn-inbox .ib-pw-rec { flex: none; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+.pn-inbox .ib-pw-sent { display: inline-flex; align-items: center; gap: 5px; padding-right: 10px; }
+.pn-inbox .ib-pw-pick {
+  flex: none; margin-left: 6px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 0; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; background: var(--primary); color: var(--primary-foreground); white-space: nowrap;
+}
+.pn-inbox .ib-pw-pick:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.pn-inbox .ib-pw-pick[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 16%, transparent); color: color-mix(in oklch, var(--primary) 60%, var(--foreground)); }
+@media (max-width: 600px) {
+  .pn-inbox .ib-pw-foot { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-pw-cap { height: 52px; gap: 4px; padding-left: 4px; }
+  .pn-inbox .ib-pw-step { width: 40px; height: 40px; }
+  .pn-inbox .ib-pw-mid { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.25; }
+  .pn-inbox .ib-pw-mid > .ib-pw-label { max-width: 100%; }
+  .pn-inbox .ib-pw-pick { height: 40px; padding: 0 16px; }
+  .pn-inbox .ib-pw-bar .ib-seg-o { padding: 0 9px; }
+  .pn-inbox .ib-pw-segt { display: none; }
+  .pn-inbox .ib-pw-pill { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pn-inbox .ib-qtab, .pn-inbox .ib-qtab-foot, .pn-inbox [data-question-tray] { transition: background-color 120ms ease-out, fill 120ms ease-out; }
+}

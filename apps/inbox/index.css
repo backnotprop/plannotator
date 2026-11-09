@@ -32,6 +32,8 @@
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
 @import "../../packages/inbox/live-site.css";
+/* SPIKE: a question's running-app prototypes (components/PrototypeWindow.tsx). */
+@import "../../packages/inbox/prototype-window.css";
 /* System: the drawing's own sheet (sys- classes, packages/system), drawn in Reviews' System pane. */
 @import "../../packages/system/src/system.css";
 /* Floating reply drafts and Ask AI in the corner. */

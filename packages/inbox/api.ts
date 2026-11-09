@@ -1604,8 +1604,9 @@ export const inboxApi = {
     get<{ sites: LiveSiteRefWire[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live`)),
   openLiveSite: (threadId: string, url: string) =>
     post<{ site: LiveSiteWire }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live`), { url }),
-  liveSite: (threadId: string, siteId: string) =>
-    get<{ site: LiveSiteWire }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}`)),
+  // `probe`: ask the app first (a prototype window): a stopped app answers 422 live_not_answering.
+  liveSite: (threadId: string, siteId: string, probe = false) =>
+    get<{ site: LiveSiteWire }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}${probe ? '?probe=1' : ''}`)),
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>

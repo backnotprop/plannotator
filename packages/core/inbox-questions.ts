@@ -134,8 +134,8 @@ function questionBlocksOf(markdown: string): { key: string; startLine: number; p
       .replace(/\r\n?/g, "\n")
       .split("\n");
     const inner = lines.slice(1, CLOSE_RE.test(lines.at(-1) ?? "") && lines.length > 1 ? -1 : undefined);
-    // The Inbox records no decisions: a `Decision:` line is context.
-    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false });
+    // The Inbox records no decisions: a `Decision:` line is context. It reads each choice's `Prototype:` line.
+    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, prototypeLines: true });
     if (parsed !== null) out.push({ key: location.key, startLine: location.startLine, parsed });
   }
   return out;
@@ -164,6 +164,7 @@ export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[
           recommended: choice.recommended,
           settled: choice.settled,
           ...(choice.image ? { image: { alt: choice.image.alt, src: choice.image.src } } : {}),
+          ...(choice.prototype ? { prototype: { target: choice.prototype.target, ...(choice.prototype.label ? { label: choice.prototype.label } : {}) } } : {}),
         })),
         aliases: parsed.choices.map((choice) => (choice.aliases?.length ? [...choice.aliases] : null)),
         recommendation: parsed.recommendation ?? null,

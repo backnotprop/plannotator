@@ -163,6 +163,37 @@ export interface QuestionChoice {
   /** A picture choice: the choice's first markdown image. The picture picks
    *  the choice; the answer is still the label. Absent otherwise. */
   image?: QuestionChoiceImage;
+  /** A prototype of this choice (`Prototype: <target>`, an indented line under
+   *  a `- [ ]` choice), read only with `prototypeLines` (the Plannotator
+   *  Inbox). Absent otherwise: the line stays in the description. */
+  prototype?: QuestionChoicePrototype;
+}
+
+/**
+ * A choice's prototype as written: `Prototype: http://localhost:3000/x?v=a`,
+ * `Prototype: <http://…>` or `Prototype: [Name](target)`. `target` is the
+ * address or path exactly as written; the host decides what it opens (a
+ * running local app for an `http://` address, an attached file for a path).
+ */
+export interface QuestionChoicePrototype {
+  target: string;
+  /** The link's text, when written as `[Name](target)`. */
+  label?: string;
+}
+
+/** `Prototype: …` (or `Try: …`), its value: a bare target, `<target>`, or `[label](target)`. */
+const PROTOTYPE_LINE_RE = /^[*_]{0,2}(?:prototype|try)[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.+?)\s*$/i;
+
+/** The prototype a `Prototype:` line names, or null when the line is not one (or names nothing usable). */
+export function parsePrototypeLine(line: string): QuestionChoicePrototype | null {
+  const m = PROTOTYPE_LINE_RE.exec(line.trim());
+  if (!m) return null;
+  const value = m[1]!.replace(/[*_]{1,2}$/, '').trim();
+  const link = /^\[([^\]]*)\]\(\s*<?([^)\s>]+)>?\s*\)$/.exec(value);
+  if (link) return link[2] ? { target: link[2], ...(link[1]!.trim() ? { label: link[1]!.trim() } : {}) } : null;
+  const angled = /^<([^>\s]+)>$/.exec(value);
+  if (angled) return { target: angled[1]! };
+  return /^\S+$/.test(value) ? { target: value } : null;
 }
 
 /** The picture of a picture choice (`- [ ] Label — ![alt](src)`). */
@@ -847,6 +878,12 @@ export interface ParseQuestionBlockOptions {
    *  annotate pass false (approval "inbox-decision-mode": plan review shows
    *  the lines as plain text); picture choices are read either way. */
   contractLines?: boolean;
+  /** Read a `Prototype:` line indented under a `- [ ]` choice into that
+   *  choice's `prototype` (the first one wins) and leave it out of the
+   *  description. Default false: the line joins the description as before,
+   *  so plan review, annotate and every older reader show it as text. The
+   *  key, labels and answers are the same either way. */
+  prototypeLines?: boolean;
 }
 
 export const parseQuestionBlock = (
@@ -857,6 +894,7 @@ export const parseQuestionBlock = (
   if (!isQuestionDirectiveKind(directiveKind)) return null;
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
+  const readPrototypeLines = options?.prototypeLines === true;
   if (typeof body !== 'string' || body.length > MAX_QUESTION_BODY_CHARS) return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
@@ -1072,6 +1110,11 @@ export const parseQuestionBlock = (
       trackContinuationFence(line);
       const c = choices[lastChoice];
       const extra = line.trim();
+      const prototype = readPrototypeLines && !continuationFence ? parsePrototypeLine(extra) : null;
+      if (prototype) {
+        if (!c.prototype) c.prototype = prototype;
+        continue;
+      }
       if (c.description) c.description = `${c.description} ${extra}`;
       else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
