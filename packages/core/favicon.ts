@@ -1,9 +1,19 @@
+// The style ids, their names and the default live in favicon-style.ts, which
+// holds no icon bytes: the settings store imports that, so a bundle that never
+// draws a favicon (the guides.show viewer, which has a size budget) carries
+// none of the icons below. Each icon is also marked pure, so a bundle drops
+// the ones it never reads.
+
+import type { FaviconStyle } from './favicon-style';
+
+export { DEFAULT_FAVICON_STYLE, FAVICON_STYLE_CHOICES, isFaviconStyle, type FaviconStyle } from './favicon-style';
+
 /**
  * The Glass favicon, the default: the goggles icon in its glass finish, the
  * brand studio's web/icon-192.png (192x192 PNG), embedded byte for byte.
  * Source SHA-256: f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5
  */
-export const FAVICON_PNG_BASE64 = [
+export const FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6",
   "UTwAAAAGYktHRAD/AP8A/6C9p5MAAAAHdElNRQfqCwkFMCnq7ICrAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDI2LTExLTA5VDA1OjQ3",
   "OjA2KzAwOjAwPWlnYAAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyNi0xMS0wOVQwNTo0NzowNiswMDowMEw039wAAAAodEVYdGRhdGU6",
@@ -223,7 +233,7 @@ export const FAVICON_PNG_BASE64 = [
 
 export const FAVICON_PNG_DATA_URL = `data:image/png;base64,${FAVICON_PNG_BASE64}`;
 
-export const FAVICON_PNG_BYTES = Uint8Array.from(
+export const FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
   atob(FAVICON_PNG_BASE64),
   (character) => character.charCodeAt(0),
 );
@@ -241,7 +251,7 @@ export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
  * (64x64 PNG), embedded byte for byte from FAVICON_PNG_BASE64 at eede4aecf^1.
  * Source SHA-256: 8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073
  */
-export const FACE_FAVICON_PNG_BASE64 = [
+export const FACE_FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAYhklEQVR42u2be7hdZX3nP7/3XWvty7mfkxu5UUJuJAFFiVIU",
   "QS2d4gUrTuIUSisdBkZQEerz1Gr1cNqq1YoOF9vn6eA4M0adSWxBvFC1ToowyCVcDEkgGELI/SQ5J+e6L+vy/uaPtfY+e+9z",
   "DgSVTv/ofp717GSdtdf7/m7f3/WFV/HT34/RfryZ/qabsdqP2bwh/X6pZ17NPcqr9WLtx8gADuCZu/o6lqqsNLHrdcr4aC54",
@@ -334,7 +344,7 @@ export const FACE_FAVICON_PNG_BASE64 = [
 
 export const FACE_FAVICON_PNG_DATA_URL = `data:image/png;base64,${FACE_FAVICON_PNG_BASE64}`;
 
-export const FACE_FAVICON_PNG_BYTES = Uint8Array.from(
+export const FACE_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
   atob(FACE_FAVICON_PNG_BASE64),
   (character) => character.charCodeAt(0),
 );
@@ -345,7 +355,7 @@ export const FACE_FAVICON_PNG_BYTES = Uint8Array.from(
  * byte. Stored as 'classic', so anyone who chose the old navy P gets this one.
  * Source SHA-256: f6bed7f06a78ae9d4de3d2019e7704ca447f9629c85d868ca77f5a25af82b4f8
  */
-export const P_FAVICON_PNG_BASE64 = [
+export const P_FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAAQAElEQVR4nOy9CfhtWVUf+Nvn3v/05lfv1QAFiAiCUKCIDA0RQwC/",
   "HpLWKNEYEhNMG5P26zSBDiZp6cbmMxrpJEZJomk6g+n+Es0XM7S2rUmnDQGCoMhkFUVRQg3U9OrNw3+69+w+e1jT3vvce/+vXgnG",
   "OvBq/dcZ19l7rd/67bXPOXeK30XLz/3cz22dv//84fOz84fcvts6e/7Syd35/tH57u6x/dl8+Ld3fDabnZjv98fnzg9y/1jf47iD",
@@ -739,34 +749,11 @@ export const P_FAVICON_PNG_BASE64 = [
 
 export const P_FAVICON_PNG_DATA_URL = `data:image/png;base64,${P_FAVICON_PNG_BASE64}`;
 
-export const P_FAVICON_PNG_BYTES = Uint8Array.from(
+export const P_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
   atob(P_FAVICON_PNG_BASE64),
   (character) => character.charCodeAt(0),
 );
 
-/**
- * The favicon a person picks. The ids are what cookies (`plannotator-favicon`)
- * and config.json (`favicon`) store:
- * - 'glass': the Glass icon, the default for anyone with nothing stored.
- * - 'totman': the Face icon. The id is older than the name: it is what people
- *   picked when this icon was the default, so it keeps meaning this icon.
- * - 'classic': the P icon. The id is older than this icon: it named the navy P,
- *   which the P icon replaced, so anyone who chose Classic gets the P icon.
- */
-export type FaviconStyle = 'glass' | 'totman' | 'classic';
-
-export const DEFAULT_FAVICON_STYLE: FaviconStyle = 'glass';
-
-/** The choices, in the order they are shown, with the names people see. */
-export const FAVICON_STYLE_CHOICES: readonly { id: FaviconStyle; label: string }[] = [
-  { id: 'glass', label: 'Glass' },
-  { id: 'totman', label: 'Face' },
-  { id: 'classic', label: 'P' },
-];
-
-export function isFaviconStyle(value: unknown): value is FaviconStyle {
-  return value === 'glass' || value === 'totman' || value === 'classic';
-}
 
 /**
  * Exact historical pre-Totman dark-navy favicon SVG with gold highlight.
@@ -781,7 +768,7 @@ export const CLASSIC_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" view
   <text x="32" y="46" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="42" fill="white">P</text>
 </svg>`;
 
-export const CLASSIC_FAVICON_DATA_URL = `data:image/svg+xml;base64,${btoa(CLASSIC_FAVICON_SVG)}`;
+export const CLASSIC_FAVICON_DATA_URL = `data:image/svg+xml;base64,${/* @__PURE__ */ btoa(CLASSIC_FAVICON_SVG)}`;
 
 export function faviconDataUrl(style: FaviconStyle): string {
   if (style === 'classic') return P_FAVICON_PNG_DATA_URL;

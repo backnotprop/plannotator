@@ -14,7 +14,7 @@ import {
   type AnnotateAgentTerminalSide,
 } from '@plannotator/core/agent-terminal';
 import type { DiffLineBgIntensity, ReviewDefaults } from '@plannotator/core/config-types';
-import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon-style';
 import {
   agentSwitchConfigValue,
   isAgentSwitchName,
