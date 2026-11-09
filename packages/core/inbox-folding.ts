@@ -335,12 +335,16 @@ export function plainLabel(label: string): string {
  * The first words of a message's markdown as plain text: question blocks,
  * fences, tables, images and raw HTML dropped, link and emphasis marks
  * removed, whitespace collapsed, cut at a word near `max` characters.
+ * `enough` (characters of kept lines) stops the read early, so a long body
+ * costs no more than its start: a list row's line (inbox-row-preview.ts).
  */
-export function firstWords(markdown: string, max = 240): string {
+export function firstWords(markdown: string, max = 240, enough = Infinity): string {
   const lines: string[] = [];
   let fence: string | null = null;
   let directive = 0;
-  for (const raw of markdown.split(/\r?\n/)) {
+  let kept = 0;
+  for (const raw of markdown.split(/\r?\n/, enough === Infinity ? undefined : LINES_READ_MAX)) {
+    if (kept >= enough) break;
     const line = raw.trim();
     if (fence !== null) {
       if (line.startsWith(fence)) fence = null;
@@ -362,11 +366,18 @@ export function firstWords(markdown: string, max = 240): string {
     if (directive > 0) continue;
     if (line.startsWith('|') || /^[-*_]{3,}$/.test(line) || /^<\/?[A-Za-z][^>]*>$/.test(line)) continue;
     // Block marks: a heading's hashes, a list or task marker, a quote.
-    lines.push(line.replace(/^#{1,6}\s+/, '').replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '').replace(/^>\s?/, ''));
+    const words = line.replace(/^#{1,6}\s+/, '').replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '').replace(/^>\s?/, '');
+    lines.push(words);
+    kept += words.length + 1;
   }
-  const text = cleanInline(lines.join(' ')).replace(/\s+/g, ' ').trim();
+  const joined = lines.join(' ');
+  // Past `enough` the words are never shown: a long paragraph is cleaned only as far as that.
+  const text = cleanInline(joined.length > enough ? sliceText(joined, enough) : joined).replace(/\s+/g, ' ').trim();
   return cutAtWord(text, max);
 }
+
+/** With `enough`, the most lines `firstWords` reads (a body of thousands of short lines, or fences, stays bounded). */
+const LINES_READ_MAX = 2000;
 
 /** One thing a message holds, for its folded line. */
 export interface Holding {

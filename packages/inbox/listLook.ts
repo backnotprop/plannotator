@@ -42,7 +42,7 @@ export interface ListLook {
   roomy: boolean;
   /** Settings → Rows only: Unread "Dot", an accent dot before an unread row (with `smallNames`: the name at the read size, bold). */
   unreadDot: boolean;
-  /** Settings → Rows only: Subject preview "2 lines", beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
+  /** Settings → Rows only: Preview "2 lines", beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
   previewTwo: boolean;
   /** Settings → Rows only: Time "Relative", "4m", "3h", "2d", then the date (relativeTime.ts). */
   relativeTime: boolean;
@@ -150,7 +150,7 @@ export function lookFromRows(rows: readonly string[]): ListLook {
 
 /**
  * A change on top of a look, with its rivals made to agree: the option just turned on wins (Compact turns Roomy
- * off and Roomy turns Compact off; "2 lines" turns "Hide subject preview" off and back; the Dot needs the smaller
+ * off and Roomy turns Compact off; "2 lines" turns "Hide preview" off and back; the Dot needs the smaller
  * names, so it turns them on, and turning them off turns the Dot off).
  */
 export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListLook {

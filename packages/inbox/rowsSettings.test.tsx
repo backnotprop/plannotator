@@ -20,7 +20,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { RowsSection, ROWS_PRESETS, rowsSummary } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
-const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, readListLook, resetListLookForTests, rowsFromLook } = await import('./listLook');
+const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, adoptSavedRows, readListLook, resetListLookForTests, rowsFromLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const saves: unknown[][] = [];
@@ -121,7 +121,20 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(saves).toHaveLength(3);
   });
 
-  test('Subject preview: None and 2 lines never together', async () => {
+  test('Preview (was "Subject preview"): a saved None or 2 lines shows under its new name, unchanged', async () => {
+    // The saved options keep their names (`hidePreview`, `previewTwo`): only the words on the page changed.
+    act(() => adoptSavedRows(['smallNames', 'hidePreview'], 1));
+    const el = render();
+    const label = el.querySelector('[data-rows-control="preview"] .ib-l')!;
+    expect(label.textContent).toBe('Preview');
+    expect(chosen(el, 'preview')).toEqual(['None']);
+    act(() => adoptSavedRows(['smallNames', 'previewTwo'], 2));
+    await settle();
+    expect(chosen(el, 'preview')).toEqual(['2 lines']);
+    expect(readListLook()).toEqual(lookOf({ previewTwo: true }));
+  });
+
+  test('Preview: None and 2 lines never together', async () => {
     const el = render();
     await pick(el, 'preview', '2 lines');
     expect(readListLook()).toEqual(lookOf({ previewTwo: true }));

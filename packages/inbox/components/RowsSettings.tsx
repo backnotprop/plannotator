@@ -5,7 +5,7 @@
  * width" (the one-line row, zoomed down when the page is narrower than a wide list). On a phone one picture, the
  * phone's rows. Round 2 (the owner, 2026-11-02: "Couldn't customization go a bit further"): three presets beside the
  * lede (Minimal, Balanced = the defaults, Detailed) as starting points, then beside the narrow picture Look (density,
- * first line, thread names, unread, subject preview, time) and Show (agent icons, project). Letter marks (approval
+ * first line, thread names, unread, preview, time) and Show (agent icons, project). Letter marks (approval
  * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
  * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures). A notes-list look (the
  * owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default and in no preset: Look →
@@ -61,6 +61,7 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
           project: { id: 'prj_billing', name: 'billing-svc' },
           thread_name: 'Postgres 17 migration',
           subject: 'The staging password expired: can you rotate it?',
+          latest_preview: 'Asked: The staging password expired: can you rotate it?',
           author: { kind: 'agent', host: 'codex', session: 'ses_b', name: null },
           section: 'stopped',
           questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null },
@@ -77,6 +78,7 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
           project: { id: 'prj_store', name: 'storefront' },
           thread_name: 'Checkout redesign',
           subject: 'Which cart layout should ship first?',
+          latest_preview: 'Asked: Which cart layout should ship first?',
           participants: [
             { host: 'claude-code', session: 'ses_a' },
             { host: 'codex', session: 'ses_c' },
@@ -96,6 +98,8 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
         sample({
           thread_id: 'rows-sample-plain',
           subject: 'Tests pass on main after the retry fix',
+          // The grey line is the latest message (approval "inbox-row-latest-preview"): here the person's reply.
+          latest_preview: 'You: Merge it once CI is green.',
           author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
           section: 'quiet',
           waiting_on_person: false,
@@ -376,7 +380,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
           />
           <LookRow
             id="preview"
-            label="Subject preview"
+            label="Preview"
             value={look.hidePreview ? 'none' : look.previewTwo ? 'two' : 'one'}
             choices={[
               { id: 'none', label: 'None' },

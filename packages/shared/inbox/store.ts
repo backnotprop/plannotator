@@ -54,6 +54,7 @@ import {
   type InboxAnswerRefusal,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-row-preview";
 import {
   checkInboxActionResult,
   composeInboxActionsReply,
@@ -943,6 +944,12 @@ export class InboxStore {
   private readonly latestAgentIds = new Map<string, string>();
   /** Per thread, how many message lines were applied to it: `threadVersion`. */
   private readonly threadLines = new Map<string, number>();
+  /**
+   * A message's row line (`latestPreview`), by record, with what it was worked out from: its questions' states (`asks`).
+   * A message line puts a new record, so an entry never outlives the words it read, and a list rebuild reads no body
+   * and cleans no prompt again while the states stay the same.
+   */
+  private readonly previewLines = new WeakMap<InboxMessage, { asks: string; text: string | null }>();
   private readonly now: () => Date;
 
   private constructor(dataDir: string, now: () => Date) {
@@ -2303,6 +2310,7 @@ export class InboxStore {
     const sessionEnded = askerGone || undelivered;
     const facts = {
       ...summary,
+      latest_preview: this.latestPreview(root, messages, unseen > 0 ? seenSeq : null),
       unsent,
       delivery,
       agent_after_archive: agentAfterArchive,
@@ -2332,6 +2340,43 @@ export class InboxStore {
     // In New only for the person's own unsent words or comments: not bold.
     const draftOnly = section === "new" && unseen === 0 && !facts.answered_not_sent && inboxHasUnsent(unsent);
     return { ...facts, ...(sessionEnded && section !== "quiet" ? { session_ended: true } : {}), section, unread: inboxRowUnread(section, unseen, draftOnly) };
+  }
+
+  /**
+   * The row's grey line (approval "inbox-row-latest-preview"): while an agent message is unread (after `unreadAfter`,
+   * the look's seq), the newest of them; else the newest message, the Inbox's own notes read past (a 👍's, Mark
+   * read's, a Tidy's). None for an unnamed thread whose latest message is its first: its title is that message's.
+   * Reads one message's words (kept per record) and, for an answer with no words, the thread's questions.
+   */
+  private latestPreview(root: InboxMessage, messages: readonly InboxMessage[], unreadAfter: number | null): string | null {
+    let latest: InboxMessage | null = null;
+    for (let i = messages.length - 1; i >= 0 && !latest; i--) {
+      const message = messages[i]!;
+      if (unreadAfter !== null ? message.author.kind === "agent" && (this.messageSeq.get(message.id) ?? 0) > unreadAfter : !isInboxNote(message)) latest = message;
+    }
+    if (!latest || (latest === root && !root.thread_name?.trim())) return null;
+    if (latest.author.kind === "person") {
+      const kept = this.previewLines.get(latest);
+      if (kept) return kept.text;
+      const words = inboxRowPreviewWords(latest);
+      const reply = latest;
+      // No words of their own: the answers it carried, from the thread's questions (only then read).
+      const answered = words ? undefined : messages.flatMap((m) => (m.author.kind === "agent" ? this.questionsOf(m.id).filter((q) => q.sent_reply_id === reply.id) : []));
+      const text = inboxRowPreview({ message: latest, words, answered });
+      // Kept only when it is the reply's own words: its answers are read again each time, as their lines may land after it.
+      if (words) this.previewLines.set(latest, { asks: "", text });
+      return text;
+    }
+    // An agent message's questions as records with their state: the line needs only the kind, prompt and state, so
+    // no wire copy of each (`questionsOf`) is made for every row of every rebuild.
+    const closed = this.closedByArchive(latest);
+    const questions = this.questionRecords(latest.id).map((record) => ({ kind: record.kind, prompt: record.prompt, state: inboxQuestionState(record, closed), answer: null }));
+    const asks = questions.map((q) => q.state).join(",");
+    const kept = this.previewLines.get(latest);
+    if (kept && kept.asks === asks) return kept.text;
+    const text = inboxRowPreview({ message: latest, questions });
+    this.previewLines.set(latest, { asks, text });
+    return text;
   }
 
   /** The live sessions the rows' delivery reads (the server's); null forgets them. */

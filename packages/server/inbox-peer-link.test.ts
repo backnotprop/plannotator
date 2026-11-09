@@ -340,6 +340,12 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.rows.map((r) => [r.thread_id, r.machine])).toEqual([["new", B]]);
   });
 
+  test("a linked machine's row keeps its grey line (latest_preview) through the forward", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 2, sections: [{ threads: [{ thread_id: "msg_a", latest_preview: "You: Ship it." }, { thread_id: "msg_b", latest_preview: null }] }] });
+    expect(peer.list!.rows.map((r) => [r.thread_id, r.latest_preview])).toEqual([["msg_a", "You: Ship it."], ["msg_b", null]]);
+  });
+
   test("a machine keeps snoozes only when its list says so: an older Inbox's list (no `snoozes`) takes no snooze", () => {
     const { peer } = link("http://127.0.0.1:9");
     peer.acceptList({ cursor: 3, sections: [] });

@@ -293,13 +293,19 @@ function BadgeWords({ row, id }: { row: InboxListRow; id: string }) {
  * An older Inbox sends no `delivery`: its Sent row says it in words instead.
  */
 function subjectOf(row: InboxListRow): string {
+  return sentWordsOf(row) ?? row.subject ?? '(no subject)';
+}
+
+/** A Sent row's own words in place of its subject, or null. */
+function sentWordsOf(row: InboxListRow): string | null {
+  if (row.section !== 'sent') return null;
   // A thread the person started keeps its own subject in Sent; its count cell says whom it went to.
   // A reply that tags agents (approval "inbox-tag-agents", Lines): how many have it, and who waits.
-  if (row.section === 'sent' && !row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
+  if (!row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
   // A Re-ask note waits on the agent to ask again (approval "inbox-reask"): its own words, beside the delivery tick.
-  if (row.section === 'sent' && row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
-  if (row.section === 'sent' && !row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
-  return row.subject ?? '(no subject)';
+  if (row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
+  if (!row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
+  return null;
 }
 
 /** The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none. */
@@ -368,13 +374,18 @@ function useAvatarRow(): boolean {
 }
 
 /**
- * The grey preview under or after the title: the subject of a named thread (`subjectOf`, so a Sent row's words
- * too), nothing under an unnamed one, whose subject is its title, or when the subject only repeats the name.
+ * The grey preview under or after the title (approval "inbox-row-latest-preview"): the thread's latest message as
+ * the server words it (`latest_preview`: the newest unread agent message, else the newest one, "You: …" for the
+ * person's own), under a named and an unnamed thread alike. A named Sent row keeps its own words (who has the reply,
+ * a re-ask that waits), as before. Nothing when it only repeats the title. An older Inbox sends no `latest_preview`:
+ * a named thread's subject then, as before, and nothing under an unnamed one, whose subject is its title.
  */
 function previewOf(row: InboxListRow): string | null {
-  if (!row.thread_name?.trim()) return null;
-  const subject = subjectOf(row);
-  return subject.trim() === row.thread_name.trim() ? null : subject;
+  const named = !!row.thread_name?.trim();
+  const sentWords = named ? sentWordsOf(row) : null;
+  const text = sentWords ?? (row.latest_preview !== undefined ? row.latest_preview : named ? subjectOf(row) : null);
+  if (!text?.trim()) return null;
+  return text.trim() === titleOf(row).trim() ? null : text;
 }
 
 /**
@@ -1000,7 +1011,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <LineCount row={row} tip status={statusMark} card={cardOf(row)} open={kbd} />
     </>
   );
-  // First line "Thread name" with Subject preview off too (approval "inbox-customize-rows"): two lines, the guided
+  // First line "Thread name" with Preview off too (approval "inbox-customize-rows"): two lines, the guided
   // review mark and the row's end at line 2's right end. With the time under the preview the end has its own line.
   const twoLines = titleFirst && noPreview && !compact && !timeBelow;
   return (
@@ -1036,7 +1047,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
           </div>
           {/* Nothing shows on it with Agent icons and Project both off (`leadEmpty`): it stays for a screen reader (the
               agents' names), but takes no room, so the preview sits under the name (the owner, 2026-11-07, q-dbe4dc80).
-              Subject preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3, so the
+              Preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3, so the
               line draws them and never folds. */}
           {twoLines ? (
             <div className="ib-l2 ib-l2-lead">
@@ -1110,7 +1121,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // row never grows a line for the pin alone.
   const avatarRow = useAvatarRow();
   // With the time under the preview the pin goes with the row's end, on the time's line.
-  // First line "Thread name" with Subject preview off: two lines, line 3's book, pin, badge and count at line 2's end.
+  // First line "Thread name" with Preview off: two lines, line 3's book, pin, badge and count at line 2's end.
   const twoLines = titleFirst && noPreview && !compact && !timeBelow;
   const pinOnLine1 = !timeBelow && !twoLines && pinned && !preview && !guide && !rowHasBadge(row) && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
   const time = (
