@@ -36,6 +36,12 @@ When the document has question blocks, `read_document` also returns `questions`,
 
 Comments the agent creates appear in the annotations panel like any other external-tool comment, labeled `browser-agent`. A reply threads under the comment it answers and is exported nested under it, so the coding agent reads the exchange in order.
 
+## Inbox navigation
+
+The Inbox registers only `plannotator.show_thread`, with `{ "thread_id": "<thread_id>" }`. It checks that the thread exists, then opens it in the current window without reloading the page. Showing the thread already open leaves its scroll position alone. It does not register the document tools listed above, send messages or answer questions. The WebMCP opt-out also disables this tool.
+
+For a tool outside the browser, use the Inbox MCP server's `show_thread` or local `POST /api/inbox/windows/show`; see [Inbox](/docs/reference/inbox/#show-a-thread-from-a-local-tool). Raising an OS window stays the caller's job.
+
 ## Turning the tools off
 
 Settings, General tab, "Agent tools". The row appears only in a browser that exposes WebMCP, and switching it off unregisters every tool for that browser. The choice is stored as a cookie only when you opt out; the default leaves nothing behind.

@@ -344,6 +344,7 @@ The stdio command fills in the project (its working folder) and a session id for
 |------|--------------|
 | `send_message` | Send you a message. It can carry `:::question` blocks and `attachments` (any file it can read, absolute or relative to the project; `.env` refused). `thread` names a thread to join, and `reply_to` answers one of your replies. In a thread you started that has no name you typed, the agent's first reply names it with `thread` (a name another open thread of the project already has is refused, and the agent picks another). `supersedes` (or a `Replaces: <message id>/<key>` line in a new question block) retires earlier questions of the thread, so you can no longer answer them. `done` closes the agent's own action items it saw happen (the card reads "<agent> saw it done"; nothing is sent) |
 | `read_thread` | Read one thread as a short transcript: the questions still waiting on you, the newest 6 messages in full (`limit` sets how many), your earlier messages in full (up to 12 KB of them), and every other earlier message as one line with its questions' answers. A message over 16 KB is cut, except your newest one, which is always whole. Your answers are given whole. The agent can ask for any message in full (`expand`), read further back (`before`), or read only what is new since its last read (`after`). Your 👍 Looks good shows on its message. Without a thread, it lists the threads this session wrote in, one short row each (subject, name, where it sits in your list, open questions, last writer and time, your last message, and whether it has a reply from you it has not read) |
+| `show_thread` | Show a thread (`thread_id`) in the most recently focused open local Inbox window without reloading it. Returns `shown: true` and `window` after acknowledgment, or `shown: false` and a `url` to open. Raising the OS window stays the caller's job |
 | `search` | Find messages by their words, in the agent's project or in every project: its own, other agents' and yours. Read-only: it uses the same search as your **⌘K**, never adds to your recent searches, and marks nothing read. Each result is one line: the thread, the message, who wrote it, when, and the words around the match |
 | `resolve_message` | Resolve (archive) or reopen a thread |
 | `snooze_thread` | Only when you ask: snooze a thread until a time, or end its snooze |
@@ -352,6 +353,12 @@ The stdio command fills in the project (its working folder) and a session id for
 | `card` | Only while the Board is on (see [The Board](#the-board)). Make, move and keep its cards current: `create`, `move`, `say` (its last word, and what you owe in In review), `link` (a thread, a pull request or an issue), `ship` (to Done), `drop` (cancel, with a reason) and `list`. Columns: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `dropped`; the names agents used before (`shipped` among them) still work. An agent cannot move a card you put in Backlog, and only you restore a card you cancelled |
 
 No tool answers, approves or sends anything for you.
+
+### Show a thread from a local tool
+
+`POST /api/inbox/windows/show` with `{ "thread": "<thread_id>" }` uses the same navigation as the MCP `show_thread` tool. It answers only on this computer, not through the tailnet or a paired phone. An open window keeps its page loaded; showing the same thread again does not change its scroll position. If no window accepts the request within two seconds, the result includes the thread URL instead.
+
+A browser-integrated agent can use WebMCP `plannotator.show_thread` with `{ "thread_id": "<thread_id>" }` to navigate its own Inbox window. It cannot raise a different OS window, answer questions or send replies.
 
 ## Over your tailnet
 
