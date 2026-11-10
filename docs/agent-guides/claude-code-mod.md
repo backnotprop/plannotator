@@ -693,10 +693,26 @@ passes a shell -c script that runs rm…`, and no `rule`, `hook`, `setting` or
 `plugin` on it, so any PreToolUse hook that asked, and any plugin beneath the
 mod that made or joined the ask, keeps its prompt), `$.settings.read()`
 (every source, managed included) holds no ask/deny rule on Bash, PowerShell,
-Monitor or `rm`, no `blockReadsOutsideWorkingDirectories`, and no PreToolUse
-or PermissionRequest hook whose matcher could select Bash (absent, `*`, a
+Monitor or `rm`, no `blockReadsOutsideWorkingDirectories`, and no
+PermissionRequest hook whose matcher could select Bash (absent, `*`, a
 regex matching `Bash`, or one that does not compile), and no enabled plugin
-holds such a hook either. The mod answers without the hooks beneath it, so it
+holds such a hook either. A PreToolUse hook is no reason to step aside by
+being there: it has run before the prompt whatever
+the mod answers, Claude Code itself keeps the waiver on beside one (real
+runs, 2.1.318 and 2.1.321: a no-op, allow or deny PreToolUse hook on Bash or
+`*`, in settings or a plugin, leaves the removal unprompted with no
+Plannotator), and its ask is on the verdict (`hook`). **A command of several
+parts** (`cd /tmp/x && rm -rf logs/*/*`, two removals in one command, a
+removal outside the working directories beside a `mkdir`) gets another
+wording from Claude Code, `This Bash command contains multiple operations.
+The following parts require approval: <part>, <part>`, which lists the parts
+(allowed ones too) and never names the check that asked. The mod answers it
+only when the verdict carries no `rule`, `hook`, `setting` or `plugin`, a
+listed part runs `rm` or `rmdir`, and Claude Code's own verdict for each
+listed part asked by itself (`$.tool.check`, which runs nothing and no classic
+hook) is `allow` or a removal-check ask alone; a part that asks for any other
+reason, or a query that fails, keeps the prompt. The mod answers without the
+PermissionRequest hooks beneath it, so it
 reads every plugin the settings' `enabledPlugins` turn on (anything but
 `false`) from Claude Code's registry
 (`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/installed_plugins.json`, every
@@ -706,7 +722,12 @@ own hooks are on EnterPlanMode and ExitPlanMode and never count. Anything
 else, or anything unreadable (a registry or hooks file that does not parse, an
 enabled plugin not in the registry, a hooks file the manifest names that is
 not there), steps aside and the dialog shows as before. Without the variable
-nothing changes, and the debug log gets no line for Bash asks. Plannotator
+nothing changes, and the debug log gets no line for Bash asks. With it and
+`PLANNOTATOR_MOD_DEBUG=1`, `<data dir>/claude-code-mod/debug.log` gets a
+`Bash ask (main|subagent): <reason>` line for every Bash ask and a `removal
+prompt (…): allowed, as the variable asks` or `left to the dialog: <what kept
+it>` line for every Bash prompt (the rule kind, the settings hook, the
+plugin's id, the mode, a part that asked for another reason). Plannotator
 judges no removal itself. Not covered: `-p`/SDK runs and a mod turned off (the
 mod is inert there); hooks the mod cannot see: those in an agent's or skill's
 frontmatter (Claude Code keeps them in the session's hooks registry, which no
@@ -717,7 +738,13 @@ plugin put on the call's verdict, not what it would answer at the prompt); the w
 checks and the mod cannot: managed settings sources still loading or failed
 to load, settings changes not yet applied, hook registration still in flight;
 Bash ask/deny rules given as CLI flags (`--disallowedTools` and the like, not
-in `$.settings.read()`); and the Monitor and PowerShell tools. Under a guard
+in `$.settings.read()`); a several-parts ask whose parts are each allowed by
+themselves and which a check other than the removal check raised from the
+parts together (none known in bypass mode); a plugin the registry lists but
+`enabledPlugins` does not name (Claude Code 2.1.321 did not load such a
+plugin's hooks in a real run); a built-in plugin named in `enabledPlugins`
+(`<name>@builtin` is never in the registry, so the mod steps aside); and the
+Monitor and PowerShell tools. Under a guard
 that sends `classic.*` past the mod (`cc-plugin-sec-default`) the hook never
 runs and the prompt stays. Tests: `skip-rm-prompts.test.ts` (through the real
 hooks, with plugin registries and hooks files in temp folders).

@@ -263,7 +263,7 @@ test('the order a move makes, the state a pinned row shows, and the toast words'
 test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the row menu and the thread appears in Pinned, above Projects', async () => {
   await renderApp();
   expect(pinnedSection()).toBeNull();
-  expect(document.querySelector('.ib-side-sec-l')!.textContent).toBe('Projects');
+  expect([...document.querySelectorAll('.ib-side-sec-l')].map((el) => el.textContent)).toEqual(['Agents', 'Projects']);
   await act(async () => {
     rowButton(ids.stopped)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
   });
@@ -279,7 +279,7 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the r
   expect(await serverPins()).toEqual([ids.stopped]);
   // Above Projects, labelled by its header, Pinned.
   const labels = [...document.querySelectorAll('.ib-side-sec-l')].map((el) => el.textContent);
-  expect(labels).toEqual(['Starred', 'Projects']);
+  expect(labels).toEqual(['Starred', 'Agents', 'Projects']);
   expect(pinnedSection()!.getAttribute('aria-labelledby')).toBe(document.querySelector('[data-sidebar-section="pinned"]')!.id);
   // The Count variant: Stopped as a pill; the name says subject, project, state; bold (it waits on the person).
   const pin = pinnedRow(ids.stopped)!;

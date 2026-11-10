@@ -114,10 +114,10 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
  * first-run screen) names its session; focus then starts in the message.
  * A draft saved with nobody in To opens the same way as a plain one.
  */
-export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
+export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown; launch?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
-  // "+" on a project row (F3): To is filled, so the cursor starts in the message.
-  return { chosen, focus: chosen || request.start ? 'message' : 'to' };
+  // "+" on a project row (F3), and Agents' Add agent: To is filled, so the cursor starts in the message.
+  return { chosen, focus: chosen || request.start || request.launch ? 'message' : 'to' };
 }
 
 /** "started 2:41 PM": when the session started, without its host. */

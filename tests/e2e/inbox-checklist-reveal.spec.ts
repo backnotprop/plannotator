@@ -93,7 +93,8 @@ async function world(steps?: boolean): Promise<World> {
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
-      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown } },
+      // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.
+      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown } },
       ...(steps === undefined ? {} : { inboxSteps: steps }),
     }),
   );

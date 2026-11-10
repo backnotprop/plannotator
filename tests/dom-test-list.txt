@@ -253,6 +253,7 @@ packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/connectLine.test.tsx
 packages/inbox/agentsSettings.test.tsx
+packages/inbox/agents/agentMotion.test.tsx
 packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx
@@ -588,6 +589,7 @@ packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
 packages/inbox/pulls/railTree.test.tsx
+packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
@@ -653,6 +655,7 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
 packages/inbox/listFilterButton.test.tsx
 packages/inbox/prototypeWindow.test.tsx
@@ -662,3 +665,4 @@ packages/review-editor/components/guide/GuideDiffControls.test.tsx
 packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
+packages/inbox/agents/agentsSection.test.tsx

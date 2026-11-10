@@ -21,7 +21,7 @@ export function LaunchTipCard(props: {
   const side = place?.side ?? 'right';
   return (
     <div
-      className="ib-tour-coach ib-lt"
+      className="ib-tour-coach ib-ctip"
       role="group"
       aria-labelledby={props.titleId}
       aria-hidden={leaving || undefined}
@@ -31,7 +31,7 @@ export function LaunchTipCard(props: {
       data-leaving={leaving ? '' : undefined}
       style={place ? { top: place.top, left: place.left } : { visibility: 'hidden' }}
     >
-      <span className="ib-lt-arrow" data-side={side === 'right' ? 'left' : 'up'} style={side === 'below' && place ? { left: place.arrow } : undefined} aria-hidden="true" />
+      <span className="ib-ctip-arrow" data-side={side === 'right' ? 'left' : 'up'} style={side === 'below' && place ? { left: place.arrow } : undefined} aria-hidden="true" />
       <div className="ib-tc-eb">{LAUNCH_TIP_WORDS.eyebrow}</div>
       <h2 id={props.titleId}>{LAUNCH_TIP_WORDS.title}</h2>
       <p id={props.lineId}>{LAUNCH_TIP_WORDS.line}</p>

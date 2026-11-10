@@ -376,12 +376,12 @@ test('Pinned and Projects close like folders: the count, the project on screen k
   await expect(page.locator('.ib-lhead h1')).toHaveText('docs-site');
   await header('projects').click();
   await expect(header('projects')).toHaveAttribute('aria-expanded', 'false');
-  await expect(side(page).locator('.ib-proj')).toHaveText([/^docs-site/]);
+  await expect(side(page).locator('.ib-projs .ib-proj')).toHaveText([/^docs-site/]);
   expect(await cookie(page, 'plannotator-inbox-sidebar-closed')).toBe(encodeURIComponent('pinned,projects'));
   await page.reload();
   await expect(header('projects')).toHaveAttribute('aria-expanded', 'false');
   await expect(header('pinned')).toHaveAttribute('aria-expanded', 'false');
-  await expect(side(page).locator('.ib-proj')).toHaveText([/^docs-site/]);
+  await expect(side(page).locator('.ib-projs .ib-proj')).toHaveText([/^docs-site/]);
   await page.mouse.move(900, 450);
   await shot('sections-closed');
 
@@ -401,7 +401,7 @@ test('Pinned and Projects close like folders: the count, the project on screen k
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
   await header('projects').click();
-  await expect(side(page).locator('.ib-proj')).toHaveCount(2);
+  await expect(side(page).locator('.ib-projs .ib-proj')).toHaveCount(2);
   expect(await cookie(page, 'plannotator-inbox-sidebar-closed')).toBeUndefined();
   expect(world.errors).toEqual([]);
 });
