@@ -30,13 +30,14 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAuthor, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
+import { PhoneToSheet } from './PhoneToSheet';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
 import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
@@ -49,9 +50,14 @@ import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
+import { AgentPill } from '../components/AgentPill';
+import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { wordsMessage } from '../sendTargets';
+import { pinnedState, type PinnedState } from '../pins';
+import { ThreadPill } from './ThreadPill';
 import { registerReloadFlush } from '../stalePage';
 import {
   DRAFT_TOO_LONG,
@@ -141,6 +147,48 @@ export interface ComposeRequest {
   launch?: { agent: string | null } | null;
 }
 
+/** What the chip says when another open thread of the project has the typed name. */
+const THREAD_NAME_TAKEN = 'Another open thread in this project has this name.';
+
+/** The open thread that has the name the person typed, and the message a reply typed in it answers. */
+interface ThreadNameHolder {
+  threadId: string;
+  messageId: string;
+  /** Its name as that thread has it (the typed one may differ in case or spaces). */
+  name: string;
+  /** Who a reply typed in it reaches: "Claude Code". */
+  agent: string;
+  /** That agent, for its mark. */
+  author: InboxAuthor;
+  /** The thread's state as its list row has it (Stopped, Holds N, open questions); null when the read carried no row. */
+  state: PinnedState | null;
+}
+
+/** Read the thread that has the name; null when it can't be read (the notice then offers nothing). */
+async function threadNameHolder(threadId: string): Promise<ThreadNameHolder | null> {
+  try {
+    const { thread, row } = await inboxApi.thread(threadId, 5000);
+    if (thread.resolved_at !== null || thread.thread_name === null) return null;
+    const target = wordsMessage(thread);
+    // A thread no agent wrote in yet is its addressee's.
+    const author: InboxAuthor = target.author.kind === 'agent' ? target.author : { kind: 'agent', host: target.to?.host ?? null, session: target.to?.session ?? null, name: null };
+    const agent = (author.kind === 'agent' ? author.name : null) ?? (author.kind === 'agent' && author.host ? hostLabel(author.host) : 'That thread’s agent');
+    return { threadId, messageId: target.id, name: thread.thread_name, agent, author, state: row ? pinnedState(row) : null };
+  } catch {
+    return null;
+  }
+}
+
+/** Compose's message went into an open thread instead of starting one ("Send to that thread"). */
+export interface ComposeJoined {
+  threadId: string;
+  threadName: string;
+  /** Who got it: "Claude Code". */
+  agent: string;
+  /** The draft it was written in (deleted), or null. */
+  draftId: string | null;
+}
+
 export interface ComposeSent {
   threadId: string;
   session: string;
@@ -204,6 +252,11 @@ export interface ComposeDialogProps {
   lastSent: string | null;
   home: string | null;
   onSent: (sent: ComposeSent) => void;
+  /**
+   * The message went into the open thread that already had the typed name. Absent: compose never offers it (the
+   * tour), and the taken name is only said.
+   */
+  onJoined?: (joined: ComposeJoined) => void;
   onSaved: (draft: DraftView) => void;
   onDeleted: (draft: DraftView) => void;
   onClose: () => void;
@@ -268,6 +321,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
   const toRowRef = useRef<HTMLDivElement>(null);
+  const footRef = useRef<HTMLDivElement>(null);
   const opening = useRef(composeOpening(request)).current;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const titleId = `ib-cp-title-${uid}`;
@@ -588,6 +642,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
+  // The one open thread that has the typed name (the 409 names it): the chip's notice offers to send there instead.
+  const [nameHolder, setNameHolder] = useState<ThreadNameHolder | null>(null);
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
@@ -665,7 +721,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (!tipUp) return;
     const measure = () => {
       const dialog = dialogRef.current;
-      const row = toRowRef.current;
+      // A phone has no To line: the card stands over the foot's row, where To is.
+      const row = phone ? footRef.current : toRowRef.current;
       if (!dialog || !row) return;
       setTipPlace(launchTipPlace({ phone, viewportWidth: window.innerWidth, dialog: dialog.getBoundingClientRect(), row: row.getBoundingClientRect(), to: toRef.current?.getBoundingClientRect() ?? null }));
     };
@@ -758,6 +815,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   // ── sending ──
+  // "Send to that thread" is a plain message into a thread of this computer: never a review, a Board card's thread, a
+  // PR hand-off or another machine's project, whose Sends carry more than a reply can.
+  const joinsThreads = !!props.onJoined && !transport && !box && !card && !pulls && !start?.machine;
+  // Another To may be another project: the thread read for the old one is not offered for it.
+  useEffect(() => {
+    setNameHolder(null);
+  }, [chosen, start?.agent, start?.project.id, start?.machine]);
   const send = async () => {
     leaveTip();
     // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
@@ -912,11 +976,53 @@ export function ComposeDialog(props: ComposeDialogProps) {
         setTrustInfo(true);
         setError(cause.message);
       } else if (cause instanceof InboxApiError && cause.code === 'thread_name_taken') {
-        setNameError('Another open thread in this project has this name.');
+        // Read before the notice shows, so it says at once whose thread it is; unread, the notice is the plain one.
+        const holder = joinsThreads && cause.threadId ? await threadNameHolder(cause.threadId) : null;
+        setNameHolder(holder);
+        setNameError(THREAD_NAME_TAKEN);
       } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
         // git did not answer in time (#1919): the server's words are for an agent; the person presses Send again.
         setError('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
       } else setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * "Send to that thread": the message, with its files, goes into the open thread that has the typed name, as a reply
+   * typed in that thread would (`wordsMessage`, `POST …/reply`), so to that thread's agent, whatever To says. Nothing
+   * is started and no thread is made. A failure leaves compose as it was.
+   */
+  const sendToHolder = async () => {
+    const holder = nameHolder;
+    if (!holder || busy !== null) return;
+    if (!body.trim() && !files.files.some((file) => file.state !== 'refused')) {
+      setError('Write a message first.');
+      textRef.current?.focus();
+      return;
+    }
+    if (files.uploading) {
+      setError('Wait for the files to finish uploading.');
+      return;
+    }
+    setBusy('send');
+    setError(null);
+    try {
+      const words = body.trim();
+      const feedback = withSkillsBlock('', await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE));
+      await inboxApi.reply(holder.messageId, {
+        idempotency_key: sendKey.current,
+        words,
+        questions: [],
+        ...(feedback ? { feedback } : {}),
+        ...(uploadIds.length > 0 ? { uploads: uploadIds } : {}),
+      });
+      // The draft it was written in is done, as after a Send.
+      if (draft) await inboxApi.deleteDraft(draft.id).catch(() => {});
+      props.onJoined?.({ threadId: holder.threadId, threadName: holder.name, agent: holder.agent, draftId: draft?.id ?? null });
+    } catch (cause) {
+      setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
     } finally {
       setBusy(null);
     }
@@ -1127,10 +1233,73 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // the room it leaves "Press Send" would have no card to read.
   const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
-  const toRow = (
+  // Where a new session starts: the button that opens the folder menu (a computer's To line, a phone's line over the row).
+  const folderButton = (className: string, chevron: number) =>
+    start && (
+      <button
+        type="button"
+        className={className}
+        data-compose-folder={start.project.id}
+        data-missing={start.project.exists ? undefined : ''}
+        aria-haspopup="listbox"
+        aria-expanded={folderMenu}
+        data-compose-folder-machine={start.machine ?? undefined}
+        data-compose-folder-new={start.create ? '' : undefined}
+        data-compose-folder-clone={start.clone ? start.clone.slug : undefined}
+        aria-label={`Start in: ${start.project.name}, ${start.create ? `a new folder at ${start.folder}, made when you send` : start.clone ? `${start.folder}, cloned from ${start.clone.host}/${start.clone.slug} when you send` : tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
+        onClick={() => {
+          setPicker(false);
+          setFolderMenu((open) => !open);
+        }}
+      >
+        {/* A13: a folder the Send makes carries the new-folder mark until then. */}
+        {start.create && <Icon name="folderPlus" size={15} />}
+        {/* C13: a clone carries the git mark until the Send clones it. */}
+        {start.clone && <Icon name="gitBranch" size={15} />}
+        {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
+        {/* Another machine's project names its machine, as the list's rows do ("billing-svc · Mac mini"). */}
+        {startMachineName && (
+          <span className="ib-cp-on" data-compose-machine={start.machine ?? undefined}>
+            · <bdi>{startMachineName}</bdi>
+          </span>
+        )}
+        <Icon name="chevD" size={chevron} />
+      </button>
+    );
+
+  // The Launch tip: beside or under To on a computer, over the foot's row on a phone.
+  const tipCard = tipUp && (
+    <LaunchTipCard
+      place={tipPlace}
+      phone={phone}
+      leaving={tip === 'leaving'}
+      titleId={`${titleId}-tip`}
+      lineId={tipLineId}
+      onOk={(keyboard) => {
+        leaveTip();
+        // From the keyboard, focus was on Got it, which is going: to To, the thing the tip was about.
+        if (keyboard) (toRef.current ?? textRef.current)?.focus();
+      }}
+    />
+  );
+
+  const noAgent = !!model && !anyLive && !canStart && !endedNote;
+  const toValue = target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose';
+  const toName = target
+    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
+    : start
+      ? `To: a new ${start.name} session. Change`
+      : endedNote
+        ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
+        : loading
+          ? 'To: looking for live agents'
+          : 'To: choose an agent';
+
+  // A computer: the To line at the top. A phone has none: To is the pill in the foot's row (`phoneTo`).
+  const toRow = phone ? null : (
     <div ref={toRowRef} className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
-      {model && !anyLive && !canStart && !endedNote ? (
+      {noAgent ? (
         <span className="ib-cp-none-to" data-compose-to="none">
           <Icon name="info" size={15} />
           No agent is running
@@ -1140,20 +1309,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ref={toRef}
           type="button"
           className="ib-cp-tobtn"
-          data-compose-to={target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose'}
+          data-compose-to={toValue}
           aria-haspopup="listbox"
           aria-expanded={picker}
-          aria-label={
-            target
-              ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
-              : start
-                ? `To: a new ${start.name} session. Change`
-                : endedNote
-                ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
-                : loading
-                  ? 'To: looking for live agents'
-                  : 'To: choose an agent'
-          }
+          aria-label={toName}
           aria-disabled={loading || undefined}
           // The Launch tip's line describes To while it is up; To wears its own hover fill, never a ring.
           aria-describedby={tip === 'shown' ? tipLineId : undefined}
@@ -1190,58 +1349,99 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <Icon name="chevD" size={15} />
         </button>
       )}
-      {tipUp && (
-        <LaunchTipCard
-          place={tipPlace}
-          phone={phone}
-          leaving={tip === 'leaving'}
-          titleId={`${titleId}-tip`}
-          lineId={tipLineId}
-          onOk={(keyboard) => {
-            leaveTip();
-            // From the keyboard, focus was on Got it, which is going: to To, the thing the tip was about.
-            if (keyboard) (toRef.current ?? textRef.current)?.focus();
-          }}
-        />
-      )}
+      {tipCard}
       {start && (
         <span className="ib-cp-startin">
           <span className="ib-cp-in">in</span>
-          <button
-            type="button"
-            className="ib-cp-tobtn"
-            data-compose-folder={start.project.id}
-            data-missing={start.project.exists ? undefined : ''}
-            aria-haspopup="listbox"
-            aria-expanded={folderMenu}
-            data-compose-folder-machine={start.machine ?? undefined}
-            data-compose-folder-new={start.create ? '' : undefined}
-            data-compose-folder-clone={start.clone ? start.clone.slug : undefined}
-            aria-label={`Start in: ${start.project.name}, ${start.create ? `a new folder at ${start.folder}, made when you send` : start.clone ? `${start.folder}, cloned from ${start.clone.host}/${start.clone.slug} when you send` : tildePath(start.project.root, startHome)}${startMachineName ? `, on ${startMachineName}${startAsleep ? ', asleep' : ''}` : ''}${start.project.exists ? '' : ', not there any more'}. Change`}
-            onClick={() => {
-              setPicker(false);
-              setFolderMenu((open) => !open);
-            }}
-          >
-            {/* A13: a folder the Send makes carries the new-folder mark until then. */}
-            {start.create && <Icon name="folderPlus" size={15} />}
-            {/* C13: a clone carries the git mark until the Send clones it. */}
-            {start.clone && <Icon name="gitBranch" size={15} />}
-            {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
-            {/* Another machine's project names its machine, as the list's rows do ("billing-svc · Mac mini"). */}
-            {startMachineName && (
-              <span className="ib-cp-on" data-compose-machine={start.machine ?? undefined}>
-                · <bdi>{startMachineName}</bdi>
-              </span>
-            )}
-            <Icon name="chevD" size={15} />
-          </button>
+          {folderButton('ib-cp-tobtn', 15)}
         </span>
       )}
       {(boxPull || (linkOnly && !linkScratch)) && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
   );
+
+  // A phone (approval "inbox-phone-composer-picker"): To is a pill in the foot's row, after the paperclip and Skills,
+  // and opens the sheet. Where a new session starts is a line over the row.
+  const phoneTo = !phone ? null : noAgent ? (
+    <span className="ib-apill ib-apill-none" data-compose-to="none">
+      No agent is running
+    </span>
+  ) : (
+    <AgentPill
+      buttonRef={toRef}
+      host={start ? start.agent : target ? target.host : endedNote ? endedNote.host : undefined}
+      // A new session: the agent's name alone; the line over the row says "New <agent> session in <folder>".
+      label={start ? start.name : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
+      detail={endedNote && !target && !start ? 'ended' : null}
+      struck={!!endedNote && !target && !start}
+      ask={!start && !target && !endedNote && !loading}
+      open={picker}
+      ariaLabel={toName}
+      disabled={!loading && !anyLive && !canStart && !endedNote}
+      attrs={{
+        'data-compose-to': toValue,
+        'aria-disabled': loading || undefined,
+        // The Launch tip's line describes To while it is up.
+        'aria-describedby': tip === 'shown' ? tipLineId : undefined,
+        'data-launch-tip': tip === 'shown' ? '' : undefined,
+        'data-loading': loading ? '' : undefined,
+      }}
+      onClick={() => !loading && setPicker((open) => !open)}
+    />
+  );
+  const phoneStartIn = phone && start && (
+    <div className="ib-cp-startline" data-compose-start-line="">
+      <span>New {start.name} session in</span>
+      {folderButton('ib-cp-startlineb', 13)}
+    </div>
+  );
+  // A phone's Skills button, as the reply box has it: it types the `/` the skill list opens on.
+  const [noSkills, setNoSkills] = useState(false);
+  const openSkills = () => {
+    const field = textRef.current;
+    if (!field) return;
+    const slash = () => {
+      if (textRef.current !== field) return;
+      field.focus();
+      const at = field.selectionStart ?? field.value.length;
+      document.execCommand('insertText', false, at === 0 || /\s$/.test(field.value.slice(0, at)) ? '/' : ' /');
+    };
+    const none = () => {
+      setNoSkills(true);
+      say('No skills are installed to pick from.');
+      setTimeout(() => setNoSkills(false), 2600);
+    };
+    if (getCachedSkillCatalog().length > 0) return slash();
+    void fetchSkillCatalog().then((catalog) => (catalog.length > 0 ? slash() : none()));
+  };
+
+  const toStart = launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
+  const pickStart = (picked: ComposeStart) => {
+    setToFilled(false);
+    setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
+    // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
+    void inboxApi.launchSettingsRead(true).catch(() => {});
+    setChosen(null);
+    setPicker(false);
+    setError(null);
+    textRef.current?.focus();
+  };
+  const pickSession = (picked: ComposeTarget) => {
+    setToFilled(false);
+    setChosen(picked.session);
+    setStartPick(null);
+    setPicker(false);
+    setError(null);
+    afterPicker();
+  };
+  const closePicker = () => {
+    setPicker(false);
+    // Still nobody in To: back on To, where the choice is made.
+    if (target) afterPicker();
+    else (toRef.current ?? textRef.current)?.focus();
+  };
+  const toSelected = target?.session ?? (start ? startKey(start.agent) : null);
 
   const reviewRows = box && (
     <ReviewRows
@@ -1306,6 +1506,184 @@ export function ComposeDialog(props: ComposeDialogProps) {
     />
   );
 
+  // The words, what is wrong with them, and the row with Send.
+  const composer = (
+    <>
+      <div className="ib-cp-body">
+        {/* The Inbox's composer field (#1914): the / and $ skill picker; the Send composes the block. */}
+        <div className="ib-cp-field" data-compose-text="">
+          <InboxComposerField
+            textareaRef={textRef}
+            voice={voice}
+            ariaLabel="Message"
+            ariaDescribedBy={status ? statusId : undefined}
+            destination="your message"
+            placeholder={box ? (reviewKind === 'walkthrough' ? 'What should it walk you through?' : 'A guided review, by default. Add words to curate it your way, or ask for a full review.') : 'Write an idea or a request. It starts a new thread.'}
+            // The field is tall and sits in a scrolling body above the footer: the picker opens at the
+            // caret, inside the dialog and above its footer, and Escape closes it before the dialog.
+            caretMenu={caretMenu}
+            escapeClosesMenu
+            value={body}
+            onChange={(value) => {
+              setBody(value);
+              if (error) setError(null);
+            }}
+          />
+        </div>
+        <ComposeFileTiles
+          files={files.files}
+          onRemove={(key) => {
+            files.remove(key);
+            // The × goes with its tile: focus stays in the dialog, in the message.
+            textRef.current?.focus();
+          }}
+          onPutBack={(key) => files.putBack(key, textRef.current)}
+        />
+      </div>
+      {start && startAsleep && startMachineName && (
+        <p className="ib-cp-asleep" data-compose-note="asleep">
+          <Icon name="moon" size={15} />
+          <span>
+            {startMachineName} is asleep (since {whenTime(startMachine!.since)}). Your message waits here, and {start.name} starts on {startMachineName} when it's back. You can cancel it until then.
+          </span>
+        </p>
+      )}
+      {error && (
+        // Kept, unseen, while the details say it: the button under a press that closes them must not move.
+        <div className="ib-cp-error" role={errorInDetails ? undefined : 'alert'} data-compose-error={errorInDetails ? undefined : ''} data-in-details={errorInDetails ? '' : undefined}>
+          {error}
+          {conflict && (
+            <span className="ib-cp-conflict">
+              <button type="button" className="ib-lnk" onClick={() => void keepDraft()}>
+                Keep mine
+              </button>
+              <button
+                type="button"
+                className="ib-lnk"
+                onClick={() => {
+                  setDraft(conflict);
+                  setBody(conflict.body);
+                  setNameState(threadNameStateOf(conflict));
+                  setChosen(conflict.to?.session ?? null);
+                  setConflict(null);
+                  setError(null);
+                }}
+              >
+                Use the other
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+      {phoneStartIn}
+      <div className="ib-cp-foot" ref={footRef}>
+        {phone && tipCard}
+        {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
+        {takesFiles ? (
+          // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
+          <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
+        ) : (
+          <Tip content="Files: not in the tour">
+            <span className="ib-cp-clip" role="img" aria-label="Files: not in the tour" aria-disabled="true" data-compose-attach-off="">
+              <Icon name="clip" size={17} />
+            </span>
+          </Tip>
+        )}
+        {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
+        {phone && attached > 0 && (
+          <span className="ib-cp-clipn" data-compose-file-count="">
+            {attached}
+            <span className="ib-sr"> attached</span>
+          </span>
+        )}
+        {phone && !box && !transport && (
+          <button type="button" className="ib-pchip" aria-label="Skills" data-compose-skills="" onClick={openSkills}>
+            <Icon name="cube" size={20} />
+          </button>
+        )}
+        {phoneTo}
+        {phone && noSkills && (
+          <span className="ib-cp-hint" data-compose-hint="">
+            No skills are installed
+          </span>
+        )}
+        {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
+        {draft && !dirty && phone && (
+          <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
+            <Icon name="check" size={14} />
+            <span>Saved</span>
+            <span>{whenTime(draft.updated_at)}</span>
+          </span>
+        )}
+        {/* A phone deletes a draft from its row on the Drafts page. */}
+        {draft && !phone && (
+          <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
+            Delete draft
+          </button>
+        )}
+        <span className="ib-sp" />
+        {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
+        {status && (
+          <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
+            {status}
+          </span>
+        )}
+        {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
+        <VoiceFoot voice={voice} phone={phone}>
+          {box && !phone && (
+            <button type="button" className="ib-btn ib-ghost" onClick={requestClose} data-compose-cancel="">
+              Cancel
+            </button>
+          )}
+          {saveOffered && !phone && (
+            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+              Save draft
+            </button>
+          )}
+        </VoiceFoot>
+        {trustFacts.length > 0 && (
+          <button
+            type="button"
+            ref={trustCircleRef}
+            className="ib-iconbtn ib-cp-trustcircle"
+            aria-label="What trusting this folder means"
+            aria-haspopup="dialog"
+            aria-expanded={trustInfoOpen}
+            aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
+            onClick={() => setTrustInfo((open) => !open)}
+            data-compose-trust-circle=""
+            data-warning={trust?.warns ? '' : undefined}
+          >
+            <Icon name="question" size={18} />
+          </button>
+        )}
+        <button
+          type="button"
+          className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+          // A phone: the round arrow while it says only "Send"; a Send that says more (Trust and start) keeps its words.
+          data-send-words={phone && sendLabel !== 'Send' ? '' : undefined}
+          aria-disabled={!sendable || undefined}
+          aria-keyshortcuts={sendKeys}
+          onClick={() => void send()}
+          disabled={busy !== null || voice.busy}
+          data-compose-send=""
+        >
+          {phone ? (
+            <>
+              <Icon name="arrowUp" size={20} className="ib-cp-sendi" />
+              <span className="ib-cp-sendl">{sendLabel}</span>
+            </>
+          ) : (
+            <>
+              <Icon name="send" size={15} />
+              {sendLabel}
+            </>
+          )}
+        </button>
+      </div>
+    </>
+  );
+
   return (
     <dialog
       ref={dialogRef}
@@ -1340,7 +1718,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       }}
     >
       {phone ? (
-        // One box, so To can take the top bar's line while the keyboard is up (inbox.css).
+        // The top bar (and the review box's rows) in one box. To is not here: it is the pill in the foot's row.
         <div className="ib-cp-head">
           <div className="ib-cp-bar">
             <button type="button" className="ib-cp-barb" onClick={requestClose} data-compose-cancel="">
@@ -1373,38 +1751,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </span>
         </p>
       )}
-      {picker && (
-        <ToPicker
-          groups={groups}
-          selected={target?.session ?? (start ? startKey(start.agent) : null)}
-          home={home}
-          phone={phone}
-          start={launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
-          onStart={(picked) => {
-            setToFilled(false);
-            setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
-            // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
-            void inboxApi.launchSettingsRead(true).catch(() => {});
-            setChosen(null);
-            setPicker(false);
-            setError(null);
-            textRef.current?.focus();
-          }}
-          onPick={(picked) => {
-            setToFilled(false);
-            setChosen(picked.session);
-            setStartPick(null);
-            setPicker(false);
-            setError(null);
-            afterPicker();
-          }}
-          onClose={() => {
-            setPicker(false);
-            // Still nobody in To: back on To, where the choice is made.
-            if (target) afterPicker();
-            else (toRef.current ?? textRef.current)?.focus();
-          }}
-        />
+      {/* The one place To's list splits: a phone's is a bottom sheet (kept mounted, for its way out), a computer's the list under To. */}
+      {phone ? (
+        <PhoneToSheet open={picker} host={dialogRef.current} groups={groups} selected={toSelected} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
+      ) : (
+        picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
       )}
       {folderMenu && start && launch && (
         <FolderMenu
@@ -1486,9 +1837,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
           suggested={reviewName ?? suggested}
           hint={box ? 'Named from what it reviews until you type here.' : undefined}
           error={nameError}
+          action={
+            nameError === THREAD_NAME_TAKEN && nameHolder
+              ? { label: 'Send to that thread', name: `Send this message to the thread “${nameHolder.name}”, to ${nameHolder.agent}`, onPress: () => void sendToHolder(), disabled: busy !== null || voice.busy, picture: <ThreadPill name={nameHolder.name} author={nameHolder.author} agent={nameHolder.agent} state={nameHolder.state} /> }
+              : null
+          }
           onChange={(next) => {
             setNameState(next);
             setNameError(null);
+            setNameHolder(null);
           }}
           onDone={() => textRef.current?.focus()}
           onOverflow={(text) => {
@@ -1583,154 +1940,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </div>
         </div>
       )}
-      <div className="ib-cp-body">
-        {/* The Inbox's composer field (#1914): the / and $ skill picker; the Send composes the block. */}
-        <div className="ib-cp-field" data-compose-text="">
-          <InboxComposerField
-            textareaRef={textRef}
-            voice={voice}
-            ariaLabel="Message"
-            ariaDescribedBy={status ? statusId : undefined}
-            destination="your message"
-            placeholder={box ? (reviewKind === 'walkthrough' ? 'What should it walk you through?' : 'A guided review, by default. Add words to curate it your way, or ask for a full review.') : 'Write an idea or a request. It starts a new thread.'}
-            // The field is tall and sits in a scrolling body above the footer: the picker opens at the
-            // caret, inside the dialog and above its footer, and Escape closes it before the dialog.
-            caretMenu={caretMenu}
-            escapeClosesMenu
-            value={body}
-            onChange={(value) => {
-              setBody(value);
-              if (error) setError(null);
-            }}
-          />
+      {phone ? (
+        // A phone: the words and the row are one card that floats over the keyboard (phoneComposer.css).
+        <div className="ib-cp-pcard" data-compose-pcard="">
+          {composer}
         </div>
-        <ComposeFileTiles
-          files={files.files}
-          onRemove={(key) => {
-            files.remove(key);
-            // The × goes with its tile: focus stays in the dialog, in the message.
-            textRef.current?.focus();
-          }}
-          onPutBack={(key) => files.putBack(key, textRef.current)}
-        />
-      </div>
-      {start && startAsleep && startMachineName && (
-        <p className="ib-cp-asleep" data-compose-note="asleep">
-          <Icon name="moon" size={15} />
-          <span>
-            {startMachineName} is asleep (since {whenTime(startMachine!.since)}). Your message waits here, and {start.name} starts on {startMachineName} when it's back. You can cancel it until then.
-          </span>
-        </p>
+      ) : (
+        composer
       )}
-      {error && (
-        // Kept, unseen, while the details say it: the button under a press that closes them must not move.
-        <div className="ib-cp-error" role={errorInDetails ? undefined : 'alert'} data-compose-error={errorInDetails ? undefined : ''} data-in-details={errorInDetails ? '' : undefined}>
-          {error}
-          {conflict && (
-            <span className="ib-cp-conflict">
-              <button type="button" className="ib-lnk" onClick={() => void keepDraft()}>
-                Keep mine
-              </button>
-              <button
-                type="button"
-                className="ib-lnk"
-                onClick={() => {
-                  setDraft(conflict);
-                  setBody(conflict.body);
-                  setNameState(threadNameStateOf(conflict));
-                  setChosen(conflict.to?.session ?? null);
-                  setConflict(null);
-                  setError(null);
-                }}
-              >
-                Use the other
-              </button>
-            </span>
-          )}
-        </div>
-      )}
-      <div className="ib-cp-foot">
-        {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
-        {takesFiles ? (
-          // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
-          <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
-        ) : (
-          <Tip content="Files: not in the tour">
-            <span className="ib-cp-clip" role="img" aria-label="Files: not in the tour" aria-disabled="true" data-compose-attach-off="">
-              <Icon name="clip" size={17} />
-            </span>
-          </Tip>
-        )}
-        {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
-        {phone && attached > 0 && (
-          <span className="ib-cp-clipn" data-compose-file-count="">
-            {attached}
-            <span className="ib-sr"> attached</span>
-          </span>
-        )}
-        {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
-        {draft && !dirty && phone && (
-          <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
-            <Icon name="check" size={14} />
-            <span>Saved</span>
-            <span>{whenTime(draft.updated_at)}</span>
-          </span>
-        )}
-        {/* A phone deletes a draft from its row on the Drafts page. */}
-        {draft && !phone && (
-          <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
-            Delete draft
-          </button>
-        )}
-        <span className="ib-sp" />
-        {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
-        {status && (
-          <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
-            {status}
-          </span>
-        )}
-        {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
-        <VoiceFoot voice={voice} phone={phone}>
-          {box && !phone && (
-            <button type="button" className="ib-btn ib-ghost" onClick={requestClose} data-compose-cancel="">
-              Cancel
-            </button>
-          )}
-          {saveOffered && !phone && (
-            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
-              Save draft
-            </button>
-          )}
-        </VoiceFoot>
-        {trustFacts.length > 0 && (
-          <button
-            type="button"
-            ref={trustCircleRef}
-            className="ib-iconbtn ib-cp-trustcircle"
-            aria-label="What trusting this folder means"
-            aria-haspopup="dialog"
-            aria-expanded={trustInfoOpen}
-            aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
-            onClick={() => setTrustInfo((open) => !open)}
-            data-compose-trust-circle=""
-            data-warning={trust?.warns ? '' : undefined}
-          >
-            <Icon name="question" size={18} />
-          </button>
-        )}
-        <button
-          type="button"
-          className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
-          aria-disabled={!sendable || undefined}
-          aria-keyshortcuts={sendKeys}
-          onClick={() => void send()}
-          disabled={busy !== null || voice.busy}
-          data-compose-send=""
-        >
-          <Icon name="send" size={15} />
-          {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
-        </button>
-      </div>
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">
         {pasteSaid}
       </div>

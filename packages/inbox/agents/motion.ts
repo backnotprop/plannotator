@@ -11,8 +11,10 @@
  *   every part, so the whole never lines up again), phases and choice of gestures. A gesture comes after a gap that
  *   is never the same twice, now and then a longer rest or a quick second one, and never the same gesture twice
  *   running. Gestures start one at a time across the page, so a list never moves in chorus.
- * - Claude turns on its own layer; a gesture changes only the speed (it slows, turns back a touch, whirls), never the
- *   angle, so the star never jumps.
+ * - Claude is mostly at rest (the owner, 2026-11-09: it "spins too much"; "a little bit more random and subtle"): it
+ *   never turns on and on. Now and then, after a gap drawn from its own seeded chances, it makes one small gesture: a
+ *   slow part turn that eases in and out and settles, a soft breath of a few percent, or a ray's shimmer. How small
+ *   and how often: CLAUDE_CALM (the owner chose this level, 2026-11-09).
  * - Attention: while the pointer is in the sidebar the section is in, each icon leans a little toward it (the `.am-look`
  *   layer: at most AGENT_LOOK.shift px and AGENT_LOOK.turn degrees) and a rig's eyes (the `.am-e` layer: Codex's
  *   prompt, OpenCode's square, Pi's top block) look that way too. Each icon follows on its own critically damped
@@ -31,20 +33,14 @@
  *   still cost a layout every frame).
  * - `unmountAgentMark` cancels everything an icon runs: an animation left on a removed element keeps ticking.
  *
- * The click cycle: the agent's mark, then Glass, Yellow, Transparent and Face, then the agent again. Our faces are
- * the favicon art (faceArt.ts, loaded on the first click) and move as a whole; so does a host with no rig of its own.
+ * The faces (faceChoices.ts): the agent's mark, the Glass colours, Transparent and Face, chosen in the picker
+ * (FaceFan.tsx) or stepped through by a click (the agent, Glass, Yellow, Transparent, Face). Our faces (faceArt.ts,
+ * loaded on the first click or the first look at the picker) move as a whole; so does a host with no rig of its own.
  */
+import type { AgentFace, OurFace } from './faceChoices';
 import { AGENT_RIGS, CLAUDE_RAY_ANGLES, type AgentRigKind } from './rigs';
 
-export type AgentFace = 'agent' | 'glass' | 'yellow' | 'transparent' | 'totman';
-
-/** The click cycle, in order (the owner, 2026-11-09): each stays until the next click. */
-export const AGENT_FACES: readonly AgentFace[] = ['agent', 'glass', 'yellow', 'transparent', 'totman'];
-
-/** The face after `face` in the cycle. */
-export function nextAgentFace(face: AgentFace): AgentFace {
-  return AGENT_FACES[(AGENT_FACES.indexOf(face) + 1) % AGENT_FACES.length]!;
-}
+export { AGENT_FACES, nextAgentFace, type AgentFace } from './faceChoices';
 
 /** The rig an agent host's mark has; null for a host with none (its plain mark, moved as a whole). */
 export function agentRigOf(host: string | null | undefined): AgentRigKind | null {
@@ -54,11 +50,25 @@ export function agentRigOf(host: string | null | undefined): AgentRigKind | null
 }
 
 /**
+ * Claude's rare gestures: the gap before the next (ms, drawn evenly from the range, each mark from its own seed), a
+ * part turn's size (degrees, either way) and length (ms), a breath's swell and a ray's shimmer (fractions of its
+ * size), and how often each comes ([turn, breath, shimmer, ripple]).
+ */
+export const CLAUDE_CALM: Readonly<{ gap: [number, number]; turn: [number, number]; turnMs: [number, number]; breath: number; shimmer: number; weights: [number, number, number, number] }> = {
+  gap: [4000, 12000],
+  turn: [18, 40],
+  turnMs: [1800, 2400],
+  breath: 0.025,
+  shimmer: 0.09,
+  weights: [3, 2, 2, 1],
+};
+
+/**
  * Timers and the pointer's spring run at `clock` times their rate (a recorder that slows the page sets it; the tests
  * speed it up); `fidgets` off: no gestures; `simulatedDom`: move in a simulated DOM too (the marks' own tests, which
  * stand in for Web Animations).
  */
-export const agentMotionOptions = { clock: 1, fidgets: true, simulatedDom: false };
+export const agentMotionOptions: { clock: number; fidgets: boolean; simulatedDom: boolean } = { clock: 1, fidgets: true, simulatedDom: false };
 
 /**
  * How far an icon follows the pointer: `shift` px of lean and `turn` degrees at most, its eyes `eyes` px more; the
@@ -321,10 +331,8 @@ class Track {
 /* ---------- the rigs: each part's own life, and the little things the character does now and then ---------- */
 interface Gestures {
   x: (part: string, clip: Clip) => void;
-  /** The turn's speed (Claude), degrees a second: ramp to `to` over `ms`, hold `hold` ms, the next step; then back to its cruise. */
-  turn: (steps: { to: number; ms: number; hold?: number }[]) => void;
-  /** A new cruising speed for the turn. */
-  cruise: (dps: number) => void;
+  /** A part turn of the whole star (Claude's `.am-spin` layer): `deg` more, over `ms`, easing in and out and settling. */
+  rotate: (deg: number, ms: number) => void;
 }
 interface Rig {
   parts: Record<string, { sel: string; a?: number; vb?: number }>;
@@ -332,8 +340,8 @@ interface Rig {
   life: (part: string, index: number) => Clip | undefined;
   /** The repertoire: [how often, the gesture]. */
   acts: [number, (I: Gestures) => void][];
-  /** A turning rig's cruising speed, degrees a second. */
-  spin?: number;
+  /** The wait before its next gesture (ms), when the rig sets its own; `first`: the first after it starts. */
+  gap?: (first: boolean) => number;
   /** The part whose inside looks toward the pointer. */
   eyes?: string;
   /** How much of AGENT_LOOK.turn the body leans (a star that turns anyway: none). */
@@ -345,42 +353,56 @@ const px = (vb: number) => vb / 24;
 /** Go there, stay, come back: 0 to 1 on a spring, held until `stay` ms, then released. */
 const visit = (t: number, stay: number, zeta: number, omega: number) => (t < stay ? rise(t, zeta, omega) : ring(t - stay, Math.max(zeta, 0.7), omega));
 
-/* Claude: a star that turns ("it's circular"). It slows, turns back a touch, whirls; its rays ripple. */
+/* Claude: a star mostly at rest. Now and then one small thing: a slow part turn that settles, a breath, a ray's
+   shimmer or a soft ripple round the rays; never a turn that goes on. No life loop: between gestures it is still. */
 const claudeRig = (R: Rand): Rig => {
   const n = CLAUDE_RAY_ANGLES.length;
+  const calm = CLAUDE_CALM;
   const parts: Rig['parts'] = { body: { sel: '[data-p="body"]' } };
   CLAUDE_RAY_ANGLES.forEach((a, i) => (parts[`r${i}`] = { sel: `[data-p="r${i}"]`, a }));
-  const D = 4200 + 2600 * R();
-  const way = R() < 0.5 ? 1 : -1;
-  const speed = () => 17 + 15 * R();
-  const ripple = (I: Gestures, k = 0.15) => {
+  const between = (lo: number, hi: number) => lo + (hi - lo) * R();
+  const ripple = (I: Gestures, k: number) => {
     const from = Math.floor(R() * n);
     const w = R() < 0.5 ? 1 : -1;
     for (let i = 0; i < n; i++) {
-      const at = ((((w * (i - from)) % n) + n) % n) * 42;
-      I.x(`r${i}`, once(1000, (t) => ({ sx: 1 + k * bell(t - at, 440) })));
+      const at = ((((w * (i - from)) % n) + n) % n) * 46;
+      I.x(`r${i}`, once(1100, (t) => ({ sx: 1 + k * bell(t - at, 480) })));
     }
   };
+  // Mostly one way, now and then back: it reads as a slow, wandering clock.
+  let way = R() < 0.5 ? 1 : -1;
+  const turn = (I: Gestures) => {
+    if (R() < 0.3) way = -way;
+    I.rotate(way * between(...calm.turn), between(...calm.turnMs));
+  };
+  const [wTurn, wBreath, wShimmer, wRipple] = calm.weights;
+  const acts: Rig['acts'] = [
+    [wTurn, turn],
+    [
+      wBreath,
+      (I) => {
+        const D = 1700;
+        const k = calm.breath;
+        I.x('body', once(D, (t) => ({ sx: 1 + k * bell(t, D), sy: 1 + k * bell(t, D) })));
+        for (let i = 0; i < n; i++) I.x(`r${i}`, once(D, (t) => ({ sx: 1 + k * 1.4 * bell(t - 60, D - 60) })));
+      },
+    ],
+    [
+      wShimmer,
+      (I) => {
+        const i = Math.floor(R() * n);
+        I.x(`r${i}`, once(900, (t) => ({ sx: 1 + calm.shimmer * bell(t, 900) })));
+        I.x(`r${(i + 1) % n}`, once(900, (t) => ({ sx: 1 + calm.shimmer * 0.4 * bell(t - 120, 700) })));
+      },
+    ],
+    [wRipple, (I) => ripple(I, calm.shimmer * 0.7)],
+  ];
   return {
     parts,
-    // The rays breathe in a wave that travels round the star.
-    life: (p, i) => (p === 'body' ? undefined : loop(D, (t) => ({ sx: 1 + 0.07 * S(t / D + (way * i) / n) }), 70)),
-    spin: speed(),
+    life: () => undefined,
     lean: 0,
-    acts: [
-      [3, (I) => ripple(I)],
-      [2, (I) => I.turn([{ to: 3, ms: 900, hold: 700 + 900 * R() }])],
-      [1.6, (I) => I.turn([{ to: 2, ms: 500 }, { to: -(12 + 8 * R()), ms: 450, hold: 350 + 300 * R() }])],
-      [1.4, (I) => I.turn([{ to: 95 + 40 * R(), ms: 260, hold: 120 }])],
-      [1.6, (I) => I.cruise(speed())],
-      [
-        1.4,
-        (I) => {
-          I.x('body', once(560, (t) => ({ sx: 1 + 0.1 * bell(t, 560), sy: 1 + 0.1 * bell(t, 560) })));
-          ripple(I, 0.09);
-        },
-      ],
-    ],
+    gap: (first) => (first ? between(400, calm.gap[1] * 0.7) : between(...calm.gap)),
+    acts,
   };
 };
 
@@ -543,6 +565,17 @@ const opencodeRig = (R: Rand): Rig => {
   };
 };
 
+/**
+ * A face that keeps its shape: a squash becomes the same small dip on both axes, so a tile (the Glass faces' rounded
+ * square) is only ever turned, moved and scaled as a whole, never stretched into a shape it is not.
+ */
+const keepShape = (p: PoseIn): PoseIn => {
+  if (p.sx === undefined && p.sy === undefined) return p;
+  const s = Math.sqrt((p.sx ?? 1) * (p.sy ?? 1));
+  return { ...p, sx: s, sy: s };
+};
+const whole = (clip: Clip): Clip => ({ ...clip, f: (t) => keepShape(clip.f(t)) });
+
 /* Our faces (the favicon art) and a host with no rig: the whole mark sways, tilts, bounces and nods, in a 64-unit grid. */
 const faceRig = (R: Rand): Rig => {
   const u = px(64);
@@ -562,13 +595,16 @@ const faceRig = (R: Rand): Rig => {
           I.x('body', once(1600, (t) => ({ r: 9 * s * visit(t, 900, 0.55, 13) })));
         },
       ],
-      [2, (I) => I.x('body', once(900, (t) => hop(t, 900, 2.4 * u, 0.12, 0.85)))],
-      [1.5, (I) => I.x('body', once(420, (t) => ({ sy: 1 - 0.08 * bell(t, 420), sx: 1 + 0.04 * bell(t, 420) })))],
+      [2, (I) => I.x('body', whole(once(900, (t) => hop(t, 900, 2.4 * u, 0.12, 0.85))))],
+      [1.5, (I) => I.x('body', whole(once(420, (t) => ({ sy: 1 - 0.08 * bell(t, 420), sx: 1 + 0.04 * bell(t, 420) }))))],
       [1.5, (I) => I.x('body', once(1050, (t) => ({ x: 1.3 * u * Math.sin((TAU * t) / 420) * Math.sin((Math.PI * t) / 1050) })))],
       [1.2, (I) => I.x('body', once(1300, (t) => ({ y: -1.7 * u * visit(t, 800, 0.7, 18) })))],
     ],
   };
 };
+
+/** A part turn: eases in, eases out and settles with the faintest overshoot (about 3 % of the turn). */
+const TURN_EASE = 'cubic-bezier(0.45, 0, 0.22, 1.035)';
 
 const RIGS: Record<AgentRigKind | 'face', (R: Rand) => Rig> = { claude: claudeRig, codex: codexRig, pi: piRig, opencode: opencodeRig, face: faceRig };
 
@@ -633,46 +669,39 @@ function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement, R:
   };
   let alive = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let rampT: ReturnType<typeof setTimeout> | undefined;
   const phase = R();
   // Its temperament: how long it waits between gestures.
   const tempo = 0.85 + 0.45 * R();
   let last = -1;
-  // A turning rig (Claude): one endless turn on its own layer. A gesture changes only its speed, in small steps, so
-  // the angle never jumps. It starts far into its run, so a turn back never reaches its start. Cancelled on stop.
-  const spinEl = rig.spin ? root.querySelector<HTMLElement>('.am-spin') : null;
-  let spin: Animation | null = null;
-  let cruise = rig.spin ?? 0;
-  const rampTo = (dps: number, ms: number, then?: () => void) => {
-    if (!spin) return;
-    clearTimeout(rampT);
-    const from = spin.playbackRate;
-    const to = dps / 360;
-    const t0 = performance.now();
-    const tick = () => {
-      if (!spin) return;
-      const k = Math.min(1, ((performance.now() - t0) * agentMotionOptions.clock) / Math.max(ms, 1));
-      spin.playbackRate = from + (to - from) * smooth(k);
-      if (k < 1) rampT = setTimeout(tick, 40 / agentMotionOptions.clock);
-      else then?.();
-    };
-    tick();
-  };
+  // Claude's part turns: one at a time on its own layer, each from where the last one left the star; the angle it
+  // rests at is kept as a plain style (nothing left running between gestures). Cancelled on stop.
+  const spinEl = root.querySelector<HTMLElement>('.am-spin');
+  let angle = 0;
+  let turning: Animation | null = null;
   const I: Gestures = {
     x: (name, clip) => (batch ? batch.push([name, clip]) : go1(name, clip)),
-    turn: (steps) => {
-      const go = (i: number) => {
-        const step = steps[i];
-        if (!step) return rampTo(cruise, 1200);
-        rampTo(step.to, step.ms, () => {
-          rampT = setTimeout(() => go(i + 1), (step.hold ?? 0) / agentMotionOptions.clock);
-        });
-      };
-      go(0);
-    },
-    cruise: (dps) => {
-      cruise = dps;
-      rampTo(dps, 1500);
+    rotate: (deg, ms) => {
+      if (!spinEl) return;
+      // A turn still on its way (rare: gestures come seconds apart): start from where it is now, never jump.
+      let from = angle;
+      if (turning) {
+        const m = /matrix\(([-\d.e]+),\s*([-\d.e]+)/.exec(getComputedStyle(spinEl).transform);
+        if (m) from = (Math.atan2(Number(m[2]), Number(m[1])) * 180) / Math.PI;
+        turning.cancel();
+      }
+      const to = from + deg;
+      angle = ((to % 360) + 360) % 360;
+      const an = animate(icon, spinEl, [{ transform: `rotate(${f3(from)}deg)` }, { transform: `rotate(${f3(to)}deg)` }], { duration: ms, easing: TURN_EASE, fill: 'forwards' });
+      turning = an;
+      an.finished?.then(
+        () => {
+          if (turning !== an) return;
+          spinEl.style.transform = `rotate(${f3(angle)}deg)`;
+          an.cancel();
+          turning = null;
+        },
+        () => {},
+      );
     },
   };
   const total = rig.acts.reduce((sum, [w]) => sum + w, 0);
@@ -687,6 +716,7 @@ function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement, R:
   };
   /** The wait before the next gesture: mostly a few seconds, now and then a quick second thing or a longer rest. */
   const gap = (first = false): number => {
+    if (rig.gap) return rig.gap(first);
     if (first) return 400 + 3600 * R();
     const r = R();
     if (r < 0.18) return 900 + 600 * R();
@@ -723,18 +753,12 @@ function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement, R:
       const first = !alive;
       alive = true;
       clearTimeout(timer);
-      clearTimeout(rampT);
       for (const t of Object.values(X)) t.stop();
       if (agentMotionStill()) {
-        spin?.cancel();
-        spin = null;
+        turning?.cancel();
+        turning = null;
         for (const tr of Object.values(T)) tr.hold({});
         return;
-      }
-      if (spinEl && !spin) {
-        spin = animate(icon, spinEl, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 1000, iterations: Infinity });
-        spin.currentTime = 1e7 + phase * 1000;
-        spin.playbackRate = cruise / 360;
       }
       for (const [name, tr] of Object.entries(T)) {
         const c = rig.life(name, kind === 'claude' && name[0] === 'r' ? Number(name.slice(1)) : 0);
@@ -747,10 +771,11 @@ function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement, R:
     stop() {
       alive = false;
       clearTimeout(timer);
-      clearTimeout(rampT);
       timer = undefined;
-      spin?.cancel();
-      spin = null;
+      turning?.cancel();
+      turning = null;
+      angle = 0;
+      if (spinEl) spinEl.style.transform = '';
       for (const t of Object.values(T)) t.stop();
       for (const t of Object.values(X)) t.stop();
       for (const eye of eyes) eye.style.transform = '';
@@ -958,8 +983,8 @@ function tick(now: number): void {
 }
 
 /** Our faces' art (faceArt.ts), set once it is loaded. Until then a swap waits for it. */
-let faceArt: Readonly<Record<Exclude<AgentFace, 'agent'>, string>> | null = null;
-export function setAgentFaceArt(art: Readonly<Record<Exclude<AgentFace, 'agent'>, string>>): void {
+let faceArt: Readonly<Record<OurFace, string>> | null = null;
+export function setAgentFaceArt(art: Readonly<Record<OurFace, string>>): void {
   faceArt = art;
 }
 export function agentFaceArtReady(): boolean {

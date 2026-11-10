@@ -863,7 +863,7 @@ describe('GuideView bare (the Inbox PR page)', () => {
   describe('the reader\'s place', () => {
     const box = () => host!.querySelector<HTMLElement>('[data-guide-code-view-mounted]')!;
     /** The page, a box `top` px from its top, and what a ResizeObserver would say when the box's height changes. */
-    async function placed(top: number, height: number) {
+    async function placed(top: number, height: number, below: () => number = () => 9_000) {
       const heard: (() => void)[] = [];
       const savedObserver = globalThis.ResizeObserver;
       globalThis.ResizeObserver = class {
@@ -880,6 +880,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
       document.body.appendChild(page);
       let scrolled = 5_000;
       Object.defineProperty(page, 'scrollTop', { configurable: true, get: () => scrolled, set: (next: number) => void (scrolled = next) });
+      // A view 1,000 px tall; the page ends `below` px under it.
+      Object.defineProperty(page, 'clientHeight', { configurable: true, get: () => 1_000 });
+      Object.defineProperty(page, 'scrollHeight', { configurable: true, get: () => scrolled + 1_000 + below() });
       page.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
       let boxHeightNow = height;
       await renderView(guide, { fitFileHeights: true, state: makeState({ files: [makeFile('a.ts')] }) });
@@ -921,6 +924,18 @@ describe('GuideView bare (the Inbox PR page)', () => {
         expect(inView.top()).toBe(5_000);
       } finally {
         inView.restore();
+      }
+    }, 15_000);
+
+    // Guards the end of a long review: a file above the view that draws shorter than its estimate brings the page up
+    // with it (a browser never leaves a page past its end), and a second move left End 50 to 100 px short of the end.
+    test.skipIf(!hasDom)('at the end of the page, a box above the viewport that shrinks moves nothing: the browser has already', async () => {
+      const atEnd = await placed(-900, 150, () => 0);
+      try {
+        atEnd.grow(51);
+        expect(atEnd.top()).toBe(5_000);
+      } finally {
+        atEnd.restore();
       }
     }, 15_000);
 

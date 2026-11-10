@@ -21,6 +21,7 @@
  * the platform.
  */
 
+import { INBOX_ROWS_HELP_SECTION } from "@plannotator/core/inbox-types";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
@@ -521,6 +522,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "4. Tell the person what you combined, and that you can undo it. Their window shows no notice of your combine: the project just leaves the sidebar.",
     "",
     "`undo` takes the id of the project that went in, listed under \"Combined into it\", not the one that stayed. It works at any time, from any session, and brings back that project with whatever went into it. It gives back the project's name, its cards and its threads, the ones started since the combine too. A message or a card that joined the other project's thread stays with that thread. After an undo, the project is not suggested back into the project it left, or into whatever that project has gone into. Combining never crosses machines.",
+    "",
+    ...INBOX_ROWS_HELP_SECTION,
     "",
     "## Scripting the Inbox",
     "",

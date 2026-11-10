@@ -26,7 +26,9 @@ const hasDom = typeof document !== 'undefined';
 let reduce = false;
 interface FakeAnimation {
   target: Element;
+  frames: Keyframe[];
   options: KeyframeAnimationOptions;
+  at: number;
   playState: 'running' | 'paused' | 'finished' | 'idle';
 }
 const made: FakeAnimation[] = [];
@@ -35,7 +37,7 @@ if (hasDom) {
   const query = { media: '(prefers-reduced-motion: reduce)', get matches() { return reduce; }, addEventListener() {}, removeEventListener() {} };
   (window as unknown as { matchMedia: unknown }).matchMedia = () => query;
   (globalThis as unknown as { matchMedia: unknown }).matchMedia = window.matchMedia;
-  Element.prototype.animate = function (this: Element, _frames: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
+  Element.prototype.animate = function (this: Element, frames: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
     const opts = (typeof options === 'number' ? { duration: options } : (options ?? {})) as KeyframeAnimationOptions;
     let resolve!: () => void;
     let reject!: (e: unknown) => void;
@@ -44,7 +46,7 @@ if (hasDom) {
       reject = no;
     });
     finished.catch(() => {});
-    const record: FakeAnimation = { target: this, options: opts, playState: 'running' };
+    const record: FakeAnimation = { target: this, frames: Array.isArray(frames) ? frames : [], options: opts, at: performance.now(), playState: 'running' };
     made.push(record);
     const an = {
       currentTime: 0 as number | null,
@@ -230,7 +232,7 @@ test.skipIf(!hasDom)("a mark's motion never depends on its agent's state: a chan
 
 test.skipIf(!hasDom)('every mark has a life of its own: an idle agent gestures by itself, a plain mark moves too, and two marks of one kind never run the same loop', async () => {
   motion.agentMotionOptions.clock = 200;
-  sidebar([agent('ses_a'), agent('ses_b'), agent('ses_plain', { host: 'some-new-agent' })]);
+  sidebar([agent('ses_a', { host: 'codex' }), agent('ses_b', { host: 'codex' }), agent('ses_plain', { host: 'some-new-agent' })]);
   await wait(20);
   // The host with no rig draws its plain mark inside a moving layer.
   expect(mark('ses_plain').getAttribute('data-rig')).toBe('plain');
@@ -354,4 +356,83 @@ test.skipIf(!hasDom)('unmount leaves nothing behind: no animation, no frame, no 
   await wait(120);
   expect(made.length).toBe(after);
   expect(motion.agentPointerActivity().frame).toBe(false);
+});
+
+/* ---------- Claude: mostly at rest (the owner, 2026-11-09: it "spins too much") ---------- */
+const turnOf = (an: FakeAnimation) => {
+  const deg = (f: Keyframe | undefined) => Number(/rotate\((-?[\d.]+)deg\)/.exec(String(f?.transform ?? ''))?.[1] ?? NaN);
+  return deg(an.frames[an.frames.length - 1]) - deg(an.frames[0]);
+};
+
+test.skipIf(!hasDom)('Claude: nothing runs between gestures, no turn goes on and on, each turn is small, and it still gestures by itself', async () => {
+  motion.agentMotionOptions.clock = 400;
+  const [star] = handSidebar(['claude']) as [HTMLElement];
+  // Started: no loop at all (no endless turn, no breathing wave).
+  expect(made.filter((an) => star.contains(an.target) && an.options.iterations === Infinity)).toEqual([]);
+  const spin = star.querySelector('.am-spin')!;
+  await until(() => made.filter((an) => an.target === spin).length >= 3, 'three part turns');
+  const own = made.filter((an) => star.contains(an.target));
+  // Every animation it ever ran ends; every turn is a part turn within the bound, never a whole one.
+  expect(own.every((an) => an.options.iterations === undefined || an.options.iterations === 1)).toBe(true);
+  for (const an of own.filter((a) => a.target === spin)) {
+    expect(Math.abs(turnOf(an))).toBeGreaterThan(1);
+    expect(Math.abs(turnOf(an))).toBeLessThanOrEqual(motion.CLAUDE_CALM.turn[1] + 0.01);
+    expect(Number(an.options.duration)).toBeGreaterThanOrEqual(motion.CLAUDE_CALM.turnMs[0]);
+  }
+});
+
+test.skipIf(!hasDom)('Claude under reduced motion: it holds still, no gesture and no turn ever starts', async () => {
+  reduce = true;
+  motion.agentMotionOptions.clock = 400;
+  const [star] = handSidebar(['claude']) as [HTMLElement];
+  // At 400 times the clock its first gesture would come within about 20 ms; give it ten times that.
+  await wait(250);
+  expect(made.filter((an) => star.contains(an.target))).toEqual([]);
+  // The same mark with motion allowed does gesture, so the stillness above is reduced motion's doing.
+  reduce = false;
+  const [moving] = handSidebar(['claude']) as [HTMLElement];
+  await until(() => made.some((an) => moving.contains(an.target)), 'a gesture with motion allowed');
+});
+
+test.skipIf(!hasDom)('several Claude marks never move in step: each starts its gestures on its own schedule, and a turn picks up where the last one left the star', async () => {
+  motion.agentMotionOptions.clock = 400;
+  const stars = handSidebar(['claude', 'claude', 'claude']);
+  const firsts = () => stars.map((el) => made.find((an) => el.contains(an.target))?.at);
+  await until(() => firsts().every((at) => at !== undefined), 'a gesture from each');
+  // Never two at once: one gesture starts at a time across the page.
+  expect(new Set(firsts()).size).toBe(3);
+  // The turns chain: each starts at the angle the one before ended on (mod 360), so the star never jumps.
+  const spin = stars[0]!.querySelector('.am-spin')!;
+  await until(() => made.filter((an) => an.target === spin).length >= 3, 'three turns of one star');
+  const turns = made.filter((an) => an.target === spin);
+  const deg = (f: Keyframe | undefined) => Number(/rotate\((-?[\d.]+)deg\)/.exec(String(f?.transform ?? ''))?.[1]);
+  for (let i = 1; i < turns.length; i++) {
+    const end = (((deg(turns[i - 1]!.frames.at(-1)) % 360) + 360) % 360).toFixed(1);
+    const start = (((deg(turns[i]!.frames[0]) % 360) + 360) % 360).toFixed(1);
+    expect(start).toBe(end);
+  }
+});
+
+/* ---------- our faces move as a whole: the Glass tile is turned, moved and scaled, never stretched or skewed ---------- */
+test.skipIf(!hasDom)('a Glass face keeps its rounded tile while it moves: every frame scales both axes alike and never skews', async () => {
+  motion.agentMotionOptions.clock = 300;
+  motion.setAgentFaceArt(Object.fromEntries(motion.AGENT_FACES.filter((f) => f !== 'agent').map((f) => [f, `<img class="am-art" data-art="${f}" alt="">`])) as Parameters<typeof motion.setAgentFaceArt>[0]);
+  const [el] = handSidebar([null]) as [HTMLElement];
+  motion.showAgentFace(el, 'glass-blue', false);
+  const face = el.querySelector('.am-f-glass-blue')!;
+  const gestures = () => made.filter((an) => face.contains(an.target) && an.options.iterations !== Infinity);
+  // Enough of its gestures to have drawn each kind (a tilt, a hop, a dip, a shake, a nod) more than once.
+  await until(() => gestures().length >= 12, 'a dozen gestures of the Glass face');
+  const frames = made.filter((an) => face.contains(an.target)).flatMap((an) => an.frames.map((f) => String(f.transform ?? '')));
+  expect(frames.length).toBeGreaterThan(50);
+  let squashes = 0;
+  for (const t of frames) {
+    for (const m of t.matchAll(/scale\(([-\d.]+),([-\d.]+)\)/g)) {
+      expect(Math.abs(Number(m[1]) - Number(m[2]))).toBeLessThan(0.0015);
+      if (Number(m[1]) !== 1) squashes++;
+    }
+    for (const m of t.matchAll(/skewX\(([-\d.]+)deg\)/g)) expect(Number(m[1])).toBe(0);
+  }
+  // It still dips and hops (a uniform scale), so the guard is not passing on a face that never scales.
+  expect(squashes).toBeGreaterThan(0);
 });

@@ -2054,12 +2054,17 @@ export class InboxStore {
    * this one, which is addressed to someone else.
    */
   private threadNameTaken(projectId: string, name: string, exceptRoot: string | null): boolean {
+    return this.openThreadsNamed(projectId, name, exceptRoot).length > 0;
+  }
+
+  /** The OPEN threads of the project that have this name (`threadNameTaken`'s rule), but `exceptRoot`. */
+  private openThreadsNamed(projectId: string, name: string, exceptRoot: string | null): string[] {
     const key = inboxThreadNameKey(name);
     // Threads the person started that still carry their compose name (an agent may have replaced a suggestion).
     const personRoots = this.projectGroup(projectId)
       .flatMap((id) => this.personNamed.get(`${id}\0${key}`) ?? [])
       .filter((rootId) => inboxThreadNameKey(this.messages.get(rootId)?.thread_name ?? "") === key);
-    return [...this.rootsNamed(projectId, name), ...personRoots].some((rootId) => rootId !== exceptRoot && !this.isResolved(rootId));
+    return [...new Set([...this.rootsNamed(projectId, name), ...personRoots])].filter((rootId) => rootId !== exceptRoot && !this.isResolved(rootId));
   }
 
   thread(threadId: string): InboxThread | null {
@@ -6861,6 +6866,8 @@ export class InboxStore {
      * says how to answer. Only `true` sets it; a replay keeps the first Send's.
      */
     decision_ask?: unknown;
+    /** Sent from Settings → Rows' ask box: the root carries `rows_ask`, and what the agent receives for it carries the Rows instructions. */
+    rows_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
@@ -6903,6 +6910,7 @@ export class InboxStore {
       ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
+      ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
@@ -6928,7 +6936,13 @@ export class InboxStore {
     if (!name || !this.threadNameTaken(projectId, name, null)) return name;
     if (auto && numbered) return this.numberedThreadName(projectId, name);
     if (auto) return null;
-    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
+    // The thread that has it rides the refusal (`thread_id`), so compose can offer to send there instead; none when
+    // more than one has it (an agent's name and a compose name may both be open): there is no one "that thread".
+    const holders = this.openThreadsNamed(projectId, name, null);
+    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, {
+      field: "thread_name",
+      ...(holders.length === 1 ? { thread_id: holders[0] } : {}),
+    });
   }
 
   /** `name (n)` for the first n from 2 no open thread in the project has, cut to fit the name limit; null past 99. */
