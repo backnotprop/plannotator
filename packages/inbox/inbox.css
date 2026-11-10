@@ -4676,6 +4676,9 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-tname-err { font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; padding-top: 4px; color: var(--destructive); min-width: 0; flex: 1 1 200px; }
 /* A taken name's way through ("Send to that thread"): after the notice's words, wrapping under them when narrow. */
 .ib-cp-tname-err:has(.ib-cp-tname-go) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+/* With the way through, the notice is an offer: muted words, and the chip marked in the focus ring's colour, not the error's. */
+.ib-cp-tname-err[data-offer] { color: var(--muted-foreground); }
+.ib-key.ib-cp-tname[data-offer] { border-color: var(--ring); border-style: solid; }
 .pn-inbox .ib-cp-tname-go { flex: none; margin-top: 0; font-size: inherit; white-space: nowrap; }
 .pn-inbox .ib-cp-tname-go:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
 .pn-inbox .ib-cp-tname-go:disabled { opacity: 0.55; cursor: default; }

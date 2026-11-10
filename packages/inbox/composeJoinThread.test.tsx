@@ -147,8 +147,12 @@ test.skipIf(!hasDom)('a taken name keeps its notice and offers the thread that h
   // The notice names the thread as that thread has it, and who gets what is sent there (not To's Claude Code).
   expect(notice()!.textContent).toContain('“Launch notes”');
   expect(notice()!.textContent).toContain('Codex');
-  expect(notice()!.getAttribute('role')).toBe('alert');
-  // A real button after the alert's words, with its full name; the field is still described by the alert alone.
+  // An offer, not a failure: said politely, and neither the chip nor the field is marked as an error.
+  expect(notice()!.getAttribute('role')).toBe('status');
+  expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(false);
+  expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-offer')).toBe(true);
+  expect(nameField().hasAttribute('aria-invalid')).toBe(false);
+  // A real button after the notice's words, with its full name; the field is still described by the notice alone.
   expect(offer()!.tagName).toBe('BUTTON');
   expect(offer()!.hasAttribute('tabindex')).toBe(false);
   expect(notice()!.contains(offer())).toBe(false);
@@ -204,6 +208,10 @@ test.skipIf(!hasDom)('no offer without one thread to send to: the Inbox named no
   await refused();
   expect(notice()!.textContent).toBe('Another open thread in this project has this name.');
   expect(offer()).toBeNull();
+  // The plain refusal is still an error.
+  expect(notice()!.getAttribute('role')).toBe('alert');
+  expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(true);
+  expect(nameField().getAttribute('aria-invalid')).toBe('true');
 
   act(() => root?.unmount());
   host?.remove();

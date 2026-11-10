@@ -11,7 +11,10 @@
  * Nothing to suggest yet: an empty dashed chip saying "Name this thread".
  * `error` (the name is taken, or not a valid name) is said beside it, and
  * `action` (the name is another open thread's: send there instead) is a
- * button after those words, outside the alert so it is read once.
+ * button after those words, outside them so it is read once. With an action
+ * the words are an offer, not a failure (the owner, 2026-11-09): muted text
+ * said politely (`role="status"`), and the chip marked with the focus ring's
+ * colour (`data-offer`) instead of the error's.
  * Enter moves to the message; Escape is the dialog's (close or ask).
  *
  * Text pasted into it that is not a name (a line break, longer than a name
@@ -97,7 +100,8 @@ export function ThreadNameChip(props: {
         data-compose-thread-name={mode}
         data-auto={auto ? '' : undefined}
         data-empty={value === '' ? '' : undefined}
-        data-invalid={error ? '' : undefined}
+        data-invalid={error && !action ? '' : undefined}
+        data-offer={error && action ? '' : undefined}
         // The chip's padding (and a phone's larger hit area) puts the caret in the field.
         onMouseDown={(event) => {
           if (event.target === inputRef.current) return;
@@ -111,7 +115,7 @@ export function ThreadNameChip(props: {
           className="ib-cp-tname-in"
           aria-label="Thread name"
           aria-describedby={[error ? errorId : null, hintId, note ? noteId : null].filter(Boolean).join(' ')}
-          aria-invalid={error ? true : undefined}
+          aria-invalid={error && !action ? true : undefined}
           placeholder={THREAD_NAME_PLACEHOLDER}
           spellCheck={false}
           autoComplete="off"
@@ -157,8 +161,8 @@ export function ThreadNameChip(props: {
         </span>
       )}
       {error && (
-        <span className="ib-cp-tname-err">
-          <span id={errorId} role="alert" data-compose-thread-name-error="">
+        <span className="ib-cp-tname-err" data-offer={action ? '' : undefined}>
+          <span id={errorId} role={action ? 'status' : 'alert'} data-compose-thread-name-error="">
             {error}
           </span>
           {action && (
