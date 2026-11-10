@@ -5,8 +5,9 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
- * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the gap
+ * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, not shipped), the
+ * same-day group (the tab icon, themes, List view "Grouping", list options "Rows", the sound, voice: no tenure, the
+ * gap apart), then the later group, later only by tenure (Snooze, the Board, the Checklist, Bro mode). The agent note is a setup dialog: never in the queue, but it keeps the gap
  * (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
@@ -102,55 +103,63 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
+  // Not shipped yet (held until 0.29, packages/server/inbox.ts `switchesHeld`): its slot is kept as it was.
   CODE_REVIEW_OFFER,
-  // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), the line's gap apart
-  // (40 minutes): the sound on the update day, then list options and voice, each at its moment.
-  { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // "Choose how your list looks" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more threads, that's
-  // the point"): due for everyone, fresh installs too, once the machine holds five threads, with no day count.
-  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
-  { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // "Which favicon do you prefer?" (the owner, 2026-11-09: "Ship it as shown"): due for someone who used an earlier
+  // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
+  // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then
+  // the later group, which is later only by its tenure (`tenureMs`: days since first use). Nothing else separates
+  // them: there is no one-a-day rule.
+  //
+  // 1. "Which favicon do you prefer?" (the owner, 2026-11-09: "Ship it as shown"): due for someone who used an earlier
   // Inbox and never chose a favicon (config.json `favicon` unset), decided at the release start; fresh installs never.
+  // It opens 15 s into the page (packages/inbox/tabIconChoice.ts).
   { id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; who: config.json `inboxThemeChooser`,
-  // theme-chooser.ts: only someone still on the default theme). Its place is the owner's (2026-11-10): "it can't compete
-  // with the favicon one… The favicon one should come first. Themes must come only after, like thirty minutes after. If
-  // favicon's already done, themes can show up fifteen seconds after opening." So: right after the tab icon dialog, never
-  // offered while that one is still due (the server keeps it closed meanwhile, so patience cannot let it pass), the
-  // line's own gap after it (`REVEAL_SPACING_MS`, unchanged: no number of its own), and from day one (no tenure, no
-  // thread minimum). It never retires and has no Not now. No other entry's rules moved.
+  // 2. The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; who: config.json `inboxThemeChooser`,
+  // theme-chooser.ts: only someone still on the default theme). The owner (2026-11-10): "it can't compete with the
+  // favicon one… The favicon one should come first. Themes must come only after, like thirty minutes after. If favicon's
+  // already done, themes can show up fifteen seconds after opening." So: right after the tab icon dialog, never offered
+  // while that one is still due (the server keeps it closed meanwhile, so patience cannot let it pass), the line's own
+  // gap after it, and 15 s into the page (packages/inbox/themeChooser.ts). It never retires and has no Not now.
   { id: "theme_chooser", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
+  // 3. List view's choice, "Grouping" (approval "inbox-list-view-dialog"; its moment, approval "inbox-one-time-dialogs":
+  // once the list is taller than the screen, on Grouped, at the next calm moment; the page checks the screen). No
+  // tenure since 2026-11-10 (it was 2 days). `minThreads: 15` is the server's stand-in for "taller than the screen",
+  // which only the page can see. Still `ahead`: once it qualifies it also goes ahead of whichever offer is next.
+  { id: "list_view", kind: "offer", tenureMs: 0, minThreads: 15, ahead: true, enabled: true },
+  // 4. "Choose how your list looks", "Rows" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more
+  // threads, that's the point"): due for everyone, fresh installs too, once the machine holds five threads.
+  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
+  // 5. The sound (who: config.json `inboxSound`): only after an update that adds it.
+  { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // 6. Voice (who: config.json `inboxVoiceIntro`, and a `codex` CLI on this computer; inbox-voice.ts).
+  { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // The later group. 7. Snooze: its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
-  // Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use (`revealHeavyUse`:
-  // 10 or more threads read in 7 days, on 2 or more days), never on day 0 or 1 (2 days' tenure). Opt-in, as the Board:
-  // the claim only stamps it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
-  { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true },
-  // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the
-  // dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
+  // 8. The Board. The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps
+  // it; the dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
-  // The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and the
-  // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
-  // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
+  // 9. The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and
+  // the Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro`
+  // opens, and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
+  // 10. Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use
+  // (`revealHeavyUse`: 10 or more threads read in 7 days, on 2 or more days), never on day 0 or 1 (2 days' tenure).
+  // After the Checklist in order since 2026-11-10 (it was after Snooze). Opt-in, as the Board: the claim only stamps
+  // it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
+  { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true },
   // The grill-me tip (the owner, 2026-11-08: "if we have any gap in like consistent use, we should say, hey, have you
   // tried /grill-me yet?"; its cadence, the owner: "Sooner: after 3 answered questions, whatever the days, once"). No
   // tenure, but it never costs another card its day (`lastResort`): it waits until the line has nothing else for the
   // moment, and its claim stamps only its own record. Its need is its own (`open`): 3 answered question cards and no
   // sign of grill-me (grill-me-tip.ts `revealGrillMeGap`). Nothing to turn on: `GrillMeTip` says it once.
   { id: "grill_me_tip", kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true },
-  // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
-  // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
-  // minimum), once across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the
-  // owner: no offer may lose its showing to it): it takes a calm moment while the line is free, and its claim stamps
-  // only its own `inboxReveals.star`, so every other dialog keeps its day. Its claim runs the already-starred check
-  // (gh) before it stamps anything; starred already, nothing shows.
+  // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): shown from the second day
+  // of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread minimum), once
+  // across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the owner: no offer
+  // may lose its showing to it): it takes a calm moment while the line is free, and its claim stamps only its own
+  // `inboxReveals.star`, so every other dialog keeps its day. Its claim runs the already-starred check (gh) before it
+  // stamps anything; starred already, nothing shows.
   { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, aside: true, enabled: true },
-  // List view's choice (approval "inbox-list-view-dialog"): last in order but ahead at its moment (`ahead`; approval
-  // "inbox-one-time-dialogs": once the list is taller than the screen, on Grouped, at the next calm moment; the page
-  // checks the screen). `minThreads: 15` is the server's stand-in for "taller than the screen".
-  { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true },
 ];
 
 /**
@@ -266,14 +275,20 @@ export function revealQualifies(entry: RevealEntry, state: RevealState, now: Dat
  */
 export function revealNext(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId | null {
   if (!revealLineFree("spaced", state, now)) return null;
-  let longest: { id: RevealId; since: number } | null = null;
-  for (const entry of table) {
-    if (entry.aside || !revealQualifies(entry, state, now)) continue;
-    const since = time(state.waitingSince?.[entry.id]);
-    if (since === null || now.getTime() - since < REVEAL_PATIENCE_MS) return entry.id;
-    if (!longest || since < longest.since) longest = { id: entry.id, since };
-  }
-  return longest?.id ?? null;
+  const pick = (ahead: boolean): RevealId | null => {
+    let longest: { id: RevealId; since: number } | null = null;
+    for (const entry of table) {
+      if (entry.aside || (entry.ahead === true) !== ahead || !revealQualifies(entry, state, now)) continue;
+      const since = time(state.waitingSince?.[entry.id]);
+      if (since === null || now.getTime() - since < REVEAL_PATIENCE_MS) return entry.id;
+      if (!longest || since < longest.since) longest = { id: entry.id, since };
+    }
+    return longest?.id ?? null;
+  };
+  // An `ahead` entry (List view) never holds the line: only the page can see its moment (the list taller than the
+  // screen, on Grouped), so while another entry qualifies that one is next and the `ahead` entry is armed beside it
+  // (`revealAhead`). It is next itself only when nothing else is.
+  return pick(false) ?? pick(true);
 }
 
 /**
@@ -291,13 +306,20 @@ export function revealLastShown(stamps: readonly (string | null | undefined)[]):
 
 /**
  * The `ahead` offers a page may arm besides `next` (approval "inbox-one-time-dialogs": List view goes at its moment,
- * ahead of the other offers): each one that qualifies, while the line is free and `next` is not an update-day dialog.
+ * ahead of the other offers): each one that qualifies, while the line is free and `next` is not an update-day dialog
+ * that stands before it in the order.
  */
 export function revealAhead(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId[] {
   const next = revealNext(state, now, table);
   if (next === null && !revealLineFree("spaced", state, now)) return [];
-  if (next !== null && table.find((entry) => entry.id === next)?.kind !== "offer") return [];
-  return table.filter((entry) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && revealQualifies(entry, state, now)).map((entry) => entry.id);
+  const nextAt = table.findIndex((entry) => entry.id === next);
+  const nextEntry = nextAt < 0 ? null : table[nextAt]!;
+  // Armed beside an offer wherever that offer stands, and beside an update-day dialog only when that one comes after
+  // it in the order (the owner's order, 2026-11-10: the tab icon and the themes dialogs go before Grouping; Rows, the
+  // sound and voice after it).
+  return table
+    .filter((entry, at) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && (nextEntry === null || nextEntry.kind === "offer" || at < nextAt) && revealQualifies(entry, state, now))
+    .map((entry) => entry.id);
 }
 
 /** The `aside` entries a page may arm on this load (the star ask): each one that may be claimed now. */

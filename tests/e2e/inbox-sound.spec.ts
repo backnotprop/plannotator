@@ -124,8 +124,9 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   // An Inbox that ran before on an older version: this run is an update.
   if (options.updatedFrom) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
-    // Due on a used Inbox, and its check would run the `codex` on this PATH.
-    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' }, favicon: 'glass', inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
+    // Due on a used Inbox, and its check would run the `codex` on this PATH. Rows ("Choose how your list looks") is
+    // ahead of the sound in the line since 2026-11-10: settled here, so the sound is what this world has next.
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' }, inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z', version: 2 }, favicon: 'glass', inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
   }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
