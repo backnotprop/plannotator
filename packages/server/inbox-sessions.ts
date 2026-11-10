@@ -1130,35 +1130,47 @@ export function createInboxLiveSessions(options: {
     return offer ? { [INBOX_RELOAD_FIELD]: offer } : {};
   };
 
-  /** Live Claude Code sessions a restart brings up to date: the sidebar's "Reload Claude Code N". */
+  /**
+   * Whether the sidebar's row counts this outdated Claude Code session: a
+   * reload brings it up to date (`restart`), or its plugin on disk is itself
+   * behind this Inbox (`update_plugin`: the update first, then the reload;
+   * Settings → Agents, which the row opens, carries both steps). Once nothing
+   * updates the plugin by itself, nothing else in plain view says so.
+   */
+  const claudeRowFix = (fix: string | undefined): boolean => fix === "restart" || fix === "update_plugin";
+
+  /** Live Claude Code sessions the sidebar's "Reload Claude Code N" counts (claudeRowFix). */
   const restartCount = (): number => {
     let count = 0;
     for (const entry of sessions.values()) {
-      if (entry.host === "claude-code" && isLive(entry) && outdatedOf(entry)?.fix === "restart") count += 1;
+      if (entry.host === "claude-code" && isLive(entry) && claudeRowFix(outdatedOf(entry)?.fix)) count += 1;
     }
     return count;
   };
 
   /**
-   * Live sessions a reload alone brings up to date, per runtime (owner
-   * approval "reload-hosts"): Claude Code's `restart`, and Pi's, Oh My Pi's
-   * and OpenCode 2's `reload`. An update first (`update_plugin`,
-   * `update_extension`) is not counted, as before: the Update button and
-   * Settings carry it.
+   * Live sessions the sidebar's row counts, per runtime (owner approval
+   * "reload-hosts"): Claude Code's `restart` and `update_plugin` (its plugin
+   * on disk is behind this Inbox, so the update comes first: `update_first`),
+   * and Pi's, Oh My Pi's and OpenCode 2's `reload`. Pi's and OpenCode 2's
+   * `update_extension` is not counted, as before: Settings carries it.
    */
   const restartAgents = (): InboxRestartAgents => {
     const runtimes: InboxRestartAgents["runtimes"] = {};
     let total = 0;
+    let updateFirst = 0;
     for (const entry of sessions.values()) {
       if (!isLive(entry)) continue;
       const fix = outdatedOf(entry)?.fix;
-      if (fix !== "restart" && fix !== "reload") continue;
+      const claude = entry.host === "claude-code" && claudeRowFix(fix);
+      if (!claude && fix !== "restart" && fix !== "reload") continue;
       const runtime = runtimeOf(entry.host, entry.plugin);
       if (!runtime) continue;
       runtimes[runtime] = (runtimes[runtime] ?? 0) + 1;
       total += 1;
+      if (claude && fix === "update_plugin") updateFirst += 1;
     }
-    return { total, runtimes };
+    return { total, runtimes, ...(updateFirst > 0 ? { update_first: updateFirst } : {}) };
   };
 
   /** Whether a session is live now (no grace: compose sends only to a session that polls). */
