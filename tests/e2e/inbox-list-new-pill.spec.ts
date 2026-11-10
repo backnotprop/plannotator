@@ -1,16 +1,17 @@
 /**
- * The list's "N new" pill (packages/inbox/components/ListNewPill.tsx), proved in a browser against the compiled
- * binary with an agent writing through `plannotator inbox mcp` (scripts/inbox-sim.ts). The DOM test
- * (packages/inbox/listNewPill.test.tsx) proves its rules with a stand-in observer; this proves what needs a
- * layout: where the "N new" line really is, where the pill really sits, and where a press really brings the row.
+ * The list's "N new" pill and Show's light (packages/inbox/components/ListNewPill.tsx, packages/inbox/showLight.ts),
+ * proved in a browser against the compiled binary with an agent writing through `plannotator inbox mcp`
+ * (scripts/inbox-sim.ts). The DOM tests (packages/inbox/listNewPill.test.tsx, showLight.test.tsx) prove the rules
+ * with stand-ins; this proves what needs a layout.
  *
- * - The reader is scrolled down, so the line at the list's top is out of view: news shows the pill at the list's
- *   bottom edge, counting, and the list's rows stay as they are.
- * - A press is Show: the line goes, the row is lit near the middle of the list, the pill is gone. The light is
- *   fresh when the reader gets there: pressed four seconds after the first arrival, it starts once the row is in
- *   view and lasts its whole 3 s from there.
- * - With the line in view there is no pill; and scrolling down to where the rows will land lights nothing and
- *   draws nothing before Show.
+ * - The reader is scrolled down, so the "N new · Show" line at the list's top is out of view: news shows the pill
+ *   at the list's bottom edge, counting, the list's rows stay as they are, and the pill stays (it is still there
+ *   after the seven seconds a fading pill would have taken).
+ * - A press on it is Show and "take me there": the line goes, the rows come to the middle of the list, and each is
+ *   lit only once it is in view, for the light's whole 3 s from there.
+ * - With the line in view there is no pill, and scrolling to where the rows will land draws and lights nothing.
+ * - Show on the line never scrolls the list. The row it brought in below the view is not lit; the pill counts it;
+ *   a press on the pill goes there and the row is lit for its whole time.
  * - A 390 px phone: the pill is above the list's bottom edge with a 44 px target, and a tap brings the row in view.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -103,7 +104,7 @@ function placeIn(page: Page, selector: string) {
   }, selector);
 }
 
-test('scrolled down, news shows the pill at the bottom edge and the list holds; it counts; a press shows the row in the middle', async ({ browser }: { browser: Browser }) => {
+test('scrolled down, news shows the pill at the bottom edge and the list holds; it counts and stays; a press shows the rows in the middle, lit once in view', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
@@ -122,13 +123,13 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     // The list held still: the same rows in the same order, the new one not drawn.
     expect(await order()).toEqual(before);
 
-    // A second arrival 1.5 s later keeps the pill up (its 5 s start again); the press comes 4 s after the first.
-    await page.waitForTimeout(1500);
     const second = await news();
     await expect(pill(page)).toHaveText('2 new');
     await expect(pill(page)).toHaveAccessibleName('2 new messages below, show');
-    await page.waitForTimeout(2500);
+    // It stays: past the time a fading pill would be gone, it is still there, whole.
+    await page.waitForTimeout(7000);
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
+    await expect(pill(page)).not.toHaveAttribute('data-fading', '');
 
     // Each frame from the press on: when each new row is first in view in the list, when it is lit, when the light goes.
     await page.evaluate((ids) => {
@@ -181,7 +182,7 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
   }
 });
 
-test('with the "N new" line in view, news shows no pill', async ({ browser }: { browser: Browser }) => {
+test('with the "N new" line in view there is no pill; Show never scrolls, and the pill then goes to the row it brought in below', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
@@ -205,6 +206,37 @@ test('with the "N new" line in view, news shows no pill', async ({ browser }: { 
     await page.waitForTimeout(500);
     await expect(page.locator(`.ib-lbody [data-thread-id="${held}"]`)).toHaveCount(0);
     await expect(page.locator('.ib-lbody [data-lit]')).toHaveCount(0);
+
+    // Back at the top, Show: the list does not move. The row it brought in is far below, so it is not lit yet.
+    await body(page).evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await expect(line(page)).toBeInViewport();
+    await line(page).click();
+    await expect(line(page)).toHaveCount(0);
+    const row = page.locator(`.ib-lbody [data-thread-id="${held}"]`);
+    await expect(row).toHaveCount(1);
+    await page.waitForTimeout(800);
+    expect(await body(page).evaluate((el) => el.scrollTop)).toBe(0);
+    await expect(row).not.toBeInViewport();
+    await expect(page.locator('.ib-lbody [data-lit]')).toHaveCount(0);
+    // The pill counts it, at the bottom edge, and stays.
+    await expect(pill(page)).not.toHaveAttribute('data-off', '');
+    await expect(pill(page)).toHaveText('1 new');
+    await expect(pill(page)).toHaveAccessibleName('1 new message below, show');
+    await expect(pill(page).locator('..')).toHaveAttribute('data-edge', 'bottom');
+    // Well past the light's own 3 s: it has not run out of sight.
+    await page.waitForTimeout(3500);
+    await expect(row).not.toHaveAttribute('data-lit', '');
+
+    // The pill is "take me there": the row comes into view and is lit for its whole time from then.
+    await pill(page).click();
+    await expect(row).toBeInViewport({ ratio: 1 });
+    await expect(row).toHaveAttribute('data-lit', '');
+    const litAt = Date.now();
+    await expect(pill(page)).toHaveAttribute('data-off', '');
+    await expect(row).not.toHaveAttribute('data-lit', '', { timeout: 6000 });
+    expect(Date.now() - litAt).toBeGreaterThanOrEqual(2500);
   } finally {
     await context.close();
   }
