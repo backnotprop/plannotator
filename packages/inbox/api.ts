@@ -1742,7 +1742,7 @@ export const inboxApi = {
    * restarted under this tab (whose serverSession is new) so the count of
    * windows that may notify is right again.
    */
-  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null }) =>
+  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null; can_show?: boolean; focused?: boolean }) =>
     readJson<{ notify_reach: InboxNotifyReach }>(
       await fetch(inboxUrl('/window'), {
         method: 'POST',
@@ -1750,6 +1750,7 @@ export const inboxApi = {
         body: JSON.stringify(report),
       }),
     ),
+  acknowledgeShow: (report: { request: string; window: string }) => post<{ accepted: boolean }>(inboxUrl('/windows/shown'), report),
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>(inboxUrl('/settings'), { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
@@ -2280,6 +2281,8 @@ export interface InboxEventHandlers {
   onStatus: (update: InboxHealth['update'], updated?: string | null, restartClaudeCode?: number, restartAgents?: InboxRestartAgents, checkFailing?: UpdateCheckFailing | null) => void;
   /** Whether a notification can reach the person now (inbox-windows.ts); never called by an older Inbox. */
   onReach?: (reach: InboxNotifyReach) => void;
+  /** Ephemeral navigation request: only the addressed window may acknowledge it. */
+  onShow?: (request: { request: string; window: string; thread: string; expires: number }) => void;
   /**
    * A row's delivery may have moved with the live sessions (a turn started or
    * ended, a session went away): no store line, so the list is read again.
@@ -2357,7 +2360,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'show', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2400,6 +2403,18 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'hello':
       // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
       handlers.onConnect?.(readHello(frame.data) ?? undefined);
+      return;
+    case 'show':
+      try {
+        const data: unknown = JSON.parse(frame.data);
+        if (data && typeof data === 'object' && 'request' in data && typeof data.request === 'string'
+          && 'window' in data && typeof data.window === 'string' && 'thread' in data && typeof data.thread === 'string'
+          && 'expires' in data && typeof data.expires === 'number' && Number.isFinite(data.expires)) {
+          handlers.onShow?.({ request: data.request, window: data.window, thread: data.thread, expires: data.expires });
+        }
+      } catch {
+        // A malformed frame changes nothing.
+      }
       return;
     case 'reach':
       try {

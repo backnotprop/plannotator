@@ -307,6 +307,7 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
+import { createInboxShow } from "./inbox-show";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
@@ -1159,6 +1160,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
+  const showThread = createInboxShow({ store, windows, baseUrl: () => baseUrl });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
   let openEventStreams = 0;
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
@@ -1399,6 +1401,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       createInboxMcpServer({
         store,
         baseUrl: () => baseUrl,
+        showThread: (thread) => showThread.show(thread),
         resolveProject,
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
@@ -3494,6 +3497,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
+        // A shared stream serves followers too; only the addressed page handles this frame.
+        const stopShow = windowId && via === "local" && !fromDeviceDoor.has(req)
+          ? showThread.subscribe((request) => send(`event: show\ndata: ${JSON.stringify(request)}\n\n`))
+          : () => {};
         // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
@@ -3577,6 +3584,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           unsubscribe();
           statusListeners.delete(onStatus);
           stopReach();
+          stopShow();
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
@@ -5231,6 +5239,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       return eventStream(req, url, via);
     }
+      // Local tools navigate an existing local window, never a phone or a tailnet peer's page.
+      if (path === "/api/inbox/windows/show" || path === "/api/inbox/windows/shown") {
+        if (via !== "local") return localOnly();
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (path === "/api/inbox/windows/show") return json(await showThread.show(body.thread));
+        const window = parseWindowId(body.window);
+        if (!window || typeof body.request !== "string") throw new InboxError("validation_error", "request and window are required.");
+        return json({ accepted: showThread.acknowledge(body.request, window) });
+      }
       // A window's report: its browser's notification permission for its own origin changed (inbox-windows.ts).
       if (path === "/api/inbox/window") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -5250,7 +5269,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.served_by !== undefined && body.served_by !== null && !servedBy) {
           throw new InboxError("validation_error", "served_by: 8 to 64 letters, digits, - or _.", { field: "served_by" });
         }
-        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy });
+        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, canShow: body.can_show === true, focused: body.focused === true });
         return json({ notify_reach: windows.reach(notificationsState().enabled) });
       }
       if (path === "/api/inbox/restart") {
@@ -6731,6 +6750,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).
     debugLog?.close();
     clearInterval(dataCheck);
+    showThread.stop();
     windows.stop();
     liveSites.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);

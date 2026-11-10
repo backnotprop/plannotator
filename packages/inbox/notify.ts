@@ -415,13 +415,17 @@ export function useInboxNotifications(options: {
   const reportWindow = useCallback(() => {
     void inboxApi
       // A tab listening to another tab's stream names it, so the server counts this tab under it (sharedEvents.ts).
-      .reportWindow({ window: windowId.current, permission: permissionRef.current, origin: window.location.origin, served_by: inboxEventsServedBy() })
+      .reportWindow({ window: windowId.current, permission: permissionRef.current, origin: window.location.origin, served_by: inboxEventsServedBy(), can_show: true, focused: document.hasFocus() })
       .then((answer) => setReach(answer.notify_reach))
       .catch(() => {});
   }, []);
   useEffect(() => {
     reportWindow();
   }, [permission, reportWindow]);
+  useEffect(() => {
+    window.addEventListener('focus', reportWindow);
+    return () => window.removeEventListener('focus', reportWindow);
+  }, [reportWindow]);
 
   // Chrome may freeze a background tab (Energy Saver) and discard one
   // (Memory Saver). A frozen tab runs nothing, so a notice can only come late,

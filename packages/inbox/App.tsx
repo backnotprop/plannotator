@@ -240,6 +240,7 @@ import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
+import { acceptInboxShow } from './showThread';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
@@ -2434,6 +2435,7 @@ function Inbox() {
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
         // Shape's boards changed (only sent while Shape is on).
+        onShow: (request) => acceptInboxShow(windowReport().id, request),
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
         },
