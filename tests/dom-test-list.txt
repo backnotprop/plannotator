@@ -303,6 +303,7 @@ packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.reselectOverlap.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.selectionEdges.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.releaseOutside.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
 packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx

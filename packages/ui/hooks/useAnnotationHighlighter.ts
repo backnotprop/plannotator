@@ -10,6 +10,7 @@ import Highlighter from '@plannotator/web-highlighter';
 import type { Annotation, EditorMode, HostDraft, ImageAttachment } from '../types';
 import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } from '../utils/belowTitleSlot';
 import { AnnotationType } from '../types';
+import { caretAtPoint, type CaretPosition } from '../utils/caretAtPoint';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
   dropEmptyNodes,
@@ -650,6 +651,28 @@ const clampRangeToContainer = (container: Element, range: Range): boolean => {
   if (endOutside) range.setEnd(last, last.length);
   if (startOutside) range.setStart(first, 0);
   return true;
+};
+
+/** Pointer travel, in CSS px, under which a press and its release are a click, not a drag. */
+const DRAG_SLOP_PX = 4;
+
+/** A press on these is theirs (a click, a native drag, typing), never the start of a text selection to repair. */
+const NOT_A_TEXT_PRESS = 'a, button, input, textarea, select, label, summary, img, svg, canvas, video, [role="button"], [draggable="true"], [contenteditable]:not([contenteditable="false"])';
+
+/** The text position under a point, when it is text of `container` that can be painted. */
+const textCaretAt = (container: Element, x: number, y: number): CaretPosition | null => {
+  const caret = caretAtPoint(x, y);
+  if (!caret || caret.node.nodeType !== Node.TEXT_NODE || !container.contains(caret.node)) return null;
+  if (paintSkippedAncestor(container, caret.node)) return null;
+  return caret;
+};
+
+/** A press on an element's own scrollbar: its point lies outside the element's content box. */
+const isScrollbarPress = (event: MouseEvent): boolean => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (!target || target.clientWidth === 0) return false;
+  if (target.scrollWidth <= target.clientWidth && target.scrollHeight <= target.clientHeight) return false;
+  return event.offsetX >= target.clientWidth || event.offsetY >= target.clientHeight;
 };
 
 /** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
@@ -1996,12 +2019,57 @@ export function useAnnotationHighlighter({
         releasedOutsideQuote = null;
       }
     };
+    // The same press, for a drag the browser leaves as a moving caret.
+    // Chromium does that after a press at some fractional x positions (a
+    // trackpad, a Retina screen): the caret follows the pointer, nothing is
+    // selected, and the release finds nothing to highlight. Once a real drag
+    // (past DRAG_SLOP_PX) has shown a collapsed selection on two moves in a
+    // row while the pointer is over other text than the press, the selection
+    // is set from the press to the pointer here, and the browser's own move
+    // handling is cancelled so it does not put its caret back. A drag the
+    // browser IS selecting is never touched, and a click never becomes one.
+    let caretDrag: {
+      x0: number;
+      y0: number;
+      anchor: CaretPosition;
+      moved: boolean;
+      caretMoves: number;
+      driving: boolean;
+    } | null = null;
+    const driveCaretDrag = (x: number, y: number) => {
+      const selection = window.getSelection();
+      const focus = textCaretAt(container, x, y);
+      if (!caretDrag || !selection || !focus || !caretDrag.anchor.node.isConnected) return;
+      selection.setBaseAndExtent(caretDrag.anchor.node, caretDrag.anchor.offset, focus.node, focus.offset);
+    };
+    const followCaretDrag = (event: MouseEvent) => {
+      const drag = caretDrag;
+      if (!drag || !listening) return;
+      if (!drag.moved && Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) >= DRAG_SLOP_PX) drag.moved = true;
+      if (!drag.moved) return;
+      if (!drag.driving) {
+        // The selection read here is the one the browser made of the move before.
+        const selection = window.getSelection();
+        const collapsed = !selection || selection.rangeCount === 0 || selection.isCollapsed;
+        const focus = textCaretAt(container, event.clientX, event.clientY);
+        const elsewhere = !!focus && (focus.node !== drag.anchor.node || focus.offset !== drag.anchor.offset);
+        drag.caretMoves = collapsed && elsewhere ? drag.caretMoves + 1 : 0;
+        if (drag.caretMoves < 2) return;
+        drag.driving = true;
+      }
+      driveCaretDrag(event.clientX, event.clientY);
+      event.preventDefault();
+    };
+
     const endPress = () => {
+      caretDrag = null;
       document.removeEventListener('mouseup', handlePressRelease, true);
       document.removeEventListener('mousemove', handlePressMove, true);
     };
     const handlePressRelease = (event: MouseEvent) => {
       if (event.button !== 0) return;
+      // Once more, where the pointer was let go, before anything reads the selection.
+      if (caretDrag?.driving && listening) driveCaretDrag(event.clientX, event.clientY);
       endPress();
       if (event.target instanceof Node && container.contains(event.target)) return;
       // After every other listener of this release, like the library's own
@@ -2020,7 +2088,10 @@ export function useAnnotationHighlighter({
     // A release the page never hears (over a frame): the first move with the
     // button up ends the drag.
     const handlePressMove = (event: MouseEvent) => {
-      if (event.buttons & 1) return;
+      if (event.buttons & 1) {
+        followCaretDrag(event);
+        return;
+      }
       endPress();
       commitReleasedOutside();
     };
@@ -2030,6 +2101,13 @@ export function useAnnotationHighlighter({
       endPress();
       document.addEventListener('mouseup', handlePressRelease, true);
       document.addEventListener('mousemove', handlePressMove, true);
+      // A single plain press on text: multi-clicks, modified presses, controls,
+      // links and scrollbars keep the browser's own handling.
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.detail > 1 || event.shiftKey || event.altKey || event.metaKey) return;
+      if (!target || target.closest(NOT_A_TEXT_PRESS) || isScrollbarPress(event)) return;
+      const anchor = textCaretAt(container, event.clientX, event.clientY);
+      if (anchor) caretDrag = { x0: event.clientX, y0: event.clientY, anchor, moved: false, caretMoves: 0, driving: false };
     };
     container.addEventListener('mousedown', handlePressStart, true);
 
