@@ -10901,6 +10901,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-cp-picker .ib-cp-opt.ib-cp-fnotice { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
 .ib-cp-picker .ib-cp-opt.ib-cp-fnotice > svg.ib-ic { flex: none; color: var(--muted-foreground); }
 .ib-cp-picker .ib-cp-fnotice .ib-cp-op { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; color: var(--muted-foreground); }
+/* What to do there, under the line (a signed-out agent: sign in, or restart Plannotator from that machine's Terminal). */
+.ib-cp-picker .ib-cp-fnotice:has(.ib-cp-ffix) { align-items: flex-start; }
+.ib-cp-picker .ib-cp-fnotice:has(.ib-cp-ffix) > svg.ib-ic { margin-top: 2px; }
+.ib-cp-picker .ib-cp-ffix { display: block; margin-top: 2px; font-size: var(--ib-fs-13, 13px); }
+.ib-cp-picker .ib-cp-ffix code { font-family: var(--font-mono); font-size: 0.92em; color: var(--foreground); white-space: nowrap; }
 .pn-inbox .ib-cp-fcopy { flex: none; font-size: var(--ib-fs-13, 13px); }
 .ib-cp-asleep { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 16px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); flex: none; }
 .ib-cp-asleep > svg { flex: none; margin-top: 2px; }
