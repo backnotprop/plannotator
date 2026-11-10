@@ -798,16 +798,28 @@ background session, which starts in another process from the old transcript;
 seen in a real transcript about 2.5 minutes after a manual `/compact`, among
 `/model` and `/login`, and which of the person's actions led to it is not
 known). So the new session looks for the transcript that names it:
-`TranscriptContinuedIn` reads the last 8 KB of each transcript in its own
-project folder (one `/bin/sh` or PowerShell call for the folder; only each
-file's record comes back) and follows the records back, nearest first, up to 8
-sessions (A handed to B handed to C: C says `[B, A]`); a session is named
-once, so records that point at each other end the line. As Claude Code reads
-it, a record counts only while no `user` or `assistant` row follows it (the
-person went back to that session); a cut or broken record is nothing. Looked
-for at the session's first poll in a process and, while nothing is found, 5
-more times over about a minute (the record is written just after the new
-session starts), then never again in that process; never at delivery. The poll
+`TranscriptContinuedIn` looks through the transcripts in its own project folder
+(one `/bin/sh` or PowerShell call for the folder; only the records come back)
+and follows the records back, nearest first, up to 8 sessions (A handed to B
+handed to C: C says `[B, A]`); a session is named once, so records that point
+at each other end the line. A record counts wherever it is and whatever follows
+it (a report of 2026-11-10: a conversation still listed as two agents; before,
+only a record in a transcript's last 8 KB with no `user` or `assistant` row
+after it counted, as Claude Code itself reads it). Whether the old session
+still goes on is the Inbox's to judge: one that still polls keeps its own. A cut
+or broken record is nothing. The work is capped: the last 64 MB of each
+transcript (`TRANSCRIPT_CONTINUED_IN_READ_BYTES`), streamed through `grep` a
+line at a time and never held whole, the 200 most recently written transcripts
+of a folder (`TRANSCRIPT_CONTINUED_IN_FILES_MAX`), each file's last 4 records,
+and 20 s a look (`TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS`; a look that runs out
+finds nothing). Looked for at the session's first poll in a process and, while
+nothing is found, 5 more times over about a minute (the record is written just
+after the new session starts), then once every 10 minutes
+(`TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS`); once found, kept for the session in
+that process; never at delivery. A session that was already running gets the
+new read without a restart: after an update the Inbox reloads its module
+("Plannotator reloads itself after an update"), and the new module looks at
+its first poll. The poll
 sends both cases' ids in the one `continues` list. Not checked: a hand-over
 whose new transcript is in another project folder (a worktree move) is not
 found.

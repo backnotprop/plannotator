@@ -590,23 +590,36 @@ export class TranscriptForkedFrom {
  * for the transcript that names it, in the project folders its own transcript
  * may be in.
  *
- * As Claude Code itself reads the record: it counts while no real turn (a
- * `user` or `assistant` row) follows it, so a session the person went back to
- * hands nothing over; bookkeeping rows after it (a title written again on
- * exit) change nothing.
+ * Every record counts, wherever it is in the transcript and whatever follows
+ * it (a report of 2026-11-10: one conversation still listed as two agents
+ * after many more rows went into its old transcript). Claude Code itself drops a record once a real turn follows it
+ * (the person went back to that session); here that is the Inbox's to judge,
+ * and it does: a session that still polls keeps its own, and the continuing
+ * one stands in only while the old one does not
+ * (packages/server/inbox-continuations.ts).
  *
- * `$1` the folder, `$2` how many of each transcript's last bytes to look in.
- * One `tail` over the folder's transcripts (`/dev/null` beside them, so every
- * file gets its `==> name <==` header), and `awk` hands back only each
- * file's standing record, cut to 1,024 characters: no transcript is copied
- * into the module. Bare quotes are structure only, as for the title.
+ * `$1` the folder, `$2` how many of each transcript's last bytes to look in,
+ * `$3` how many transcripts, the most recently written first. The work is
+ * capped by those two (TRANSCRIPT_CONTINUED_IN_READ_BYTES and
+ * TRANSCRIPT_CONTINUED_IN_FILES_MAX) and by the call's time
+ * (TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS). Each file is streamed through `grep`,
+ * a line at a time, never held whole; only its last 4 records come back, each
+ * cut to 1,024 characters: no transcript is copied into the module. Bare
+ * quotes are structure only, as for the title.
  */
-export const TRANSCRIPT_CONTINUED_IN_READ_BYTES = 8 * 1024
-export const TRANSCRIPT_CONTINUED_IN_SCRIPT = `cd -- "$1" 2>/dev/null || exit 0; ls 2>/dev/null | LC_ALL=C grep '^[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$' | xargs tail -c "$2" /dev/null 2>/dev/null | LC_ALL=C awk 'function emit() { if (found != "") print substr(found, 1, 1024); found = "" } /^==> .* <==$/ { emit(); next } index($0, "\\"type\\":\\"continued-in\\"") { found = $0; next } index($0, "\\"type\\":\\"user\\"") || index($0, "\\"type\\":\\"assistant\\"") { found = "" } END { emit() }' | tail -n 200; exit 0`
+/** The last bytes of each transcript looked in: 64 MB, so a record under months of later rows is still found. */
+export const TRANSCRIPT_CONTINUED_IN_READ_BYTES = 64 * 1024 * 1024
+/** The most transcripts of one project folder looked in, the most recently written first. */
+export const TRANSCRIPT_CONTINUED_IN_FILES_MAX = 200
+/** The longest one look over a folder may take. */
+export const TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS = 20_000
+export const TRANSCRIPT_CONTINUED_IN_SCRIPT = `cd -- "$1" 2>/dev/null || exit 0; ls -t 2>/dev/null | LC_ALL=C grep '^[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$' | head -n "$3" | while IFS= read -r f; do tail -c "$2" -- "$f" 2>/dev/null | LC_ALL=C grep -a -F '"type":"continued-in"' | tail -n 4 | LC_ALL=C cut -c 1-1024; done | head -n 400; exit 0`
 /** The waits between looks, doubling: the record is written just after the new session starts, so the first look may be too early. */
 export const TRANSCRIPT_CONTINUED_IN_RETRY_MS = 2_000
-/** Looks before the session is taken to continue nothing (about a minute in all). */
+/** Quick looks before the session is taken to continue nothing for now (about a minute in all). */
 export const TRANSCRIPT_CONTINUED_IN_LOOKS_MAX = 6
+/** After those, while nothing is found: one more look this often (a record this module could not read before, a folder that came late). */
+export const TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS = 10 * 60_000
 /** The longest line of sessions followed back (the poll's `continues` takes as many). */
 export const TRANSCRIPT_CONTINUED_IN_CHAIN_MAX = 8
 
@@ -653,7 +666,10 @@ export function transcriptContinuedLineOf(handovers: readonly { from: string; to
   return out
 }
 
-/** Finds, once per session in this process, the sessions whose transcripts say they were continued in this one. */
+/**
+ * Finds the sessions whose transcripts say they were continued in this one. Found: kept for the session in this
+ * process. Not found: looked for a few times at once, then every TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS.
+ */
 export class TranscriptContinuedIn {
   private settled: string[] | null = null
   private retryAt = Number.NEGATIVE_INFINITY
@@ -672,7 +688,7 @@ export class TranscriptContinuedIn {
     const now = await this.host.now()
     if (now < this.retryAt) return []
     this.looks += 1
-    this.retryAt = now + TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** Math.min(30, this.looks - 1)
+    this.retryAt = now + (this.looks >= TRANSCRIPT_CONTINUED_IN_LOOKS_MAX ? TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS : TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** (this.looks - 1))
     const folders: string[] = []
     for (const path of await this.candidates().catch(() => [] as readonly string[])) {
       const folder = path.replace(/[\\/][^\\/]*$/, '')
@@ -681,12 +697,12 @@ export class TranscriptContinuedIn {
     const handovers: { from: string; to: string }[] = []
     for (const folder of folders) {
       const result = await this.host
-        .run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [folder, String(TRANSCRIPT_CONTINUED_IN_READ_BYTES)]), { timeoutMs: 5_000 })
+        .run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [folder, String(TRANSCRIPT_CONTINUED_IN_READ_BYTES), String(TRANSCRIPT_CONTINUED_IN_FILES_MAX)]), { timeoutMs: TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS })
         .catch(() => null)
       if (result && result.exitCode === 0) handovers.push(...transcriptHandoversOf(result.stdout))
     }
     const line = transcriptContinuedLineOf(handovers, this.sessionId)
-    if (line.length > 0 || this.looks >= TRANSCRIPT_CONTINUED_IN_LOOKS_MAX) this.settled = line
+    if (line.length > 0) this.settled = line
     return line
   }
 }
