@@ -49,20 +49,38 @@ function getSegmenter(): SegmenterLike | null {
 const WORD_CHAR = /[\p{L}\p{M}\p{N}_]/u;
 const JOINER = /['’-]/;
 
-/** [start, end) of the word holding the character at `index`, or null when that character is not in a word. */
+/** A hyphen or apostrophe with a letter or digit on both sides: "re-run", "don't". Never a dash with a space beside it. */
+const joinsWords = (text: string, i: number): boolean =>
+  JOINER.test(text[i] ?? '') && WORD_CHAR.test(text[i - 1] ?? '') && WORD_CHAR.test(text[i + 1] ?? '');
+
+/**
+ * [start, end) of the word holding the character at `index`, or null when that character is not in a word.
+ * Words joined by single hyphens or apostrophes are one word ("Dead-lettered", "well-known", "user's"), and
+ * the joiner itself counts as part of it; a slash, a dot or a spaced dash ends a word.
+ */
 export function wordSpanAt(text: string, index: number, useSegmenter = true): [number, number] | null {
   if (index < 0 || index >= text.length) return null;
   const seg = useSegmenter ? getSegmenter() : null;
   if (seg) {
-    for (const s of seg.segment(text)) {
-      const end = s.index + s.segment.length;
-      if (index >= s.index && index < end) return s.isWordLike ? [s.index, end] : null;
-    }
-    return null;
+    const words: [number, number][] = [];
+    for (const s of seg.segment(text)) if (s.isWordLike) words.push([s.index, s.index + s.segment.length]);
+    const at = (i: number) => words.find(([from, to]) => i >= from && i < to) ?? null;
+    // On the joiner itself: the word before it, which the loops below grow across it.
+    const first = at(index) ?? (joinsWords(text, index) ? at(index - 1) : null);
+    if (!first) return null;
+    let [start, end] = first;
+    for (let next = joinsWords(text, end) ? at(end + 1) : null; next; next = joinsWords(text, end) ? at(end + 1) : null) end = next[1];
+    for (let prev = joinsWords(text, start - 1) ? at(start - 2) : null; prev; prev = joinsWords(text, start - 1) ? at(start - 2) : null) start = prev[0];
+    // The segmenter keeps "retry.cap" and "a.b:c" whole; a dot or colon ends a word here, except inside a number ("0.28").
+    const splits = (i: number) => /[.:]/.test(text[i] ?? '') && !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
+    if (splits(index)) return null;
+    for (let i = index - 1; i >= start; i -= 1) if (splits(i)) { start = i + 1; break; }
+    for (let i = index + 1; i < end; i += 1) if (splits(i)) { end = i; break; }
+    return [start, end];
   }
   const isWordChar = (i: number) => WORD_CHAR.test(text[i] ?? '');
-  const inWord = (i: number) => isWordChar(i) || (JOINER.test(text[i] ?? '') && isWordChar(i - 1) && isWordChar(i + 1));
-  if (!isWordChar(index)) return null;
+  const inWord = (i: number) => isWordChar(i) || joinsWords(text, i);
+  if (!inWord(index)) return null;
   let start = index;
   let end = index + 1;
   while (start > 0 && inWord(start - 1)) start -= 1;
