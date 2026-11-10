@@ -350,7 +350,9 @@ test.skipIf(!hasDom)('Show lights exactly the rows it brought in, after they sli
   expect(order(el).filter((id) => before.includes(id) && id !== moved).every((id) => !lit().includes(id))).toBe(true);
   await wait(SHOW_LIT_MS);
   expect(lit()).toEqual([]);
-});
+// Its own time: the test waits out the light (about 5 s), right at the default 5 s limit. Over it, the runner killed
+// the Inbox this whole file shares, and every test after it failed waiting for a list.
+}, 15_000);
 
 // The failure this guards (design record "inbox-new-in-open-thread", the
 // /seen race): the look sent when a thread opens marked the thread seen up to

@@ -57,6 +57,7 @@ import {
   type WhatsNewModel,
   type WhatsNewReleasesModel,
 } from './api';
+import { listReadRefused, readFirstList } from './firstListRead';
 import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
 import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
 import { createOwnSaves } from './ownSaves';
@@ -1443,6 +1444,8 @@ function Inbox() {
   // `.pn-inbox` in the page: html and body carry `data-pn-inbox` (pageMarks.ts). The root is drawn on every render.
   useLayoutEffect(() => markInboxPage(rootRef.current), []);
   const latestRef = useRef(latest);
+  /** Why the last list read failed (null: it landed): the first read is tried again unless the Inbox refused it (firstListRead.ts). */
+  const listReadFailure = useRef<unknown>(null);
   latestRef.current = latest;
   /**
    * The threads opened in this tab (a row, a link, a notification, Settings'
@@ -1551,6 +1554,7 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      listReadFailure.current = null;
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
       const held = latestRef.current;
@@ -1610,6 +1614,7 @@ function Inbox() {
       setLoadError(null);
       return next;
     } catch (cause) {
+      listReadFailure.current = cause;
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
@@ -2281,11 +2286,30 @@ function Inbox() {
     };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
+    let settingsAsked = false;
+    let firstListTimer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
-      const first = await refreshList(true);
-      void refreshSettings();
+      // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
+      const first = await readFirstList({
+        read: async () => {
+          const next = await refreshList(true);
+          // As before, right after the first try, landed or not.
+          if (!settingsAsked) void refreshSettings();
+          settingsAsked = true;
+          return next;
+        },
+        landed: () => latestRef.current,
+        refused: () => listReadRefused(listReadFailure.current),
+        cancelled: () => cancelled,
+        wait: (ms) =>
+          new Promise<void>((done) => {
+            firstListTimer = setTimeout(done, ms);
+          }),
+        // The settings read went out with the read that failed, and most likely failed with it.
+        onLateLanding: () => void refreshSettings(),
+      });
       if (cancelled || !first) {
-        // No subscription follows (the effect ended, or the first read failed): close the early channel.
+        // No subscription follows (the effect ended, or the Inbox refused the first read): close the early channel.
         discardPreparedInboxEvents();
         return;
       }
@@ -2512,6 +2536,7 @@ function Inbox() {
       pickSaves.current.read = () => {};
       pickSaves.current.readOwn = () => {};
       pickSaves.current.readHeld = () => {};
+      if (firstListTimer) clearTimeout(firstListTimer);
       discardPreparedInboxEvents();
       unsubscribe();
       if (timer) clearTimeout(timer);
