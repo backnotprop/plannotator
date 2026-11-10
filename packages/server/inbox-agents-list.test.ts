@@ -42,6 +42,8 @@ function evidence(over: Partial<InboxAgentsEvidence> = {}): InboxAgentsEvidence 
     projectOf: (root) => (root ? { id: "prj_ledger", name: "ledger" } : null),
     projectById: (id) => ({ id, name: id === "prj_ledger" ? "ledger" : "other" }),
     lastHeardOf: () => null,
+    continuedBy: () => null,
+    continuesOf: () => [],
     labels: true,
     ...over,
   };
@@ -123,6 +125,67 @@ describe("who is listed, and how", () => {
     const owned = [inboxAgentsGroup(evidence({ sessions }))];
     expect(owned[0]!.agents[0]!.label).toBe("Secret plan");
     expect(inboxAgentsWithoutLabels(owned)[0]!.agents[0]!.label).toBeUndefined();
+  });
+});
+
+describe("one conversation under two session ids (a poll's `continues`) is one agent", () => {
+  /** The list as the Inbox builds it from the live sessions. */
+  const listed = (live: ReturnType<typeof liveSessions>["live"], clock: { t: number }, over: Partial<InboxAgentsEvidence> = {}) =>
+    inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)), lastHeardOf: live.lastHeardOf, continuedBy: live.continuedBy, continuesOf: live.continuesOf, ...over }));
+  const wait = (session: string, thread = "msg_asked") => ({ thread_id: thread, session, host: "claude-code", project: { id: "prj_ledger", name: "ledger" }, at: "2026-11-09T10:00:00.000Z" });
+  /** `ses-old` polled and stopped; `ses-new` polls and says it continues it. */
+  const handedOver = async () => {
+    const made = liveSessions();
+    await poll(made.live, "ses-old", { busy: false, label: "Ledger work" });
+    made.clock.t += 31_000;
+    await poll(made.live, "ses-new", { busy: false, label: "Ledger work", continues: ["ses-old"] });
+    return made;
+  };
+
+  test("the old id is not listed beside the session that continues it, nor counted as ended today", async () => {
+    const { live, clock } = await handedOver();
+    const group = listed(live, clock);
+    expect(group.agents.map((agent) => [agent.id, agent.state, agent.continues])).toEqual([["ses-new", "idle", ["ses-old"]]]);
+    expect(group).toMatchObject({ total: 1, ended_today: 0 });
+  });
+
+  test("a thread that waits on the old id waits on the one agent, not on a second row", async () => {
+    const { live, clock } = await handedOver();
+    const group = listed(live, clock, { waits: [wait("ses-old"), wait("ses-new", "msg_second")] });
+    expect(group.agents.map((agent) => [agent.id, agent.session, agent.state, agent.waiting, agent.live])).toEqual([["ses-new", "ses-new", "waiting", 2, true]]);
+  });
+
+  test("a launched session that got a new id is still its launch's one agent, running as the new id", async () => {
+    const { live, clock } = await handedOver();
+    const launches = [{ launch_id: "lch_1", session: "ses-old", thread_id: "msg_launch", host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", run: "stopped" as const }];
+    const group = listed(live, clock, { launches, waits: [wait("ses-old", "msg_launch")] });
+    expect(group.agents.map((agent) => [agent.id, agent.session, agent.launch?.thread_id, agent.waiting, agent.live])).toEqual([["lch_1", "ses-new", "msg_launch", 1, true]]);
+    expect(group.total).toBe(1);
+  });
+
+  test("once the continuing session stops, the old id's waiting thread is listed under the old id again", async () => {
+    const { live, clock } = await handedOver();
+    clock.t += 31_000;
+    const group = listed(live, clock, { waits: [wait("ses-old")] });
+    expect(group.agents.filter((agent) => agent.state !== "ended").map((agent) => [agent.id, agent.state])).toEqual([["ses-old", "waiting"]]);
+  });
+
+  test("an old id that still polls keeps its own row, and the continuing one names it; the windows are told when the claim arrives", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-old", { busy: false });
+    await poll(live, "ses-new", { busy: false });
+    const before = live.agentsSignature(inboxStartOfDay(clock.t));
+    await poll(live, "ses-new", { busy: false, continues: "ses-old" });
+    expect(live.agentsSignature(inboxStartOfDay(clock.t))).not.toBe(before);
+    const group = listed(live, clock);
+    expect(group.agents.map((agent) => [agent.id, agent.continues]).sort()).toEqual([["ses-new", ["ses-old"]], ["ses-old", undefined]]);
+  });
+
+  test("two sessions in one folder that continue nothing stay two agents", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-one", { busy: false });
+    await poll(live, "ses-two", { busy: false });
+    expect(listed(live, clock).total).toBe(2);
   });
 });
 
