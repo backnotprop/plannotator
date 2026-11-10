@@ -115,7 +115,7 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     const first = await news();
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
     await expect(pill(page)).toHaveText('1 new');
-    await expect(pill(page)).toHaveAccessibleName('1 new message below, show');
+    await expect(pill(page)).toHaveAccessibleName('1 new message below, show and go there');
     await expect(line(page)).not.toBeInViewport();
     // At the list's bottom edge, inside it, once it has risen into place (it comes in from 6 px lower).
     await expect.poll(async () => (await placeIn(page, '[data-list-new-pill]')).bottom).toBeGreaterThanOrEqual(8);
@@ -125,7 +125,7 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
 
     const second = await news();
     await expect(pill(page)).toHaveText('2 new');
-    await expect(pill(page)).toHaveAccessibleName('2 new messages below, show');
+    await expect(pill(page)).toHaveAccessibleName('2 new messages below, show and go there');
     // It stays: past the time a fading pill would be gone, it is still there, whole.
     await page.waitForTimeout(7000);
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
@@ -223,7 +223,7 @@ test('with the "N new" line in view there is no pill; Show never scrolls, and th
     // The pill counts it, at the bottom edge, and stays.
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
     await expect(pill(page)).toHaveText('1 new');
-    await expect(pill(page)).toHaveAccessibleName('1 new message below, show');
+    await expect(pill(page)).toHaveAccessibleName('1 new message below, go there');
     await expect(pill(page).locator('..')).toHaveAttribute('data-edge', 'bottom');
     // Well past the light's own 3 s: it has not run out of sight.
     await page.waitForTimeout(3500);

@@ -65,7 +65,7 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
-import { useShowLight } from './showLight';
+import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
@@ -6130,8 +6130,8 @@ function Inbox() {
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
-  /** The list's pill was pressed (Show, and "take me there"): the list's next draw scrolls to the first row it brought in. Show's own line never scrolls. */
-  const goAfterShow = useRef(false);
+  /** The list's pill was pressed (Show, and "take me there"): the list's next draw goes to the rows it brought in past that edge. Show's own line never scrolls. */
+  const goAfterShow = useRef<ListEdge | null>(null);
   /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
   const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -6143,7 +6143,7 @@ function Inbox() {
     const showBefore = showFrom.current;
     showFrom.current = null;
     const pressedPill = goAfterShow.current;
-    goAfterShow.current = false;
+    goAfterShow.current = null;
     // The rows Show (or a refresh) brought in, in the order they are drawn, their groups opened with the press.
     let brought: HTMLElement[] = [];
     if (showBefore && shown) {
@@ -6154,7 +6154,7 @@ function Inbox() {
       // wait for the reader, counted by the list's pill. Only that pill's press goes to them.
       if (ids.size > 0) {
         light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, body);
-        if (pressedPill && brought[0]) goToNew(brought[0]);
+        if (pressedPill) goToNew(pressedPill);
       }
     }
     const shownAll = focusAfterShow.current;
@@ -6812,7 +6812,7 @@ function Inbox() {
             listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
             if (latestRef.current) {
               showFrom.current = shown;
-              goAfterShow.current = fromPill === true;
+              goAfterShow.current = fromPill ?? null;
             }
             settleList('all', true);
           }}

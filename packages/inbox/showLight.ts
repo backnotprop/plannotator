@@ -30,7 +30,7 @@ const GO_MS = 1200;
 
 interface Run {
   stop: () => void;
-  go: (target: ListEdge | HTMLElement) => void;
+  go: (edge: ListEdge) => void;
 }
 
 type SetLit = (change: (lit: ReadonlySet<string>) => ReadonlySet<string>) => void;
@@ -61,6 +61,8 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
   /** `go` is scrolling the list: the count is held back until the scroll ends, so the pill does not flash on the way. */
   let going = false;
   let started = false;
+  /** `go` asked before the rows had slid into place (the pill's press that is also Show): it goes once they are measured. */
+  let goFirst: ListEdge | null = null;
   const publish = () => {
     if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));
   };
@@ -108,36 +110,39 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
     resize?.observe(body);
     redraw?.observe(body, { childList: true, subtree: true });
     measure();
+    if (goFirst) go(goFirst);
   }, after);
+  const go = (edge: ListEdge) => {
+    if (!started) {
+      goFirst = edge;
+      going = true;
+      return;
+    }
+    // The nearest of the rows past that edge; focus follows the reader there.
+    const rows = [...waiting.values()].filter((row) => row.edge === edge).map((row) => ({ el: row.el, top: row.el.getBoundingClientRect().top }));
+    rows.sort((a, b) => (edge === 'bottom' ? a.top - b.top : b.top - a.top));
+    const el = rows[0]?.el;
+    going = !!el;
+    if (!el) return publish();
+    el.focus({ preventScroll: true });
+    const arrived = () => {
+      if (!going) return;
+      going = false;
+      clearTimeout(limit);
+      body.removeEventListener('scrollend', arrived);
+      measure();
+    };
+    const limit = later(arrived, GO_MS);
+    body.addEventListener('scrollend', arrived);
+    el.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
 
   return {
     stop: () => {
       timers.forEach(clearTimeout);
       unwatch();
     },
-    go: (target) => {
-      let el: HTMLElement | null = null;
-      if (typeof target !== 'string') el = target;
-      else {
-        // The nearest of the rows past that edge; focus follows the reader there.
-        const rows = [...waiting.values()].filter((row) => row.edge === target).map((row) => ({ el: row.el, top: row.el.getBoundingClientRect().top }));
-        rows.sort((a, b) => (target === 'bottom' ? a.top - b.top : b.top - a.top));
-        el = rows[0]?.el ?? null;
-        el?.focus({ preventScroll: true });
-      }
-      if (!el) return;
-      going = true;
-      const arrived = () => {
-        if (!going) return;
-        going = false;
-        clearTimeout(limit);
-        body.removeEventListener('scrollend', arrived);
-        measure();
-      };
-      const limit = later(arrived, GO_MS);
-      body.addEventListener('scrollend', arrived);
-      el.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-    },
+    go,
   };
 }
 
@@ -151,8 +156,8 @@ export function useShowLight(): {
    * row is lit when it is in view there; without it, all at once.
    */
   light: (ids: ReadonlySet<string>, after: number, body?: HTMLElement | null) => void;
-  /** Scroll the list to the nearest unseen row past `target`'s edge, or to that row, bringing it to the middle. */
-  go: (target: ListEdge | HTMLElement) => void;
+  /** Scroll the list to the nearest unseen row past that edge, bringing it to the middle. */
+  go: (edge: ListEdge) => void;
 } {
   const [lit, setLit] = useState(NONE);
   const [unseen, setUnseen] = useState(NO_ROWS);
@@ -171,6 +176,6 @@ export function useShowLight(): {
     },
     [cancel],
   );
-  const go = useCallback((target: ListEdge | HTMLElement) => run.current?.go(target), []);
+  const go = useCallback((edge: ListEdge) => run.current?.go(edge), []);
   return { lit, unseen, light, go };
 }

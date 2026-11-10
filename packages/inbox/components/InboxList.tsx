@@ -88,8 +88,8 @@ export interface InboxListProps {
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
-  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the first row it brings in. */
-  onShowNew: (fromPill?: boolean) => void;
+  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the rows it brings in past that edge. */
+  onShowNew: (fromPill?: ListEdge) => void;
   /** The rows Show brought in that are not in view yet (showLight.ts): the pill counts them, and its press is `onGoNew`. */
   unseenNew?: readonly UnseenRow[];
   onGoNew?: (edge: ListEdge) => void;
@@ -1472,7 +1472,7 @@ export function InboxList(props: InboxListProps) {
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
   /** Show, from the "N new" line or from the pill that stands for it while it is out of view. */
-  const showNew = (fromPill: boolean) => {
+  const showNew = (fromPill?: ListEdge) => {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
@@ -1683,7 +1683,7 @@ export function InboxList(props: InboxListProps) {
         order={props.sections.map((section) => section.id)}
         layout={`${asList}|${visible.map((section) => section.id).join(',')}`}
         covered={props.covered === true}
-        onShow={() => showNew(true)}
+        onShow={showNew}
         unseen={props.unseenNew ?? NO_UNSEEN}
         onGo={(edge) => props.onGoNew?.(edge)}
       />
@@ -1717,7 +1717,7 @@ export function InboxList(props: InboxListProps) {
             <HeldNoticeLine
               count={props.notice.count}
               project={props.notice.project ?? null}
-              onShow={() => showNew(false)}
+              onShow={() => showNew()}
             />
           )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}

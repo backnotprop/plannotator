@@ -2,10 +2,12 @@
  * The list's own "↓ N new" pill (the owner's pick, variant "A · Pill" of the design "new below"): the thread's
  * pill (`.ib-npill`, Thread.tsx `NewPill`) at the list's edge, for news the reader cannot see. Two cases, one pill:
  *
- *  - Held: news came while the "N new · Show" line at the list's top is out of view. The pill is at the bottom
- *    edge when the row will land below the view, else the top edge. A press is Show, and goes to the row.
- *  - Shown: Show brought rows in and some are out of view (Show never scrolls). The pill counts those past the
- *    bottom edge, or with none there those past the top. A press goes to the nearest.
+ *  - Held: news came while the "N new · Show" line at the list's top is out of view. A press is Show, and goes
+ *    to the rows.
+ *  - Shown: Show brought rows in and some are out of view (Show never scrolls). A press goes to the nearest.
+ *
+ * It counts one direction at a time, never both in one number: the rows that land (or are) below the view, at
+ * the bottom edge; with none there, those above, at the top edge. After a press the pill shows what is left.
  *
  * How long it stays is `LIST_NEW_PILL_STAYS`: until it is pressed or the reader scrolls there (the default), or,
  * set to false, `LIST_NEW_PILL_MS` after the last arrival and then a fade (the owner's first ask: "show for five
@@ -42,8 +44,8 @@ type Edge = ListEdge;
 interface Where {
   /** The "N new · Show" line is in view. */
   sign: boolean;
-  /** The list's edge nearest to where the first row will land. */
-  edge: Edge;
+  /** For each group news lands in, the list's edge its rows will land past (top also when they land in view). */
+  edges: Record<string, Edge>;
 }
 
 /**
@@ -60,35 +62,41 @@ function landing(body: HTMLElement, lands: InboxListGroupId, order: readonly str
   return { band: null, edge: 'bottom' };
 }
 
-/** Where the "N new" line and the landing place are in the list's scroll box; null until the browser has said. */
-function useWhere(body: RefObject<HTMLElement | null>, lands: InboxListGroupId | null, order: string, layout: string): Where | null {
+/** Where the "N new" line and each landing place are in the list's scroll box; null until the browser has said. `lands`: the groups, comma-joined. */
+function useWhere(body: RefObject<HTMLElement | null>, lands: string, order: string, layout: string): Where | null {
   const [where, setWhere] = useState<Where | null>(null);
   // After the commit's refs are set: the list's scroll box is a later sibling of the pill.
   useEffect(() => {
     const root = body.current;
     const sign = root?.querySelector('[data-inbox-notice]');
-    if (!root || !sign || lands === null || typeof IntersectionObserver === 'undefined') {
+    if (!root || !sign || lands === '' || typeof IntersectionObserver === 'undefined') {
       setWhere(null);
       return;
     }
     // Another landing place (news now lands higher up) keeps what is known until the browser reports on it, so a
     // pill on screen does not blink.
-    const target = landing(root, lands, order.split(','));
-    const now: Where = { sign: false, edge: target.edge };
+    const now: Where = { sign: false, edges: {} };
+    /** Each header watched, and the groups whose rows land at it. */
+    const bands = new Map<Element, string[]>();
+    for (const group of lands.split(',')) {
+      const target = landing(root, group as InboxListGroupId, order.split(','));
+      now.edges[group] = target.edge;
+      if (target.band) bands.set(target.band, [...(bands.get(target.band) ?? []), group]);
+    }
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           const inView = entry.intersectionRatio >= IN_VIEW;
           if (entry.target === sign) now.sign = inView;
-          // Below the view, or only its top edge showing at the bottom: the row lands below.
-          else now.edge = !inView && entry.boundingClientRect.top > (entry.rootBounds?.top ?? 0) ? 'bottom' : 'top';
+          // Below the view, or only its top edge showing at the bottom: the rows land below.
+          else for (const group of bands.get(entry.target) ?? []) now.edges[group] = !inView && entry.boundingClientRect.top > (entry.rootBounds?.top ?? 0) ? 'bottom' : 'top';
         }
-        setWhere({ ...now });
+        setWhere({ sign: now.sign, edges: { ...now.edges } });
       },
       { root, threshold: [0, IN_VIEW] },
     );
     observer.observe(sign);
-    if (target.band) observer.observe(target.band);
+    for (const band of bands.keys()) observer.observe(band);
     return () => observer.disconnect();
   }, [body, lands, order, layout]);
   return where;
@@ -118,8 +126,8 @@ export interface ListNewPillProps {
   layout: string;
   /** The list is drawn but out of sight (a thread covers it): the pill waits for the list to be back. */
   covered: boolean;
-  /** Show, as the "N new" line's press, and on to the first row it brings in. */
-  onShow: () => void;
+  /** Show, as the "N new" line's press, and on to the rows it brings in past that edge. */
+  onShow: (edge: Edge) => void;
   /** On to the nearest unseen row past that edge. */
   onGo: (edge: Edge) => void;
   /** `LIST_NEW_PILL_STAYS`, for the tests of the other answer. */
@@ -133,15 +141,16 @@ export function ListNewPill({ news, unseen, body, order, layout, covered, onShow
   /** What the reader has had a sign of: the "N new" line was in view, or (when the pill fades) the pill ran its time. */
   const [seen, setSeen] = useState(NONE);
   const fresh = loud.filter((item) => !seen.has(item.key));
-  const where = useWhere(body, fresh[0]?.lands ?? null, order.join(','), layout);
+  const where = useWhere(body, [...new Set(fresh.map((item) => item.lands))].join(','), order.join(','), layout);
   const watching = usePageShown() && !covered;
-  // Held news first; else the rows Show brought in, those below before those above.
+  // Held news first; else the rows Show brought in. Either way one direction at a time, never a count that mixes
+  // both: what is below first, then what is above.
   const held = watching && fresh.length > 0 && where !== null && !where.sign;
   const rest = unseen.filter((row) => !seen.has(shownKey(row)));
-  const restEdge: Edge = rest.some((row) => row.edge === 'bottom') ? 'bottom' : 'top';
-  const count = held ? fresh.length : rest.filter((row) => row.edge === restEdge).length;
+  const edges = held ? fresh.map((item) => where.edges[item.lands] ?? 'top') : rest.map((row) => row.edge);
+  const edge: Edge = edges.includes('bottom') ? 'bottom' : 'top';
+  const count = edges.filter((at) => at === edge).length;
   const on = held || (watching && count > 0);
-  const edge = held ? where.edge : restEdge;
   const burst = held ? fresh.map((item) => item.key).join('\n') : rest.map(shownKey).join('\n');
   // Everything that could show is in `burst`, so an effect that follows `burst` always holds it as it is.
   const sawAll = () => setSeen(new Set([...loud.map((item) => item.key), ...unseen.map(shownKey)]));
@@ -192,8 +201,8 @@ export function ListNewPill({ news, unseen, body, order, layout, covered, onShow
   };
 
   // What the pill shows; as it leaves it keeps what it last showed.
-  const last = useRef<{ count: number; edge: Edge }>({ count: 1, edge: 'bottom' });
-  const drawn = on ? { count, edge } : last.current;
+  const last = useRef<{ count: number; edge: Edge; held: boolean }>({ count: 1, edge: 'bottom', held: true });
+  const drawn = on ? { count, edge, held } : last.current;
   useLayoutEffect(() => {
     if (on) last.current = drawn;
   });
@@ -215,7 +224,8 @@ export function ListNewPill({ news, unseen, body, order, layout, covered, onShow
         data-fading={on && fading ? '' : undefined}
         tabIndex={on ? 0 : -1}
         aria-hidden={!on}
-        aria-label={`${words}, show`}
+        // Held, the press is Show and then goes there; shown already, it only goes there.
+        aria-label={`${words}, ${drawn.held ? 'show and go there' : 'go there'}`}
         onPointerEnter={() => hold(true)}
         onPointerLeave={() => hold(false)}
         onFocus={() => hold(true)}
@@ -223,7 +233,7 @@ export function ListNewPill({ news, unseen, body, order, layout, covered, onShow
         onClick={(event) => {
           // The pill goes with the press: focus is the list's to place, as after the line's Show.
           event.currentTarget.blur();
-          if (held) onShow();
+          if (held) onShow(drawn.edge);
           else onGo(drawn.edge);
         }}
       >

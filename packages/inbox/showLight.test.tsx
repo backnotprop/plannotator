@@ -150,6 +150,23 @@ test.skipIf(!hasDom)('go scrolls to the nearest row past that edge, to the middl
   expect(show.unseen).toEqual([{ id: 't_c', edge: 'bottom' }]);
 });
 
+test.skipIf(!hasDom)('go asked with Show (the pill\'s press) waits for the rows to slide into place, then goes, the count held back meanwhile', () => {
+  act(() => {
+    show.light(ALL, 280, body());
+    show.go('bottom');
+  });
+  pass(279);
+  expect(scrolled).toEqual([]);
+  pass(1);
+  expect(scrolled).toEqual([{ id: 't_b', block: 'center' }]);
+  expect(litRows()).toEqual(['t_a']);
+  expect(show.unseen).toEqual([]);
+  scroll(500);
+  act(() => void body().dispatchEvent(new Event('scrollend')));
+  expect(litRows()).toEqual(['t_a', 't_b', 't_c']);
+  expect(show.unseen).toEqual([]);
+});
+
 test.skipIf(!hasDom)('a row whose group is closed is no longer waited for', async () => {
   act(() => show.light(ALL, 0, body()));
   pass(1);

@@ -63,7 +63,7 @@ const TOPS: Record<Place, number> = { above: 20, 'in view': 300, below: 900 };
  * The browser reports: the "N new" line is in view or scrolled away above, and the header of the group the row
  * lands in is above, in or below the view. The same report again is a scroll that changed neither.
  */
-function see(line: 'in view' | 'out of view', landing: Place = 'below'): void {
+function see(line: 'in view' | 'out of view', landing: Place | Record<string, Place> = 'below'): void {
   const observer = FakeObserver.live;
   // Nothing is watched while no news could show a pill: a scroll then reports nothing.
   if (!observer) return;
@@ -76,7 +76,7 @@ function see(line: 'in view' | 'out of view', landing: Place = 'below'): void {
       rootBounds: VIEW,
     }) as unknown as IntersectionObserverEntry;
   act(() =>
-    observer.notify(observer.targets.map((target) => (target.matches('[data-inbox-notice]') ? entry(target, line === 'in view' ? 'in view' : 'above') : entry(target, landing)))),
+    observer.notify(observer.targets.map((target) => (target.matches('[data-inbox-notice]') ? entry(target, line === 'in view' ? 'in view' : 'above') : entry(target, typeof landing === 'string' ? landing : landing[target.closest('[data-section-id]')!.getAttribute('data-section-id')!]!)))),
   );
 }
 
@@ -159,7 +159,7 @@ const ON_SCREEN = [row('t_wait', 'waiting'), row('t_new', 'new'), row('t_sent', 
 let arrive: (...rows: InboxListRow[]) => void = () => {};
 let setCovered: (covered: boolean) => void = () => {};
 let setUnseen: (rows: UnseenRow[]) => void = () => {};
-const shows: boolean[] = [];
+const shows: (string | false)[] = [];
 const goes: string[] = [];
 
 function HeldList() {
@@ -184,7 +184,7 @@ function HeldList() {
           notice={held.text ? { count: held.count, project: held.project ?? null, lands: showLandsIn(shown, latest), news: heldNews(shown, latest) } : null}
           covered={covered}
           onShowNew={(fromPill) => {
-            shows.push(fromPill === true);
+            shows.push(fromPill ?? false);
             setShown(latest);
           }}
           unseenNew={unseen}
@@ -236,7 +236,7 @@ test.skipIf(!hasDom)('news shows the pill only while the "N new" line is out of 
   expect(line()!.textContent).toContain('2 new');
   expect(pillOn()).toBe(true);
   expect(pill().textContent).toBe('1 new');
-  expect(pill().getAttribute('aria-label')).toBe('1 new message below, show');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message below, show and go there');
   // The list did not move: the row is not drawn until Show.
   expect(drawn('t_b')).toBe(false);
 });
@@ -250,8 +250,9 @@ test.skipIf(!hasDom)('it stays and counts up: no clock takes it away', () => {
   pass(LIST_NEW_PILL_MS * 4);
   expect(pillOn() && !fading()).toBe(true);
   arrive(row('t_b', 'new', later()), row('t_c', 'waiting', later()));
+  see('out of view');
   expect(pill().textContent).toBe('3 new');
-  expect(pill().getAttribute('aria-label')).toBe('3 new messages below, show');
+  expect(pill().getAttribute('aria-label')).toBe('3 new messages below, show and go there');
   pass(LIST_NEW_PILL_MS * 4);
   expect(pillOn() && !fading()).toBe(true);
 });
@@ -264,7 +265,7 @@ test.skipIf(!hasDom)('after Show, the rows it brought in that are out of view ar
   expect(pillOn()).toBe(true);
   expect(pill().textContent).toBe('2 new');
   expect(edge()).toBe('bottom');
-  expect(pill().getAttribute('aria-label')).toBe('2 new messages below, show');
+  expect(pill().getAttribute('aria-label')).toBe('2 new messages below, go there');
   pass(LIST_NEW_PILL_MS * 4);
   expect(pillOn()).toBe(true);
 
@@ -275,7 +276,7 @@ test.skipIf(!hasDom)('after Show, the rows it brought in that are out of view ar
   setUnseen([{ id: 't_a', edge: 'top' }]);
   expect(pill().textContent).toBe('1 new');
   expect(edge()).toBe('top');
-  expect(pill().getAttribute('aria-label')).toBe('1 new message above, show');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message above, go there');
   // They scroll up to it themselves: gone.
   setUnseen([]);
   expect(pillOn()).toBe(false);
@@ -291,7 +292,7 @@ test.skipIf(!hasDom)('a press on held news is Show: the row is drawn, the folded
   expect(pillOn()).toBe(true);
 
   act(() => pill().click());
-  expect(shows).toEqual([true]);
+  expect(shows).toEqual(['bottom']);
   expect(line()).toBeNull();
   expect(isOpen('new')).toBe(true);
   expect(drawn('t_a')).toBe(true);
@@ -302,7 +303,7 @@ test.skipIf(!hasDom)('a press on held news is Show: the row is drawn, the folded
   // The line's own Show asks for no move.
   arrive(row('t_b', 'new', later()));
   act(() => line()!.click());
-  expect(shows).toEqual([true, false]);
+  expect(shows).toEqual(['bottom', false]);
 });
 
 test.skipIf(!hasDom)('news that lands in Quiet or Sent shows no pill; the line still counts it', () => {
@@ -336,13 +337,32 @@ test.skipIf(!hasDom)('it points to where the row will land: below the view, else
   arrive(row('t_a', 'new', later()));
   see('out of view', 'below');
   expect(edge()).toBe('bottom');
-  expect(pill().getAttribute('aria-label')).toBe('1 new message below, show');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message below, show and go there');
 
   // The reader scrolls on past the group's header: the same pill, now at the top edge.
   see('out of view', 'above');
   expect(pillOn()).toBe(true);
   expect(edge()).toBe('top');
-  expect(pill().getAttribute('aria-label')).toBe('1 new message above, show');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message above, show and go there');
+});
+
+test.skipIf(!hasDom)('news that lands above and below is never one mixed count: what is below first, then what is above', () => {
+  draw();
+  // The reader is between the two groups: a question lands in Waiting on you, above; two updates land in New, below.
+  arrive(row('t_a', 'waiting', later()), row('t_b', 'new', later()), row('t_c', 'new', later()));
+  see('out of view', { waiting: 'above', new: 'below' });
+  expect(line()!.textContent).toContain('3 new');
+  expect(pill().textContent).toBe('2 new');
+  expect(edge()).toBe('bottom');
+  expect(pill().getAttribute('aria-label')).toBe('2 new messages below, show and go there');
+
+  // The press is Show, toward what it counted. The row above is then what the light still waits on.
+  act(() => pill().click());
+  expect(shows).toEqual(['bottom']);
+  setUnseen([{ id: 't_a', edge: 'top' }]);
+  expect(pill().textContent).toBe('1 new');
+  expect(edge()).toBe('top');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message above, go there');
 });
 
 test.skipIf(!hasDom)('a group with no row yet is not drawn: the next group drawn stands for where the row lands', () => {
@@ -388,7 +408,7 @@ test.skipIf(!hasDom)('it is said once as it comes, not again as its count grows'
   see('out of view');
   expect(said()).toBe('1 new message below');
   arrive(row('t_b', 'new', later()));
-  expect(pill().getAttribute('aria-label')).toBe('2 new messages below, show');
+  expect(pill().getAttribute('aria-label')).toBe('2 new messages below, show and go there');
   expect(said()).toBe('1 new message below');
   // Gone: the region is empty, so the next pill is said afresh.
   see('in view');
