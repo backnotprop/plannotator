@@ -1,5 +1,5 @@
 /**
- * Plannotator Inbox: the face each agent's icon shows, for every window (core `inbox-agent-faces.ts`, the file in
+ * Plannotator Inbox: the face each agent's icon shows, for every window (core `inbox-types.ts` ("Agent faces"), the file in
  * packages/shared/inbox/agent-faces.ts). The window's routes (same origin for every POST, the page's
  * `serverSession`, as the pins' routes). Bun only: the Inbox runs on the Bun server; the Pi server serves no Inbox route.
  *

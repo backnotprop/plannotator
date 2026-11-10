@@ -235,7 +235,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
-import type { InboxAgentFacesWire } from "@plannotator/core/inbox-agent-faces";
+import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";

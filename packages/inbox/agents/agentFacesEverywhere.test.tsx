@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { Profiler, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup, InboxParticipant } from '@plannotator/core/inbox-types';
-import type { InboxAgentFacesWire } from '@plannotator/core/inbox-agent-faces';
+import type { InboxAgentFacesWire } from '@plannotator/core/inbox-types';
 import { createInboxAgentFacesFile } from '../../shared/inbox/agent-faces';
 import { createInboxAgentFaces } from '../../server/inbox-agent-faces';
 

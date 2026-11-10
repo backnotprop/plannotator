@@ -12,7 +12,7 @@ import { beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, statSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { INBOX_AGENT_FACES_KEPT, type InboxAgentFacesWire } from '@plannotator/core/inbox-agent-faces';
+import { INBOX_AGENT_FACES_KEPT, type InboxAgentFacesWire } from '@plannotator/core/inbox-types';
 import { createInboxAgentFacesFile, INBOX_AGENT_FACES_FILE } from '@plannotator/shared/inbox/agent-faces';
 import { createInboxAgentFaces } from './inbox-agent-faces';
 

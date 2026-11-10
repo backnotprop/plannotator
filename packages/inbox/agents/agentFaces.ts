@@ -4,7 +4,7 @@
  * icon that knows an agent (a list row's tiles, a message's author, the reply box's recipient, the starred pills, New
  * message's To; icons.tsx `HostMark`'s `agent`) reads it by whatever id it has, a session id or an `InboxAgent.id`.
  *
- * The Inbox keeps it (`GET`/`POST /api/inbox/agent-faces`, core inbox-agent-faces.ts), so every window, the phone's
+ * The Inbox keeps it (`GET`/`POST /api/inbox/agent-faces`, core inbox-types.ts, "Agent faces"), so every window, the phone's
  * and the iPad's, shows the same face, and every window open takes a save at once (`event: agent-faces`). An entry
  * is an agent's id (a launch's, else its session's) with every session it was or is, so an icon finds it by any of
  * them; the agents' list adds the sessions a live agent is now (a launch that started, a conversation that went on).
@@ -18,7 +18,7 @@
  * once (`adopt`): the old key goes only when the server has them.
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { readInboxAgentFaces, type InboxAgentFaceEntry } from '@plannotator/core/inbox-agent-faces';
+import { readInboxAgentFaces, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
 import type { InboxAgent } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { inboxAgentsFlat, inboxAgentsNow, onInboxAgentsSet } from '../agentsList';

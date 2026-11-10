@@ -1,5 +1,5 @@
 /**
- * Plannotator Inbox: the face each agent's icon shows (core `inbox-agent-faces.ts`), saved for every window.
+ * Plannotator Inbox: the face each agent's icon shows (core `inbox-types.ts` ("Agent faces")), saved for every window.
  *
  *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, sessions } } }, the latest choice last,
  *                            0600, written whole (temp, then rename)
@@ -22,7 +22,7 @@ import {
   type InboxAgentFaceChange,
   type InboxAgentFaceEntry,
   type InboxAgentFacesWire,
-} from "@plannotator/core/inbox-agent-faces";
+} from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 
 export const INBOX_AGENT_FACES_FILE = "agent-faces.json";
