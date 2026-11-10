@@ -3,10 +3,10 @@
  * after the paperclip and Skills, and the sheet it opens. A computer keeps ReplyRecipient.tsx. Like that pill it shows
  * only in a thread with several agents (ThreadPane's `pillActive`): a one-agent thread has no control in its row.
  *
- * - One recipient: its mark and a small chevron (`AgentPill`; the owner: "maybe it's just the Claude icon in the bottom
- *   row, versus the full thing"). When another of the thread's agents wears the same mark (two Claude Code sessions),
- *   a short name follows the mark, since the mark alone cannot tell them apart. The accessible name always says who.
- *   Several recipients: the first mark with how many (`AgentMark`).
+ * - One recipient: its mark and a small chevron, never a name (`AgentPill`; the owner: "It should only ever be one"),
+ *   also when two of the thread's agents are of one kind. The accessible name says who, with the session's title, and
+ *   the sheet lists every agent by name with the current one marked. Several recipients: the first mark with how many
+ *   (`AgentMark`).
  * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it. A tap on a row sends
  *   to that agent only and closes; the circle at a row's end adds it and the sheet stays; the last row types a real `@`.
  *
@@ -59,8 +59,6 @@ export function PhoneReplyRecipient({
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const chosenIds = chosen.map((r) => r.session);
-  /** Another agent the reply could go to wears the same mark (two Claude Code sessions): the mark alone cannot say which. */
-  const sameMark = (row: RecipientRow) => rows.some((other) => other.session !== row.session && other.host === row.host);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
   /** As it is read out: "Claude Code · Invoice PDF fonts", each agent with its session's title. */
@@ -77,7 +75,7 @@ export function PhoneReplyRecipient({
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
-        <AgentPill {...control} host={first.host} label={sameMark(first) ? (titleOf(first) ?? first.short) : null} detail={ended ? 'ended' : null} />
+        <AgentPill {...control} host={first.host} label={null} detail={ended ? 'ended' : null} />
       ) : (
         <AgentMark {...control} host={first.host} count={chosen.length} />
       )}

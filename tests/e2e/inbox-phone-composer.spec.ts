@@ -11,7 +11,7 @@
  * - The sheet (a thread with two agents): a dialog that takes focus from the field and gives it back, a long label
  *   cut on one line, closed by Escape, the scrim and a drag down on its head; with reduced motion it does not slide.
  * - Reply, two agents: the pill is the recipient's mark and a chevron, named for a screen reader; a row picks one, a
- *   circle adds one, and Send reaches both. Two sessions of one agent: the pill also says which, in 14ch at most.
+ *   circle adds one, and Send reaches both. Two sessions of one agent: the same look, and the pill's name says which.
  * - New message: To in the foot's row, its sheet with the filter unfocused, the card 8 px over the keyboard with the
  *   title kept, the dialog's own ground under the keyboard. Chromium at 1440 x 900: none of it applies.
  *
@@ -449,25 +449,15 @@ for (const engine of ENGINES) {
       await box.getByRole('button', { name: 'Send', exact: true }).tap();
       await expect(pane(page).locator('article.ib-message[data-author="person"]', { hasText: words }), 'the thread does not show the reply').toBeVisible();
       for (const session of [TWO_A, TWO_B]) await expect.poll(() => world.polls[session]!.got(words, world.twoThread), { message: `${session} was not handed the reply`, timeout: 30_000 }).toBe(true);
-      // Two Claude Code sessions: the pill says which, on one line, in 14ch at most, still between Skills and the mic.
+      // Two Claude Code sessions: the same look, the mark and the chevron alone. Its name says which, and the sheet lists both.
       await openBox(page, world.sameThread);
-      const name = recipient(page).locator('.ib-apill-n');
-      await expect(name, 'two sessions of one agent: the pill does not say which').toHaveText(/\S/);
-      const said = await name.evaluate((el) => {
-        const zero = document.createElement('span');
-        zero.textContent = '0';
-        zero.style.cssText = 'position:absolute;visibility:hidden';
-        el.parentElement!.appendChild(zero);
-        const ch = zero.getBoundingClientRect().width;
-        zero.remove();
-        return { width: el.getBoundingClientRect().width, most: 14 * ch + 1, height: el.getBoundingClientRect().height, ellipsis: getComputedStyle(el).textOverflow };
-      });
-      expect(said.width, 'the name in the pill is wider than 14ch').toBeLessThanOrEqual(said.most);
-      expect(said.height, 'the name in the pill wraps').toBeLessThanOrEqual(24);
-      expect(said.ellipsis, 'a long name in the pill is not cut with an ellipsis').toBe('ellipsis');
+      await expect(recipient(page), 'two sessions of one agent: no control in the row').toHaveAttribute('data-agent-pill', '');
+      await expect(recipient(page).locator('.ib-apill-n'), 'two sessions of one agent: the pill shows a name').toHaveCount(0);
+      await expect(recipient(page), 'the pill\'s name does not say who gets the reply').toHaveAttribute('aria-label', /^Reply goes to .*Claude Code.*\. Change$/);
+      expect((await spot(recipient(page))).right - (await spot(recipient(page))).left, 'the pill is wider than a mark and a chevron').toBeLessThan(70);
       const both = await spot(recipient(page));
-      expect(both.left, 'the named pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
-      expect(both.right, 'the named pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
+      expect(both.left, 'the pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
+      expect(both.right, 'the pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
       await shot(page, `${engine.name}-reply-same-agent`);
       await page.context().close();
     });

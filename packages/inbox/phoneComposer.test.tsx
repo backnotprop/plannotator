@@ -189,15 +189,21 @@ test.skipIf(!hasDom)('a phone, several agents of different kinds: the mark and a
   expect(control()!.getAttribute('aria-label')).toBe('Reply goes to Pi · Copy pass on the order summary. Change');
 });
 
-test.skipIf(!hasDom)('a phone, two agents of one kind: the mark cannot tell them apart, so the chosen one\'s name follows it (its session\'s title when it has one)', async () => {
+test.skipIf(!hasDom)('a phone, two agents of one kind: still the mark and a chevron alone; the accessible name and the sheet tell them apart', async () => {
   const SECOND = { kind: 'agent' as const, host: 'claude-code', session: 'ses_pi', name: null };
   await openReply(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, SECOND, 45)), true);
-  const pill = control()!;
-  expect(pill.hasAttribute('data-agent-pill')).toBe(true);
-  expect(pill.querySelector('.ib-apill-n')!.textContent).toBe('Claude Code 2');
   act(() => setSessionLabels({ ses_pi: 'Invoice PDF fonts' }));
   await settle();
-  expect(control()!.querySelector('.ib-apill-n')!.textContent).toBe('Invoice PDF fonts');
+  const pill = control()!;
+  expect(pill.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill.textContent).toBe('');
+  expect(pill.getAttribute('aria-label')).toBe('Reply goes to Claude Code · Invoice PDF fonts. Change');
+  await click(pill);
+  await until(() => sheet() !== null, 'the sheet');
+  expect(q('[data-recipient-row="ses_pi"] .ib-sheet-t')!.textContent).toBe('Invoice PDF fonts');
+  expect(q('[data-recipient-row="ses_pi"]')!.getAttribute('aria-selected')).toBe('true');
+  expect(q('[data-recipient-row="ses_claude"]')!.getAttribute('aria-selected')).toBe('false');
 });
 
 test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes the sheet and puts focus back in the reply; Send goes to the agent the control names', async () => {

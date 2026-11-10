@@ -150,8 +150,6 @@
   .pn-inbox .ib-rrow[data-phone] .ib-rmid { height: 36px; }
   .pn-inbox .ib-rrow[data-phone] .ib-rlayer { gap: 8px; padding-left: 0; }
   .pn-inbox .ib-rrow[data-phone] .ib-rlayer > .ib-apill { flex: 0 1 auto; }
-  /* In the reply row a name is only there to tell two agents of one kind apart: it stays short. */
-  .pn-inbox .ib-rrow[data-phone] .ib-apill-n { max-width: 14ch; }
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic) { width: 36px; height: 36px; margin: 0; border-radius: 999px; transition: background-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out; }
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic:not([data-state="live"])) { background: var(--ib-fill); }
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic)::after { content: ''; position: absolute; inset: -4px; border-radius: 999px; }

@@ -3,8 +3,7 @@
  * button that opens the picker sheet.
  *
  * - `AgentPill`: the agent's mark, a short name that gives way with "…", and a small chevron. New message's To, and
- *   the reply row of a thread with several agents: there the mark and the chevron alone, with the name only when two
- *   of the thread's agents wear the same mark.
+ *   the reply row of a thread with several agents: there the mark and the chevron alone (`label` null).
  * - `AgentMark`: round like the paperclip and Skills beside it: the first recipient's mark and how many get the
  *   reply, when several do.
  *

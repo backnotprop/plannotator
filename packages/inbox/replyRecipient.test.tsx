@@ -615,18 +615,19 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in t
   expect(replies()[0]!.body.tags).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): the pill names the one that gets the reply, and the other once it is picked', async () => {
+test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): still the mark alone, and its accessible name says which gets the reply', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M4, FARCLAUDE, 45, { from_project: { name: FAR.name, root: FAR.root } })), true);
   await write(el, 'Which folder?');
   expect(pill(el)!.hasAttribute('data-agent-pill')).toBe(true);
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_far');
   expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (plannotator). Change');
-  expect(pill(el)!.querySelector('.ib-apill-n')?.textContent).toBe('plannotator');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
   await openList(el);
   await act(async () => sheetRow(el, 'ses_claude').click());
   await settle();
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
-  expect(pill(el)!.querySelector('.ib-apill-n')?.textContent).toBe('superfans');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (superfans). Change');
 });
 
 test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: its row can\'t be picked alone, and the reply stays with the agent that wrote', async () => {
