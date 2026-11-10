@@ -63,6 +63,7 @@
     "./inbox-snooze": "./inbox-snooze.ts",
     "./inbox-sidebar": "./inbox-sidebar.ts",
     "./inbox-artifact-pins": "./inbox-artifact-pins.ts",
+    "./inbox-agent-faces": "./inbox-agent-faces.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
     "./shape-scene": "./shape-scene.ts",
