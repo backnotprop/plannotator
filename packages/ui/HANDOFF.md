@@ -3003,12 +3003,11 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
 
-## `useAnnotationHighlighter`: three selection fixes (unreleased; every host, no opt-in, no core change)
+## `useAnnotationHighlighter`: selection fixes (unreleased; every host, no opt-in, no core change)
 
 Fixes in the hook's release guard, for `Viewer` and every other host of the hook, on web-highlighter 0.8.2. A selection that worked keeps the same highlight, quote and stored positions.
 
 - **An end in skipped chrome.** A selection whose end is inside, or right at, an element the highlighter skips (`button`, `.katex`, `.math-annotatable`, `.annotation-toolbar`, `.annotation-exclude`: a button in the text, a code block's Copy button, a formula, an alert's hidden type word) used to be painted from its start to the end of the document. Its end now moves back to the last paintable text before that element, in the release guard, the touch bridge (`takeSelection` too) and `highlightRange`. The quote loses the half-selected chrome. A formula the drag ended on is not part of the highlight; drag past it to include it.
 - **Words from outside the document.** A drag that starts in a panel after the document and ends in the document used to be painted from the release point to the end of the document, with the panel's words at the end of its quote. A selection that reaches outside the container and carries text from there now makes no highlight. One that reaches outside without such text (a triple-click on the last block ends at offset 0 of the next element) is unchanged.
-- **Other mouse buttons.** A release of a button other than the main one (a context click on selected words, or on a word the browser selects for its menu) used to make a highlight, a deletion in redline mode. It now makes none and the selection stays for the menu's Copy.
 
 Pinned by `hooks/useAnnotationHighlighter.selectionEdges.test.tsx`.
