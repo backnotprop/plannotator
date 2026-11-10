@@ -274,7 +274,8 @@ test('24 starred in the narrow list: two lines at most, then "+N" and its menu',
 });
 
 test('an iPhone in WebKit: one line that scrolls sideways; a tap on the star opens the thread and unstars nothing', async () => {
-  const phoneBrowser = await webkit.launch();
+  // No launch args: the project's are Chromium's, which WebKit refuses.
+  const phoneBrowser = await webkit.launch({ args: [] });
   try {
     const context = await phoneBrowser.newContext({ ...devices['iPhone 13'] });
     const page = await context.newPage();
