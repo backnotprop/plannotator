@@ -11,7 +11,8 @@
  * Nothing to suggest yet: an empty dashed chip saying "Name this thread".
  * `error` (the name is taken, or not a valid name) is said beside it, and
  * `action` (the name is another open thread's: send there instead) is a
- * button after those words, outside them so it is read once. With an action
+ * button after those words, outside them so it is read once, with the
+ * action's `picture` before it (compose: the thread it goes to). With an action
  * the words are an offer, not a failure (the owner, 2026-11-09): muted text
  * said politely (`role="status"`), and the chip marked with the focus ring's
  * colour (`data-offer`) instead of the error's.
@@ -76,8 +77,8 @@ export function ThreadNameChip(props: {
   /** Text pasted into the chip that cannot be a name: the caller puts it in the message (and may say how, in the note). */
   onOverflow: (text: string) => string | void;
   error?: string | null;
-  /** A way through `error` besides changing the name. `name` is its full name for a screen reader. */
-  action?: { label: string; name: string; onPress: () => void; disabled?: boolean } | null;
+  /** A way through `error` besides changing the name. `name` is its full name for a screen reader; `picture` (where it goes) is drawn before it. */
+  action?: { label: string; name: string; onPress: () => void; disabled?: boolean; picture?: React.ReactNode } | null;
   idBase: string;
 }) {
   const { state, suggested, hint, onChange, onDone, onOverflow, error = null, action = null, idBase } = props;
@@ -166,9 +167,12 @@ export function ThreadNameChip(props: {
             {error}
           </span>
           {action && (
-            <button type="button" className="ib-lnk ib-cp-tname-go" aria-label={action.name} disabled={action.disabled} onClick={action.onPress} data-compose-thread-name-join="">
-              {action.label}
-            </button>
+            <span className="ib-cp-tname-to">
+              {action.picture}
+              <button type="button" className="ib-lnk ib-cp-tname-go" aria-label={action.name} disabled={action.disabled} onClick={action.onPress} data-compose-thread-name-join="">
+                {action.label}
+              </button>
+            </span>
           )}
         </span>
       )}

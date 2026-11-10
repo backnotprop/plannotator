@@ -30,7 +30,7 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAuthor, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -53,6 +53,8 @@ import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { wordsMessage } from '../sendTargets';
+import { pinnedState, type PinnedState } from '../pins';
+import { ThreadPill } from './ThreadPill';
 import { registerReloadFlush } from '../stalePage';
 import {
   DRAFT_TOO_LONG,
@@ -153,17 +155,22 @@ interface ThreadNameHolder {
   name: string;
   /** Who a reply typed in it reaches: "Claude Code". */
   agent: string;
+  /** That agent, for its mark. */
+  author: InboxAuthor;
+  /** The thread's state as its list row has it (Stopped, Holds N, open questions); null when the read carried no row. */
+  state: PinnedState | null;
 }
 
 /** Read the thread that has the name; null when it can't be read (the notice then offers nothing). */
 async function threadNameHolder(threadId: string): Promise<ThreadNameHolder | null> {
   try {
-    const { thread } = await inboxApi.thread(threadId, 5000);
+    const { thread, row } = await inboxApi.thread(threadId, 5000);
     if (thread.resolved_at !== null || thread.thread_name === null) return null;
     const target = wordsMessage(thread);
-    const host = target.author.kind === 'agent' ? target.author.host : (target.to?.host ?? null);
-    const agent = (target.author.kind === 'agent' ? target.author.name : null) ?? (host ? hostLabel(host) : 'That thread’s agent');
-    return { threadId, messageId: target.id, name: thread.thread_name, agent };
+    // A thread no agent wrote in yet is its addressee's.
+    const author: InboxAuthor = target.author.kind === 'agent' ? target.author : { kind: 'agent', host: target.to?.host ?? null, session: target.to?.session ?? null, name: null };
+    const agent = (author.kind === 'agent' ? author.name : null) ?? (author.kind === 'agent' && author.host ? hostLabel(author.host) : 'That thread’s agent');
+    return { threadId, messageId: target.id, name: thread.thread_name, agent, author, state: row ? pinnedState(row) : null };
   } catch {
     return null;
   }
@@ -1579,10 +1586,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
           state={nameState}
           suggested={reviewName ?? suggested}
           hint={box ? 'Named from what it reviews until you type here.' : undefined}
-          error={nameError === THREAD_NAME_TAKEN && nameHolder ? `${THREAD_NAME_TAKEN} ${nameHolder.agent} gets what you send to “${nameHolder.name}”.` : nameError}
+          error={nameError}
           action={
             nameError === THREAD_NAME_TAKEN && nameHolder
-              ? { label: 'Send to that thread', name: `Send this message to the thread “${nameHolder.name}”, to ${nameHolder.agent}`, onPress: () => void sendToHolder(), disabled: busy !== null || voice.busy }
+              ? { label: 'Send to that thread', name: `Send this message to the thread “${nameHolder.name}”, to ${nameHolder.agent}`, onPress: () => void sendToHolder(), disabled: busy !== null || voice.busy, picture: <ThreadPill name={nameHolder.name} author={nameHolder.author} agent={nameHolder.agent} state={nameHolder.state} /> }
               : null
           }
           onChange={(next) => {

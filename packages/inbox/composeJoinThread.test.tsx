@@ -1,6 +1,6 @@
 /**
- * New message with a thread name another open thread has: the notice stays, and it offers to send to that thread
- * instead. The real ComposeDialog over a mocked fetch.
+ * New message with a thread name another open thread has: the notice stays, and under it the thread is shown as a
+ * pill (its agent's mark, its name) with an offer to send to that thread instead. The real ComposeDialog over a mocked fetch.
  *
  * The failures this catches: the offer missing (the person can only rename), the message going to a new thread or to
  * the wrong message of the thread, a second thread started, compose closing or losing the words when the send fails,
@@ -40,6 +40,8 @@ let closed = 0;
 let names: Record<string, unknown> = {};
 let thread: InboxThread | null = null;
 let replyFails = false;
+/** The thread's list row, as the thread read carries it (its state); null: none. */
+let row: Record<string, unknown> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -50,6 +52,7 @@ beforeEach(() => {
   names = { thread_id: ROOT_ID };
   thread = holder();
   replyFails = false;
+  row = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -63,7 +66,7 @@ beforeEach(() => {
       if (path.endsWith('/reply')) return replyFails ? Response.json({ code: 'thread_resolved', error: 'That thread is archived.' }, { status: 409 }) : Response.json({ reply: {}, questions: [], replayed: false });
       return Response.json({});
     }
-    if (path.startsWith(`/api/inbox/threads/${ROOT_ID}`)) return thread ? Response.json({ serverSession: 's', cursor: 2, thread }) : Response.json({ code: 'thread_not_found', error: 'No such thread.' }, { status: 404 });
+    if (path.startsWith(`/api/inbox/threads/${ROOT_ID}`)) return thread ? Response.json({ serverSession: 's', cursor: 2, thread, ...(row ? { row } : {}) }) : Response.json({ code: 'thread_not_found', error: 'No such thread.' }, { status: 404 });
     if (path.startsWith('/api/inbox/sessions')) {
       return Response.json({
         serverSession: 's',
@@ -87,6 +90,7 @@ afterEach(() => {
 
 const inDialog = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector('dialog[data-compose]')?.querySelector<T>(selector) ?? null;
 const notice = () => inDialog('[data-compose-thread-name-error]');
+const pill = () => inDialog('[data-compose-thread-pill]');
 const offer = () => inDialog<HTMLButtonElement>('[data-compose-thread-name-join]');
 const nameField = () => inDialog<HTMLInputElement>('input[aria-label="Thread name"]')!;
 const words = () => inDialog<HTMLTextAreaElement>('[data-compose-text] textarea')!;
@@ -144,9 +148,19 @@ async function refused(name = 'launch notes') {
 
 test.skipIf(!hasDom)('a taken name keeps its notice and offers the thread that has it; the offer sends the message there, to the message a reply in that thread answers', async () => {
   await refused();
-  // The notice names the thread as that thread has it, and who gets what is sent there (not To's Claude Code).
-  expect(notice()!.textContent).toContain('“Launch notes”');
-  expect(notice()!.textContent).toContain('Codex');
+  // The notice is its one sentence; the thread is shown under it as a pill: its own name (not the typed one), and
+  // the agent that has it (Codex, not To's Claude Code), by its mark and in the pill's name.
+  expect(notice()!.textContent).toBe('Another open thread in this project has this name.');
+  expect(pill()!.querySelector('.ib-tpill-n')!.textContent).toBe('Launch notes');
+  expect(pill()!.getAttribute('aria-label')).toBe('Launch notes, with Codex');
+  expect(pill()!.getAttribute('role')).toBe('img');
+  expect(pill()!.querySelector('.ib-mk')).not.toBeNull();
+  // A picture, not a way out of compose: nothing in it can be pressed or focused.
+  expect(pill()!.matches('button, a, [tabindex]')).toBe(false);
+  expect(pill()!.querySelector('button, a, [tabindex]')).toBeNull();
+  act(() => pill()!.click());
+  expect(closed).toBe(0);
+  expect(posts.filter((p) => p.path.endsWith('/reply'))).toHaveLength(0);
   // An offer, not a failure: said politely, and neither the chip nor the field is marked as an error.
   expect(notice()!.getAttribute('role')).toBe('status');
   expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(false);
@@ -197,6 +211,7 @@ test.skipIf(!hasDom)('another name is the other way out: typing one takes the no
   type(nameField(), 'Launch notes two');
   expect(notice()).toBeNull();
   expect(offer()).toBeNull();
+  expect(pill()).toBeNull();
   act(() => inDialog('[data-compose-send]')!.click());
   await until(() => sent.length === 1, 'the send');
   expect(starts().at(-1)!.body.thread_name).toBe('Launch notes two');
@@ -208,6 +223,7 @@ test.skipIf(!hasDom)('no offer without one thread to send to: the Inbox named no
   await refused();
   expect(notice()!.textContent).toBe('Another open thread in this project has this name.');
   expect(offer()).toBeNull();
+  expect(pill()).toBeNull();
   // The plain refusal is still an error.
   expect(notice()!.getAttribute('role')).toBe('alert');
   expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(true);
@@ -226,4 +242,18 @@ test.skipIf(!hasDom)('no offer without one thread to send to: the Inbox named no
   thread = { ...holder(), resolved_at: '2026-10-14T16:00:00.000Z' };
   await refused();
   expect(offer()).toBeNull();
+});
+
+test.skipIf(!hasDom)("the pill carries the thread's state when it waits on the person, and none when it does not; its name stays the thread and its agent", async () => {
+  row = { thread_id: ROOT_ID, section: 'stopped', resolved_at: null, unseen: 0, questions: { open: 1, holds_up: [], actions: 0 } };
+  await refused();
+  expect(pill()!.getAttribute('data-state')).toBe('stop');
+  expect(pill()!.querySelector('.ib-spill[data-k="stop"]')).not.toBeNull();
+  expect(pill()!.getAttribute('aria-label')).toBe('Launch notes, with Codex');
+
+  act(() => root?.unmount());
+  host?.remove();
+  row = { thread_id: ROOT_ID, section: 'quiet', resolved_at: null, unseen: 0, questions: { open: 0, holds_up: [], actions: 0 } };
+  await refused();
+  expect(pill()!.querySelector('.ib-spill, .ib-tpill-q')).toBeNull();
 });
