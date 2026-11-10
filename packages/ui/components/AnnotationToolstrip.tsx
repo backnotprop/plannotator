@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { WORD_INPUT_METHOD_OFFERED } from '../utils/inputMethod';
 import type { EditorMode, InputMethod } from '../types';
 import { TaterSpritePullup } from './TaterSpritePullup';
 
@@ -32,6 +33,13 @@ export interface AnnotationToolstripProps {
    */
   hideInputMethodSwitch?: boolean;
   /**
+   * Offer the Word input method (one click on a word highlights it) as a
+   * third choice beside Select and Pinpoint. Default: `WORD_INPUT_METHOD_OFFERED`
+   * (false). When it is not offered and the method in use is Word, Select
+   * shows as the one in use.
+   */
+  offerWordInputMethod?: boolean;
+  /**
    * Omit only the Quick Label action. Defaults to false so existing consumers
    * retain the complete action-mode group.
    */
@@ -61,6 +69,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   showHelpLink = true,
   iconOnly = false,
   hideInputMethodSwitch = false,
+  offerWordInputMethod = WORD_INPUT_METHOD_OFFERED,
   hideQuickLabel = false,
   hideRedline = false,
   hideActionModes = false,
@@ -81,7 +90,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         {!hideInputMethodSwitch && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
-            active={inputMethod === 'drag'}
+            active={inputMethod === 'drag' || (inputMethod === 'word' && !offerWordInputMethod)}
             onClick={() => onInputMethodChange('drag')}
             label="Select"
             color="primary"
@@ -98,6 +107,24 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
               </svg>
             }
           />
+          {offerWordInputMethod && (
+          <ToolstripButton
+            active={inputMethod === 'word'}
+            onClick={() => onInputMethodChange('word')}
+            label="Word"
+            color="primary"
+            mounted={mounted}
+            compact={compact}
+            iconOnly={iconOnly}
+            icon={
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7V5h16v2" />
+                <path d="M12 5v14" />
+                <path d="M9 19h6" />
+              </svg>
+            }
+          />
+          )}
           <ToolstripButton
             active={inputMethod === 'pinpoint'}
             onClick={() => onInputMethodChange('pinpoint')}

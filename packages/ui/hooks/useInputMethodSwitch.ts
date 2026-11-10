@@ -25,8 +25,11 @@ export function useInputMethodSwitch(
     }
   }, [inputMethod]);
 
+  // Alt goes between Pinpoint and the text method in use (Select, or Word).
+  const textMethodRef = useRef<InputMethod>(inputMethod === 'pinpoint' ? 'drag' : inputMethod);
+  if (inputMethod !== 'pinpoint') textMethodRef.current = inputMethod;
   const otherMethod = useCallback(
-    (m: InputMethod): InputMethod => (m === 'drag' ? 'pinpoint' : 'drag'),
+    (m: InputMethod): InputMethod => (m === 'pinpoint' ? textMethodRef.current : 'pinpoint'),
     [],
   );
 

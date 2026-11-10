@@ -91,6 +91,7 @@ import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBa
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
+import { useClickWord } from '../hooks/useClickWord';
 import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
@@ -1372,6 +1373,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onCodeBlockClick: hostComposes ? noHostCodeBlockClick : handlePinpointCodeBlockClick,
   });
   clearPinpointHoverRef.current = clearPinpointHover;
+  // The Word input method (off unless the host passes `inputMethod="word"`):
+  // one click on a word highlights it, a drag selects whole words. Redline
+  // keeps the word-snapped drag but not the click: a stray click must not
+  // delete a word. Off under read-only, a plan diff and vim focus.
+  useClickWord({
+    containerRef,
+    enabled: inputMethod === 'word' && selectionCommentsOn && !(isPlanDiffActive ?? false) && !(vimModeActive && vim.focused),
+    clicksEnabled: mode !== 'redline',
+    snapDrags: true,
+    annotationUiOpen: !!(toolbarState || hookCommentPopover || viewerCommentPopover || hookQuickLabelPicker || codeBlockQuickLabelPicker),
+    onSelectRange: hostComposes ? hostPinpointRange : highlightRange,
+  });
   const vimOwnsHudTarget = vimHudEnabled
     && vim.state.phase !== 'inactive'
     && (vim.focused || vim.state.phase === 'action');
