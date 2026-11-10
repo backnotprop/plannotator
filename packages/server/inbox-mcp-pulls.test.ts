@@ -66,6 +66,16 @@ describe("thread_pulls", () => {
     expect(w.refreshed).toEqual([["github.com/o/r#1", "gitlab.com/acme/api#7:pull"]]);
   });
 
+  test("a Bitbucket Cloud PR is added by its URL and read back as that URL, never as a GitHub short ref", async () => {
+    const w = world();
+    const url = "https://bitbucket.org/acme/api/pull-requests/3";
+    const result = await w.call({ thread_id: w.thread, add: [`${url}/diff`], ...FILLED });
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added ${url}. Nothing was sent to the person.`);
+    expect(w.refreshed).toEqual([["bitbucket.org/acme/api#3:pull"]]);
+    expect(threadPullsText(w.context, w.thread, "ses_a")[1]).toStartWith(`- ${url} `);
+  });
+
   test("an agent that is not in the thread is refused, and so is a call with no session: nothing is written", async () => {
     const w = world();
     for (const who of [STRANGER, {}]) {

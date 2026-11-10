@@ -14,6 +14,7 @@ import {
   inboxThreadPullRefError,
   inboxThreadPullsSummary,
   inboxThreadPullText,
+  inboxThreadPullWire,
   parseInboxThreadPullRef,
   parseInboxThreadPullRefs,
   type InboxThreadPull,
@@ -47,6 +48,22 @@ describe("refs", () => {
     expect("refs" in ok && ok.refs.map((ref) => ref.key)).toEqual(["github.com/o/r#1", "github.com/o/r#2"]);
     expect(parseInboxThreadPullRefs(["o/r#1", "#2"], "add")).toEqual({ error: inboxThreadPullRefError("#2"), field: "add[1]" });
     expect(parseInboxThreadPullRefs("o/r#1", "pulls")).toMatchObject({ field: "pulls" });
+  });
+
+  test("a Bitbucket Cloud PR reads by its URL only; its key, label and link stay Bitbucket's", () => {
+    const bb = parseInboxThreadPullRef("https://bitbucket.org/Acme-Team/billing-svc/pull-requests/3/diff");
+    expect("key" in bb && bb.key).toBe("bitbucket.org/acme-team/billing-svc#3:pull");
+    expect("url" in bb && bb.url).toBe("https://bitbucket.org/Acme-Team/billing-svc/pull-requests/3");
+    const stored = pull("https://bitbucket.org/Acme-Team/billing-svc/pull-requests/3", "open");
+    expect(inboxThreadPullWire(stored)).toMatchObject({ platform: "bitbucket", host: "bitbucket.org", repo: "Acme-Team/billing-svc", number: 3, label: "#3", ref: "https://bitbucket.org/Acme-Team/billing-svc/pull-requests/3" });
+    // A stored key whose URL no longer reads still names Bitbucket, never GitHub.
+    expect(inboxThreadPullWire({ ...stored, url: "https://bitbucket.org/moved" }).platform).toBe("bitbucket");
+    // Bitbucket has no short form: `ws/repo#3` is GitHub's.
+    const short = parseInboxThreadPullRef("acme-team/billing-svc#3");
+    expect("key" in short && short.key).toBe("github.com/acme-team/billing-svc#3");
+    for (const text of ["https://bitbucket.org/acme-team/billing-svc/issues/3", "https://bitbucket.org.evil.example/a/b/pull-requests/3", "https://bitbucket.example.com/a/b/pull-requests/3"]) {
+      expect(parseInboxThreadPullRef(text)).toEqual({ error: inboxThreadPullRefError(text) });
+    }
   });
 
   test("a stored PR is written back as an agent writes it", () => {
@@ -87,6 +104,16 @@ describe("stacks, related and the headline", () => {
     expect(groups).toEqual([
       { kind: "stack", pulls: [base.pull, middle.pull, top.pull] },
       { kind: "related", pulls: [other.pull, lone.pull] },
+    ]);
+  });
+
+  test("Bitbucket PRs stack like any other, apart from a GitHub repository of the same name", () => {
+    const base = pull("https://bitbucket.org/ws/app/pull-requests/1", "open", "main", "feat-a");
+    const top = pull("https://bitbucket.org/ws/app/pull-requests/2", "open", "feat-a", "feat-b");
+    const github = pull("ws/app#3", "open", "feat-a", "feat-c");
+    expect(inboxThreadPullGroups([top, github, base])).toEqual([
+      { kind: "stack", pulls: [base.pull, top.pull] },
+      { kind: "related", pulls: [github.pull] },
     ]);
   });
 

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import type { InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullWire } from '@plannotator/core/inbox-types';
 import { parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { loadRefCard } from '@plannotator/ui/utils/refCard';
 import { inboxApi } from '../api';
@@ -267,6 +268,12 @@ function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRe
   );
 }
 
+/** "GitHub and GitLab", "GitHub, GitLab, and Bitbucket": the forges in the order the specs list them. */
+function forgeNames(forges: readonly InboxThreadPullWire['platform'][]): string {
+  const names = (Object.keys(FORGE_SPECS) as InboxThreadPullWire['platform'][]).filter((p) => forges.includes(p)).map((p) => FORGE_SPECS[p].name);
+  return names.length > 2 ? `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}` : names.join(' and ');
+}
+
 /** Several PRs: each stack base first and joined, then the others (no heading) in the order they were added. */
 function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRemove?: (pull: InboxThreadPullWire) => void }) {
   const head = pullsHead(answer);
@@ -291,7 +298,7 @@ function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRem
           </ol>
         </section>
       ))}
-      {forges.size > 1 && <div className="ib-prpop-foot">GitHub and GitLab</div>}
+      {forges.size > 1 && <div className="ib-prpop-foot">{forgeNames([...forges])}</div>}
     </div>
   );
 }
