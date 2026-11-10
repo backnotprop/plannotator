@@ -1722,6 +1722,8 @@ CLAUDE_PLUGIN_REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_pl
 # | no-marketplace (the plannotator marketplace is gone; re-add it)
 claude_plugin_state="none"
 claude_plugin_version=""
+# The installed plugin's version before this run (for notify_claude_plugin_reload).
+claude_plugin_from_version=""
 
 # The registry value for plannotator@plannotator (a JSON array of per-scope
 # install records; an object in the older v1 file), or nothing.
@@ -1853,6 +1855,7 @@ find_claude_cli() {
 update_claude_plugin_if_installed() {
     _cp_record=$(claude_plugin_user_record)
     [ -n "$_cp_record" ] || return 0
+    claude_plugin_from_version=$(claude_plugin_field "$_cp_record" version)
     _cp_claude=$(find_claude_cli) || _cp_claude=""
     if [ -z "$_cp_claude" ]; then
         claude_plugin_state="manual"
@@ -3564,3 +3567,126 @@ fi
 
 # The full install completed: remember its command-line flags for auto-update.
 write_install_flags
+
+# When Claude Code sessions that are open right now cannot load the plugin by
+# themselves, tell the person the one thing to do, even when this ran in the
+# background (Update now in the Inbox, auto-update): one operating-system
+# notification, and the plugin-update page on plannotator.ai in the default
+# browser, which says what happened and shows the commands to copy. Two cases:
+# - updated, from a plugin older than 0.28.52, the first release whose mod
+#   reloads itself after an update (#2356, auto-reload): open sessions run that
+#   older mod, so /reload-plugins must be typed once in each (state=reload).
+# - manual / failed / no-marketplace, while the installed plugin is older than
+#   this release: the plugin could not be updated at all (state=manual).
+# The page URL carries only the case and the two versions:
+#   https://plannotator.ai/plugin-update?state=reload|manual[&from=X.Y.Z][&to=X.Y.Z]
+# Never on a fresh install, an opted-out or pinned plugin (skipped), or a
+# current one; never when no Claude Code session is open (no live pid among
+# Claude Code's sessions/<pid>.json); never in CI, over SSH, without a desktop
+# session or under the test sandbox (PLANNOTATOR_TEST_SANDBOX); once per run
+# (it runs once, here). Opt out of both with PLANNOTATOR_INSTALL_NOTIFY=0;
+# PLANNOTATOR_BROWSER is honored for the page as everywhere else (a "none"
+# value opens no page, a path is run with the URL). Uses only what the system
+# has (osascript and open on macOS, notify-send and xdg-open on Linux), each
+# time-bounded, and never fails the install. install.ps1 / install.cmd carry
+# the same rule.
+CLAUDE_PLUGIN_SELF_RELOAD_VERSION="0.28.52"
+CLAUDE_PLUGIN_UPDATE_PAGE="https://plannotator.ai/plugin-update"
+claude_code_session_open() {
+    _cs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
+    [ -d "$_cs_dir" ] || return 1
+    for _cs_file in "$_cs_dir"/*.json; do
+        [ -f "$_cs_file" ] || continue
+        _cs_pid=$(basename "$_cs_file" .json)
+        case "$_cs_pid" in ''|*[!0-9]*) continue ;; esac
+        kill -0 "$_cs_pid" 2>/dev/null && return 0
+    done
+    return 1
+}
+# A plain X.Y.Z (a leading v dropped), or nothing: only versions go in the URL.
+plain_version() {
+    _pv="${1#v}"
+    case "$_pv" in
+        ''|*[!0123456789.]*|.*|*.|*..*|*.*.*.*) return 0 ;;
+        *.*.*) printf '%s' "$_pv" ;;
+    esac
+}
+notify_claude_plugin_reload() {
+    case "${PLANNOTATOR_INSTALL_NOTIFY:-}" in
+        0|false|no|off|disabled|FALSE|NO|OFF|False|No|Off) return 0 ;;
+    esac
+    [ -z "${PLANNOTATOR_TEST_SANDBOX:-}" ] || return 0
+    [ -z "${CI:-}" ] || return 0
+    [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ] || return 0
+    _nt_from=$(plain_version "$claude_plugin_from_version")
+    [ -n "$_nt_from" ] || return 0
+    case "$claude_plugin_state" in
+        updated)
+            oc2_version_at_least "$_nt_from" "$CLAUDE_PLUGIN_SELF_RELOAD_VERSION" && return 0
+            _nt_state="reload"
+            _nt_to=$(plain_version "$claude_plugin_version")
+            [ -n "$_nt_to" ] || _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator updated its Claude Code plugin"
+            _nt_body="Type /reload-plugins in each open Claude Code session to load it."
+            ;;
+        manual|failed|no-marketplace)
+            oc2_version_at_least "$_nt_from" "$latest_tag" && return 0
+            _nt_state="manual"
+            _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator could not update its Claude Code plugin"
+            _nt_body="See Settings > Agents in the Plannotator Inbox for the two commands to run."
+            ;;
+        *) return 0 ;;
+    esac
+    claude_code_session_open || return 0
+    _nt_url="${CLAUDE_PLUGIN_UPDATE_PAGE}?state=${_nt_state}&from=${_nt_from}${_nt_to:+&to=${_nt_to}}"
+    _nt_browser="${PLANNOTATOR_BROWSER:-}"
+    _nt_browser_trim=$(printf '%s' "$_nt_browser" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    case "$_nt_browser_trim" in
+        none|false|0|off|no|true|1|:) _nt_page=0 ;;
+        *) _nt_page=1 ;;
+    esac
+    _nt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-notify.XXXXXX" 2>/dev/null) || return 0
+    case "$(uname -s)" in
+        Darwin)
+            if command -v osascript >/dev/null 2>&1; then
+                # The words go in as arguments, never into the script text.
+                run_with_time_limit 10 "$_nt_tmp/timed-out" osascript \
+                    -e 'on run argv' \
+                    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+                    -e 'end run' "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+            fi
+            if [ "$_nt_page" -eq 1 ]; then
+                case "$_nt_browser" in
+                    '') run_with_time_limit 10 "$_nt_tmp/timed-out" open "$_nt_url" >/dev/null 2>&1 || true ;;
+                    */*) run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                    *) run_with_time_limit 10 "$_nt_tmp/timed-out" open -a "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                esac
+            fi
+            ;;
+        Linux)
+            # A desktop session: a display (and, for the notification, a session bus).
+            if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+                if command -v notify-send >/dev/null 2>&1; then
+                    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+                        DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+                        export DBUS_SESSION_BUS_ADDRESS
+                    fi
+                    if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" notify-send -a Plannotator \
+                            "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+                    fi
+                fi
+                if [ "$_nt_page" -eq 1 ]; then
+                    _nt_opener="${_nt_browser:-xdg-open}"
+                    if command -v "$_nt_opener" >/dev/null 2>&1; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_opener" "$_nt_url" >/dev/null 2>&1 || true
+                    fi
+                fi
+            fi
+            ;;
+    esac
+    rm -rf "$_nt_tmp" 2>/dev/null || true
+    return 0
+}
+notify_claude_plugin_reload || true
