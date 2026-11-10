@@ -308,6 +308,7 @@ packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
 packages/ui/components/AnnotationToolbar.scrollOut.test.tsx
 packages/ui/hooks/useClickWord.test.tsx
 packages/ui/components/Viewer.clickAWord.test.tsx
+packages/inbox/clickAWord.test.tsx
 packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx

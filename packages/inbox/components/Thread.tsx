@@ -1067,6 +1067,7 @@ export function MessageBody({
       selectedAnnotationId={null}
       allowImages={false}
       mode="selection"
+      clickAWord={false}
       taterMode={false}
       maxWidth={null}
       stickyActions={false}
@@ -1123,6 +1124,9 @@ export function MessageBody({
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
+        // A click on a word of a message makes nothing (the owner, 2026-11-10): a thread is read and clicked
+        // through. Dragging over words still offers the comment; files and documents keep the click.
+        clickAWord={false}
         taterMode={false}
         maxWidth={null}
         stickyActions={false}
