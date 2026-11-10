@@ -1,27 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
+import type { InboxAgent } from '@plannotator/core/inbox-types';
 import { HostMark } from '../icons';
 import { keepAgentFace, useAgentFace } from './agentFaces';
+import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
-import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, setAgentFaceArt, showAgentFace, unmountAgentMark } from './motion';
+import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
 
-let artLoad: Promise<void> | null = null;
-let faceSources: FaceSources | null = null;
-/** Our faces' pictures (faceArt.ts), fetched once: on the first click, the first look at the picker, or for a face kept from before. */
-export function loadAgentFaceArt(): Promise<void> {
-  artLoad ??= import('./faceArt').then(
-    (mod) => {
-      faceSources = mod.AGENT_FACE_SRC;
-      setAgentFaceArt(mod.AGENT_FACE_ART);
-    },
-    (cause: unknown) => {
-      artLoad = null;
-      throw cause;
-    },
-  );
-  return artLoad;
-}
+export { loadAgentFaceArt } from './faceArtLoad';
 
 /**
  * An agent's animated mark (motion.ts), 24 px, with no tile: always alive, the same whatever the agent is doing, its
@@ -30,10 +17,11 @@ export function loadAgentFaceArt(): Promise<void> {
  * - a click shows the next face of the cycle (the agent, Glass, Yellow, Transparent, Face);
  * - the pointer resting on it, Enter or Space, or a long press on a touch screen opens the picker (FaceFan.tsx) with
  *   every face, the Glass colours among them.
- * The face is kept for that agent until changed (agentFaces.ts). A host with no rig shows its plain mark, moved as a
- * whole, and has the same faces.
+ * The face is kept for that agent until changed (agentFaces.ts), and every other icon of it shows it too. A host
+ * with no rig shows its plain mark, moved as a whole, and has the same faces. `agent`: the sessions it is (absent:
+ * only its id), so its threads' icons find the face.
  */
-export function AgentMark({ id, host, name }: { id: string; host: string | null; name: string }) {
+export function AgentMark({ id, host, name, agent }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'> }) {
   const ref = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [plain, setPlain] = useState<HTMLElement | null>(null);
@@ -71,7 +59,7 @@ export function AgentMark({ id, host, name }: { id: string; host: string | null;
 
   // The picker: opened by a rest of the pointer, a key or a long press; mounted from its first opening on.
   const [fan, setFan] = useState<{ open: boolean; by: FanOpenedBy } | null>(null);
-  const [sources, setSources] = useState<FaceSources | null>(faceSources);
+  const [sources, setSources] = useState<FaceSources | null>(agentFaceSources);
   const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   const pressed = useRef(false);
@@ -87,10 +75,10 @@ export function AgentMark({ id, host, name }: { id: string; host: string | null;
   const openFan = (by: FanOpenedBy) => {
     clearTimeout(dwell.current);
     setFan({ open: true, by });
-    if (faceSources) setSources(faceSources);
+    if (agentFaceSources()) setSources(agentFaceSources());
     else
       loadAgentFaceArt().then(
-        () => setSources(faceSources),
+        () => setSources(agentFaceSources()),
         () => {},
       );
   };
@@ -101,7 +89,7 @@ export function AgentMark({ id, host, name }: { id: string; host: string | null;
   };
   const choose = (next: AgentFace) => {
     clicked.current = true;
-    keepAgentFace(id, next);
+    keepAgentFace(agent ?? id, next);
     closeFan();
   };
   const endPress = () => {
@@ -119,7 +107,7 @@ export function AgentMark({ id, host, name }: { id: string; host: string | null;
     }
     clearTimeout(dwell.current);
     clicked.current = true;
-    keepAgentFace(id, nextAgentFace(face));
+    keepAgentFace(agent ?? id, nextAgentFace(face));
   };
   const rest = () => {
     clearTimeout(dwell.current);

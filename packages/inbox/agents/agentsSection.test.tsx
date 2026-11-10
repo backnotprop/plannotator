@@ -442,7 +442,7 @@ test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yello
     seen.push(mark('ses_s1').dataset.face!);
   }
   expect(seen).toEqual(['glass', 'yellow', 'transparent', 'totman', 'agent']);
-  expect(window.localStorage.getItem(faces.AGENT_FACES_KEY)).toBe('{}');
+  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces).toEqual({});
   expect(opened).toEqual([]);
 });
 

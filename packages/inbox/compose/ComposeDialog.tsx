@@ -1329,13 +1329,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             </>
           ) : target ? (
             <>
-              <HostMark host={target.host} />
+              <HostMark host={target.host} agent={target.session} />
               <b>{hostLabel(target.host)}</b>
               <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
             </>
           ) : endedNote ? (
             <>
-              <HostMark host={endedNote.host} />
+              <HostMark host={endedNote.host} agent={endedNote.session} />
               <s>{hostLabel(endedNote.host)}</s>
               {endedNote.project_name ? (
                 <SessionDetail name={endedNote.project_name} root={endedNote.project_root} suffix="ended" />
@@ -1371,6 +1371,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     <AgentPill
       buttonRef={toRef}
       host={start ? start.agent : target ? target.host : endedNote ? endedNote.host : undefined}
+      agent={start ? null : (target?.session ?? endedNote?.session ?? null)}
       // A new session: the agent's name alone; the line over the row says "New <agent> session in <folder>".
       label={start ? start.name : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
       detail={endedNote && !target && !start ? 'ended' : null}

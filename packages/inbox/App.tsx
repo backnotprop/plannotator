@@ -198,6 +198,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
+import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -1827,6 +1828,8 @@ function Inbox() {
   }, [noteLineAgain]);
 
   const refreshSettings = useCallback(async () => {
+    // The agent icons' faces ride with every settings read: on load, and after the stream was away.
+    void readAgentFaces();
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
@@ -2395,6 +2398,8 @@ function Inbox() {
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
+        // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
+        onAgentFaces: (data) => hearAgentFacesEvent(data),
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {

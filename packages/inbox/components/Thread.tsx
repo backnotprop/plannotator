@@ -6489,7 +6489,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {handedOff && (
           // The thread was handed to another session (approval "inbox-tag-handoff"): who has it now.
           <div className="ib-tmeta" data-thread-owner="">
-            <HostMark host={handedOff.to!.host} />
+            <HostMark host={handedOff.to!.host} agent={handedOff.to!.session} />
             <span>
               Now with <b>{handoffName(handedOff)}</b>
             </span>
@@ -6989,7 +6989,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
                     <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
-                      <HostMark host={ownerHost} />
+                      <HostMark host={ownerHost} agent={replySession} />
                       {delivered.wait ? <UndeliveredText wait={delivered.wait} name={ownerLineName} /> : <span className="ib-dl-text">{delivered.text}</span>}
                       {delivered.sendNow && (
                         <button type="button" className="ib-sendnow" data-send-now="" disabled={sendNowState?.id === last.id && sendNowState.busy} onClick={() => void sendNow()}>
@@ -6999,7 +6999,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     </li>
                     {tagLines.map(({ tag, name, line }) => (
                       <li key={tag.session} data-tag-line={tag.session} data-delivery={line.state}>
-                        <HostMark host={tag.host} />
+                        <HostMark host={tag.host} agent={tag.session} />
                         {line.wait ? <UndeliveredText wait={line.wait} name={name} /> : <span className="ib-dl-text">{line.text}</span>}
                         {line.sendNow && (
                           <button

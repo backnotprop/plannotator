@@ -120,7 +120,8 @@ test.skipIf(!hasDom)('a choice is kept for its agent and shown on its mark, and 
   await until(() => group() !== null, 'the picker');
   act(() => choice('glass-blue')!.click());
   await until(() => icon.getAttribute('aria-expanded') === 'false', 'the picker to close');
-  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_KEY)!)).toEqual({ ses_1: 'glass-blue' });
+  // Kept for a reload (the paint copy; the Inbox keeps it too: agentFacesEverywhere.test.tsx).
+  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces).toEqual({ ses_1: { face: 'glass-blue', sessions: [] } });
   await until(() => document.querySelector<HTMLElement>('[data-agent-mark="ses_1"]')!.dataset.face === 'glass-blue', 'the mark to show it');
   // Read back on a new draw (a reload's), and offered as the checked one.
   act(() => root!.unmount());

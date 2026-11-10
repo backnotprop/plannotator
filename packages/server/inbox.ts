@@ -233,6 +233,9 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
+import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
@@ -1145,6 +1148,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
+  /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
+  const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
+    for (const listener of agentFaceListeners) listener(wire);
+  });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
@@ -3507,6 +3515,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
+        // An agent icon's face was saved (any window's, a phone's too): every window draws it at once. Windows only.
+        const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
+        if (windowId) agentFaceListeners.add(onAgentFaces);
         // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId) reactionsListeners.add(onReactions);
@@ -3571,6 +3582,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
           sidebarListeners.delete(onSidebar);
+          agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
@@ -4019,6 +4031,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+    // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
+    onPoll: (session, continues) =>
+      agentFacesFile.link(session, () => [
+        ...continues,
+        ...launch
+          .agents()
+          .filter((agent) => agent.session === session)
+          .map((agent) => agent.launch_id),
+      ]),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -4312,6 +4333,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Agent icons' faces (packages/server/inbox-agent-faces.ts).
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -5704,6 +5727,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pinned artifacts and the Artifacts wall (approval "inbox-artifact-stars").
       const artifactPinned = await artifactPins.route(req, url);
       if (artifactPinned) return artifactPinned;
+      // Agent icons' faces: the face each agent shows in every window.
+      const faced = await agentFaces.route(req, url);
+      if (faced) return faced;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;

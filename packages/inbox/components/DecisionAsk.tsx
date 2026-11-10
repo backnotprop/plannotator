@@ -85,7 +85,7 @@ export function DecisionAsk() {
         <input aria-label="Ask about a decision" placeholder="Why did we drop DockView?" value={text} onChange={(event) => change(event.target.value)} />
         {agent ? (
           <button type="submit" className="ib-btn ib-sm" disabled={!question || busy} data-ask-go="">
-            <HostMark host={agent.host} />
+            <HostMark host={agent.host} agent={agent.session} />
             <span>Ask {agent.name}</span>
           </button>
         ) : sessions ? (

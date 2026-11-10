@@ -432,7 +432,7 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
             <li key={agent.session}>
               <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
                 <input type="checkbox" checked={!off.has(agent.session)} onChange={(event) => tick([agent.session], event.target.checked)} />
-                <HostMark host={agent.host} />
+                <HostMark host={agent.host} agent={agent.session} />
                 <span className="ib-tidy-nm">{agent.name}</span>
                 <em>{formatCount(agent.items.length)}</em>
               </label>
@@ -532,7 +532,7 @@ function RunPanel({ run }: { run: InboxTidyRun }) {
         {run.agents.map((agent) => (
           <li key={agent.session} className="ib-tidy-ag ib-tidy-run" data-tidy-run-agent={agent.session} data-state={agent.state}>
             <span />
-            <HostMark host={agent.host} />
+            <HostMark host={agent.host} agent={agent.session} />
             <span className="ib-tidy-nm">{agent.name}</span>
             <em>{runState(agent)}</em>
           </li>

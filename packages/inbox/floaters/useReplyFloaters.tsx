@@ -21,7 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
-import { AuthorMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { AuthorMark } from '../icons';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
