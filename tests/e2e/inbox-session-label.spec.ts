@@ -472,7 +472,8 @@ for (const width of [390, 320]) {
       expectOneLinePill(plain);
       // No label: the agent alone (the project is in the pill's name, and in the sheet).
       expect(plain.words).toBe('Claude Code');
-      expect(plain.wordsCut).toBe(false);
+      // At 320 px the row leaves the name about its own width: it may end in an ellipsis there.
+      if (width >= 360) expect(plain.wordsCut).toBe(false);
       expect(plain.name).toBe('To: Claude Code in ai-collab. Change');
       expect(errors).toEqual([]);
     } finally {

@@ -63,6 +63,8 @@
 }
 /* The home bar is under the keyboard. */
 :root[data-ib-keyboard] .ib-sheet { bottom: calc(100% - var(--ib-vvh, 100%) + 8px); }
+/* On its way in or out it takes no press: what it is leaving (Send, at the bottom) can be pressed at once. */
+.ib-sheet:not([data-shown]) { pointer-events: none; }
 .ib-sheet[data-shown] { transform: none; }
 .ib-sheet[data-dragging] { transition: none; }
 @media (prefers-reduced-motion: reduce) {
@@ -154,8 +156,9 @@
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic:not([data-state="live"])) { background: var(--ib-fill); }
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic)::after { content: ''; position: absolute; inset: -4px; border-radius: 999px; }
   .pn-inbox .ib-rrow[data-phone] :is(.ib-rclip, .ib-ricon, .ib-vmic):active { transform: scale(0.96); }
-  /* Send: the round arrow. The word stays as its name; while it sends, the spinner takes the arrow's place. */
-  .pn-inbox .ib-pfoot .ib-rrow[data-phone] .ib-rsend { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; margin: 0; border-radius: 999px; transition: background-color 120ms ease-out, opacity 120ms ease-out, transform 120ms ease-out; }
+  /* Send: the round arrow. The word stays as its name; while it sends, the spinner takes the arrow's place. No border
+     (it was the fill's own colour), so the 44 px press area is measured from the 36 px the eye sees. */
+  .pn-inbox .ib-pfoot .ib-rrow[data-phone] .ib-rsend { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; margin: 0; border: 0; border-radius: 999px; transition: background-color 120ms ease-out, opacity 120ms ease-out, transform 120ms ease-out; }
   .pn-inbox .ib-rrow[data-phone] .ib-rsend::after { content: ''; position: absolute; inset: -4px; border-radius: 999px; }
   .pn-inbox .ib-rrow[data-phone] .ib-rsend:active:not(:disabled) { transform: scale(0.96); }
   .pn-inbox .ib-rrow[data-phone] .ib-rsend .ib-rsend-w { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -193,7 +196,7 @@
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn, :root[data-ib-keyboard] .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { margin-left: -4px; }
   /* A Send that says more than "Send" keeps its words, so Skills gives its room to them. */
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-cp-send[data-send-words]) > [data-compose-skills] { display: none; }
-  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-cp-send { position: relative; flex: none; height: 36px; min-width: 36px; padding: 0 16px; margin-left: 0; gap: 6px; border-radius: 999px; font-weight: 600; justify-content: center; }
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-cp-send { position: relative; flex: none; height: 36px; min-width: 36px; padding: 0 16px; margin-left: 0; gap: 6px; border: 0; border-radius: 999px; font-weight: 600; justify-content: center; }
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-cp-send::after { content: ''; position: absolute; inset: -4px; border-radius: 999px; }
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-cp-send:not([data-send-words]) { width: 36px; padding: 0; }
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-cp-send:not([data-send-words]) .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

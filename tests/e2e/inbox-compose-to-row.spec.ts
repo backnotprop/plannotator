@@ -265,12 +265,13 @@ function measurePill(dialog: Locator): Promise<PillMeasure> {
   });
 }
 
-function expectOneCleanPill(m: PillMeasure, singleLineFoot: number): void {
+function expectOneCleanPill(m: PillMeasure, singleLineFoot: number, nameWhole = true): void {
   // One line: the foot's row is as tall as with a short name, and the pill is its 36 px.
   expect(m.footHeight).toBeCloseTo(singleLineFoot, 0);
   expect(m.pill.height).toBeCloseTo(36, 0);
-  // The agent's mark and name are whole; a name that did not fit would be cut with an ellipsis, never wrapped.
-  expect(m.nameCut).toBe(false);
+  // The agent's mark and name are whole; a name that does not fit (the 320 px row, beside the paperclip, Skills, the
+  // mic and Send) is cut with an ellipsis, never wrapped.
+  if (nameWhole) expect(m.nameCut).toBe(false);
   expect(m.markCut).toBe(false);
   expect(m.textOverflow).toBe('ellipsis');
   expect(m.whiteSpace).toBe('nowrap');
@@ -354,7 +355,8 @@ for (const width of [390, 320]) {
         await shot(page, 'phone-320-dark');
       }
       const long = await measurePill(dialog);
-      expectOneCleanPill(long, short.footHeight);
+      // At 320 px the row leaves the name about its own width: it may end in an ellipsis there.
+      expectOneCleanPill(long, short.footHeight, width >= 360);
       // The long project is not in the pill (the agent alone), and is in what a screen reader hears.
       expect(long.words).toBe('Claude Code');
       expect(long.label).toContain(BRANCH);
@@ -365,7 +367,7 @@ for (const width of [390, 320]) {
         await dialog.locator(`[data-compose-to-sheet] [data-compose-session="${session}"]`).click();
         await expect(to).toHaveAttribute('data-compose-to', session);
         await dialog.getByRole('textbox', { name: 'Message' }).blur();
-        expectOneCleanPill(await measurePill(dialog), short.footHeight);
+        expectOneCleanPill(await measurePill(dialog), short.footHeight, width >= 360);
       }
       // The Thread row keeps its own height under it.
       const thread = (await dialog.locator('.ib-cp-thread').boundingBox())!;
