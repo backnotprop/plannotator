@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { BUILT_IN_THEMES } from '@plannotator/ui/utils/themeRegistry';
 import { STAR_ASK_DISPLAY_FONT, STAR_ASK_FONT_FACES } from '@plannotator/ui/utils/starAskFonts';
@@ -119,9 +119,10 @@ function ThemeChooserDialog({ inUse, onPick, onOwn, onDismiss, art, geometry: g 
   const count = THEME_CHOOSER_CARDS.length;
 
   // The stage is as tall as the tallest card at rest plus the fan's drop; on a desktop it is scaled to fit the dialog.
-  const estimate = 14 * 2 + g.sheetH + g.peekY + 12 + 36 + (g.deck ? 52 + 24 : 40);
+  // Measured once the dialog is open (a closed dialog has no boxes; Modal opens it in its own effect, before this one).
+  const estimate = (g.deck ? 10 : 14) * 2 + 2 + g.sheetH + g.peekY + (g.deck ? 10 + 36 + 46 + 26 : 12 + 36 + 48);
   const [size, setSize] = useState({ stageH: estimate, k: 1 });
-  useLayoutEffect(() => {
+  useEffect(() => {
     const measure = () => {
       const tallest = Math.max(0, ...cards.current.map((card) => card?.offsetHeight ?? 0));
       if (tallest === 0) return;
