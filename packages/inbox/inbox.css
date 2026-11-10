@@ -8386,7 +8386,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rws-pre[data-on] { background: var(--ib-sn-bg-s, color-mix(in oklch, var(--primary) 14%, transparent)); color: var(--ib-sn-fg-s, var(--primary)); }
 .ib-rws-pre:has(.ib-rws-pre-n:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-rws-pic { display: block; height: 64px; overflow: hidden; border-radius: 6px; background: var(--card); pointer-events: none; }
-.ib-rws-pic-in { display: block; width: 200%; zoom: 0.5; }
+.ib-rws-pic-in { display: block; zoom: 0.5; }
 .pn-inbox .ib-rws-pre-n { display: block; padding: 6px 2px 1px; border: 0; background: none; color: inherit; text-align: left; font-size: var(--ib-fs-13, 13px); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .pn-inbox .ib-rws-pre-n:focus-visible { outline: none; }
 .ib-rws-pre-n::after { content: ''; position: absolute; inset: 0; border-radius: 10px; }
