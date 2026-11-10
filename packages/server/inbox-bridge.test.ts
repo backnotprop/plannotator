@@ -39,10 +39,10 @@ async function setup(): Promise<{ server: InboxServer; client: Client; project: 
   return { server, client, project, dataDir };
 }
 
-async function agentSends(client: Client, project: string, session: string, body: string): Promise<{ message_id: string; thread_id: string }> {
+async function agentSends(client: Client, project: string, session: string, body: string, replyTo?: string): Promise<{ message_id: string; thread_id: string }> {
   const result = await client.callTool({
     name: "send_message",
-    arguments: { body, project_path: project, agent_session: session, agent_host: "claude-code", agent_name: "Claude Code" },
+    arguments: { body, project_path: project, agent_session: session, agent_host: "claude-code", agent_name: "Claude Code", ...(replyTo ? { reply_to: replyTo } : {}) },
   });
   return result.structuredContent as { message_id: string; thread_id: string };
 }
@@ -139,8 +139,8 @@ describe("Inbox connection bridge", () => {
     expect(row.section).toBe("quiet");
     expect(row.sent?.checked_at).toBe(reply.delivery!.at);
 
-    // "Replied": the asking session's next message lands after the delivered reply.
-    await agentSends(client, project, "session-a", "Done: deployed to us-east-1.");
+    // "Replied": the asking session's answer lands after the delivered reply.
+    await agentSends(client, project, "session-a", "Done: deployed to us-east-1.", replyId);
     const replied = await thread(server, asked.thread_id);
     expect(replied.messages.at(-1)?.author).toMatchObject({ kind: "agent", session: "session-a" });
   });

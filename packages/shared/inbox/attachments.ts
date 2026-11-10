@@ -27,7 +27,7 @@
 
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import {
@@ -45,6 +45,7 @@ import {
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
 import { InboxError } from "./schema";
 import { readMp4VideoMetadata, sniffInboxVideo, type InboxVideoMetadata } from "./video";
+import { audioDurationMsFromHead, inboxAudioServedType, OGG_TAIL_BYTES, oggDurationMs, sniffInboxAudio } from "./audio";
 
 export const BLOBS_DIR = "blobs";
 
@@ -101,13 +102,16 @@ export interface InboxAttachmentKindDecision {
  * read from the bytes: an image by its magic bytes (the extension is
  * ignored, so an HTML page named `.svg` is not an image), a PDF by `%PDF-`,
  * a film by its container (`sniffInboxVideo`, after the image check so an
- * AVIF stays an image), UTF-8 text with no NUL as `code`, and anything else
- * as `file`. A text kind over INBOX_VIEW_MAX_BYTES is a `file` (a download),
- * since the window reads text whole: this is not a limit on what attaches.
+ * AVIF stays an image), a recording by its container (`sniffInboxAudio`,
+ * audio.ts), UTF-8 text with no NUL as `code`, and anything else as `file`.
+ * A text kind over INBOX_VIEW_MAX_BYTES is a `file` (a download), since the
+ * window reads text whole: this is not a limit on what attaches.
  *
  * `video` is what the header walk read from an MP4/MOV (readMp4VideoMetadata):
  * its length and frame size are recorded, and a file whose tracks hold no
- * video (audio named `.mp4`) stays a `file`.
+ * video (audio named `.mp4`) is a recording (`audio`, `audio/mp4`). A
+ * recording's length is the walk's (M4A), the tail's (Ogg) or its head's
+ * (WAV, FLAC, MP3).
  */
 export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText: boolean, size = 0, video?: InboxVideoMetadata | null): InboxAttachmentKindDecision {
   const byName = inboxAttachmentKind(name);
@@ -120,7 +124,8 @@ export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText
   }
   if (isPdfHead(head)) return { kind: "pdf", media_type: "application/pdf" };
   const film = sniffInboxVideo(head);
-  if (film && (!video || video.hasVideoTrack)) {
+  const sound = sniffInboxAudio(head);
+  if (film && !sound && (!video || video.hasVideoTrack)) {
     return {
       kind: "video",
       media_type: film,
@@ -128,14 +133,36 @@ export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText
       ...(film !== "video/webm" && video?.width && video.height ? { width: video.width, height: video.height } : {}),
     };
   }
+  // A recording; or an MP4/MOV whose tracks hold no video (audio named `.mp4`).
+  const recording = sound ?? (film === "video/mp4" || film === "video/quicktime" ? "audio/mp4" : null);
+  if (recording) {
+    const duration = video?.duration_ms ?? audioDurationMsFromHead(head, size, recording);
+    return { kind: "audio", media_type: recording, ...(duration ? { duration_ms: duration } : {}) };
+  }
   if (isText && fitsView) return { kind: "code" };
   return { kind: "file" };
 }
 
-/** An MP4/MOV's header read through a file handle (a few small reads; the film itself is never read). */
+/**
+ * An MP4/MOV's or M4A's header read through a file handle (a few small reads;
+ * the film itself is never read), and an Ogg recording's length from its last
+ * page (one read of the file's tail).
+ */
 export async function readInboxVideoMetadata(handle: FileHandle, size: number, head: Uint8Array): Promise<InboxVideoMetadata | null> {
   const film = sniffInboxVideo(head);
-  if (film !== "video/mp4" && film !== "video/quicktime") return null;
+  const sound = sniffInboxAudio(head);
+  if (sound === "audio/ogg") {
+    try {
+      const at = Math.max(0, size - OGG_TAIL_BYTES);
+      const tail = Buffer.alloc(size - at);
+      const { bytesRead } = await handle.read(tail, 0, tail.length, at);
+      const duration = oggDurationMs(head, tail.subarray(0, bytesRead));
+      return { hasVideoTrack: false, ...(duration ? { duration_ms: duration } : {}) };
+    } catch {
+      return null;
+    }
+  }
+  if (film !== "video/mp4" && film !== "video/quicktime" && sound !== "audio/mp4") return null;
   try {
     return await readMp4VideoMetadata(async (position, length) => {
       const buffer = Buffer.alloc(Math.max(0, Math.min(length, size - position)));
@@ -385,12 +412,11 @@ const changedType = (message: string): { ok: false; unavailable: InboxAttachment
 });
 
 /**
- * The one check before the current file is read, for every route that reads
- * it (the window's and, through it, the phone's door): the recorded realpath
- * still leads to itself, the named symlink still points there, it is a
- * regular file, and its name is not of the dotenv family. Exported for the
- * routes that hand the file to something other than a read: the new-tab
- * page and the "Open in" launcher (packages/server/inbox-open-in.ts).
+ * The one check before the current file is read: the recorded realpath still
+ * leads to itself, the named symlink still points there, it is a regular file,
+ * and its name is not of the dotenv family. The routes use `checkCurrentAsync`,
+ * the same check off the event loop; this synchronous form is its reference
+ * (attachments.test.ts holds the two to the same answers).
  */
 export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   let real: string;
@@ -415,10 +441,38 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   } catch {
     return missing(`${attachment.name} is no longer on disk.`);
   }
+  return checkedStat(attachment, stat);
+}
+
+/** The check's last part, on the file's own stat: a regular file, its name not of the dotenv family. */
+function checkedStat(attachment: InboxAttachment, stat: Stats): CurrentCheck {
   if (!stat.isFile()) return changedType(`${attachment.path} is no longer a regular file.`);
   const refusal = inboxAttachmentNameRefusal(attachment.path);
   if (refusal) return changedType(refusal);
   return { ok: true, stat };
+}
+
+/**
+ * `checkCurrent` off the event loop: the same three reads (the path's realpath, the named path's, the path's
+ * lstat), made at once, judged in the same order with the same answers. Every route that reads the file or hands
+ * it on (the listing, the reads and opens, the new-tab page, the launch check) uses it, so a thread with hundreds
+ * of files lists them without stopping the Inbox for each.
+ */
+export async function checkCurrentAsync(attachment: InboxAttachment): Promise<CurrentCheck> {
+  const settle = <T>(read: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => read.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));
+  const [real, target, stat] = await Promise.all([
+    settle(realpath(attachment.path)),
+    attachment.named_path ? settle(realpath(attachment.named_path)) : null,
+    settle(lstat(attachment.path)),
+  ]);
+  if (!real.ok) return missing(`${attachment.name} is no longer on disk.`);
+  if (real.value !== attachment.path) return changedType(`${attachment.path} now leads somewhere else (${real.value}).`);
+  if (attachment.named_path && target) {
+    if (!target.ok) return missing(`${attachment.named_path} is no longer on disk.`);
+    if (target.value !== attachment.path) return changedType(`${attachment.named_path} now points somewhere else (${target.value}).`);
+  }
+  if (!stat.ok) return missing(`${attachment.name} is no longer on disk.`);
+  return checkedStat(attachment, stat.value);
 }
 
 /**
@@ -436,10 +490,10 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
  * or a plain text format, so a swapped-in file still opens by that extension.
  */
 export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attachment: InboxAttachment): Promise<CurrentCheck> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const kind = readInboxAttachmentKind(attachment.kind);
-  if (kind !== "image" && kind !== "pdf" && kind !== "video") return check;
+  if (kind !== "image" && kind !== "pdf" && kind !== "video" && kind !== "audio") return check;
   const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current");
   if (!opened.ok) return { ok: false, unavailable: { code: opened.code, message: opened.message } };
   await opened.handle.close().catch(() => {});
@@ -519,6 +573,7 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
   if (kind === "image" && (isLfsPointer(head) || !sniffImageContentType(head))) return `${attachment.name} is no longer an image.`;
   if (kind === "pdf" && !isPdfHead(head)) return `${attachment.name} is no longer a PDF.`;
   if (kind === "video" && !sniffInboxVideo(head)) return `${attachment.name} is no longer a video.`;
+  if (kind === "audio" && !inboxAudioServedType(head)) return `${attachment.name} is no longer a recording.`;
   return null;
 }
 
@@ -528,7 +583,7 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
  * swap in between, a FIFO or a device is refused without being read.
  */
 async function openCurrent(attachment: InboxAttachment): Promise<{ ok: true; handle: FileHandle; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable }> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   let handle: FileHandle;
   try {
@@ -583,7 +638,7 @@ function primeCurrentInfo(attachment: InboxAttachment, stat: Stats, result: Curr
  * so a growing log is not re-read on every listing.
  */
 export async function inboxAttachmentCurrentInfo(attachment: InboxAttachment, options: { hash?: "always" | "small" } = {}): Promise<CurrentResult> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const key = cacheKey(attachment, check.stat);
   const cached = currentInfoCache.get(attachment.path);

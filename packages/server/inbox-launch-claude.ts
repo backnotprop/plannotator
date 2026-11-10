@@ -28,7 +28,7 @@
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -48,6 +48,7 @@ import {
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
+import { claudeRulePathOf, claudeWindowsTrustKeys, powerShellInFolder, powerShellQuote } from "./inbox-launch-windows";
 import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget } from "./inbox-launch-host";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
@@ -58,6 +59,37 @@ const CLAUDE_FILES_ENV = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CUSTOM_OAUTH_URL"] a
 
 const START_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 15_000;
+/** How long a signed-in (or unreadable) `claude auth status` answer is kept. */
+export const CLAUDE_AUTH_TTL_MS = 30_000;
+/** A signed-out one, briefly: compose's reads don't run the CLI each time, and signing in shows within seconds. */
+export const CLAUDE_AUTH_SIGNED_OUT_TTL_MS = 5_000;
+/**
+ * Ways a launched session signs in that `claude auth status`, run with the Inbox's env, may not see: a token or an
+ * API key exported in the login shell, or a cloud provider. With one set, a signed-out answer is not believed.
+ */
+export const CLAUDE_OTHER_SIGN_IN_ENV = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"] as const;
+
+/**
+ * What `claude auth status` says: `signed_out` only when it says so plainly (JSON `loggedIn: false`, or the words "not
+ * logged in" or "not signed in"). Anything else, a timeout, a CLI that has no such command, or output it can't read,
+ * is `unknown`, which never stops a start: a check that can't read the answer must not take launch away.
+ */
+export function claudeAuthState(result: AgentRunResult): "signed_in" | "signed_out" | "unknown" {
+  if (result.timedOut || result.exitCode === 127) return "unknown";
+  const out = result.stdout.trim();
+  // Words, as an older or newer CLI may print: signed out only with a failing exit, signed in only with exit 0.
+  try {
+    const parsed = JSON.parse(out) as unknown;
+    if (parsed && typeof parsed === "object" && typeof (parsed as { loggedIn?: unknown }).loggedIn === "boolean") {
+      return (parsed as { loggedIn: boolean }).loggedIn ? "signed_in" : "signed_out";
+    }
+  } catch {
+    // Not JSON.
+  }
+  if (result.exitCode !== 0 && /\bnot (logged|signed) in\b/i.test(out)) return "signed_out";
+  if (result.exitCode === 0 && !/\bnot (logged|signed) in\b/i.test(out) && /\b(logged|signed) in\b/i.test(out)) return "signed_in";
+  return "unknown";
+}
 
 /** The short id and name `claude --bg` printed, or null. */
 export function parseBackgrounded(stdout: string): { short: string; name: string } | null {
@@ -143,8 +175,9 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The command that opens the session in a terminal (the ⋯ menu's Copy attach command). */
-export function claudeAttachCommand(folder: string, short: string): string {
+/** The command that opens the session in a terminal (the ⋯ menu's Copy attach command): PowerShell's on Windows. */
+export function claudeAttachCommand(folder: string, short: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return powerShellInFolder(folder, `claude attach ${powerShellQuote(short)}`);
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
 }
 
@@ -190,13 +223,19 @@ function trustTableOf(path: string): TrustTable | null {
 export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
   const table = trustTableOf(claudeGlobalConfigPath(e));
   if (!table) return false;
-  if (table[claudeTrustKey(folder)]?.hasTrustDialogAccepted === true) return true;
+  if (trustedIn(table, claudeTrustKey(folder))) return true;
   for (let dir = placeKey(folder); ; dir = dirname(dir)) {
-    if (table[dir.normalize("NFC")]?.hasTrustDialogAccepted === true) return true;
+    if (trustedIn(table, dir.normalize("NFC"))) return true;
     // A repository's root: only its own entry counts.
     if (existsSync(join(dir, ".git"))) return false;
     if (dirname(dir) === dir) return false;
   }
+}
+
+/** Whether `key` is trusted in Claude's table: on Windows under any form Claude has written it (`claudeWindowsTrustKeys`). */
+function trustedIn(table: TrustTable, key: string, platform: NodeJS.Platform = process.platform): boolean {
+  const keys = platform === "win32" ? claudeWindowsTrustKeys(key) : [key];
+  return keys.some((each) => table[each]?.hasTrustDialogAccepted === true);
 }
 
 /**
@@ -263,7 +302,8 @@ export function claudePurgeRefusal(folder: string, plan: string | null): string 
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
-export function claudeTrustCommand(folder: string): string {
+export function claudeTrustCommand(folder: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return powerShellInFolder(folder, "claude");
   return `cd ${shellQuote(folder)} && claude`;
 }
 
@@ -313,7 +353,9 @@ export function createClaudeHost(options: {
       environment: AgentEnvironment;
     }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
       // A name that starts with "-" would read as a flag.
-      const name = input.name.replace(/^-+/, "").trim() || "Inbox";
+      // Windows: a `claude.cmd` starts through cmd.exe, which can't carry `"`, `%`, `!`, `^` or a line break.
+      const plain = process.platform === "win32" ? input.name.replace(/["%!^\u0000-\u001f\u007f]/g, "") : input.name;
+      const name = plain.replace(/^-+/, "").trim() || "Inbox";
       const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
       let { result, missing } = await run([...base, ...(input.mode ? ["--permission-mode", input.mode] : [])], input.folder, START_TIMEOUT_MS, input.environment);
       let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
@@ -376,8 +418,12 @@ export type ClaudeHost = ReturnType<typeof createClaudeHost>;
 const CLAUDE = "claude-code" as const;
 /** The agent's own Inbox call never prompts, whatever the person's permission mode. */
 const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
-/** Read of everything under a folder, whatever folder the session runs in: `//` makes a rule's path absolute (a single `/` means the project's root). */
-export const claudeReadRule = (folder: string) => `Read(/${folder}/**)`;
+/**
+ * Read of everything under a folder, whatever folder the session runs in: `//` makes a rule's path absolute (a single
+ * `/` means the project's root). Windows: Claude matches rules in POSIX form, the drive first (`//c/Users/me/**`).
+ */
+export const claudeReadRule = (folder: string, platform: NodeJS.Platform = process.platform) =>
+  `Read(/${platform === "win32" ? claudeRulePathOf(folder) : folder}/**)`;
 
 const resultOf = (result: AgentRunResult): LaunchHostResult => ({ exitCode: result.exitCode, text: `${result.stdout}${result.stderr}` });
 
@@ -446,23 +492,57 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return path;
   };
 
+  // `claude auth status`: kept CLAUDE_AUTH_TTL_MS (signed out, CLAUDE_AUTH_SIGNED_OUT_TTL_MS), and one check at a time,
+  // shared, since a Send and every compose read ask availability.
+  let auth: { key: string; at: number; state: ReturnType<typeof claudeAuthState> } | null = null;
+  let checking: { key: string; answer: Promise<ReturnType<typeof claudeAuthState>> } | null = null;
+  const authState = (files: AgentEnvironment, path: string, configDir: string | null): Promise<ReturnType<typeof claudeAuthState>> => {
+    const key = JSON.stringify([path, configDir]);
+    const kept = auth && auth.key === key ? auth : null;
+    if (kept && Date.now() - kept.at < (kept.state === "signed_out" ? CLAUDE_AUTH_SIGNED_OUT_TTL_MS : CLAUDE_AUTH_TTL_MS)) return Promise.resolve(kept.state);
+    if (checking?.key === key) return checking.answer;
+    const answer = files
+      .run([path, "auth", "status"], { timeoutMs: 10_000 })
+      .then(claudeAuthState, () => "unknown" as const)
+      .then((state) => {
+        auth = { key, at: Date.now(), state };
+        return state;
+      })
+      .finally(() => {
+        if (checking?.answer === answer) checking = null;
+      });
+    checking = { key, answer };
+    return answer;
+  };
+  /** The launched session may sign in another way the check can't see (the login shell's token or key, a cloud provider). */
+  const signsInOtherwise = (e: AgentEnvironment) => {
+    const shell = ctx.shell();
+    return CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name]);
+  };
+
   return {
     agent: CLAUDE,
     name: CLAUDE_NAME,
     // Of a login-shell read: where the person's Claude files are, and the skip-permissions export.
     shellNames: [...CLAUDE_FILES_ENV, CLAUDE_SKIP_PERMISSIONS_ENV],
+    // Whether the login shell signs Claude Code in some other way: set or not, never the value.
+    shellFlags: CLAUDE_OTHER_SIGN_IN_ENV,
 
     /** `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on. */
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("claude");
-      if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local" };
+      if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local", code: "missing" };
       const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}` };
+      if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}`, code: "too_old" };
       // In the Claude folder a launched session will use: CLAUDE_CONFIG_DIR may be set only in the person's shell.
       const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR;
       const files = configDir ? createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, CLAUDE_CONFIG_DIR: configDir } }) : e;
-      if (!claudeCodePluginEnabled(files) || !claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
+      if (!claudeCodePluginEnabled(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
+      if (!claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "tool_off" };
+      // Signed in, as a launched session will be (its Claude folder). Over SSH macOS keeps the login locked, so this
+      // reads as signed out; the launch block says the Inbox was started over SSH.
+      if ((await authState(files, path, configDir ?? null)) === "signed_out" && !signsInOtherwise(files)) return { ok: false, missing: false, reason: "Claude Code isn't signed in", code: "signed_out" };
       return { ok: true, version };
     },
 
@@ -480,7 +560,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const folder = trustFolderOf(target);
       const key = claudeTrustKey(folder);
       const home = placeKey(ctx.homeDir).normalize("NFC");
-      if (key === home || home.startsWith(`${key}/`) || dirname(key) === key) return null;
+      if (key === home || home.startsWith(`${key}${sep}`) || dirname(key) === key) return null;
       return {
         folder: key,
         // Where Claude starts, its repository's root, the folder trusted and the key: Claude reads a worktree's local

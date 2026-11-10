@@ -246,6 +246,44 @@ describe('shortcuts', () => {
     expect(matchesShortcutBinding(wrongEvent, 'Mod+Enter')).toBe(false);
   });
 
+  it('matches a letter by its physical key only in a scope that opts in (lettersByCode)', () => {
+    // Russian layout: the E key types у. Off by default, so plan review and code review match as before.
+    const cyrillicE = { key: 'у', code: 'KeyE', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
+    const plain = defineShortcutScope({ id: 'plain', title: 'Plain', shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
+    const optedIn = defineShortcutScope({ id: 'opted', title: 'Opted', lettersByCode: true, shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
+    const calls: string[] = [];
+    expect(dispatchShortcutEvent(plain, { act: () => calls.push('plain') }, cyrillicE)).toBe(false);
+    expect(dispatchShortcutEvent(optedIn, { act: () => calls.push('opted') }, cyrillicE)).toBe(true);
+    expect(calls).toEqual(['opted']);
+    // A Latin character on another key is that character, opted in or not (AZERTY's A on KeyQ is never Q).
+    const azertyA = { ...cyrillicE, key: 'a', code: 'KeyQ' } as KeyboardEvent;
+    expect(matchesShortcutBinding(azertyA, 'Q', { lettersByCode: true })).toBe(false);
+    expect(matchesShortcutBinding(azertyA, 'A', { lettersByCode: true })).toBe(true);
+  });
+
+  it('lettersByCode never turns punctuation, a dead key or an unidentified key into a letter', () => {
+    const on = { lettersByCode: true };
+    const key = (k: string, code: string, shiftKey = false) => ({ key: k, code, ctrlKey: false, metaKey: false, shiftKey, altKey: false }) as KeyboardEvent;
+    // US Dvorak: `.` on KeyE, `>` (Shift) on KeyE, `;` on KeyZ, `'` on KeyQ.
+    expect(matchesShortcutBinding(key('.', 'KeyE'), 'E', on)).toBe(false);
+    expect(matchesShortcutBinding(key('>', 'KeyE', true), 'Shift+E', on)).toBe(false);
+    expect(matchesShortcutBinding(key(';', 'KeyZ'), 'Z', on)).toBe(false);
+    expect(matchesShortcutBinding(key("'", 'KeyQ'), 'Q', on)).toBe(false);
+    // Hebrew: `/` on KeyQ stays `/` only.
+    expect(matchesShortcutBinding(key('/', 'KeyQ'), 'Q', on)).toBe(false);
+    expect(matchesShortcutBinding(key('/', 'KeyQ'), '/', on)).toBe(true);
+    // AZERTY `,` on KeyM; Colemak `;` on KeyP.
+    expect(matchesShortcutBinding(key(',', 'KeyM'), 'M', on)).toBe(false);
+    expect(matchesShortcutBinding(key(';', 'KeyP'), 'P', on)).toBe(false);
+    // Dead and unidentified keys.
+    expect(matchesShortcutBinding(key('Dead', 'KeyE'), 'E', on)).toBe(false);
+    expect(matchesShortcutBinding(key('Unidentified', 'KeyE'), 'E', on)).toBe(false);
+    // A non-Latin letter still falls back (Hebrew ק on KeyE), and Dvorak's real letters match by character.
+    expect(matchesShortcutBinding(key('ק', 'KeyE'), 'E', on)).toBe(true);
+    expect(matchesShortcutBinding(key('e', 'KeyD'), 'E', on)).toBe(true);
+    expect(matchesShortcutBinding(key('e', 'KeyD'), 'D', on)).toBe(false);
+  });
+
   it('dispatches matching registry actions', () => {
     const calls: string[] = [];
     const event = { key: 'Enter', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;

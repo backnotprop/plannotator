@@ -62,11 +62,26 @@ jobs:
   test:
     if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
+    # actions: read lists the Test runs on main for the reuse check below.
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # The reuse check walks the tag's history to main's passed Test runs.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
           persist-credentials: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -79,15 +94,37 @@ jobs:
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
 
+      # A release tag is the version bump on top of a main commit that the Test
+      # workflow already passed in full. When the nearest such commit in the
+      # tag's history differs from the tag only in the bump files (the version
+      # fields and the Feedback search index), the 40-minute `bun test` below
+      # is skipped and the reused run is linked in the log and the summary.
+      # Anything else, or any failure here, runs the full tests
+      # (scripts/release-test-reuse.ts).
+      - name: Reuse main's Test run for a version-only tag?
+        id: reuse
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/release-test-reuse.ts
+
       - name: Type check
         run: bun run typecheck
 
       # On a PR the Test workflow runs this same sweep (split into lanes), so
       # the dry run skips its own copy and goes straight to the build. Tags and
-      # manual runs still test here before building.
+      # manual runs still test here before building, unless the step above
+      # reused main's passed Test run.
       - name: Run tests
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.reuse.outputs.reuse != 'true'
         run: bun test
+
+      # The one bump file with more than a version in it: its test reads the
+      # shipped index.
+      - name: Test the Feedback search index (reused run)
+        if: github.event_name != 'pull_request' && steps.reuse.outputs.reuse == 'true' && steps.reuse.outputs.index-changed == 'true'
+        run: bun test packages/inbox/feedbackSearch.test.ts
 
   build:
     needs: test
@@ -109,6 +146,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -271,6 +317,15 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       # Only for the embedded-file probe in "Embedded pages" below, compiled on
       # this runner with the Bun the release binaries are built with.
@@ -947,6 +1002,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -1032,11 +1096,14 @@ jobs:
             esac
           done
 
+          # Like real curl, the .sha256 goes to the -o file when one is given
+          # (install.sh downloads it to a file since #2788).
           if [[ "$url" == *.sha256 ]]; then
+            dest="${out:-/dev/stdout}"
             if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$ARTIFACT"
+              sha256sum "$ARTIFACT" > "$dest"
             else
-              shasum -a 256 "$ARTIFACT"
+              shasum -a 256 "$ARTIFACT" > "$dest"
             fi
             exit 0
           fi
@@ -1220,6 +1287,7 @@ jobs:
             npm-packages/plannotator-opencode.tgz
             npm-packages/plannotator-pi-extension.tgz
             npm-packages/plannotator-dsh.tgz
+            npm-packages/plannotator-cline.tgz
           sbom-path: release-sbom/${{ needs.release-security.outputs.sbom-name }}
 
   # The binaries and the npm packages pin the guides.show viewer their own job
@@ -1259,15 +1327,23 @@ jobs:
             echo "the build and npm-package jobs pinned different viewers: $BUILD_JS $BUILD_CSS vs $PACKAGE_JS $PACKAGE_CSS" >&2
             exit 1
           fi
+          # One wait of about 35 minutes for both files, every 30 s, ending as
+          # soon as they answer. A tag that reuses main's Test run gets here
+          # about 10 minutes after the tag, and guides-show-deploy.yml can sit
+          # in the runner queue longer than that before its ~6-minute deploy.
+          deadline=$(( $(date +%s) + 35 * 60 ))
           for f in "$BUILD_JS" "$BUILD_CSS"; do
             if ! printf '%s\n' "$f" | grep -Eq '^viewer\.[A-Za-z0-9_-]+\.(js|css)$'; then
               echo "not a viewer entry file: $f" >&2
               exit 1
             fi
             code=000
-            for attempt in $(seq 1 10); do
+            attempt=0
+            while :; do
+              attempt=$((attempt + 1))
               code=$(curl -sS --max-time 20 -o /dev/null -I -w '%{http_code}' "https://guides.show/v1/$f" || true)
               [ "$code" = 200 ] && break
+              [ "$(date +%s)" -ge "$deadline" ] && break
               echo "attempt $attempt: https://guides.show/v1/$f answered $code; retrying in 30 s"
               sleep 30
             done
@@ -1341,6 +1417,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -1375,6 +1460,7 @@ jobs:
           bun run build:opencode
           bun run --cwd apps/pi-extension build
           bun run build:dsh
+          bun run build:cline
 
       # The daily ping counts only a build release CI marks (packages/shared/daily-ping.ts):
       # a local `bun run build:opencode` or Pi `bun pm pack` has no mark and is a dev build. The binaries get
@@ -1401,6 +1487,10 @@ jobs:
         working-directory: apps/dsh-plugin
         run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-dsh.tgz"
 
+      - name: Pack @plannotator/cline
+        working-directory: apps/cline-plugin
+        run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-cline.tgz"
+
       - name: Upload npm package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1426,6 +1516,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # setup-bun downloads Bun without a token, and with no cache here it would
+      # do so on every run: install it first from an authenticated, checksummed
+      # download, which setup-bun then finds in place.
+      - name: Install Bun 1.4.4 (authenticated download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -1455,6 +1554,7 @@ jobs:
 
       - name: Generate SBOM and enforce Grype policy
         env:
+          GH_TOKEN: ${{ github.token }}
           PLANNOTATOR_RELEASE_SUBJECTS_DIR: ${{ github.workspace }}/release-subjects
           PLANNOTATOR_RELEASE_SECURITY_DIR: ${{ runner.temp }}/plannotator-release-security
         run: scripts/release-security/run-release-security.sh
@@ -1536,6 +1636,10 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-dsh.tgz --ignore-scripts --provenance --access public
+
+      - name: Publish @plannotator/cline
+        timeout-minutes: 10
+        run: npm publish ./npm-packages/plannotator-cline.tgz --ignore-scripts --provenance --access public
 
   # The merge script merges a PR only when every `Full CI (all green)` check on
   # its head succeeded. A skipped job counts as passed elsewhere, so this job

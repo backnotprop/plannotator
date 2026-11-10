@@ -34,8 +34,10 @@
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { cutText } from "@plannotator/core/inbox-questions";
+import { killWindowsProcessTree, planAgentJobSpawn } from "@plannotator/ai/providers/command-path";
+import { envPathOf, foldEnvPath } from "./env-path";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
@@ -118,14 +120,39 @@ export function createAgentEnvironmentFor(input: {
   homeDir: string;
   env: Readonly<Record<string, string | undefined>>;
 }): AgentEnvironment {
-  const { env } = input;
+  const { env, platform } = input;
+  // Windows names PATH in any case (`Path`): the lookup reads it by any spelling.
+  const which = (command: string) => Bun.which(command, { PATH: envPathOf(env, platform) ?? "" });
   return {
-    platform: input.platform,
+    platform,
     homeDir: input.homeDir,
     env,
-    which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd, options.killGroup ?? true),
+    which,
+    run: (argv, options) => {
+      const runEnv = options.env ? foldEnvPath({ ...env, ...options.env }, platform) : env;
+      const shim = windowsShimOf(argv, platform, which);
+      if (shim && "refused" in shim) return Promise.resolve({ exitCode: 127, timedOut: false, stdout: "", stderr: shim.refused });
+      return spawnRun(shim ? shim.argv : argv, runEnv, options.timeoutMs, options.signal, options.cwd, false, options.killGroup ?? true, shim !== null);
+    },
   };
+}
+
+/**
+ * A Windows `.cmd`/`.bat` CLI (npm's `claude.cmd`): the cmd.exe argv the agent jobs use (`planAgentJobSpawn`, #2372),
+ * since a script can't be spawned without a shell. Null for an `.exe`, any other platform, or a program not found.
+ * Arguments cmd.exe would misread are refused, never passed.
+ */
+export function windowsShimOf(
+  argv: readonly string[],
+  platform: NodeJS.Platform,
+  which: (command: string) => string | null,
+  exists?: (path: string) => boolean,
+): { argv: string[] } | { refused: string } | null {
+  if (platform !== "win32" || !argv[0]) return null;
+  const find = (name: string) => (win32.isAbsolute(name) && (exists ?? existsSync)(name) ? name : which(name));
+  const plan = planAgentJobSpawn([...argv], { which: find, platform, ...(exists ? { exists } : {}) });
+  if (plan.unsafeScript) return { refused: plan.unsafeScript };
+  return plan.verbatim ? { argv: plan.command } : null;
 }
 
 /**
@@ -178,6 +205,15 @@ export function runUntilExit(argv: readonly string[], env: Readonly<Record<strin
   return spawnRun(argv, env, hardLimitMs, undefined, undefined, true);
 }
 
+/**
+ * `runUntilExit` with no limit at all: never killed, however long it takes,
+ * and left to finish if this process stops. For a run that writes a login
+ * (`cswap switch`), where a kill at any moment could land mid-write.
+ */
+export function runToExit(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): Promise<AgentRunResult> {
+  return spawnRun(argv, env, Number.POSITIVE_INFINITY, undefined, undefined, true);
+}
+
 function spawnRun(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
@@ -186,6 +222,8 @@ function spawnRun(
   cwd: string | undefined,
   outlivesThisProcess: boolean,
   killGroup = true,
+  /** Windows: `argv` is a cmd.exe line already quoted (`windowsShimOf`); a kill ends its tree when `killGroup`. */
+  viaCmd = false,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -200,6 +238,7 @@ function spawnRun(
         ...(cwd ? { cwd } : {}),
         detached: process.platform !== "win32",
         windowsHide: true,
+        ...(viaCmd ? { windowsVerbatimArguments: true } : {}),
       });
     } catch (error) {
       done({ exitCode: 127, timedOut: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) });
@@ -218,7 +257,8 @@ function spawnRun(
       if (exited) return;
       try {
         if (killGroup && process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
+        // Through cmd.exe the CLI is cmd.exe's child: its tree ends, not cmd.exe alone.
+        else if (!(viaCmd && killGroup && killWindowsProcessTree(child.pid))) child.kill("SIGKILL");
       } catch {
         try {
           child.kill("SIGKILL");
@@ -241,10 +281,11 @@ function spawnRun(
       child.stderr?.destroy();
       done(result);
     };
-    const timer = setTimeout(stopRun, timeoutMs);
+    // No limit (`runToExit`): no timer, since setTimeout would take Infinity as 1 ms.
+    const timer = Number.isFinite(timeoutMs) ? setTimeout(stopRun, timeoutMs) : undefined;
     if (outlivesThisProcess) {
       // Not in liveRuns, and nothing here keeps this process up for it.
-      timer.unref?.();
+      timer?.unref?.();
       child.unref();
       (child.stdout as { unref?: () => void } | null)?.unref?.();
     } else {
@@ -689,6 +730,73 @@ export function dshPluginInstalled(e: AgentEnvironment): boolean {
   });
 }
 
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+export const CLINE_PLUGIN_PACKAGE = "@plannotator/cline";
+
+/** Cline's home: `$CLINE_DIR` when set, else `~/.cline` (Cline's own rule; a blank value counts as unset). */
+export function clineDir(e: AgentEnvironment): string {
+  return envDir(e, "CLINE_DIR") ?? join(e.homeDir, ".cline");
+}
+
+/** Whether a package.json (by path) names Plannotator's Cline plugin. */
+function namesClinePlugin(manifest: string): boolean {
+  const read = readAgentFile(manifest);
+  if (read.kind !== "file") return false;
+  try {
+    return (JSON.parse(read.text) as { name?: unknown }).name === CLINE_PLUGIN_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+function listDir(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+/** Whether one Cline plugins folder holds Plannotator's plugin (see clinePluginInstalled). */
+function clinePluginsFolderHasPlugin(plugins: string): boolean {
+  const installed = join(plugins, "_installed");
+  for (const kind of ["npm", "local"]) {
+    for (const id of listDir(join(installed, kind))) {
+      const root = join(installed, kind, id, "package");
+      if (namesClinePlugin(join(root, "node_modules", "@plannotator", "cline", "package.json")) || namesClinePlugin(join(root, "package.json"))) return true;
+    }
+  }
+  for (const entry of listDir(plugins)) {
+    if (entry === "_installed" || entry === "node_modules") continue;
+    const path = join(plugins, entry);
+    if (/\.(?:[cm]?js|ts)$/.test(entry)) {
+      // A plugin module copied in as a file: the built bundle names its package (it reads its own version by it).
+      const read = readAgentFile(path, 4 * 1024 * 1024);
+      if (read.kind === "file" && read.text.includes(`"${CLINE_PLUGIN_PACKAGE}"`)) return true;
+    } else if (namesClinePlugin(join(path, "package.json"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether Plannotator's Cline plugin (`@plannotator/cline`) is in a Cline
+ * plugins folder: the global one (`<cline>/plugins`) or the workspace one of
+ * the folder this runs in (`<cwd>/.cline/plugins`, `cline plugin install
+ * --cwd`). In each: as `cline plugin install` writes it,
+ * `_installed/npm/<id>/package/node_modules/@plannotator/cline` for
+ * `npm:@plannotator/cline` and `_installed/local/<id>/package` for a local
+ * folder; or copied in by hand, as a module file naming the package or a
+ * folder whose package.json does. Git, official and remote installs are not
+ * looked for. Read only: Plannotator never runs cline.
+ */
+export function clinePluginInstalled(e: AgentEnvironment, cwd: string = process.cwd()): boolean {
+  const global = join(clineDir(e), "plugins");
+  const workspace = resolve(cwd, ".cline", "plugins");
+  return clinePluginsFolderHasPlugin(global) || (workspace !== global && clinePluginsFolderHasPlugin(workspace));
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -1047,9 +1155,13 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   },
   {
     id: "cline",
-    detect: (e) => !!e.which("cline"),
-    // Cline CLI's `mcp add` and its config file are not verified (and a positional word can start a task), so a person adds it.
-    way: async () => ({ kind: "manual", why: "Cline's MCP command is not verified; add it in Cline's MCP settings" }),
+    detect: (e) => clinePluginInstalled(e) || !!e.which("cline"),
+    // With Plannotator's plugin: its tool, and the wake (apps/cline-plugin). Without it, Cline CLI's `mcp add` and its
+    // config file are not verified (and a positional word can start a task), so a person adds the plugin or the server.
+    way: async (e) =>
+      clinePluginInstalled(e)
+        ? { kind: "tool", host: "cline" }
+        : { kind: "manual", why: `add Plannotator's Cline plugin (cline plugin install npm:${CLINE_PLUGIN_PACKAGE}), or the server in Cline's MCP settings` },
     file: () => null,
     raw: () => null,
   },

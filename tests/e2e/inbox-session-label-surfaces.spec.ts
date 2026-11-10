@@ -1,7 +1,7 @@
 /**
  * Session labels everywhere else (issue #2450, after #2467's To picker), on the compiled binary. Nothing is mocked:
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (HOME is never set; every agent home is a temp
- * folder), sessions are the bridge's real long-polls carrying a `label` as the Claude Code mod sends it, and their
+ * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (HOME and every agent home are temp
+ * folders), sessions are the bridge's real long-polls carrying a `label` as the Claude Code mod sends it, and their
  * messages go through the Inbox's own MCP `send_message`. No real agent runs.
  *
  * Three named Claude Code sessions in one project, one unnamed, one that stops before it takes a message, and a named
@@ -173,7 +173,7 @@ async function openReply(page: Page, threadId: string) {
   const pane = page.locator('section.ib-pane');
   await expect(pane.locator('h2.ib-subject')).toBeVisible();
   const box = pane.getByRole('textbox', { name: /^Reply to/ });
-  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await reply.click({ timeout: 1_000 }).catch(() => {});
   }
@@ -209,8 +209,12 @@ test.beforeAll(async () => {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: '0.0.0-dev' },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
       inboxReveals: { lastShownAt: past },
@@ -218,6 +222,7 @@ test.beforeAll(async () => {
   );
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     NO_ANON_PING: '1',
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -263,9 +268,9 @@ test.beforeAll(async () => {
   const d1 = await send({ agent_session: S.docs, reply_to: r1.reply.id, body: 'Documented in docs/webhooks.md: 5 tries with backoff 2 s, 10 s, 60 s, 5 min, 30 min, then the dead-letter queue.' });
   await send({ agent_session: S.auth, reply_to: r1.reply.id, body: 'No. Token refresh writes to its own table and never goes through `ledger-writes`.' });
   await send({ agent_session: S.stripe, reply_to: d1.message_id, body: 'Thanks both. I turned on the dead-letter alert and linked the doc from the runbook.' });
-  // T2: the unnamed session's own thread.
+  // T2: a thread the unnamed session starts.
   const t2 = await send({ agent_session: S.plain, subject: 'Lint config cleanup', body: 'I removed the three unused ESLint plugins. `bun run lint` is clean.' });
-  // T4: the named Pi session's own thread, one message (its head is the open one, with no fold button).
+  // T4: a thread the named Pi session starts, one message (its head is the open one, with no fold button).
   const t4 = await send({ agent_host: 'pi', agent_name: 'Pi', agent_session: S.pi, subject: 'CSV export columns', body: 'The billing CSV export now writes `amount_cents` and `currency` as two columns. Old reports still parse.' });
   // T3: the person writes to a session that stops before it takes the message.
   const t3 = await post<{ thread_id: string }>('/api/inbox/messages', {

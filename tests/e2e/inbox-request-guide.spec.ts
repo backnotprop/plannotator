@@ -135,7 +135,7 @@ test('the item sits above Archive; a click puts the request in the thread, Queue
   await openThread(page, 'light');
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
-  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Request guided review', 'Archive thread']);
+  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
   await requestItem(page).hover();
   await shot(page, 'desktop-light-menu-open.png');
   await requestItem(page).click();

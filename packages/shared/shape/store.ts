@@ -35,6 +35,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { sniffImageContentType } from "../review-image";
 import { inboxProjectKey } from "../inbox/project-key";
 import {
   checkShapeBoard,
@@ -58,7 +60,11 @@ import {
 export const SHAPE_DRAWING_MAX_MS = 10 * 60 * 1000;
 /** An image a board cites, copied into the shape's files/. */
 export const SHAPE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+/** The pictures a board may copy in, by name; the bytes must then sniff as an image too. */
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".ico"]);
+const IMAGE_KINDS = "a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image";
+/** A web picture (`http:` or `https:`), named as written. */
+const WEB_PICTURE_RE = /^https?:\/\//i;
 const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30_000;
 const MESSAGE_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -97,7 +103,59 @@ export interface ShapeUpdateInput {
   session?: ShapeSession | null;
   /** The folder the board file is in: image references by relative path are read from here. */
   sourceDir?: string | null;
+  /**
+   * The web pictures the board names (`https://…/a.png`), already fetched
+   * (`fetchShapeWebPictures`, web-pictures.ts), by the address as written:
+   * copied in like a file. One that is not here is refused.
+   */
+  webPictures?: ReadonlyMap<string, ShapeWebPicture>;
 }
+
+/** A web picture `shape update` fetched: its bytes and the file name it is kept under (`logo.png`). */
+export interface ShapeWebPicture {
+  bytes: Uint8Array;
+  name: string;
+}
+
+/** A picture to copy into files/: from a file, or bytes already read (a web picture). */
+type ShapeImageFile = { path: string; name: string } | { bytes: Uint8Array; name: string };
+
+/**
+ * Where each picture a board names sits (`<img src>`, `<image href>` in a drawn
+ * view, its tall and its Show more; an image ref's target and every ref's
+ * `images`), with its field: what `shape update` copies in. As written.
+ */
+export function shapeBoardPictureSources(input: unknown): { src: string; field: string }[] {
+  const out: { src: string; field: string }[] = [];
+  const board = input as { views?: unknown; refs?: unknown } | null;
+  const views = board?.views;
+  if (views && typeof views === "object") {
+    for (const [name, view] of Object.entries(views)) {
+      if (!view || typeof view !== "object") continue;
+      const v = view as { html?: unknown; tall?: { html?: unknown }; more?: { html?: unknown } };
+      for (const [part, field] of [[v, `views.${name}.html`], [v.tall, `views.${name}.tall.html`], [v.more, `views.${name}.more.html`]] as const) {
+        if (typeof part?.html !== "string") continue;
+        for (const m of part.html.matchAll(new RegExp(DRAWN_PICTURE_RE.source, "gi"))) out.push({ src: (m[3] ?? m[4] ?? m[5])!, field });
+      }
+    }
+  }
+  if (Array.isArray(board?.refs)) {
+    board.refs.forEach((ref: unknown, i: number) => {
+      const r = ref as { kind?: unknown; target?: unknown; images?: unknown } | null;
+      if (r?.kind === "image" && typeof r.target === "string") out.push({ src: r.target, field: `refs[${i}].target` });
+      if (Array.isArray(r?.images)) {
+        r.images.forEach((im: unknown, j: number) => {
+          const src = (im as { src?: unknown } | null)?.src;
+          if (typeof src === "string") out.push({ src, field: `refs[${i}].images[${j}].src` });
+        });
+      }
+    });
+  }
+  return out;
+}
+
+/** An `<img>` or `<image>` start tag's picture: the tag up to it, its attribute, and its value (one of three quotings). Attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone. */
+const DRAWN_PICTURE_RE = /(<(?:img|image)\b(?:\s+(?!(?:xlink:href|src|href)\s*=)[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s+)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi;
 
 export type ShapeUpdateResult =
   | { ok: true; id: string; v: number; created: boolean; record: ShapeRecord }
@@ -117,6 +175,8 @@ export interface ShapeStore {
   /** One version (the latest when `n` is absent). */
   read(id: string, n?: number): ShapeVersion | null;
   versions(id: string): { n: number; at: string; note: string | null; base: number | null }[];
+  /** When each version was written and the review it took in, for naming the board a Show me made. */
+  versionStamps(id: string): { n: number; at: string; through: string | null }[];
   list(options?: { state?: ShapeState | "all" }): ShapeSummary[];
   /** The newest active shape of a session, else of a project root. For CLI calls that name no shape. */
   latestFor(options: { session?: ShapeSession | null; root?: string | null }): ShapeRecord | null;
@@ -139,6 +199,11 @@ export interface ShapeStore {
   markDelivered(id: string, noteIds: readonly string[]): ShapeNote[];
   /** A file under the shape's files/ folder, path-guarded; null when absent or outside. */
   filePath(id: string, name: string): string | null;
+  /**
+   * A Show me's box picture (a PNG `data:` URL), kept in the shape's files/ folder as a box note's picture is: the
+   * file's full path, or null (no such shape, or not a PNG data: URL).
+   */
+  keepShowMePicture(id: string, picture: string): string | null;
   /**
    * Someone holds the store's lock (or this shape's). A server awaits this
    * clearing before it writes, so the store's blocking wait never stalls its
@@ -322,7 +387,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   const drawingNow = (record: ShapeRecord) => !!record.drawing && Date.parse(record.drawing.until) > now();
 
   /** Where an image comes from and its name in files/. Null: it stays as written (a files/ name, a data:image) or an error was recorded. */
-  function imageFile(src: string, field: string, sourceDir: string | null | undefined, errors: string[]): { path: string; name: string } | null {
+  function imageFile(src: string, field: string, sourceDir: string | null | undefined, errors: string[], web?: ReadonlyMap<string, ShapeWebPicture>): ShapeImageFile | null {
     // files/… is a picture the board keeps, unless the board's own folder really has one by that name: that one is copied.
     const local = src.startsWith("files/") && sourceDir ? resolve(sourceDir, src) : null;
     if (src.startsWith("files/") && !(local && existsSync(local))) {
@@ -330,18 +395,37 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       return null;
     }
     if (/^data:image\/(?:png|jpeg|gif|webp)[;,]/i.test(src)) return null;
-    // A board loads nothing from outside: an image is a file on this computer, copied in.
-    if (/^[a-z][a-z0-9+.-]+:|^\/\/|^\\\\/i.test(src)) {
-      errors.push(`${field}: "${src.slice(0, 80)}" is a URL; an image must be a file on this computer (it is copied into the board)`);
+    // A web picture: fetched by `shape update` before the store sees it, and copied in like a file.
+    if (WEB_PICTURE_RE.test(src)) {
+      const picture = web?.get(src);
+      if (!picture) {
+        errors.push(`${field}: "${src.slice(0, 80)}" is a web picture that was not fetched; store the board with \`plannotator shape update\`, which copies it in`);
+        return null;
+      }
+      return { bytes: picture.bytes, name: `${createHash("sha256").update(picture.bytes).digest("hex").slice(0, 10)}-${picture.name.replace(/[^\w.-]+/g, "_")}` };
+    }
+    // A file: URL names a file on this computer by its absolute path.
+    let named = src;
+    if (/^file:/i.test(src)) {
+      try {
+        named = fileURLToPath(src);
+      } catch {
+        errors.push(`${field}: "${src.slice(0, 80)}" is not a file on this computer`);
+        return null;
+      }
+    }
+    // A board loads nothing from outside: a picture is a file on this computer or a web picture, copied in.
+    else if (/^[a-z][a-z0-9+.-]+:|^\/\/|^\\\\/i.test(src)) {
+      errors.push(`${field}: "${src.slice(0, 80)}" is a URL; a picture must be a file on this computer or an https:// address (it is copied into the board)`);
       return null;
     }
-    const path = isAbsolute(src) ? src : sourceDir ? resolve(sourceDir, src) : null;
+    const path = isAbsolute(named) ? named : sourceDir ? resolve(sourceDir, named) : null;
     if (!path) {
       errors.push(`${field}: a relative image path needs the board file's folder`);
       return null;
     }
     if (!IMAGE_EXT.has(extname(path).toLowerCase())) {
-      errors.push(`${field}: "${src}" is not a PNG, JPEG, GIF or WebP image`);
+      errors.push(`${field}: "${src}" is not ${IMAGE_KINDS}`);
       return null;
     }
     let size: number;
@@ -357,21 +441,29 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     }
     // A link named .png is what it points at.
     if (!IMAGE_EXT.has(extname(real).toLowerCase())) {
-      errors.push(`${field}: "${src}" is not a PNG, JPEG, GIF or WebP image`);
+      errors.push(`${field}: "${src}" is not ${IMAGE_KINDS}`);
       return null;
     }
     if (size > SHAPE_IMAGE_MAX_BYTES) {
       errors.push(`${field}: "${src}" is ${size} bytes; at most ${SHAPE_IMAGE_MAX_BYTES}`);
       return null;
     }
-    return { path, name: `${createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 10)}-${basename(path).replace(/[^\w.-]+/g, "_")}` };
+    const bytes = readFileSync(path);
+    // Its name says picture; its bytes must too (an SVG by its <svg> root).
+    if (!sniffImageContentType(bytes)) {
+      errors.push(`${field}: "${src}" is not ${IMAGE_KINDS}`);
+      return null;
+    }
+    return { path, name: `${createHash("sha256").update(bytes).digest("hex").slice(0, 10)}-${basename(path).replace(/[^\w.-]+/g, "_")}` };
   }
 
-  function copyImage(file: { path: string; name: string }, folder: string): void {
+  function copyImage(file: ShapeImageFile, folder: string): void {
     const files = join(folder, "files");
     ensureDir(files);
     const dest = join(files, file.name);
-    if (!existsSync(dest)) copyFileSync(file.path, dest);
+    if (existsSync(dest)) return;
+    if ("path" in file) copyFileSync(file.path, dest);
+    else writeFileSync(dest, file.bytes, { mode: 0o600 });
   }
 
   /**
@@ -379,20 +471,20 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
    * its files/ name before the board is checked; the file is copied once the
    * board's folder is known. A URL stays as written, for the check to refuse.
    */
-  function drawnImages(input: unknown, sourceDir: string | null | undefined): { board: unknown; files: { path: string; name: string }[]; errors: string[] } {
+  function drawnImages(input: unknown, sourceDir: string | null | undefined, web?: ReadonlyMap<string, ShapeWebPicture>): { board: unknown; files: ShapeImageFile[]; errors: string[] } {
     const errors: string[] = [];
-    const files: { path: string; name: string }[] = [];
+    const files: ShapeImageFile[] = [];
     const views = (input as { views?: unknown } | null)?.views;
     if (!views || typeof views !== "object") return { board: input, files, errors };
     const inHtml = (html: unknown, field: string): unknown =>
       typeof html !== "string"
         ? html
-        // Attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone.
-        : html.replace(/(<(?:img|image)\b(?:\s+(?!(?:xlink:href|src|href)\s*=)[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s+)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi, (all, head: string, attr: string, q2?: string, q1?: string, bare?: string) => {
+        : html.replace(new RegExp(DRAWN_PICTURE_RE.source, "gi"), (all, head: string, attr: string, q2?: string, q1?: string, bare?: string) => {
             const src = (q2 ?? q1 ?? bare)!;
-            if (/^(?:#|[a-z][a-z0-9+.-]+:|\/\/|\\\\)/i.test(src)) return all;
+            // Any other URL (a data:image, #id, //host) stays as written, for the check.
+            if (/^(?:#|[a-z][a-z0-9+.-]+:|\/\/|\\\\)/i.test(src) && !/^(?:file:|https?:\/\/)/i.test(src)) return all;
             const name = attr.toLowerCase() === "xlink:href" ? "href" : attr;
-            const file = imageFile(src, field, sourceDir, errors);
+            const file = imageFile(src, field, sourceDir, errors, web);
             if (!file) return src.startsWith("files/") ? `${head}${name}="${src}"` : all;
             files.push(file);
             return `${head}${name}="files/${file.name}"`;
@@ -415,11 +507,11 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   }
 
   /** Copy the images the refs cite into files/, and point the refs at the copies. */
-  function keepImages(board: ShapeBoard, folder: string, sourceDir: string | null | undefined): { board: ShapeBoard; errors: string[] } {
+  function keepImages(board: ShapeBoard, folder: string, sourceDir: string | null | undefined, web?: ReadonlyMap<string, ShapeWebPicture>): { board: ShapeBoard; errors: string[] } {
     const errors: string[] = [];
     if (!board.refs?.length) return { board, errors };
     const keep = (src: string, field: string): string => {
-      const file = imageFile(src, field, sourceDir, errors);
+      const file = imageFile(src, field, sourceDir, errors, web);
       if (!file) return src;
       copyImage(file, folder);
       return `files/${file.name}`;
@@ -436,7 +528,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   }
 
   function update(input: ShapeUpdateInput): ShapeUpdateResult {
-    const drawn = drawnImages(input.board, input.sourceDir);
+    const drawn = drawnImages(input.board, input.sourceDir, input.webPictures);
     if (drawn.errors.length) return { ok: false, code: "invalid", errors: drawn.errors };
     const checked = checkShapeBoard(drawn.board);
     if (!checked.ok) return { ok: false, code: "invalid", errors: checked.errors };
@@ -449,7 +541,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       const folder = join(dir, inboxProjectKey(input.project.name, input.project.root), id);
       ensureDir(folder);
       return withLock(folder, () => {
-        const kept = keepImages(checked.value, folder, input.sourceDir);
+        const kept = keepImages(checked.value, folder, input.sourceDir, input.webPictures);
         if (kept.errors.length) {
           rmSync(folder, { recursive: true, force: true });
           return { ok: false, code: "invalid", errors: kept.errors };
@@ -510,7 +602,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
           latest,
         };
       }
-      const kept = keepImages(checked.value, folder, input.sourceDir);
+      const kept = keepImages(checked.value, folder, input.sourceDir, input.webPictures);
       if (kept.errors.length) return { ok: false, code: "invalid", errors: kept.errors };
       for (const file of drawn.files) copyImage(file, folder);
       const n = latest.n + 1;
@@ -553,6 +645,12 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     const folder = shapeDir(id);
     if (!folder) return [];
     return versionsOf(folder).map((v) => ({ n: v.n, at: v.at, note: v.note ?? null, base: v.base }));
+  }
+
+  function versionStamps(id: string) {
+    const folder = shapeDir(id);
+    if (!folder) return [];
+    return versionsOf(folder).map((v) => ({ n: v.n, at: v.at, through: v.through ?? null }));
   }
 
   function seen(): Record<string, number> {
@@ -677,8 +775,17 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       if (!record) return { ok: false, code: "not_found", message: `No shape ${id}.` };
       if (record.state === "finished") return { ok: false, code: "finished", message: `${id} is finished. Reopen it to change it.` };
       if (checked.value.v > record.latest) return { ok: false, code: "no_version", message: `${id} has no version ${checked.value.v}.` };
+      const noteId = shapeNoteId(now());
+      let picture: string | undefined;
+      if (checked.value.picture) {
+        // A box's picture: a file the shape keeps, named for its note.
+        const name = `note-${noteId}.png`;
+        ensureDir(join(folder, "files"));
+        writeFileSync(join(folder, "files", name), Buffer.from(checked.value.picture.slice(checked.value.picture.indexOf(",") + 1), "base64"), { mode: 0o600 });
+        picture = `files/${name}`;
+      }
       const note: ShapeNote = {
-        id: shapeNoteId(now()),
+        id: noteId,
         at: iso(),
         kind: checked.value.kind,
         v: checked.value.v,
@@ -689,6 +796,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         from: "you",
         re: null,
         delivered: null,
+        ...(checked.value.box ? { box: checked.value.box } : {}),
+        ...(checked.value.code ? { code: checked.value.code } : {}),
+        ...(picture ? { picture } : {}),
       };
       appendLine(join(folder, "chat.jsonl"), note);
       return { ok: true, note };
@@ -769,5 +879,18 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return !!folder && existsSync(join(folder, ".lock"));
   }
 
-  return { dir, locked, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
+  function keepShowMePicture(id: string, picture: string): string | null {
+    if (!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(picture)) return null;
+    const folder = shapeDir(id);
+    if (!folder) return null;
+    return withLock(folder, () => {
+      if (!recordOf(folder)) return null;
+      const name = `show-me-${shapeNoteId(now()).slice(4)}.png`;
+      ensureDir(join(folder, "files"));
+      writeFileSync(join(folder, "files", name), Buffer.from(picture.slice(picture.indexOf(",") + 1), "base64"), { mode: 0o600 });
+      return filePath(id, name);
+    });
+  }
+
+  return { dir, locked, update, get, read, versions, versionStamps, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath, keepShowMePicture };
 }

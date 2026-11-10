@@ -278,6 +278,40 @@ test("images with no record are captured on a later read, in the background: wri
   expect(person.inline_images.map((i: any) => i.ref)).toEqual(["design/b.png"]);
 });
 
+test("a thread with nothing left to capture starts no pass on a read; a new message in it is captured on its next read", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const first = await send(client, { project_path: project, body: "![a](design/a.png)", thread: "settled" });
+  const read = async () => ((await (await get(server, `/api/inbox/threads/${first.thread_id}`)).json()) as any).thread;
+  let scans = 0;
+  const scan = server.store.imageCaptureGaps.bind(server.store);
+  server.store.imageCaptureGaps = (...args) => {
+    scans += 1;
+    return scan(...args);
+  };
+  try {
+    await read();
+    await server.imageCapture.idle();
+    expect(scans).toBe(1);
+    // Nothing changed in the thread: no second pass.
+    await read();
+    await read();
+    await server.imageCapture.idle();
+    expect(scans).toBe(1);
+
+    // An image written after its message was sent: captured on the thread's next read.
+    await send(client, { project_path: project, body: "![c](design/c.png)", thread: "settled" });
+    writeFileSync(join(project, "design", "c.png"), png(4, 4, 33));
+    await read();
+    await server.imageCapture.idle();
+    const messages = (await read()).messages;
+    expect(messages.map((m: any) => (m.inline_images ?? []).map((i: any) => [i.ref, i.captured ?? null]))).toEqual([[["design/a.png", null]], [["design/c.png", "on_open"]]]);
+  } finally {
+    server.store.imageCaptureGaps = scan;
+  }
+});
+
 test("a send the store refuses leaves no blob of its images behind", async () => {
   const { project, dataDir } = world();
   writeFileSync(join(project, "design", "only-here.png"), png(6, 6, 77));
@@ -306,7 +340,8 @@ test("a large capture on first read never blocks health: the read answers at onc
       writeFileSync(join(project, "design", `big-${m}-${k}.png`), bytes);
       refs.push(`![${m}-${k}](design/big-${m}-${k}.png)`);
     }
-    const sent = old.sendMessage({ project_id: projectRecord.id, author: { kind: "agent", host: "claude-code", session: "s1", name: null }, body: refs.join("\n\n") });
+    // One thread of 16 messages: each after the first replies into it.
+    const sent = old.sendMessage({ project_id: projectRecord.id, author: { kind: "agent", host: "claude-code", session: "s1", name: null }, body: refs.join("\n\n"), ...(threadId ? { reply_to: threadId } : {}) });
     threadId = sent.message.thread_id;
   }
   const server = await start(dataDir);

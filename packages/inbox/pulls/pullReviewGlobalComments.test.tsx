@@ -121,6 +121,7 @@ beforeEach(() => {
       if (url.pathname.endsWith('/pulls/review')) return Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }
+    if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
@@ -148,12 +149,14 @@ async function settle() {
   }
 }
 
+const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+
 function mount(node: React.ReactNode) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox">{node}</div>);
+    root.render(<SidebarProvider><div className="pn-inbox">{node}</div></SidebarProvider>);
   });
 }
 

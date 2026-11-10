@@ -176,6 +176,21 @@ const card = (page: Page) => pane(page).locator('section.pc-card[data-permission
 const record = (page: Page, outcome: string) => pane(page).locator(`[data-perm-record="${outcome}"]`);
 /** The waiting card's answers are armed (they ignore activation for a moment after it appears or takes focus). */
 const armed = (page: Page) => expect(card(page)).toHaveAttribute('data-perm-armed', '', { timeout: 30_000 });
+/** From now on, note every state the thread's run line takes, however briefly: `runLinesSeen` reads them in order. */
+const watchRunLine = (page: Page) =>
+  page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __runLines: string[] }).__runLines = seen;
+    const note = () => {
+      for (const el of document.querySelectorAll('section.ib-pane [data-run]')) {
+        const state = el.getAttribute('data-run')!;
+        if (seen.at(-1) !== state) seen.push(state);
+      }
+    };
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-run'] });
+    note();
+  });
+const runLinesSeen = (page: Page) => page.evaluate(() => (window as unknown as { __runLines: string[] }).__runLines);
 /** Whether an element's text sits on one line (every line box at the same top). */
 const oneLine = (target: Locator) =>
   target.evaluate((el) => {
@@ -534,30 +549,27 @@ test('only the window answers: a local call with no page Origin is refused, and 
   expect(result.outcome).toBe('denied');
 });
 
-test('launch turned off while a question waits: the question is withdrawn, and nothing draws as a permission card', async () => {
+test('launch turned off while a question waits: the switch governs new starts only, so the card stays and its answer still reaches the agent', async () => {
   const { page, fake } = world;
   fake.configure({ prompts: [BUILD] });
   const { threadId } = await launch(page, 'A build before the switch goes off.');
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   const read = await readThread(page, threadId);
   const question = read.thread.messages.find((m) => m.author.session?.startsWith('perm:'))!;
+  const before = fake.permissions().length;
   writeConfig({ inboxLaunch: { enabled: false } });
   try {
-    await expect
-      .poll(
-        async () => {
-          const now = await readThread(page, threadId);
-          return (now.thread.messages.find((m) => m.id === question.id) as { questions?: { state: string }[] } | undefined)?.questions?.[0]?.state;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe('superseded');
+    // Several sweeps go by: the question is still open (before 0.29 turning launch off withdrew it).
+    await page.waitForTimeout(4_000);
+    const now = await readThread(page, threadId);
+    expect((now.thread.messages.find((m) => m.id === question.id) as { questions?: { state: string }[] } | undefined)?.questions?.[0]?.state).not.toBe('superseded');
     await page.reload();
-    await expect(pane(page).locator('article.ib-message').first()).toBeVisible();
-    await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
+    await expect(card(page)).toBeVisible({ timeout: 15_000 });
+    await answer(page, { choice: 'Deny' });
+    const result = await waitFor('the prompt decided with the switch off', () => fake.permissions()[before]);
+    expect(result.outcome).toBe('denied');
   } finally {
     writeConfig({ inboxLaunch: { enabled: true } });
-    fake.configure({ localAnswer: await sessionOf(page, threadId) });
   }
 });
 
@@ -736,15 +748,20 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     await expect(card(mobile).locator('.pc-row button')).toHaveText(['Deny', 'Deny with a reason', 'Approve in Terminal']);
     await card(mobile).locator('footer').scrollIntoViewIfNeeded();
     await shot(mobile, 'full-launch-safety-check-phone');
-    // A deny counts.
+    // A deny counts. The host's view from before the answer still shows the prompt: never "waiting on a permission
+    // prompt" after it, however briefly, from the click on (a look that starts once the hook has ended sees such a
+    // line only when the window's next read happens to be late). The next prompt waits meanwhile: a slow hook of its
+    // own would list that prompt with no card yet, which says nothing about this answer.
+    await watchRunLine(page);
+    fake.configure({ holdPrompts: true });
     await answer(page, { choice: 'Deny' });
     expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'denied', mode: 'bypassPermissions' });
     await expect(record(page, 'deny')).toContainText('You chose Deny');
-    // The host's view from before the answer still shows the prompt: never "waiting on a permission prompt" after it.
-    for (let i = 0; i < 25; i++) {
-      await expect(pane(page).locator('[data-run="waiting_terminal"]')).toHaveCount(0, { timeout: 100 });
-      await page.waitForTimeout(200);
-    }
+    await page.waitForTimeout(5_000);
+    const lines = await runLinesSeen(page);
+    expect(lines[0]).toBe('waiting_answer');
+    expect(lines).not.toContain('waiting_terminal');
+    fake.configure({ holdPrompts: false });
     // Approve in Terminal: the hook says nothing, so Claude's own dialog comes up, and Terminal opens attached to it.
     await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf packages/inbox/build', { timeout: 30_000 });
     await armed(page);
@@ -921,6 +938,20 @@ test('a second Enter never answers the prompt that arrives right after: the card
   await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build', { timeout: 30_000 });
   await page.waitForTimeout(300);
   await expect(card(page).locator('[data-perm="once"]')).not.toBeFocused();
+  // Before anything is answered: note, on the page's own clock, when the second prompt's Allow once takes focus and
+  // when each Enter reaches it (read below).
+  await page.evaluate((detail) => {
+    const seen = { focusAt: 0, enters: [] as number[] };
+    (window as unknown as { __secondPrompt: typeof seen }).__secondPrompt = seen;
+    const second = (target: EventTarget | null) =>
+      target instanceof HTMLElement && target.matches('[data-perm="once"]') && target.closest('section.pc-card')?.querySelector('[data-perm-detail]')?.textContent === detail;
+    document.addEventListener('focusin', (event) => {
+      if (second(event.target)) seen.focusAt = Date.now();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && second(event.target)) seen.enters.push(Date.now());
+    }, true);
+  }, 'rm -rf apps/inbox/dist');
   // The person moves to Allow once and answers with Enter.
   await card(page).locator('[data-perm="once"]').focus();
   await armed(page);
@@ -930,21 +961,29 @@ test('a second Enter never answers the prompt that arrives right after: the card
   const decidedAt = Date.now();
   // The next prompt arrives and, nothing having focus now, its Allow once takes it; Enter again at once
   // (a double tap, a held key, "it didn't take"): the card is not armed yet, so nothing is answered.
-  await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
+  // The card arms ARM_MS after its button takes focus, so "at once" is measured from that focus, on the page's own
+  // clock (the listeners above). Measured from when an `expect` here noticed the card (its retries are up to a second
+  // apart) the presses could land after the card had armed and still count as early: the second prompt was then
+  // answered, rightly, and the count below was one too many.
+  // Checked every frame in the page, so the presses follow the focus by a frame or two, never by a retry's wait.
+  await page.waitForFunction(() => (window as unknown as { __secondPrompt: { focusAt: number } }).__secondPrompt.focusAt > 0, null, { timeout: 30_000, polling: 'raf' });
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
   const shownAt = Date.now();
-  await expect(card(page).locator('[data-perm="once"]')).toBeFocused({ timeout: 2_000 });
-  await page.keyboard.press('Enter');
-  await page.keyboard.press('Enter');
-  const pressedMs = Date.now() - shownAt;
+  const pressed = await page.evaluate(() => (window as unknown as { __secondPrompt: { focusAt: number; enters: number[] } }).__secondPrompt);
+  expect(pressed.enters).toHaveLength(2);
+  // Both presses reached the card before it armed (ARM_MS, 600 ms after the focus): what the rest of this test stands on.
+  const pressedMs = Math.max(...pressed.enters) - pressed.focusAt;
   expect(pressedMs).toBeLessThan(600);
+  await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist');
   const arrivedMs = shownAt - decidedAt;
   await page.waitForTimeout(1_200);
   // Still waiting: nothing decided, no record.
   expect(fake.permissions().length).toBe(before + 1);
   await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist');
   await expect(record(page, 'once')).toHaveCount(1);
-  test.info().annotations.push({ type: 'timing', description: `second prompt on screen ${arrivedMs} ms after the first answer; Enter pressed ${pressedMs} ms after it showed` });
-  console.log(`TIMING second prompt on screen ${arrivedMs} ms after the first answer; Enter pressed ${pressedMs} ms after it showed`);
+  test.info().annotations.push({ type: 'timing', description: `second prompt on screen ${arrivedMs} ms after the first answer; Enter pressed ${pressedMs} ms after it took focus` });
+  console.log(`TIMING second prompt on screen ${arrivedMs} ms after the first answer; Enter pressed ${pressedMs} ms after it took focus`);
   await answer(page, { choice: 'Deny' });
   expect((await waitFor('the second prompt decided', () => fake.permissions()[before + 1])).output?.hookSpecificOutput?.decision?.behavior).toBe('deny');
 });
@@ -1031,7 +1070,7 @@ test('the switch never set and a login shell that runs Claude in bypass mode: wi
     await page.goto(`${world.url}#settings/agents`);
     const row = page.locator('[data-launch-full-row]');
     await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
-    await expect(row.locator('[data-launch-follows="shell"]')).toHaveText("Follows your shell's setting until you change it.");
+    await expect(row.locator('[data-launch-follows="shell"]')).toHaveText("Uses your shell's setting until you change it.");
     await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
     // Without the person's consent it still follows the shell, and says why it does not apply.
     claudeSettings({});

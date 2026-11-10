@@ -15,6 +15,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "os";
@@ -88,6 +89,30 @@ describe("annotate server: /api/save-notes wiring", () => {
       server.stop();
     }
   });
+
+  test("/api/plan identifies the annotated file's repository, not the launch repository", async () => {
+    const targetRoot = mkdtempSync(join(tmpdir(), "plannotator-annotate-target-repo-"));
+    const filePath = join(targetRoot, "specs", "refunds.md");
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "# Refunds\n", "utf-8");
+    execFileSync("git", ["init", "-q"], { cwd: targetRoot });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/payments-docs.git"], { cwd: targetRoot });
+
+    const server = await startAnnotateServer({
+      markdown: "# Refunds\n",
+      filePath,
+      htmlContent: MINIMAL_HTML,
+    });
+    try {
+      const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as {
+        repoInfo?: { display: string };
+      };
+      expect(payload.repoInfo?.display).toBe("acme/payments-docs");
+    } finally {
+      server.stop();
+      rmSync(targetRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("annotate server: /api/config favicon persistence", () => {
@@ -116,7 +141,7 @@ describe("annotate server: /api/config favicon persistence", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("persists classic favicon via POST /api/config and ignores unknown values", async () => {
+  test("persists the yellow favicon via POST /api/config and ignores unknown values", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",
       filePath: join(tmpdir(), "test.md"),
@@ -127,11 +152,11 @@ describe("annotate server: /api/config favicon persistence", () => {
       const validResponse = await fetch(`${server.url}/api/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ favicon: "classic" }),
+        body: JSON.stringify({ favicon: "yellow" }),
       });
       expect(validResponse.status).toBe(200);
-      expect(loadConfig().favicon).toBe("classic");
-      expect(getServerConfig(null).favicon).toBe("classic");
+      expect(loadConfig().favicon).toBe("yellow");
+      expect(getServerConfig(null).favicon).toBe("yellow");
 
       const invalidResponse = await fetch(`${server.url}/api/config`, {
         method: "POST",
@@ -139,9 +164,9 @@ describe("annotate server: /api/config favicon persistence", () => {
         body: JSON.stringify({ favicon: "unknown" }),
       });
       expect(invalidResponse.status).toBe(200);
-      // "unknown" was not written into config, so "classic" is retained
-      expect(loadConfig().favicon).toBe("classic");
-      expect(getServerConfig(null).favicon).toBe("classic");
+      // "unknown" was not written into config, so "yellow" is retained
+      expect(loadConfig().favicon).toBe("yellow");
+      expect(getServerConfig(null).favicon).toBe("yellow");
     } finally {
       server.stop();
     }

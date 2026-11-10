@@ -1,19 +1,22 @@
 /**
  * Split | Unified in a guided review (approval "inbox-guide-diff-style",
  * #2107): the control the guide reader raises in a tab out of the first
- * section card (the guide chain's `renderSectionTab`). It writes code review's
- * own diff layout (diffStyle.ts), so the choice holds in both. Native radios
- * in a radiogroup: Tab reaches the one chosen, the arrows choose.
+ * section card (the guide chain's `renderSectionTab`) where the host's bar
+ * does not draw the diff controls (the pull request page). It writes code
+ * review's own diff layout (diffOptions.ts), so the choice holds in both.
+ * Native radios in a radiogroup: Tab reaches the one chosen, the arrows
+ * choose. The guided review and the full-window review draw one Split /
+ * Unified button in their bars instead (DiffControls).
  *
- * `icons`: the full-window review (the owner's note on r7, "limit the amount of text so the user can focus on the
- * diff"): two marks, the tooltip and each radio's name saying which is which. `name`: another switch on the page (one
- * per chapter, and the one docked in the top bar) keeps its own radio group.
+ * `icons`: the pull request page's flat review (the owner's note on r7, "limit the amount of text so the user can focus
+ * on the diff"): two marks, the tooltip and each radio's name saying which is which. `name`: another switch on the page
+ * (the one docked in the top bar) keeps its own radio group.
  */
 
 import type React from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { InboxDiffStyle } from '../api';
-import { chooseDiffStyle } from '../diffStyle';
+import { chooseDiffOption } from '../diffOptions';
 import { Tip } from './Tip';
 
 const CHOICES: { id: InboxDiffStyle; label: string; tip: string }[] = [
@@ -55,7 +58,7 @@ export function DiffStyleSwitch({
   name?: string;
   /** The group's name, told apart when the page has several. */
   label?: string;
-}) {
+} = {}) {
   const style = useConfigValue('diffStyle');
   return (
     <span className={`ib-seg ib-gtab${icons ? ' ib-gtab-marks' : ''}`} role="radiogroup" aria-label={label} data-diff-style-switch={style}>
@@ -68,7 +71,7 @@ export function DiffStyleSwitch({
               aria-label={icons ? choice.label : undefined}
               value={choice.id}
               checked={style === choice.id}
-              onChange={() => chooseDiffStyle(choice.id)}
+              onChange={() => chooseDiffOption('diffStyle', choice.id)}
             />
             {icons ? MARKS[choice.id] : choice.label}
           </label>

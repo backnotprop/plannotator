@@ -5,13 +5,19 @@
  *   once on a selection;
  * - Show me or Ask reaches the host with the wrong file, lines or side, or
  *   leaves the chooser (or a comment box) open over the picture;
- * - Comment no longer opens the comment box for the same lines.
+ * - Comment no longer opens the comment box for the same lines;
+ * - the bar stops reading the lines the diff painted (the side the selection
+ *   ends on, this selection's diff when another has lines painted too), or stops
+ *   falling back on the pointer when it can read none;
+ * - the bar goes to another file with the same line numbers, or stays on screen
+ *   (over the header, over other lines) when its lines are gone.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { resetPageMarks, setPageMarks } from '@plannotator/ui/utils/pageMarks';
 import type { DiffSelection } from './SelectionChooser';
 import type { ToolbarHostHandle } from './ToolbarHost';
 
@@ -26,6 +32,8 @@ afterEach(() => {
 });
 
 const PATCH = ['--- a/src/retry-worker.ts', '+++ b/src/retry-worker.ts', '@@ -14,3 +14,5 @@', ' a', '+b', '+c', '+d', ' e', ''].join('\n');
+
+let lastRef: ToolbarHostHandle | null = null;
 
 function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectionActions']) {
   const ref = createRef<ToolbarHostHandle>();
@@ -47,10 +55,42 @@ function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectio
     ),
   );
   act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions' }));
+  lastRef = ref.current;
   return ref;
 }
 
-const chooser = () => document.querySelector('[data-selection-chooser]');
+const chooser = () => document.querySelector<HTMLElement>('[data-selection-chooser]');
+const frames = async (n = 8) => {
+  for (let i = 0; i < n; i += 1) await act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+};
+
+/** A diff with these lines painted, each at the place given, the way Pierre draws them. */
+function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; top: number; left: number }[], parent: HTMLElement = document.body) {
+  const host = document.createElement('diffs-container');
+  parent.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+  for (const row of rows) {
+    const code = document.createElement('div');
+    code.setAttribute('data-code', '');
+    if (row.column) code.setAttribute(`data-${row.column}`, '');
+    const at = (el: HTMLElement, left: number, right: number) => {
+      el.setAttribute('data-selected-line', '');
+      el.getBoundingClientRect = () => ({ top: row.top, bottom: row.top + 20, left, right, width: right - left, height: 20, x: left, y: row.top, toJSON: () => ({}) });
+      code.appendChild(el);
+    };
+    const gutter = document.createElement('div');
+    gutter.setAttribute('data-column-number', String(row.line));
+    at(gutter, row.left - 41, row.left);
+    const text = document.createElement('div');
+    text.setAttribute('data-line', String(row.line));
+    // Scrolled sideways: the code's own left has gone under the gutter; the gutter has not moved.
+    at(text, row.left - 200, row.left + 400);
+    shadow.appendChild(code);
+  }
+  return host;
+}
+const unpaint = (diff: HTMLElement) => diff.shadowRoot!.querySelectorAll('[data-selected-line]').forEach((el) => el.removeAttribute('data-selected-line'));
+const barEl = () => document.querySelector<HTMLElement>('.review-selpop');
 const commentBox = () => document.querySelector('.review-toolbar');
 
 describe.skipIf(!hasDom)('the selection chooser', () => {
@@ -94,5 +134,214 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());
     expect(chooser()).toBeNull();
     expect(commentBox()).not.toBeNull();
+  });
+
+  describe('where it sits', () => {
+    const placed = () => ({ top: chooser()!.style.top, left: chooser()!.style.left, transform: chooser()!.style.transform, hidden: chooser()!.style.visibility });
+
+    test('under the painted lines, at the start of their code, and not until it has read them', async () => {
+      const ref = mount({ onShowMe: () => {} });
+      // Nothing painted yet: unseen, not flashed at the pointer.
+      expect(placed().hidden).toBe('hidden');
+      paintedDiff([{ line: 16, top: 300, left: 803 }, { line: 18, top: 340, left: 803 }]);
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions' }));
+      await frames();
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('Split paints both columns: it goes by the side the selection ends on', async () => {
+      paintedDiff([
+        { column: 'deletions', line: 18, top: 340, left: 100 },
+        { column: 'additions', line: 18, top: 340, left: 803 },
+      ]);
+      const ref = mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().left).toBe('803px');
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'deletions' }));
+      await frames();
+      expect(placed().left).toBe('100px');
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions', endSide: 'deletions' }));
+      await frames();
+      expect(placed().left).toBe('100px');
+    });
+
+    test("another diff's painted lines don't take it: this selection's last line does", async () => {
+      paintedDiff([{ line: 5, top: 100, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+    });
+
+    /** The pointer is at this height when the lines are picked. */
+    const pickedAt = (ref: React.RefObject<ToolbarHostHandle | null>, y: number) => {
+      act(() => window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100, clientY: y })));
+      act(() => ref.current!.handleLineSelectionEnd({ start: 17, end: 18, side: 'additions' }));
+    };
+
+    test("a diff nearer the pointer with other lines painted waits behind this selection's own", async () => {
+      paintedDiff([{ line: 5, top: 120, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      pickedAt(mount({ onShowMe: () => {} }), 120);
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+    });
+
+    test('the same line painted in two diffs: the one by the pointer', async () => {
+      paintedDiff([{ line: 18, top: 100, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      pickedAt(mount({ onShowMe: () => {} }), 480);
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+      pickedAt({ current: lastRef }, 90);
+      await frames();
+      expect(placed()).toMatchObject({ top: '126px', left: '300px' });
+    });
+
+    test("only another selection's lines to read, once it has waited: those, not the pointer", async () => {
+      paintedDiff([{ line: 5, top: 200, left: 300 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed()).toMatchObject({ top: '226px', left: '300px', transform: '' });
+    });
+
+    test('nothing on the diff to read: the pointer, centred, on screen', async () => {
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().hidden).toBe('');
+      expect(placed().transform).toBe('translateX(-50%)');
+    });
+
+    test('it follows its lines when they move, with nothing to announce it', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().top).toBe('366px');
+      const rows = [...document.querySelector('diffs-container')!.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      for (const row of rows) {
+        const was = row.getBoundingClientRect();
+        row.getBoundingClientRect = () => ({ ...was, top: 240, bottom: 260, y: 240 });
+      }
+      await frames(3);
+      expect(placed().top).toBe('266px');
+    });
+
+    test('two files sharing line numbers: it stays on the diff it found, and hides rather than go to the other', async () => {
+      const a = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().top).toBe('366px');
+      // The other file now has a line of that number painted, nearer the pointer, and this one has none.
+      unpaint(a);
+      paintedDiff([{ line: 18, top: 500, left: 40 }]);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      expect(barEl()!.style.top).toBe('366px');
+    });
+
+    test('painted in both files: it stays on the one it found', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      paintedDiff([{ line: 18, top: 500, left: 40 }]);
+      await frames(3);
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('its lines dropped by the diff: hidden, the + back, and shown again when they return', async () => {
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      unpaint(diff);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      expect(chooser(), 'the + mark comes back while the bar is hidden').toBeNull();
+      for (const row of rows) row.setAttribute('data-selected-line', '');
+      await frames(3);
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('its lines off the top or the bottom of the viewport: hidden', async () => {
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      const moveTo = (top: number) => {
+        for (const row of rows) {
+          const was = row.getBoundingClientRect();
+          row.getBoundingClientRect = () => ({ ...was, top, bottom: top + 20, y: top });
+        }
+      };
+      moveTo(-30);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      moveTo(window.innerHeight + 5);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      moveTo(100);
+      await frames(3);
+      expect(placed().hidden).toBe('');
+      expect(placed().top).toBe('126px');
+    });
+
+    test('its lines past the edge of a scroller around them, though on the screen: hidden', async () => {
+      const scroller = document.createElement('div');
+      scroller.style.overflowY = 'auto';
+      scroller.getBoundingClientRect = () => ({ top: 400, bottom: 700, left: 0, right: 900, width: 900, height: 300, x: 0, y: 400, toJSON: () => ({}) }) as DOMRect;
+      document.body.appendChild(scroller);
+      paintedDiff([{ line: 18, top: 340, left: 803 }], scroller);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(barEl()!.style.visibility).toBe('hidden');
+    });
+
+    test('its first line near the top of the page\'s scroller, no room below: not up over what sits above that scroller', async () => {
+      const scroller = document.createElement('div');
+      scroller.style.overflowY = 'auto';
+      scroller.getBoundingClientRect = () => ({ top: 46, bottom: 768, left: 0, right: 900, width: 900, height: 722, x: 0, y: 46, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(scroller, 'scrollHeight', { value: 3000 });
+      Object.defineProperty(scroller, 'clientHeight', { value: 722 });
+      document.body.appendChild(scroller);
+      // The lines fill the screen from just under the header to its bottom.
+      paintedDiff([{ line: 16, top: 50, left: 803 }, { line: 18, top: window.innerHeight - 10, left: 803 }], scroller);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(Number.parseFloat(placed().top)).toBeGreaterThanOrEqual(46 + 8);
+    });
+  });
+
+  describe('page marks (ui pageMarks: the Inbox keys comments.css\'s html:has([data-selection-chooser]) on them)', () => {
+    afterEach(() => resetPageMarks());
+    const marked = () => document.documentElement.hasAttribute('data-pn-selection-chooser');
+
+    test('<html> is marked exactly while the bar carries [data-selection-chooser]', async () => {
+      setPageMarks(true);
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      expect(marked()).toBe(true);
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      unpaint(diff);
+      await frames(3);
+      expect(chooser()).toBeNull();
+      expect(marked(), 'hidden: the + mark comes back, so the mark goes').toBe(false);
+      for (const row of rows) row.setAttribute('data-selected-line', '');
+      await frames(3);
+      expect(marked()).toBe(true);
+      act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());
+      expect(chooser()).toBeNull();
+      expect(marked(), 'closed').toBe(false);
+    });
+
+    test('off (every other host): nothing is marked', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      expect(marked()).toBe(false);
+    });
   });
 });

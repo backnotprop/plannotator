@@ -6,9 +6,10 @@ The Inbox details are split by topic. Read the foundation guide for command, ser
 - [`inbox-window.md`](inbox-window.md) — main window, questions, and send behavior.
 - [`inbox-messages.md`](inbox-messages.md) — drafts, replies, thread actions, and project menu.
 - [`inbox-compose.md`](inbox-compose.md) — composing messages and routing them to agents.
-- [`inbox-launch.md`](inbox-launch.md) — starting Claude Code from New message (behind `inboxLaunch.enabled`), the run line, Stop, Open and Delete.
+- [`inbox-launch.md`](inbox-launch.md) — starting Claude Code, Pi or Codex from New message (on by default; Settings → Agents' switch, `inboxLaunch.enabled`), the run line, Stop, Open and Delete.
 - [`inbox-files-and-guides.md`](inbox-files-and-guides.md) — attachments, annotations, images, and guided reviews.
 - [`inbox-notifications-and-agents.md`](inbox-notifications-and-agents.md) — search, event streams, notifications, Board, and agent connections.
 - [`inbox-phones-and-security.md`](inbox-phones-and-security.md) — phone pairing and surface, security boundaries, and proofs.
 - [`inbox-machines.md`](inbox-machines.md) — linked machines: one Inbox across machines, the link, the merged view, the forward and the outbox.
 - [`inbox-accounts.md`](inbox-accounts.md) — Settings → Accounts: the Claude accounts and usage of this computer and its linked machines, read through claude-swap.
+- [`inbox-system.md`](inbox-system.md) — System: a drawing of each project's code (config.json `inboxSystem`, hidden in 0.29; Settings → Capabilities → System, only with Code review on); the switch, the Reviews System button and a project's drawing, the project setup dialog and its `setup.json`.

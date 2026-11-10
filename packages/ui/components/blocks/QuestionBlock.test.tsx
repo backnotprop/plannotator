@@ -5,7 +5,8 @@
  *
  * What regresses if this fails: a pick does not reach the annotation (so the
  * answer never exports), an edit leaves a stale annotation behind, a drag
- * across option text picks the option instead of only selecting text, or an
+ * across option text picks the option instead of only selecting text, a quick
+ * tap on another card's answer is dropped as a double-click, or an
  * unparseable block stops falling back to the plain callout.
  *
  * DOM-gated (DOM_TESTS=1).
@@ -379,6 +380,28 @@ describe('QuestionBlock', () => {
       text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'mouse' }));
       text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 11, clientY: 10 }));
     });
+    expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
+  });
+
+  // A phone counts a tap near the last one as its second click (detail 2), wherever it lands: tapping one
+  // card's answer and then, quickly, the next card's answer must pick both. Only a second click on the same row is a
+  // double-click.
+  test.skipIf(!hasDom)("a quick tap on another card's answer picks, even when the browser counts it as a second click", async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const tap = async (text: HTMLElement, detail: number) => {
+      await act(async () => {
+        text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'touch' }));
+        text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, detail }));
+      });
+    };
+    await tap(rowText(cards(el)[0], 'Server-side'), 1);
+    await tap(rowText(cards(el)[3], 'WebSocket'), 2);
+    expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
+    expect(answerOf(3)?.selected).toEqual(['WebSocket']);
+
+    // The same row twice is still a double-click: the second click picks nothing more and takes its pick back.
+    await tap(rowText(cards(el)[0], 'Nowhere'), 1);
+    await tap(rowText(cards(el)[0], 'Nowhere'), 2);
     expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
   });
 

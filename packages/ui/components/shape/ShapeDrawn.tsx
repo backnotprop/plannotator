@@ -14,6 +14,7 @@ import DOMPurify from 'dompurify';
 import {
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeKeepSvgWhole,
   shapeLinkUrl,
   shapePaintAllowed,
   shapeUrlAllowed,
@@ -25,12 +26,82 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { parseCssColor } from '../../utils/cssColor';
+import { readThemeTokenValues } from '../../utils/themeTokens';
+import { SHAPE_COLOR_NAMES, shapeContrastFixes, shapeLogoFill, type ShapeColors } from './shapeContrast';
+import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { SHAPE_SHARP_COLOR_NAMES, shapeSharpFixes, type ShapeSharpColors } from './sharpContrast';
+import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
+import { ScenePlayers } from './scene/ScenePlayers';
+import type { ShapeScene } from '@plannotator/core/shape-scene';
 
-/** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
-function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
-  if (!resolve) return html;
+/**
+ * Holds a board's colours to contrast in the palette on screen (`shapeContrast.ts`): the frame's
+ * own colours where they hold, a darker or lighter one (hue kept) where not, and a dark logo lifted on a dark board.
+ * Returns the undo. Nothing changes where the palette's tokens cannot be read.
+ */
+function holdShapeContrast(board: HTMLElement): () => void {
+  const undo: (() => void)[] = [];
+  const read = readThemeTokenValues(SHAPE_COLOR_NAMES, board);
+  const colors = {} as ShapeColors;
+  for (const name of SHAPE_COLOR_NAMES) {
+    const c = parseCssColor(read?.[name]);
+    if (!c) return () => {};
+    colors[name] = c;
+  }
+  const fixes = shapeContrastFixes(colors);
+  for (const [name, value] of Object.entries(fixes)) {
+    board.style.setProperty(name, value);
+    undo.push(() => board.style.removeProperty(name));
+  }
+  for (const el of board.querySelectorAll<SVGElement>('svg[data-brand] [fill]')) {
+    const logo = parseCssColor(el.getAttribute('fill'));
+    const fill = logo && logo.a > 0 ? shapeLogoFill(logo, colors, fixes) : null;
+    if (!fill) continue;
+    el.style.setProperty('fill', fill);
+    undo.push(() => el.style.removeProperty('fill'));
+  }
+  return () => undo.forEach((u) => u());
+}
+
+/**
+ * Sharp's line colours held to their bars in the palette on screen (`sharpContrast.ts`): set on `.board` only where
+ * the frame's own mix falls short. Returns the undo. Nothing changes where the colours cannot be read.
+ */
+function holdSharpLines(board: HTMLElement): () => void {
+  const read = readThemeTokenValues(SHAPE_SHARP_COLOR_NAMES, board);
+  const colors = {} as ShapeSharpColors;
+  for (const name of SHAPE_SHARP_COLOR_NAMES) {
+    const c = parseCssColor(read?.[name]);
+    if (!c) return () => {};
+    colors[name] = c;
+  }
+  const fixes = shapeSharpFixes(colors);
+  for (const [name, value] of Object.entries(fixes)) board.style.setProperty(name, value);
+  return () => {
+    for (const name of Object.keys(fixes)) board.style.removeProperty(name);
+  };
+}
+
+/**
+ * What `holdSharpLines` reads, as one string: the board's colour variables as computed (their `var()` chains already
+ * substituted), without the line variables the hold itself sets. One style read, no probes, so a change on `<html>`
+ * that moves no colour (a viewport height, a class for something else) costs almost nothing.
+ */
+const SHARP_INPUTS = SHAPE_SHARP_COLOR_NAMES.filter((name) => !name.startsWith('shp-')).map((name) => `--${name}`);
+function sharpInputs(board: HTMLElement): string {
+  const cs = getComputedStyle(board);
+  return SHARP_INPUTS.map((name) => cs.getPropertyValue(name).trim()).join('|');
+}
+
+/**
+ * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
+ * `tile`: each also carries `data-shp-pic`, for `darkContrast`'s picture tiles.
+ */
+function resolveFiles(html: string, resolve: ((src: string) => string) | undefined, tile = false): string {
+  if (!resolve && !tile) return html;
   const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
+  return html.replace(/(<(?:img|image)\b)([^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, open: string, head: string, src: string) => `${open}${tile ? ' data-shp-pic' : ''}${head}${resolve ? attr(resolve(src)) : src}"`);
 }
 
 export interface MarkState {
@@ -45,6 +116,67 @@ const TAG_ROOM = 28;
 const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
+
+/**
+ * How every board is drawn (approval "shape-board-sharp-only": Sharp only, no switch). CSS beats an SVG's
+ * presentation attributes, so it reaches every board as shown, stored or new, and rewrites none: 1 px lines at any
+ * zoom (`vector-effect: non-scaling-stroke`), 2 px corners on boxes, panels, chips and pills (3 canvas units, about
+ * 2 px on a board shown at 1440), square ends and joins, box borders a softer grey and connectors stronger
+ * (`--shp-hair`, `--shp-wire`), quieter zone fills with a 1 px edge in the zone's hue (`--shp-zone-*`), no drop
+ * shadow. The kit draws square elbows and small filled arrowheads (`.shp-head`); an older board keeps the elbows and
+ * open arrowheads it was drawn with. `sharpContrast.ts` holds the line colours to their bars in every palette.
+ * `ShapeDrawn` writes `data-shp-style="sharp"` on every `.board`: the rules carry its weight, so a drawing's own
+ * class rules do not undo them.
+ */
+const SHARP = '.board[data-shp-style="sharp"]';
+const SHARP_ZONE = ':not(.line, .ink, .grey, .acc, .alert, .acc-fill)';
+const softIs = (zone: string) => `:is([style*="--${zone}-soft"], [fill*="--${zone}-soft"])`;
+const SHAPE_SHARP_CSS = `
+/* Sharp: thin lines, small corners, quiet zones with a thin edge, filled heads. */
+${SHARP} {
+  --shp-r: 3px;
+  --shp-hair: color-mix(in oklab, var(--ink) 52%, var(--paper));
+  --shp-wire: color-mix(in oklab, var(--ink) 64%, var(--paper));
+  --blue-soft: color-mix(in oklab, #2f6fb0 6%, var(--paper));
+  --amber-soft: color-mix(in oklab, #d9971f 7%, var(--paper));
+  --green-soft: color-mix(in oklab, #2b8a57 6%, var(--paper));
+  --plum-soft: color-mix(in oklab, #9b3f78 6%, var(--paper));
+  --alert-soft: color-mix(in oklab, var(--destructive) 8%, var(--paper));
+  --shp-zone-blue: color-mix(in oklab, var(--blue) 82%, var(--paper));
+  --shp-zone-amber: color-mix(in oklab, var(--amber) 82%, var(--paper));
+  --shp-zone-green: color-mix(in oklab, var(--green) 82%, var(--paper));
+  --shp-zone-plum: color-mix(in oklab, var(--plum) 82%, var(--paper));
+  --shp-zone-alert: var(--alert);
+}
+${SHARP} svg :is(.line, .grey, .acc, .alert, .ink, .acc-fill) { stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-linecap: butt; stroke-linejoin: miter; }
+${SHARP} svg .dash { stroke-dasharray: 5 4; }
+${SHARP} svg :is(rect, circle, ellipse, polygon):is(.line, .ink) { stroke: var(--shp-hair); }
+${SHARP} svg :is(path, line, polyline).line { stroke: var(--shp-wire); }
+${SHARP} svg rect:is(.line, .ink, .grey, .acc, .alert, .acc-fill) { rx: var(--shp-r); ry: var(--shp-r); }
+/* The kit's arrowhead: closed, filled in its line's colour. */
+${SHARP} svg path.shp-head:is(.line, .grey, .acc, .alert) { stroke: none; }
+${SHARP} svg .shp-head.line { fill: var(--shp-wire); } ${SHARP} svg .shp-head.grey { fill: var(--grey); } ${SHARP} svg .shp-head.acc { fill: var(--mark); } ${SHARP} svg .shp-head.alert { fill: var(--alert); }
+/* A zone: a rect the drawing fills with a -soft colour. Small corners, and a 1 px edge in its hue. */
+${SHARP} svg rect${SHARP_ZONE}:is([style*="-soft"], [fill*="-soft"]) { rx: var(--shp-r); ry: var(--shp-r); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `${SHARP} svg rect${SHARP_ZONE}${softIs(z)} { stroke: var(--shp-zone-${z}); }`).join('\n')}
+/* darkContrast's zone edge (a shape it found with no line of its own), as thin as the rest. */
+${SHARP}.dark-hold [data-shp-edge] { stroke-width: 1px; vector-effect: non-scaling-stroke; box-shadow: inset 0 0 0 1px var(--shp-edge); }
+/* darkContrast's light tile behind a kept picture: the same small corner. */
+${SHARP}.dark-hold .shp-pic-tile { rx: var(--shp-r); ry: var(--shp-r); }
+${SHARP}.dark-hold img[data-shp-pic] { border-radius: var(--shp-r); }
+/* Chips, cards, tiles, stickies, pictures, drawn things and path pills: the same corner, the same hairline. */
+${SHARP} svg .tag rect { rx: 2px; ry: 2px; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${SHARP} svg .tag rect[stroke-dasharray] { stroke-dasharray: 5 4; }
+${SHARP} svg :is(rect.obj, .obj rect) { rx: var(--shp-r); ry: var(--shp-r); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${SHARP} svg .obj { filter: none; }
+${SHARP} svg svg[data-draw] [stroke-width] { stroke-width: 1.25px; vector-effect: non-scaling-stroke; }
+${SHARP} svg svg[data-draw] rect { rx: 2px; ry: 2px; }
+${SHARP} svg svg[data-icon] { stroke-width: 1.5; }
+/* Follow an example's light over a line (followPainter): as thin as the line, a touch heavier so it reads. */
+${SHARP} svg .shp-ex-lit { stroke-width: 1.5px; vector-effect: non-scaling-stroke; stroke-linecap: butt; stroke-linejoin: miter; }
+${SHARP} .pick { border-radius: 3px; border-width: 1px; }
+${SHARP} .mk { border-radius: 2px; }
+`;
 
 /**
  * The frame every drawn view sits in: the variables an agent colours with
@@ -66,6 +198,16 @@ export const SHAPE_FRAME_CSS = `
   --raise: var(--popover);
   --sunk: var(--muted);
   --alert: var(--destructive);
+  /* A few zone colours, each a hue mixed toward the ink (lines, words) or the paper (fills), so light and dark both hold. */
+  --blue: color-mix(in oklab, #2f6fb0 74%, var(--ink));
+  --blue-soft: color-mix(in oklab, #2f6fb0 13%, var(--paper));
+  --amber: color-mix(in oklab, #b87a12 76%, var(--ink));
+  --amber-soft: color-mix(in oklab, #d9971f 16%, var(--paper));
+  --green: color-mix(in oklab, #2b8a57 74%, var(--ink));
+  --green-soft: color-mix(in oklab, #2b8a57 13%, var(--paper));
+  --plum: color-mix(in oklab, #9b3f78 74%, var(--ink));
+  --plum-soft: color-mix(in oklab, #9b3f78 12%, var(--paper));
+  --alert-soft: color-mix(in oklab, var(--destructive) 11%, var(--paper));
   position: relative;
   container-type: inline-size;
   container-name: board;
@@ -85,6 +227,15 @@ svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
 svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
+/* darkContrast, on a dark board only (.dark-hold, set by holdDarkBoard): a zone with no line of its own gets an edge in its hue, and a kept picture sits on a light tile. A light board gets none of it. */
+.board.dark-hold [data-shp-edge] { stroke-width: 1.5px; box-shadow: inset 0 0 0 1.5px var(--shp-edge); }
+.board.dark-hold [data-shp-edge="blue"] { stroke: var(--shp-edge-blue); --shp-edge: var(--shp-edge-blue); }
+.board.dark-hold [data-shp-edge="amber"] { stroke: var(--shp-edge-amber); --shp-edge: var(--shp-edge-amber); }
+.board.dark-hold [data-shp-edge="green"] { stroke: var(--shp-edge-green); --shp-edge: var(--shp-edge-green); }
+.board.dark-hold [data-shp-edge="plum"] { stroke: var(--shp-edge-plum); --shp-edge: var(--shp-edge-plum); }
+.board.dark-hold [data-shp-edge="alert"] { stroke: var(--shp-edge-alert); --shp-edge: var(--shp-edge-alert); }
+.board.dark-hold .shp-pic-tile { fill: #e4e6ea; stroke: none; }
+.board.dark-hold img[data-shp-pic] { background: #e4e6ea; padding: 6px; border-radius: 10px; box-sizing: border-box; object-fit: contain; }
 .if-dark { opacity: var(--shp-is-dark, 0); } .if-light { opacity: calc(1 - var(--shp-is-dark, 0)); }
 
 /* Draw: parts arrive in step order; lines draw on. */
@@ -96,7 +247,19 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 @keyframes shp-stroke-on { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes shp-fade-out { to { opacity: 0; } }
 .board.skip [data-step], .board.skip .draw, .board.skip .mk { animation: none !important; }
+
+/* A thing that travels (data-to): from its place to its point, again and again. Reduced motion: it holds still halfway. */
+.shp-go { animation: shp-go 3.4s cubic-bezier(.45,0,.4,1) infinite; }
+@keyframes shp-go { 0%, 8% { transform: translate(0, 0); opacity: 0; } 16% { opacity: 1; } 62% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 72%, 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+.board.reduce .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); }
+@media (prefers-reduced-motion: reduce) { .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); } }
 .board.reduce.entering [data-step], .board.reduce.entering .draw { animation: shp-fade-only .16s linear both; animation-delay: 0s; stroke-dasharray: none; }
+
+/* A board that takes a dragged box: the cross everywhere but a number, and no words selected on the way. */
+@media (pointer: fine) {
+  .board.boxable, .board.boxable * { cursor: crosshair !important; -webkit-user-select: none; user-select: none; }
+  .board.boxable .shp-rb, .board.boxable .shp-rb * { cursor: pointer !important; }
+}
 
 /* A marked part: the ring while the agent reads it; erased and redrawn when it changes. */
 .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
@@ -137,8 +300,12 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 .shp-rb.own.flash { animation: shp-rb-own-flash 1.2s ease-out; }
 @keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
+/* A number in an SVG's words. */
+svg tspan.shp-rb { display: inline; fill: var(--mark); }
+svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 /* A finger needs more than 16 px. */
 @media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
+${SHAPE_SHARP_CSS}
 `;
 
 // One sanitizer of our own, so its hook reaches no other DOMPurify user.
@@ -191,7 +358,50 @@ function sanitizer(): ReturnType<typeof DOMPurify> | null {
 /** An agent's drawing, made safe: no script, handlers, outside loads, frames or <style>. Empty when this page cannot sanitize. */
 export function sanitizeShapeHtml(html: string): string {
   const p = sanitizer();
-  return p ? p.sanitize(html, CONFIG) : '';
+  return p ? p.sanitize(shapeKeepSvgWhole(html), CONFIG) : '';
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Parts of an SVG that are never drawn where they stand.
+const UNDRAWN = new Set(['defs', 'symbol', 'clippath', 'mask', 'marker', 'pattern', 'lineargradient', 'radialgradient', 'filter']);
+const drawnWords = (root: Element): Element[] =>
+  [root, ...root.querySelectorAll('text')].filter((t) => {
+    if (t.localName !== 'text') return false;
+    for (let at: Element | null = t; at && at.namespaceURI === SVG_NS; at = at.parentElement) if (UNDRAWN.has(at.localName.toLowerCase())) return false;
+    return true;
+  });
+
+/**
+ * In SVG only a `<text>` shows words, so an empty number among the shapes
+ * (`<g data-ref="1"/>`) is drawn at the end of the nearest words: those just
+ * before it, else just after it, in its own group first, then in the groups
+ * around it. With no words in the drawing, it goes just after the SVG, as a
+ * bubble. A shape (`<circle data-ref>`) stays where it is: it is the number.
+ */
+function placeNumber(el: Element): Element {
+  const doc = el.ownerDocument;
+  const copy = (spot: Element) => {
+    for (const a of el.attributes) if (a.name === 'class' || a.name.startsWith('data-')) spot.setAttribute(a.name, a.value);
+    el.remove();
+    return spot;
+  };
+  for (let node: Element | null = el; node && node.parentElement?.namespaceURI === SVG_NS; node = node.parentElement) {
+    let words: Element | undefined;
+    for (let at = node.previousElementSibling; at && !words; at = at.previousElementSibling) words = drawnWords(at).pop();
+    for (let at = node.nextElementSibling; at && !words; at = at.nextElementSibling) words = drawnWords(at)[0];
+    if (!words) continue;
+    const spot = copy(doc.createElementNS(SVG_NS, 'tspan'));
+    spot.setAttribute('dx', '5');
+    words.append(spot);
+    return spot;
+  }
+  let svg = el.closest('svg');
+  while (svg?.parentElement?.namespaceURI === SVG_NS) svg = svg.parentElement.closest('svg');
+  if (!svg) return el;
+  const spot = copy(doc.createElement('span'));
+  svg.after(spot);
+  return spot;
 }
 
 const markOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t instanceof Element && (t as Element).hasAttribute('data-mark')) as HTMLElement | undefined;
@@ -213,8 +423,13 @@ export interface ShapeDrawnProps {
   onRefHover?: (n: number | null) => void;
   /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
-  /** A fixed canvas in a narrow space keeps a readable size and scrolls sideways. Absent: it shrinks to fit. */
+  /**
+   * A fixed canvas in a narrow space keeps a readable size and scrolls sideways: the side with more
+   * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
+   */
   pan?: boolean;
+  /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
+  top?: boolean;
   /**
    * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
    * screen pins it. Absent: a bubble only lights and opens, as before.
@@ -228,6 +443,8 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
+  /** On a dark board only: borders, zone edges, boxes and pictures held to contrast (`ShapeSurfaceProps.darkContrast`). Absent: as drawn. */
+  darkContrast?: boolean;
   /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
   /** Select mode: a text selection inside a mark picks it. Board only. */
@@ -237,9 +454,26 @@ export interface ShapeDrawnProps {
   stale?: ReadonlySet<string>;
   /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
   tags?: { fresh?: string; stale?: string };
+  /** A dragged box can start here: the cross cursor, and no text selection. Board only. */
+  boxable?: boolean;
+  /** Kept boxes with their comments, on this view. Board only. */
+  boxes?: readonly KeptBox[];
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
+  /**
+   * The drawing's `.board`, each time it is drawn afresh (new content, or the
+   * wide and tall layouts swapping), and null once it is gone. For a layer
+   * that works on the drawing itself ("Follow an example").
+   */
+  onBoard?: (board: HTMLElement | null) => void;
+  /**
+   * The board's scenes: a `<div data-scene="id">` holding the agent's SVG plays `scenes[id]` (`scene/ScenePlayer`,
+   * loaded lazily, in a shadow root of its own inside the slot). Absent: the drawing stays still, as before.
+   */
+  scenes?: Readonly<Record<string, ShapeScene>>;
+  /** 'technical': scenes take the technical look (`scene/look.ts`). Absent: scenes play as drawn. A board without scenes is never touched. */
+  sceneLook?: 'technical';
 }
 
 /** How much room the view has, for a fixed canvas. */
@@ -264,6 +498,9 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
 }
 
 const noop = () => {};
+/** How wide the fade is on a side of a panning drawing with more to see, and the track under it (px). */
+const PAN_FADE = 28;
+const PAN_TRACK = 56;
 const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
 
 export function ShapeDrawn(props: ShapeDrawnProps) {
@@ -287,6 +524,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   // The content: sanitized once per change, then marked up for the board.
   useLayoutEffect(() => {
@@ -295,14 +533,14 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
     for (const el of steps) el.style.setProperty('--i', String(order.indexOf(Number(el.getAttribute('data-step')) || 0)));
     for (const el of board.querySelectorAll<HTMLElement>('[data-mark]')) el.classList.add('mk');
-    for (const el of board.querySelectorAll<HTMLElement>('[data-ref]')) {
+    for (let el of board.querySelectorAll<Element>('[data-ref]')) {
       const n = Number(el.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) {
@@ -310,8 +548,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
-      else el.classList.add('own');
+      if (!el.children.length && !el.textContent?.trim()) {
+        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = placeNumber(el);
+        el.textContent = String(n);
+      } else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
       el.setAttribute('tabindex', '0');
@@ -328,7 +568,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
     }
     setContentKey((x) => x + 1);
+    handlers.current.onBoard?.(board);
   }, [html, css, scaled]);
+  useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
   useLayoutEffect(() => {
@@ -343,6 +585,91 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
 
+  // Panning: the side with more drawing fades out, and the track under the drawing follows the scroll.
+  // Written straight to the DOM, so a swipe re-renders nothing.
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const track = trackRef.current;
+    if (!frame || !track || !pan) return;
+    const fit = frame.querySelector<HTMLElement>('.shp-drawn-fit');
+    const update = () => {
+      // Every read first, then the writes: one layout per scroll event.
+      const { scrollLeft, scrollWidth, clientWidth, clientHeight } = frame;
+      const below = fit ? fit.offsetTop + fit.offsetHeight : 0;
+      const more = scrollWidth - clientWidth;
+      // Only a drawing that is wider than its frame pans: one that fits shows no track.
+      track.hidden = more <= 1;
+      frame.style.setProperty('--shp-fl', scrollLeft > 1 ? `${PAN_FADE}px` : '0px');
+      frame.style.setProperty('--shp-fr', scrollLeft < more - 1 ? `${PAN_FADE}px` : '0px');
+      track.style.left = `${scrollLeft + (clientWidth - PAN_TRACK) / 2}px`;
+      // 12 px under the drawing, or less where the frame ends sooner: the track never makes the frame scroll down.
+      track.style.top = `${Math.max(below, Math.min(below + 12, clientHeight - 4))}px`;
+      const thumb = track.firstElementChild as HTMLElement | null;
+      if (thumb && scrollWidth) {
+        thumb.style.width = `${(clientWidth / scrollWidth) * 100}%`;
+        thumb.style.left = `${(scrollLeft / scrollWidth) * 100}%`;
+      }
+    };
+    update();
+    frame.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(frame);
+    if (fit) ro?.observe(fit);
+    return () => {
+      frame.removeEventListener('scroll', update);
+      ro?.disconnect();
+      frame.style.removeProperty('--shp-fl');
+      frame.style.removeProperty('--shp-fr');
+    };
+  }, [pan, k]);
+
+  // Contrast, in one pass so the two never undo each other: the palette's (`holdShapeContrast`, every board) first, then
+  // on a dark board `darkContrast` (opt-in), which starts from the colours the first left; undone the other way round.
+  // Both again when the theme or mode changes (every frame colour comes from these page tokens, which neither sets).
+  const darkContrast = !!props.darkContrast;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board) return;
+    let undoPalette = () => {};
+    const release = () => {
+      releaseDarkBoard(board);
+      undoPalette();
+      undoPalette = () => {};
+    };
+    const hold = () => {
+      release();
+      undoPalette = holdShapeContrast(board);
+      if (darkContrast) holdDarkBoard(board);
+    };
+    const tokens = () => {
+      const cs = getComputedStyle(board);
+      return ['--shp-paper', '--background', '--foreground', '--card', '--border', '--muted-foreground', '--primary', '--destructive'].map((t) => cs.getPropertyValue(t)).join('|');
+    };
+    let key = tokens();
+    hold();
+    if (typeof MutationObserver === 'undefined') return release;
+    let frame = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const now = tokens();
+        if (now === key) return;
+        key = now;
+        hold();
+      });
+    };
+    const watch = new MutationObserver(again);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    const scheme = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    scheme?.addEventListener?.('change', again);
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+      scheme?.removeEventListener?.('change', again);
+      release();
+    };
+  }, [darkContrast, contentKey]);
+
   // Motion and mode.
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
@@ -351,7 +678,15 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('skip', skip);
     board.classList.toggle('reduce', reduce);
     board.classList.toggle('pinpointing', pinpoint);
-  }, [phase, skip, reduce, pinpoint, contentKey]);
+    board.classList.toggle('boxable', !!props.boxable);
+  }, [phase, skip, reduce, pinpoint, props.boxable, contentKey]);
+
+  // Kept boxes: inside the drawing, so they scroll and scale with it. A box belongs to the layout it was drawn on.
+  const boxes = props.boxes;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
+  }, [boxes, useTall, scaled, k, contentKey]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;
@@ -389,6 +724,37 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
     }
   }, [marks, stale, freshTag, staleTag, contentKey]);
+
+  // Sharp's line colours, after every other pass over the board's colours (darkContrast's included, so a flip of it
+  // holds them again); again when the page's theme or palette changes, and only then.
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board) return;
+    let undo = holdSharpLines(board);
+    if (typeof MutationObserver === 'undefined') return undo;
+    let key = sharpInputs(board);
+    let frame = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const now = sharpInputs(board);
+        if (now === key) return;
+        key = now;
+        undo();
+        undo = holdSharpLines(board);
+      });
+    };
+    const watch = new MutationObserver(again);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    const scheme = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    scheme?.addEventListener?.('change', again);
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+      scheme?.removeEventListener?.('change', again);
+      undo();
+    };
+  }, [darkContrast, contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {
@@ -547,13 +913,19 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   return (
     <div
       ref={frameRef}
-      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}`}
+      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}${canvas && props.top ? ' top' : ''}`}
       style={FRAME_CONTAIN}
       onPointerLeave={() => props.onHoverMark?.(null)}
     >
       <div className="shp-drawn-fit" style={scaled && fit ? { width: drawn.width! * k, height: drawn.height! * k } : undefined}>
         <div ref={hostRef} className="shp-drawn-host" />
       </div>
+      {pan && (
+        <div ref={trackRef} className="shp-pan-track" aria-hidden="true">
+          <i />
+        </div>
+      )}
+      {props.scenes && <ScenePlayers board={rootRef.current?.querySelector<HTMLElement>('.board') ?? null} drawnKey={contentKey} scenes={props.scenes} reduce={reduce} look={props.sceneLook} />}
     </div>
   );
 }

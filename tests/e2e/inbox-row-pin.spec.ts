@@ -11,7 +11,7 @@
  * items and questions). For every shape (the three-line row beside a thread, the wide list, the wide list of that
  * one project, a 390 px phone) and every list look (none, Compact rows, Highlight thread subject, Hide agent icons,
  * all three; each checked on the list column before measuring), unread and then read:
- *  - three-line and phone rows: the pin is on line 3 after the preview; with something after it (the badge, the
+ *  - three-line and phone rows: the pin is on line 3 after the preview; with something after it (the
  *    counts, the words) it ends 8 px (the line's gap) before that, else on the line's right edge. A phone row with
  *    nothing else for line 3 keeps the pin on line 1, 8 px before the time, and has no line 3;
  *  - the wide row: the pin in its own column, ending 8 px before the open counts' column, at one x down the list,
@@ -199,7 +199,7 @@ async function measure(page: Page, shape: Shape): Promise<PinGeometry[]> {
           pinRight: pin ? box(pin).right : 0,
           pinTop: pin ? box(pin).top : 0,
           lineRight: line ? box(line).right : 0,
-          after: after.map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'count' : c.classList.contains('ib-c') ? 'words' : c.className.split(' ')[0]!)),
+          after: after.map((c) => (c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'count' : c.classList.contains('ib-c') ? 'words' : c.className.split(' ')[0]!)),
           nextLeft: after[0] ? box(after[0]).left : null,
           gap: line ? parseFloat(getComputedStyle(line).columnGap) || 0 : 0,
           previewRight: preview ? box(preview).right : null,
@@ -251,8 +251,8 @@ function expectPinsRight(rows: PinGeometry[], shape: Shape, label: string) {
     }
     expect(r.line, `${name}: the pin's line`).toBe(shape === 'narrow' ? 'ib-l3' : 'ib-m3');
     if (r.nextLeft !== null) {
-      // Before the badge, the counts or the words, one 8 px gap from them.
-      expect(r.after.every((p) => ['badge', 'action', 'count', 'words'].includes(p)), `${name}: after the pin: ${r.after}`).toBe(true);
+      // Before the counts or the words, one 8 px gap from them.
+      expect(r.after.every((p) => ['action', 'count', 'words'].includes(p)), `${name}: after the pin: ${r.after}`).toBe(true);
       expect(r.gap, `${name}: the line's gap`).toBe(8);
       expect(Math.abs(r.nextLeft - r.gap - r.pinRight), `${name}: one gap before ${r.after[0]}`).toBeLessThanOrEqual(0.5);
     } else {

@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
+import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -130,7 +131,7 @@ export async function getGlUser(runtime: PRRuntime, host: string): Promise<strin
  * flags entirely; there an empty diff on a plain modification is the only
  * reliable withheld signal — empty adds/deletes/renames stay exempt.
  */
-function entryMissingContent(d: GitLabDiffEntry): boolean {
+export function entryMissingContent(d: GitLabDiffEntry): boolean {
   if (d.diff.trim() !== "") return false;
   if (d.too_large || d.collapsed) return true;
   // == null catches both absent (old GitLab) and explicit null (GitLab emits
@@ -350,6 +351,7 @@ export async function fetchGlMRContext(
 
   // --- Discussions (inline review threads) ---
   const reviewThreads: PRContext["reviewThreads"] = [];
+  const threadsIncomplete = discussionsResult.exitCode !== 0;
   const discussionNoteIds = new Set<string>();
   if (discussionsResult.exitCode === 0) {
     try {
@@ -515,6 +517,13 @@ export async function fetchGlMRContext(
     }
   }
 
+  const requestedReviewers: NonNullable<PRContext["requestedReviewers"]> = arr(mr.reviewers).flatMap((user: any) => {
+    const login = str(user?.username);
+    if (!login) return [];
+    const avatarUrl = resolveAvatar(user?.avatar_url);
+    return [{ login, ...(avatarUrl ? { avatarUrl } : {}), ...(isGitlabBot(user) ? { isBot: true } : {}) }];
+  });
+
   return {
     body: str(mr.description),
     state,
@@ -526,8 +535,10 @@ export async function fetchGlMRContext(
     comments: notes,
     reviews,
     reviewThreads,
+    ...(threadsIncomplete ? { threadsIncomplete } : {}),
     checks,
     linkedIssues,
+    requestedReviewers,
   };
 }
 
@@ -704,6 +715,87 @@ async function requestGlMRChanges(runtime: PRRuntime, run: RunWithInput, ref: Gl
   return errors.length > 0 ? errors.join("; ") : null;
 }
 
+/** One file of an MR's diff as a discussion's position needs it: its path before, and its unchanged lines' pairs. */
+interface GlPositionFile {
+  oldPath: string;
+  /** Unchanged lines: new line number to old, and old to new. */
+  newToOld: Map<number, number>;
+  oldToNew: Map<number, number>;
+}
+
+/**
+ * The MR's diff, read for discussion positions: GitLab places a comment on an unchanged line only with both its line
+ * numbers, and on a renamed file only with the path it had. Null when it can't be read (the comments then go as before).
+ */
+async function readGlPositionFiles(runtime: PRRuntime, ref: GlMRRef): Promise<Map<string, GlPositionFile> | null> {
+  const encoded = encodeProject(ref.projectPath);
+  let patch: string | null = null;
+  try {
+    const raw = await runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/raw_diffs`));
+    if (raw.exitCode === 0 && raw.stdout.trim()) {
+      patch = raw.stdout;
+    } else {
+      const json = await runtime.runCommand(
+        "glab",
+        apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"]),
+      );
+      if (json.exitCode === 0 && json.stdout.trim()) patch = reconstructPatch(parsePaginatedArray<GitLabDiffEntry>(json.stdout));
+    }
+  } catch {
+    return null;
+  }
+  if (!patch?.trim()) return null;
+  const files = new Map<string, GlPositionFile>();
+  for (const file of parseDiffToFiles(patch)) {
+    const newToOld = new Map<number, number>();
+    const oldToNew = new Map<number, number>();
+    for (const hunk of diffHunkLines(file.patch) ?? []) {
+      for (const line of hunk.lines) {
+        if (line.kind !== "context") continue;
+        newToOld.set(line.newLine, line.oldLine);
+        oldToNew.set(line.oldLine, line.newLine);
+      }
+    }
+    files.set(file.path, { oldPath: file.oldPath ?? file.path, newToOld, oldToNew });
+  }
+  return files;
+}
+
+/**
+ * Where a line comment sits, as GitLab's discussion `position` takes it. An unchanged line carries both its line
+ * numbers (`type: "old"` in a range, as GitLab names any line not added); a renamed file its old path.
+ */
+function glPosition(
+  comment: PRReviewFileComment,
+  shas: { base: string; head: string; start: string },
+  file: GlPositionFile | undefined,
+): Record<string, unknown> {
+  const at = (line: number, side: "LEFT" | "RIGHT") => {
+    const other = side === "LEFT" ? file?.oldToNew.get(line) : file?.newToOld.get(line);
+    const old_line = side === "LEFT" ? line : other;
+    const new_line = side === "LEFT" ? other : line;
+    return {
+      type: old_line === undefined ? "new" : "old",
+      ...(old_line !== undefined ? { old_line } : {}),
+      ...(new_line !== undefined ? { new_line } : {}),
+    };
+  };
+  const { type: _type, ...end } = at(comment.line, comment.side);
+  const position: Record<string, unknown> = {
+    position_type: "text",
+    base_sha: shas.base,
+    head_sha: shas.head,
+    start_sha: shas.start,
+    new_path: comment.path,
+    old_path: file?.oldPath ?? comment.path,
+    ...end,
+  };
+  if (comment.start_line != null && comment.start_line !== comment.line) {
+    position.line_range = { start: at(comment.start_line, comment.start_side ?? comment.side), end: at(comment.line, comment.side) };
+  }
+  return position;
+}
+
 /**
  * Submit a GitLab review across its separate note, discussion, and approval
  * APIs.
@@ -781,38 +873,11 @@ export async function submitGlMRReview(
         error: `${comment.path}:${comment.line}: Failed to prepare inline comment: ${diffRefsError}`,
       }));
     } else {
+      const positionFiles = await readGlPositionFiles(runtime, ref);
       // Submit comments in parallel
       const results = await Promise.allSettled(
         fileComments.map(async (comment) => {
-          const isOldSide = comment.side === "LEFT";
-          const position: Record<string, unknown> = {
-            position_type: "text",
-            base_sha: baseSha,
-            head_sha: headSha,
-            start_sha: startSha,
-            new_path: comment.path,
-            old_path: comment.path,
-          };
-
-          if (isOldSide) {
-            position.old_line = comment.line;
-          } else {
-            position.new_line = comment.line;
-          }
-
-          // Multi-line range support
-          if (comment.start_line != null && comment.start_line !== comment.line) {
-            const startIsOld = (comment.start_side ?? comment.side) === "LEFT";
-            const startEntry: Record<string, unknown> = { type: startIsOld ? "old" : "new" };
-            if (startIsOld) startEntry.old_line = comment.start_line;
-            else startEntry.new_line = comment.start_line;
-
-            const endEntry: Record<string, unknown> = { type: isOldSide ? "old" : "new" };
-            if (isOldSide) endEntry.old_line = comment.line;
-            else endEntry.new_line = comment.line;
-
-            position.line_range = { start: startEntry, end: endEntry };
-          }
+          const position = glPosition(comment, { base: baseSha, head: headSha, start: startSha }, positionFiles?.get(comment.path));
 
           const payload = JSON.stringify({ body: comment.body, position });
           const res = await runCommandWithInput(

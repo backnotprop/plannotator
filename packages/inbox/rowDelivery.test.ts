@@ -13,7 +13,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxStore } from '../shared/inbox/store';
 import { inboxDeliveryState, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { deliveryLine, waitInputs, type DeliveryLineInput, type RecipientConnection } from './deliveryLine';
-import { hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
+import { deliveriesReadList, hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
 
 const time = (iso: string) => `at ${iso.slice(11, 16)}`;
 const AT = '2026-10-20T15:41:00.000Z';
@@ -25,6 +25,8 @@ const connections: (RecipientConnection | null | undefined)[] = [
   { busy: true, idle_since: null, send_now: false },
   { busy: false, idle_since: AT, send_now: false },
   { busy: null, idle_since: null, send_now: false },
+  // Claude Code holds the session's replies until the person types there (approval "inbox-stopped-reply").
+  { busy: false, idle_since: AT, send_now: true, held: true },
 ];
 
 function* inputs(): Generator<DeliveryLineInput> {
@@ -98,6 +100,16 @@ describe('the row words', () => {
     expect(rowDeliverySpoken({ ...base, kind: 'ack', state: 'queued' })).toBe('Looks good, queued for Claude Code');
   });
 
+  // Approval "inbox-stopped-reply": the accessible name says what the tooltip and the thread say, never "Queued".
+  test('held by a stopped Claude Code session: the accessible name says Stopped, as the tooltip does', () => {
+    const stopped: InboxRowDelivery = { ...base, reason: 'stopped', send_now: false };
+    expect(rowDeliverySpoken(stopped)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliveryLine(stopped, time)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliverySpoken({ ...stopped, kind: 'ack' })).toBe('Looks good, stopped: goes in when you type in that session');
+    // Once it went in: Delivered.
+    expect(rowDeliverySpoken({ ...stopped, state: 'delivered', reason: 'delivered', at: AT })).toBe('Delivered to Claude Code');
+  });
+
   test("a 👍's tooltip, in its Undo window and after", () => {
     expect(rowDeliveryLine({ ...base, kind: 'ack', reason: 'ack_pending' })).toBe('👍 Looks good · Goes to Claude Code in a few seconds');
     expect(rowDeliveryLine({ ...base, kind: 'ack', state: 'sending', reason: 'idle' })).toBe('👍 Looks good · Sending to Claude Code…');
@@ -121,6 +133,24 @@ describe('the row words', () => {
     // Saved because the session that asked ended: its coming back moves it. Saved for an agent that reads: only its read does.
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'ended' }]))).toBe(true);
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'reads' }]))).toBe(false);
+  });
+
+  test('a session that ended or came back reads the list again even when no row has a reply to move', () => {
+    const section = (deliveries: (InboxRowDelivery | null)[]): InboxListSection[] => [
+      { id: 'sent', label: 'Sent', threads: deliveries.map((delivery) => ({ delivery }) as unknown as InboxListRow) },
+    ];
+    const quiet = section([null, { ...base, state: 'delivered' }]);
+    expect(deliveriesReadList({ labels: false, sessions: false }, quiet)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: true }, quiet)).toBe(true);
+    expect(deliveriesReadList({ labels: true, sessions: false }, quiet)).toBe(true);
+    expect(deliveriesReadList(undefined, section([{ ...base, state: 'queued' }]))).toBe(true);
+  });
+
+  test('the agents moved: the list is read again only while something draws them (the Agents section)', () => {
+    const quiet: InboxListSection[] = [{ id: 'sent', label: 'Sent', threads: [] }];
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, true)).toBe(true);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, false)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: false }, quiet, true)).toBe(false);
   });
 });
 
@@ -196,7 +226,7 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       expect(row.delivery!.send_now).toBe(line.sendNow === true);
       expect(rowDeliveryLine(row.delivery!, time)).toBe(line.text);
       expect(line.state).toBe(picked ? 'saved' : 'queued');
-      if (picked) expect(line.text).toStartWith('Saved for Pi. The session that asked has ended');
+      if (picked) expect(line.text).toStartWith('Saved for Pi. That session has ended');
       // The words answer Claude Code's message (ses_b), so they go to it, not to Pi, who started the thread.
       else expect(line.text).toContain('Claude Code is working');
     });

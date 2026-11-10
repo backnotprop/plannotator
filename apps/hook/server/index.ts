@@ -109,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -241,14 +241,18 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
-import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
+import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
+import { runShapeFrame } from "./shape-frame";
+import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { writeWholeToStdout } from "./write-whole-stdout";
@@ -348,38 +352,32 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
-// `plannotator review draw …` / `plannotator review drawings <msg_id>`: an agent's side of
-// Show me (review-draw-command.ts; approval "shape-in-code-review"). Before the
-// review parse, which would take `draw` for a ref. Only while the person has Code
-// review on, and only arguments of the command's own shape: otherwise (off
-// included) the review parse takes them, exactly as before Show me.
-{
-  const args = rawArgs;
-  // Read quietly: a broken config.json is Code review off, and the review parse that then takes the words
-  // warns about it once, as it always did.
-  if (isReviewDrawCommand(args, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
-    const drawDataDir = getPlannotatorDataDir();
-    process.exit(
-      await runReviewDrawCommand(args.slice(1), {
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-        env: process.env,
-        ensureRunning: () => ensureInboxRunning(drawDataDir),
-      }),
-    );
-  }
+// `plannotator review draw …` / `plannotator review drawings <msg_id>`: Show me makes a Shape now, so an older
+// agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
+// while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
+// the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
+// Shape off too (approval "code-review-029-shape-off"): the refusal points at Shape, so it is given only with both on;
+// otherwise the review parse takes the words, as with Code review off.
+if (isReviewDrawCommand(rawArgs, () => {
+  const config = loadConfig({ quiet: true });
+  return config.inboxCodeReview === true && config.inboxShape === true;
+})) {
+  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
+  process.exit(1);
 }
 // `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
 // HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
 // strict-annotate parse, which takes `--file`-style flags for itself.
 {
   const args = rawArgs;
-  // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
-  // learns nothing of it (the same switch hides the Pebble, the row and the routes).
+  // Off unless the person turned Shape on (Settings → Capabilities; Code review alone brings none of it, approval
+  // "code-review-029-shape-off"): no command and no help, so an agent learns nothing of it (the same switch hides the
+  // Pebble and the routes).
   // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
   }
-  if (args[0] === "shape" && !shapeSwitchOn()) {
+  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
   }
@@ -399,6 +397,23 @@ const rawArgs = process.argv.slice(2);
       }),
     );
   }
+  // `shape --help animate` (or `shape animate [--help]`): the animation guide, read once the agent decides to animate.
+  if (args[0] === "shape" && isShapeAnimateHelp(args.slice(1))) {
+    await writeWholeToStdout(`${SHAPE_ANIMATE_HELP}\n`);
+    process.exit(0);
+  }
+  // `shape frame`: a picture of a board at one moment, through the Chrome on this computer (shape-frame.ts).
+  if (args[0] === "shape" && args[1] === "frame" && !hasHelpFlag(args.slice(2))) {
+    process.exit(
+      await runShapeFrame(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        pageGzip: shapeHtmlGzip,
+        version: getCliVersion() ?? "dev",
+      }),
+    );
+  }
   if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
     process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
   }
@@ -406,8 +421,26 @@ const rawArgs = process.argv.slice(2);
     process.exit(
       await runShapeCommand(args.slice(1), {
         dataDir: getPlannotatorDataDir(),
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        cwd: shapeCommandFolder(process.env),
         env: process.env,
+      }),
+    );
+  }
+}
+// `plannotator system …`: System's drawing of a project (system-command.ts;
+// unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
+// job that keeps it current. Before the strict-annotate parse: it takes its own
+// flags and its own --help. Loaded only when asked for, as t3 is.
+{
+  const args = rawArgs;
+  if (args[0] === "system") {
+    const { runSystemCommand } = await import("./system-command");
+    process.exit(
+      await runSystemCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        dataDir: getPlannotatorDataDir(),
+        env: process.env,
+        self: inboxSelfCommand(),
       }),
     );
   }
@@ -424,6 +457,21 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "pulls") {
+    const pullsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxPullsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(pullsDataDir),
       }),
     );
   }
@@ -962,7 +1010,7 @@ if (args[0] === "install-runtime") {
 // (inbox/inbox.json). Dispatched before the session registry and the
 // auto-update trigger below, which belong to review sessions.
 if (args[0] === "inbox") {
-  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent(), json: jsonFlag });
+  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent, json: jsonFlag });
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
@@ -3347,6 +3395,15 @@ if (args[0] === "sessions") {
     console.log(
       JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: modApproval } })
     );
+    process.exit(0);
+  }
+
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  if (
+    event.hook_event_name === "PermissionRequest" &&
+    event.tool_name === "ExitPlanMode" &&
+    !resolvePlanReview(loadConfig(), process.env)
+  ) {
     process.exit(0);
   }
 

@@ -1,11 +1,10 @@
 /**
- * Show me in the Inbox's code review (approval "shape-in-code-review", mock
- * ac2): the pure parts. Which chapter a picture's part opens, the part's name
- * for the corner card, the words of the sheet's line, and which parts of a
- * redrawn Overview changed.
+ * Show me in the Inbox's code review (Show me makes a Shape: approval
+ * "code-review-launch-build", item 1): the pure parts. Which chapter a board's
+ * part opens, the part's name for the corner card, and which parts of a redrawn
+ * Overview changed.
  */
-import { parseShapeCodeTarget, shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
-import { inboxReviewLines } from '@plannotator/core/inbox-review';
+import { shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
 import { guideDiagramIsDrawn } from '@plannotator/core/guide-format';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 
@@ -34,7 +33,9 @@ type Place = { file: string | null; lines: readonly [number, number] | null };
  * least half of the lines the two cover together. Lines 1–200 are not a
  * picture of 16–18; 15–18 is.
  */
-export function showMeSamePlace(asked: Place, place: Place): boolean {
+export function showMeSamePlace(asked: Place & { part?: unknown }, place: Place): boolean {
+  // A Show me from a board always makes a new board: it never stands for lines, or for the whole review.
+  if (asked.part) return false;
   if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
   if (asked.file !== place.file || !asked.lines) return false;
   const [a0, a1] = asked.lines;
@@ -49,15 +50,15 @@ export function showMeSamePlace(asked: Place, place: Place): boolean {
 interface ShowMeTurn {
   id: string;
   kind?: 'show_me';
-  show_me?: { review: string; file: string | null; lines: [number, number] | null };
-  drawing?: string;
+  show_me?: { review: string | null; file: string | null; lines: [number, number] | null; part?: { board: string } };
+  shape?: string;
   answer?: string;
   stopped?: boolean;
   failure?: string;
 }
 
 /**
- * This review's Show me for `place` that the agent is drawing now: no picture
+ * This review's Show me for `place` that the agent is drawing now: no board
  * and no answer yet, and actually running (the Inbox's running turn, or this
  * window's live stream). A turn the Inbox kept but nobody answers (no
  * connection when asked, or the session gone before a word) is not waiting:
@@ -66,15 +67,9 @@ interface ShowMeTurn {
 export function waitingShowMe<T extends ShowMeTurn>(turns: readonly T[], reviewId: string, place: Place, running: string | null, live: string | null): T | undefined {
   return turns
     .filter((turn) => turn.kind === 'show_me' && turn.show_me?.review === reviewId && showMeSamePlace(turn.show_me, place))
-    .filter((turn) => !turn.drawing && turn.answer === undefined && !turn.stopped && turn.failure === undefined)
+    .filter((turn) => !turn.shape && turn.answer === undefined && !turn.stopped && turn.failure === undefined)
     .filter((turn) => turn.id === running || turn.id === live)
     .at(-1);
-}
-
-/** "retry-worker.ts lines 16–18", or "the whole review" for the Overview's. */
-export function showMePlace(file: string | null, lines: readonly [number, number] | null): string {
-  if (!file) return 'the whole review';
-  return lines ? `${baseName(file)} lines ${inboxReviewLines(lines)}` : baseName(file);
 }
 
 /**
@@ -86,26 +81,12 @@ export function chapterOf(chapters: readonly { diffs: readonly { file: string }[
   return at < 0 ? null : at;
 }
 
-/** One key per place a part opens. */
-export function codeKey(target: ShapeCodeTarget): string {
-  return `${target.path}#${target.line}-${target.lineEnd ?? target.line}`;
-}
-
 /** The lines a part opens, as a pair. */
 export function targetLines(target: ShapeCodeTarget): [number, number] {
   return [target.line, target.lineEnd ?? target.line];
 }
 
-/**
- * A part's name for the corner card: its first heading or bold words, else
- * its first words. Read from the drawing as the reviewer sees it.
- */
-export function partName(el: Element): string {
-  const named = el.querySelector('h1, h2, h3, h4, h5, h6, b, strong, .tt, .title, text');
-  const words = (named?.textContent ?? el.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const chars = Array.from(words);
-  return chars.length > 48 ? `${chars.slice(0, 47).join('').trimEnd()}…` : words;
-}
+export { partName } from '@plannotator/ui/components/shape/partName';
 
 /** The `data-mark` of the part a click landed in, if it has one. */
 export function markOf(el: Element): string | null {
@@ -162,8 +143,8 @@ export interface PartAnchor {
 }
 
 /**
- * Round 2 for Show me: a picture stays as asked, and each part that opens
- * code is anchored again on this round's diff. Its lines, as the earlier
+ * A board drawn on an earlier review: each part that opens code is anchored
+ * again on this review's diff. Its lines, as the earlier
  * round's diff showed them, are looked for in this round's: at the same
  * place, else the nearest place in the file (the part follows them there).
  * Lines no longer found changed since the picture was asked; the part keeps
@@ -289,44 +270,122 @@ export function earlierLinesNow(
   return anchorLines(lines, before, after) ?? shiftLines(lines, before, after);
 }
 
-/**
- * Whether the Show me the box sent ended with nothing to show: not running,
- * not waiting on a busy agent, no answer, not stopped, and no picture. A
- * turn that names its drawing has one, even before this window has read it,
- * unless the list, read again for it, still does not have it (`lost`).
- */
-export function showMeEnded(
-  turn: { answer?: string; stopped?: boolean; drawing?: string } | undefined,
-  now: { running: boolean; busy: boolean; drawn: boolean; lost?: boolean },
-): boolean {
-  return !now.running && !now.busy && !now.drawn && (!turn?.drawing || !!now.lost) && !turn?.stopped && turn?.answer === undefined;
+/** A review's new-side lines by file (`newSideLines`). */
+export type ReviewLines = ReadonlyMap<string, ReadonlyMap<number, string>>;
+
+/** A review's files as `ReviewLines`. One with no hunks (a pure rename, a binary) shows no lines and hides none: absent. */
+export function reviewLines(files: readonly { path: string; patch: string }[]): ReviewLines {
+  return new Map(files.filter((file) => file.patch.includes('@@')).map((file) => [file.path, newSideLines(file.patch)] as const));
 }
 
 /**
- * Every part of an earlier round's picture that opens code, anchored on this
- * round: its target (by `codeKey`) → where it opens now, and the `data-mark` ids of the
- * parts whose lines changed since.
+ * The review a board's version counts its lines in: the newest review at or
+ * before the message it was stored through (agents pass the latest id they read,
+ * often a reply). Stored through nothing, or through something before any review:
+ * the review the Show me that made the board names (`askedOn`), else the newest
+ * review the thread had when the version was stored (`at`). Null with none of
+ * those: its numbers mean nothing in any review here.
  */
-export function anchorDrawing(
-  html: readonly string[],
-  before: ReadonlyMap<string, ReadonlyMap<number, string>>,
-  after: ReadonlyMap<string, ReadonlyMap<number, string>>,
-): { moved: Map<string, ShapeCodeTarget>; stale: Set<string> } {
-  const moved = new Map<string, ShapeCodeTarget>();
-  const stale = new Set<string>();
-  if (typeof DOMParser === 'undefined') return { moved, stale };
-  for (const source of html) {
-    if (!source) continue;
-    const doc = new DOMParser().parseFromString(`<body>${source}</body>`, 'text/html');
-    for (const el of doc.querySelectorAll('[data-code]')) {
-      const code = el.getAttribute('data-code') ?? '';
-      const target = parseShapeCodeTarget(code);
-      if (!target) continue;
-      const anchor = anchorPart(target, before.get(target.path), after.get(target.path));
-      moved.set(codeKey(target), anchor.now);
-      const mark = el.closest('[data-mark]')?.getAttribute('data-mark');
-      if (anchor.changed && mark) stale.add(mark);
-    }
+export function reviewDrawnOn(
+  through: string | null | undefined,
+  messages: readonly { id: string; created_at?: string; guide?: { review?: unknown } | null }[],
+  askedOn: string | undefined,
+  at?: string,
+): string | null {
+  for (let i = through ? messages.findIndex((message) => message.id === through) : -1; i >= 0; i -= 1) {
+    if (messages[i]!.guide?.review) return messages[i]!.id;
   }
-  return { moved, stale };
+  if (askedOn) return askedOn;
+  const stored = at ? Date.parse(at) : NaN;
+  const before = messages.filter((message) => message.guide?.review && message.created_at && Date.parse(message.created_at) <= stored);
+  return before.at(-1)?.id ?? null;
+}
+
+/**
+ * Where a click on a board's part lands in this review's diff: the lines; null
+ * when the diff does not show them (the board's own viewer opens the code);
+ * 'changed' when these lines can't be found here (never old numbers: they hold
+ * other code now), or the file is gone from the new side. `earlier`: the review
+ * it was drawn on, when not this one, with `lines` undefined until it is read;
+ * null when it was drawn on none of this thread's reviews (the board's own viewer
+ * reads the file as it is on disk).
+ */
+export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined } | null): [number, number] | 'changed' | null {
+  const after = now.get(target.path);
+  if (!after) return null;
+  if (after.size === 0) return 'changed';
+  if (earlier === null) return null;
+  const asked = targetLines(target);
+  const numbers = Array.from({ length: asked[1] - asked[0] + 1 }, (_, i) => asked[0] + i);
+  if (!earlier) return numbers.some((n) => after.has(n)) ? asked : null;
+  if (!earlier.lines) return 'changed';
+  const before = earlier.lines.get(target.path);
+  if (!numbers.every((n) => before?.has(n))) return null;
+  return earlierLinesNow(asked, before, after) ?? 'changed';
+}
+
+/**
+ * A Show me that ended with no board and no answer: nothing is running or
+ * waiting on a choice, and the person did not stop it. The box goes back to its words.
+ */
+export function showMeEnded(turn: { answer?: string; stopped?: boolean; shape?: string } | undefined, now: { running: boolean; busy: boolean }): boolean {
+  return !now.running && !now.busy && !turn?.shape && !turn?.stopped && turn?.answer === undefined;
+}
+
+/**
+ * Which board each board was made from: a Show me on a part of a board names both (`show_me.part.board`, and `shape`,
+ * the board it made). Read from the turns, so nothing is kept twice and a reload keeps it. The first link a board has
+ * wins (Show me again keeps the same one); a turn the agent answered by moving the board it was on, or that would
+ * close a loop, links nothing.
+ */
+export function boardParents(turns: readonly { shape?: string; show_me?: { part?: { board: string } } }[]): Map<string, string> {
+  const parents = new Map<string, string>();
+  for (const turn of turns) {
+    const child = turn.shape;
+    const parent = turn.show_me?.part?.board;
+    if (!child || !parent || child === parent || parents.has(child)) continue;
+    let up: string | undefined = parent;
+    while (up && up !== child) up = parents.get(up);
+    if (up === child) continue;
+    parents.set(child, parent);
+  }
+  return parents;
+}
+
+export interface BoardRow {
+  id: string;
+  title: string;
+  /** How many Show mes it is from a board nobody made one from. No limit. */
+  depth: number;
+  parent: string | null;
+}
+
+/** A thread's boards as a list to go down: each after the board it came from, oldest first at each level (ids sort by time). */
+export function boardRows(boards: readonly { id: string; title: string }[], parents: ReadonlyMap<string, string>): BoardRow[] {
+  const ids = new Set(boards.map((board) => board.id));
+  const order = [...boards].sort((a, b) => a.id.localeCompare(b.id));
+  const under = new Map<string | null, typeof order>();
+  for (const board of order) {
+    const from = parents.get(board.id);
+    const key = from && ids.has(from) ? from : null;
+    under.set(key, [...(under.get(key) ?? []), board]);
+  }
+  const rows: BoardRow[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const board of under.get(parent) ?? []) {
+      rows.push({ id: board.id, title: board.title, depth, parent });
+      walk(board.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
+}
+
+/**
+ * A Show me pressed on a board: what it does with the box under the review. A box the person is writing in keeps its
+ * words and a box already sent keeps its wait, so the press waits its turn; an empty box gives way to it.
+ */
+export function boardPressWaits(box: { words: string; turn: string | null } | null, posting: boolean): 'wait' | 'go' {
+  if (box?.turn || posting) return 'wait';
+  return box && box.words.trim() ? 'wait' : 'go';
 }

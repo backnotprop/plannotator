@@ -23,6 +23,7 @@ import { themeSupportsHalf, type ThemeHalf } from '@plannotator/ui/utils/themeRe
 import { configStore, type ServerSyncFn } from '@plannotator/ui/config';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { inboxApi, type InboxThemeConfig } from './api';
+import { diffOptionsToWire } from './diffOptions';
 
 /**
  * The config store's server write-back, for the Inbox: it has no /api/config,
@@ -60,10 +61,9 @@ export const inboxServerSync: ServerSyncFn = (payload) => {
     }
     if (Object.keys(send).length > 0) void inboxApi.saveTheme(send).catch(() => {});
   }
-  const diffStyle = (payload.diffOptions as { diffStyle?: unknown } | undefined)?.diffStyle;
-  if (diffStyle === 'split' || diffStyle === 'unified') {
-    void inboxApi.saveDiffStyle(diffStyle).catch(() => {});
-  }
+  // Every diff setting the Inbox changed (diffOptions.ts), in one POST.
+  const diffOptions = diffOptionsToWire(payload.diffOptions);
+  if (diffOptions) void inboxApi.saveDiffOptions(diffOptions).catch(() => {});
 };
 
 let adopted = false;
@@ -159,4 +159,23 @@ export function useInboxPalettes(): InboxPalettes {
     [assign],
   );
   return { ...halves, choose, shown: resolvedMode };
+}
+
+/**
+ * The one-time "themes" dialog's pick (themeChooser.ts): a theme on both halves and a mode, each written as its
+ * Settings control writes it (the Colors row's `choose` for a half, the Theme row's for the mode), so it applies at
+ * once, with no reload, and goes to config.json `theme` the same way. Only a part that changes is written: picking
+ * what is already in use writes nothing.
+ */
+export function useInboxThemePick(): (pick: { light: string; dark: string; mode: Mode }) => void {
+  const { mode, choose: chooseMode } = useInboxTheme();
+  const { pair, choose: choosePalette } = useInboxPalettes();
+  return useCallback(
+    (pick) => {
+      if (pick.light !== pair.light) choosePalette('light', pick.light);
+      if (pick.dark !== pair.dark) choosePalette('dark', pick.dark);
+      if (pick.mode !== mode) chooseMode(pick.mode);
+    },
+    [mode, pair.light, pair.dark, chooseMode, choosePalette],
+  );
 }

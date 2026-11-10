@@ -46,6 +46,7 @@ import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
+import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
@@ -74,6 +75,18 @@ export interface InboxComposerTags {
   note?: (props: { id: string; tagged: readonly TagOption[]; focusField: () => void }) => React.ReactNode;
 }
 
+/**
+ * A command of the Inbox's own in the `/` list (the reply box's `/side`): a window action, not a skill. Picking it
+ * sends nothing to the agent: the typed `/…` leaves the words and `run` gets what is left.
+ */
+export interface ComposerCommand {
+  /** The name typed after `/`. */
+  name: string;
+  /** The list's one line. */
+  description: string;
+  run: (words: string) => void;
+}
+
 export interface InboxComposerFieldProps {
   value: string;
   onChange: (value: string) => void;
@@ -94,8 +107,12 @@ export interface InboxComposerFieldProps {
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
+  /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
+  voiceNoteGlide?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
+  /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
+  commands?: readonly ComposerCommand[];
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -115,7 +132,9 @@ export function InboxComposerField({
   caretMenu,
   escapeClosesMenu = false,
   voice,
+  voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
+  commands,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -133,6 +152,12 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
+  const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
+    () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
+    [commands],
+  );
+  const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
     setText: onChange,
@@ -140,6 +165,10 @@ export function InboxComposerField({
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
     catalogFilter: skillFilter,
+    commands: commandRows,
+    onCommand: runCommand,
+    // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
+    hostRowsFirst: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -220,6 +249,8 @@ export function InboxComposerField({
               items={skills.menu!.items}
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
+              groupHostRows
+              rowIcon={builtinSkillIcon}
               boundary={boundary}
               prefer={caretMenu?.prefer ?? 'above'}
               maxListHeight={maxListHeight}
@@ -290,7 +321,7 @@ export function InboxComposerField({
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
-      {voice && <VoiceNote voice={voice} />}
+      {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (

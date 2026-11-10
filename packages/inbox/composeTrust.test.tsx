@@ -44,6 +44,8 @@ let sends: { launch: Record<string, unknown>; body: string }[];
 let sendAnswer: (() => Promise<never>) | null;
 let sentOk: unknown[];
 let closed: number;
+/** The draft saves compose made (`POST /api/inbox/drafts/<id>`): closing with words keeps them. */
+let drafts: { body: string }[];
 
 const model = (pick: { project: string } | null) => {
   const untrusted: Record<string, InboxLaunchUntrusted> = {};
@@ -74,9 +76,17 @@ beforeEach(() => {
   sendAnswer = null;
   sentOk = [];
   closed = 0;
+  drafts = [];
   savedFetch = globalThis.fetch;
-  // The login shell read ahead (`launchSettingsRead`): its answer is unused.
-  globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
+  // The login shell read ahead (`launchSettingsRead`): its answer is unused. A draft save is answered as the Inbox does.
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && /\/drafts\/[^/]+$/.test(String(input))) {
+      const body = JSON.parse(String(init.body)) as { body: string };
+      drafts.push(body);
+      return Response.json({ draft: { v: 1, id: 'drf_1', created_at: 'x', updated_at: 'y', files: [], ...body, status: 'none' } });
+    }
+    return new Response('{}', { status: 404 });
+  }) as unknown as typeof fetch;
 });
 
 afterEach(() => {
@@ -222,6 +232,9 @@ test.skipIf(!hasDom)('a trusted folder: plain Send, no circle, and the Send carr
   type('Tidy the readme.');
   expect(label()).toStartWith('Send');
   expect(inDialog(CIRCLE)).toBeNull();
+  // No ⌘↵ keycap on Send (approval "inbox-send-no-shortcut-hint"); the key is still named for a screen reader.
+  expect(!!inDialog(SEND)!.querySelector('kbd, [data-shortcut-hint]')).toBe(false);
+  expect(inDialog(SEND)!.getAttribute('aria-keyshortcuts') ?? '').toMatch(/^(Meta|Control)\+Enter$/);
   await press(SEND);
   expect(sends[0]!.launch).toEqual({ agent: AGENT, project_id: 'p1' });
 });
@@ -280,13 +293,13 @@ test.skipIf(!hasDom)('Escape closes the details first: the dialog stays, the wor
   await flush();
   expect(inDialog(DETAILS)).toBeNull();
   expect(closed).toBe(0);
-  expect(inDialog('[data-compose-question]')).toBeNull();
+  expect(drafts).toHaveLength(0);
   expect(inDialog<HTMLTextAreaElement>('textarea')!.value).toBe('Do not lose this.');
   expect(document.activeElement).toBe(inDialog(CIRCLE));
-  // The next Escape is the dialog's own: words, so it asks.
+  // The next Escape is the dialog's own: words, so it keeps them as a draft and leaves.
   keydown(inDialog(CIRCLE)!, 'Escape');
-  await flush();
-  expect(inDialog('[data-compose-question]')).not.toBeNull();
+  await until(() => drafts.length === 1, 'the draft saved');
+  expect(drafts[0]!.body).toBe('Do not lose this.');
 });
 
 test.skipIf(!hasDom)('from the text field Escape keeps the caret where it is', async () => {

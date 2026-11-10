@@ -76,6 +76,11 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+// Changing how the list's rows look (approval "inbox-rows-settings-page"): an agent asked in passing finds the command here.
+test("the guide says how to change the person's rows: the command, set, and undo", () => {
+  for (const words of ["plannotator inbox rows`", "plannotator inbox rows set <name>=<value>", "plannotator inbox rows undo"]) expect(help).toContain(words);
+});
+
 describe("the guide against what it describes", () => {
   test("every tool a real Inbox registers has a section, and every argument named is in its schema", async () => {
     const savedPath = process.env.PATH;
@@ -299,7 +304,7 @@ describe("plannotator inbox --help as a process", () => {
 });
 
 // Each host with Plannotator's own inbox tool must be in the guide an agent reads from every wake
-// ("how it works: plannotator inbox --help"): how to turn the tool on, and that replies arrive by themselves.
+// ("help: plannotator inbox --help"): how to turn the tool on, and that replies arrive by themselves.
 describe("the guide covers every host with Plannotator's inbox tool", () => {
   const section = (title: string) => help.split(`## ${title}`)[1]!.split("\n## ")[0]!;
 

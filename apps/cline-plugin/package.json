@@ -1,0 +1,44 @@
+{
+  "name": "@plannotator/cline",
+  "version": "0.28.60",
+  "type": "module",
+  "description": "Plannotator plugin for Cline - the Plannotator Inbox in Cline sessions",
+  "author": "backnotprop",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "apps/cline-plugin"
+  },
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "bugs": {
+    "url": "https://github.com/backnotprop/plannotator/issues"
+  },
+  "keywords": [
+    "cline",
+    "cline-plugin",
+    "plannotator",
+    "ai-agent",
+    "coding-agent"
+  ],
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "cline": {
+    "plugins": [
+      {
+        "paths": ["./dist/index.js"],
+        "capabilities": ["tools", "hooks"]
+      }
+    ]
+  },
+  "scripts": {
+    "build": "bun build index.ts --outfile dist/index.js --target node",
+    "prepublishOnly": "bun run build"
+  }
+}

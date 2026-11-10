@@ -1,44 +1,61 @@
 /**
  * The agents on this computer, proved in a real browser against the compiled
  * binary (the approved "inbox-agent-awareness" design, and
- * "inbox-agent-note-dialog": the note is asked once per agent, in a one-time
- * dialog). Fake agent CLIs on a scratch PATH and a scratch HOME
- * (tests/helpers/fake-agents.ts): the real agent CLIs never run and the real
- * home is never touched.
+ * "inbox-agent-note-auto": the note is written by itself for the agents
+ * proven to load it, Claude Code, Codex, Gemini CLI, Pi and OpenCode, and
+ * said once in a quiet line above the list; Qwen Code is still offered in
+ * the one-time dialog, Cursor's note is still copied by hand). Fake agent
+ * CLIs on a scratch PATH and a scratch HOME (tests/helpers/fake-agents.ts):
+ * the real agent CLIs never run and the real home is never touched.
  *
  *  1. An agent starts the Inbox (`--background`): nothing is connected.
- *  2. The person runs `plannotator inbox`: it connects Codex and Gemini CLI.
- *     The window's first load shows the sound dialog (due), and never the note
- *     dialog on the same load. The next load opens the note dialog: the
- *     "Connected …" band, Codex, Gemini CLI and Claude Code all ticked with
- *     their exact files; Add writes the ticked notes and shows the results in
- *     the same rows. Every agent shown is answered: no dialog again.
- *  3. Gemini's switch goes off in Settings → Agents; a later run never adds
- *     it back, connects Pi and Amp (installed since), and the next load asks
- *     about Pi alone ("Add the note to Pi?"); Not now writes nothing and Pi is
- *     not asked again. A run that connects only Cursor (its rules live in the app)
- *     asks to copy its note by hand; nothing is written.
- *  4. Stress: every note agent at once, with long and non-Latin paths.
+ *  2. The person runs `plannotator inbox`: it connects Codex and Gemini CLI,
+ *     and the notes are written by then: Codex's AGENTS.md (its blank
+ *     AGENTS.override.md is not what Codex reads), Gemini's GEMINI.md above
+ *     its memory section, Claude Code's rules file. The window's first load
+ *     shows the sound dialog (due) and, never a dialog, the line: "Connected
+ *     Codex and Gemini CLI to the Inbox." and "Added the Inbox note to the
+ *     instructions of …", each file in its name's tooltip. It is said once:
+ *     the next load is clear, and no note dialog ever asks about them.
+ *  3. Codex's note goes off in Settings → Agents; a later run never writes it
+ *     back, connects Qwen Code (installed since), and the next load's line
+ *     says so while the dialog asks about Qwen alone ("Add the note to Qwen
+ *     Code?"); Add writes it. A run that connects only Cursor (its rules live
+ *     in the app) asks to copy its note by hand; nothing is written.
+ *  4. Stress: every proven agent at once, with long and non-Latin paths.
  *
- * PNGs land in /tmp/agent-note-dialog-built/ (PLANNOTATOR_AGENT_NOTE_SHOTS),
+ * Deterministic: no sleeps. A load is "settled" when the window has read the
+ * agents twice (its second read decides the line and the dialog), and what the
+ * line shows is checked against the Inbox's own model too.
+ *
+ * PNGs land in /tmp/agent-note-auto-built/ (PLANNOTATOR_AGENT_NOTE_SHOTS),
  * desktop 1280x800 and 375x820, dark and light, at 2x. Build the binary first
  * (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 import { markTourDecided } from '../helpers/tour-decided';
 import { INBOX_NOTE_START } from '../../packages/server/inbox-agent-notes';
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type Request } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createFakeAgents, type FakeAgents } from '../helpers/fake-agents';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const shots = resolve(process.env.PLANNOTATOR_AGENT_NOTE_SHOTS ?? '/tmp/agent-note-dialog-built');
+const shots = resolve(process.env.PLANNOTATOR_AGENT_NOTE_SHOTS ?? '/tmp/agent-note-auto-built');
 const DESKTOP = { width: 1280, height: 800 };
 const NARROW = { width: 375, height: 820 };
+
+/** Every animation with an end (a scheme cross-fade, a line coming in) has finished; a spinner's never ends and is skipped. */
+async function animationsDone(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((done) => requestAnimationFrame(() => done()));
+    const ending = document.getAnimations().filter((animation) => Number.isFinite(Number(animation.effect?.getComputedTiming().endTime)));
+    await Promise.allSettled(ending.map((animation) => animation.finished));
+  });
+}
 
 async function shot(page: Page, name: string, sizes: ('desktop' | 'narrow')[] = ['desktop']): Promise<void> {
   mkdirSync(shots, { recursive: true });
@@ -48,8 +65,8 @@ async function shot(page: Page, name: string, sizes: ('desktop' | 'narrow')[] = 
       await page.emulateMedia({ colorScheme: scheme });
       // The window follows the OS scheme on the next frame.
       await page.waitForFunction((dark) => document.documentElement.classList.contains('light') !== dark, scheme === 'dark', { timeout: 3000 });
-      // The scheme change cross-fades; wait it out so the shot is one scheme.
-      await page.waitForTimeout(900);
+      // The scheme change cross-fades: the shot waits for it to end, so it is one scheme.
+      await animationsDone(page);
       await page.screenshot({ path: join(shots, `${name}${size === 'narrow' ? '-375' : ''}-${scheme}.png`) });
     }
   }
@@ -60,6 +77,8 @@ async function shot(page: Page, name: string, sizes: ('desktop' | 'narrow')[] = 
 function envFor(fake: FakeAgents, root: string, extra: Record<string, string> = {}): Record<string, string> {
   return {
     ...fake.env,
+    // The fakes' scratch home, where they set the agents up (spread above; named so the HOME scan sees it).
+    HOME: fake.env.HOME,
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
@@ -76,21 +95,44 @@ function envFor(fake: FakeAgents, root: string, extra: Record<string, string> = 
 
 const dialogOf = (page: Page) => page.locator('dialog[data-dialog="agent-note"]');
 const rowsOf = (page: Page) => dialogOf(page).locator('.ib-anote-table > li');
+const lineOf = (page: Page) => page.locator('[data-connect-line]');
+const lineRows = (page: Page) => lineOf(page).locator('.ib-cline-lines > p');
 const config = (root: string) => JSON.parse(readFileSync(join(root, 'data', 'config.json'), 'utf8'));
+const isPath = (path: string, method: string) => (request: Request) => request.method() === method && new URL(request.url()).pathname === path;
 
-/** No note dialog on this load: the page has loaded the list and settled its one-time dialogs. */
-async function expectNoDialog(page: Page): Promise<void> {
-  await expect(page.locator('.ib-main h1').first()).toBeVisible();
-  // The window reads the agents again 2.5 s after load before it decides.
-  await page.waitForTimeout(4000);
-  await expect(dialogOf(page)).toHaveCount(0);
+/**
+ * Load the page and wait until the window has settled what this load shows: it reads the agents at load and once
+ * more a moment later (the run that opened it may still be connecting), and the second read decides the connect
+ * line and the note dialog. No fixed wait: the two reads' requests are counted.
+ */
+async function loadSettled(page: Page, load: () => Promise<unknown>): Promise<void> {
+  let reads = 0;
+  const count = (request: Request) => {
+    if (isPath('/api/inbox/agents', 'GET')(request)) reads++;
+  };
+  page.on('requestfinished', count);
+  try {
+    await load();
+    await expect(page.locator('.ib-main h1').first()).toBeVisible();
+    await expect.poll(() => reads, { timeout: 20_000 }).toBeGreaterThanOrEqual(2);
+  } finally {
+    page.off('requestfinished', count);
+  }
+  // The read's answer is rendered by the next frames.
+  await animationsDone(page);
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+}
+
+/** What the window's line is drawn from: the last run's report (said or not) and the notes written by themselves not said yet. */
+async function agentsModel(page: Page): Promise<{ notes_auto?: { agent: string; path: string }[]; last_report: { seen?: boolean } | null }> {
+  return page.evaluate(async () => (await fetch('/api/inbox/agents')).json());
 }
 
 async function newContext(browser: Browser) {
   return browser.newContext({ viewport: DESKTOP, deviceScaleFactor: 2, colorScheme: 'dark' });
 }
 
-test('plannotator inbox connects the agents found; the note is asked once per agent in a dialog, after the sound dialog', async ({ browser }) => {
+test('plannotator inbox connects the agents found and writes their notes by itself; one quiet line says it once, never a dialog; Qwen Code is still asked', async ({ browser }) => {
   test.setTimeout(240_000);
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-agents-e2e-');
@@ -98,151 +140,143 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
   fake.install('codex', 'gemini');
   mkdirSync(join(fake.home, '.codex'), { recursive: true });
   writeFileSync(join(fake.home, '.codex', 'AGENTS.md'), '# My rules\n\nBe brief.\n');
-  // Plannotator's Claude Code plugin: Claude Code is offered and ticked like every other agent.
+  // A blank override: Codex skips it and reads AGENTS.md, so that is where the note goes.
+  writeFileSync(join(fake.home, '.codex', 'AGENTS.override.md'), '  \n');
+  // Gemini CLI's memory section ("Save memory" appends under it): the note goes above it.
+  mkdirSync(join(fake.home, '.gemini'), { recursive: true });
+  writeFileSync(join(fake.home, '.gemini', 'GEMINI.md'), '# Mine\n\n## Gemini Added Memories\n- Likes short answers.\n');
+  // Plannotator's Claude Code plugin: Claude Code loads the rules file, so it gets the note like the others.
   mkdirSync(join(fake.home, '.claude'), { recursive: true });
   writeFileSync(join(fake.home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
-  // The sound dialog is due (as after an update): it shows first, and the note dialog waits for another load.
+  // The sound dialog is due (as after an update): it shows on the first load, and the line is no dialog to wait for it.
   mkdirSync(join(root, 'data'), { recursive: true });
-  writeFileSync(join(root, 'data', 'config.json'), JSON.stringify({ inboxSound: { dialogDueFor: '0.0.0-dev' } }));
+  writeFileSync(join(root, 'data', 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxSound: { dialogDueFor: '0.0.0-dev' } }));
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(join(root, 'data'));
   const env = envFor(fake, root);
   const run = (args: string[]) => spawnSync(binary, ['inbox', ...args], { env, cwd: root, encoding: 'utf8', timeout: 90_000 });
   const adds = () => fake.calls().filter((c) => c.args[1] === 'add').map((c) => c.name);
+  const codexRules = join(fake.home, '.codex', 'AGENTS.md');
+  const claudeRules = join(fake.home, '.claude', 'rules', 'plannotator-inbox.md');
   const context = await newContext(browser);
   try {
     const started = run(['--background']);
     expect(started.status, started.stderr).toBe(0);
     const url = started.stdout.trim();
-    expect(fake.calls()).toEqual([]);
+    expect(adds()).toEqual([]);
 
     const person = run(['--no-open']);
     expect(person.status, person.stderr).toBe(0);
     expect(person.stderr).toContain('Connected Codex and Gemini CLI to the Inbox');
     expect(adds().sort()).toEqual(['codex', 'gemini']);
+    // The run answers when its notes are written: nobody was asked.
+    expect(readFileSync(codexRules, 'utf8').startsWith(`# My rules\n\nBe brief.\n\n${INBOX_NOTE_START}\n`)).toBe(true);
+    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.override.md'), 'utf8')).toBe('  \n');
+    const gemini = readFileSync(join(fake.home, '.gemini', 'GEMINI.md'), 'utf8');
+    expect(gemini.startsWith(`# Mine\n\n${INBOX_NOTE_START}\n`)).toBe(true);
+    expect(gemini.indexOf('## Plannotator Inbox')).toBeLessThan(gemini.indexOf('## Gemini Added Memories'));
+    expect(gemini.endsWith('## Gemini Added Memories\n- Likes short answers.\n')).toBe(true);
+    expect(readFileSync(claudeRules, 'utf8')).toContain(INBOX_NOTE_START);
+    expect([...config(root).inboxAgentNotes.asked].sort()).toEqual(['claude-code', 'codex', 'gemini']);
 
     const page = await context.newPage();
+    const said = page.waitForRequest(isPath('/api/inbox/agents/seen', 'POST'), { timeout: 30_000 });
     await page.goto(url);
     const sound = page.locator('dialog[data-dialog="sound-intro"]');
     await expect(sound).toBeVisible();
     await sound.getByRole('button', { name: 'Keep it on' }).click();
     await expect(sound).toHaveCount(0);
-    // Never two one-time dialogs on one load.
-    await expectNoDialog(page);
 
-    await page.reload();
-    const dialog = dialogOf(page);
-    await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(dialog.locator('[data-anote-band] p')).toHaveText(['Connected Codex and Gemini CLI to the Inbox.']);
-    await expect(dialog.getByRole('heading', { name: 'Tell your agents about the Inbox' })).toBeVisible();
-    await expect(rowsOf(page)).toHaveCount(3);
-    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Gemini CLI', 'Claude Code']);
-    await expect(rowsOf(page).locator('.ib-anote-path')).toHaveText(['~/.codex/AGENTS.md', '~/.gemini/GEMINI.md', '~/.claude/rules/plannotator-inbox.md']);
-    await expect(rowsOf(page).locator('.ib-anote-pill')).toHaveText(['Adds to end', 'New file', 'New file']);
-    for (const box of await rowsOf(page).locator('input[type="checkbox"]').all()) await expect(box).toBeChecked();
-    const primary = dialog.locator('[data-anote-primary]');
-    await expect(primary).toHaveText('Add to Codex, Gemini CLI and Claude Code');
-    await expect(primary).toBeFocused();
-    await shot(page, 'checklist-01-several', ['desktop', 'narrow']);
-    await dialog.getByRole('button', { name: 'Show the note' }).click();
-    await expect(dialog.locator('.ib-anote-note pre')).toContainText(INBOX_NOTE_START);
-    await shot(page, 'checklist-05-show-note');
-    await dialog.getByRole('button', { name: 'Hide the note' }).click();
+    // The line: what the run connected, then the notes written by themselves; each name's tooltip is its file.
+    const line = lineOf(page);
+    await expect(line).toBeVisible({ timeout: 20_000 });
+    await expect(lineRows(page)).toHaveCount(2);
+    await expect(lineRows(page).first()).toHaveText('Connected Codex and Gemini CLI to the Inbox.');
+    const notes = line.locator('[data-connect-notes]');
+    await expect(notes).toContainText('Added the Inbox note to the instructions of Claude Code, Codex and Gemini CLI');
+    const names = notes.locator('[data-note-agent]');
+    await expect(names).toHaveText(['Claude Code', 'Codex', 'Gemini CLI']);
+    expect(await names.evaluateAll((els) => els.map((el) => el.getAttribute('data-note-path')))).toEqual([
+      '~/.claude/rules/plannotator-inbox.md',
+      '~/.codex/AGENTS.md',
+      '~/.gemini/GEMINI.md',
+    ]);
+    // Nothing to confirm: Got it is its only button.
+    await expect(line.getByRole('button')).toHaveText(['Got it']);
+    await shot(page, 'connect-line-01-first-run', ['desktop', 'narrow']);
+    await names.nth(1).hover();
+    await expect(page.locator('[data-pn-tooltip]')).toContainText('~/.codex/AGENTS.md');
+    await shot(page, 'connect-line-02-path-tooltip');
 
-    // Untick Claude Code: the primary follows; nothing ticked reads "Don't add a note" without Not now.
-    await rowsOf(page).nth(2).locator('input').uncheck();
-    await expect(primary).toHaveText('Add to Codex and Gemini CLI');
-    await rowsOf(page).nth(0).locator('input').uncheck();
-    await rowsOf(page).nth(1).locator('input').uncheck();
-    await expect(primary).toHaveText("Don't add a note");
-    await expect(dialog.locator('[data-anote-notnow]')).toHaveCount(0);
-    await shot(page, 'checklist-06-nothing-ticked');
-    await rowsOf(page).nth(0).locator('input').check();
-    await rowsOf(page).nth(1).locator('input').check();
+    // Said at once: the Inbox's model has nothing left to say.
+    await said;
+    await expect
+      .poll(async () => {
+        const model = await agentsModel(page);
+        return { notes: model.notes_auto ?? [], seen: model.last_report?.seen ?? false };
+      })
+      .toEqual({ notes: [], seen: true });
+    expect(config(root).inboxAgentNotes.auto).toBeUndefined();
+    // A line, never the note dialog: every agent shown has its note.
+    await expect(dialogOf(page)).toHaveCount(0);
+    await line.getByRole('button', { name: 'Got it' }).click();
+    await expect(line).toHaveCount(0);
 
-    // Gemini's folder cannot be written (a permission a root runner would ignore): its row says why, with Try again.
-    const failGemini = process.getuid?.() !== 0;
-    if (failGemini) chmodSync(join(fake.home, '.gemini'), 0o555);
-    await primary.click();
-    if (failGemini) {
-      await expect(dialog.getByRole('heading', { name: 'Added the note to Codex' })).toBeVisible();
-      await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Not added']);
-      await expect(rowsOf(page).nth(1).locator('.ib-anote-err')).toContainText('Try again');
-      await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
-      await expect(dialog.getByRole('button', { name: 'Done' })).toBeFocused();
-      await shot(page, 'checklist-08-error', ['desktop', 'narrow']);
-      chmodSync(join(fake.home, '.gemini'), 0o755);
-      await rowsOf(page).nth(1).getByRole('button', { name: 'Try again' }).click();
-    }
-    await expect(dialog.getByRole('heading', { name: 'Added the note to Codex and Gemini CLI' })).toBeVisible();
-    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Created']);
-    // The results view: the band is gone and Done has the focus.
-    await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
-    await expect(dialog.getByRole('button', { name: 'Done' })).toBeFocused();
-    await shot(page, 'checklist-07-added', ['desktop', 'narrow']);
-    await dialog.getByRole('button', { name: 'Done' }).click();
-    await expect(dialog).toHaveCount(0);
-    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8').startsWith(`# My rules\n\nBe brief.\n\n${INBOX_NOTE_START}\n`)).toBe(true);
-    expect(readFileSync(join(fake.home, '.gemini', 'GEMINI.md'), 'utf8')).toContain('## Plannotator Inbox');
-    // Claude Code was unticked: no file, and it is answered (asked once).
-    expect(existsSync(join(fake.home, '.claude', 'rules', 'plannotator-inbox.md'))).toBe(false);
-    expect(config(root).inboxAgentNotes).toEqual({ offered: true, asked: ['claude-code', 'codex', 'gemini'] });
-    await shot(page, 'list-after-dialog');
+    // The next load is clear: no line, no dialog.
+    await loadSettled(page, () => page.reload());
+    await expect(lineOf(page)).toHaveCount(0);
+    await expect(dialogOf(page)).toHaveCount(0);
 
-    // Every agent shown was answered: no dialog on the next load.
-    await page.reload();
-    await expectNoDialog(page);
+    // Settings → Agents: the notes are on.
+    await page.goto(`${url}#settings/agents`);
+    const codex = page.locator('[data-agent="codex"]');
+    await expect(codex.getByRole('switch', { name: 'Reaches the Inbox: Codex' })).toHaveAttribute('aria-checked', 'true');
+    await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('[data-agent="gemini"]').getByRole('switch', { name: 'Note in its instructions: Gemini CLI' })).toHaveAttribute('aria-checked', 'true');
+    await shot(page, 'connect-line-03-settings-agents');
 
-    // Removing Codex's note in Settings → Agents never brings the question back: the person said yes once.
+    // The person turns Codex's note off (the route Settings → Agents uses): it goes, and stays gone.
     const removed = await page.evaluate(async () => {
       const settings = await (await fetch('/api/inbox/settings')).json();
       const answer = await fetch('/api/inbox/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: settings.serverSession, agent: 'codex', note: false }) });
       return answer.status;
     });
     expect(removed).toBe(200);
-    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8')).toBe('# My rules\n\nBe brief.\n');
+    expect(readFileSync(codexRules, 'utf8')).toBe('# My rules\n\nBe brief.\n');
     await page.reload();
-    await expectNoDialog(page);
-    expect(config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'gemini']);
-
-    // The person turns Gemini off (the same route Settings → Agents uses): its entry goes, and stays gone.
-    const off = await page.evaluate(async () => {
-      const settings = await (await fetch('/api/inbox/settings')).json();
-      const answer = await fetch('/api/inbox/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: settings.serverSession, agent: 'gemini', reach: false }) });
-      return answer.status;
-    });
-    expect(off).toBe(200);
-    expect(JSON.parse(readFileSync(join(fake.home, '.gemini', 'settings.json'), 'utf8')).mcpServers).toEqual({});
-
-    // Settings → Agents: Codex connected, its note off (removed above), Gemini off (never re-added).
-    await page.goto(`${url}#settings/agents`);
-    const codex = page.locator('[data-agent="codex"]');
-    await expect(codex.getByRole('switch', { name: 'Reaches the Inbox: Codex' })).toHaveAttribute('aria-checked', 'true');
     await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'false');
-    await expect(page.locator('[data-agent="gemini"]').getByRole('switch', { name: 'Reaches the Inbox: Gemini CLI' })).toHaveAttribute('aria-checked', 'false');
     await page.goto(url);
 
-    // A later run connects Pi and Amp (installed since): the next load asks about Pi alone.
-    fake.install('pi', 'amp');
+    // A later run connects Qwen Code (installed since). Codex's note is not written back; Qwen's is not written by
+    // itself (not proven to load it): the next load's line says the run, and the dialog asks about Qwen alone.
+    fake.install('qwen');
     const later = run(['--no-open']);
     expect(later.status, later.stderr).toBe(0);
-    expect(later.stderr).toContain('to the Inbox (new on this computer).');
-    expect(adds().sort()).toEqual(['amp', 'codex', 'gemini', 'pi']);
-    await page.reload();
+    expect(later.stderr).toContain('Connected Qwen Code to the Inbox (new on this computer).');
+    expect(readFileSync(codexRules, 'utf8')).toBe('# My rules\n\nBe brief.\n');
+    const qwenNote = join(fake.home, '.qwen', 'QWEN.md');
+    expect(existsSync(qwenNote)).toBe(false);
+    await loadSettled(page, () => page.reload());
+    await expect(lineRows(page).first()).toHaveText('Connected Qwen Code to the Inbox (new on this computer).');
+    await expect(lineOf(page).locator('[data-connect-notes]')).toHaveCount(0);
+    const dialog = dialogOf(page);
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(dialog.getByRole('heading', { name: 'Add the note to Pi?' })).toBeVisible();
-    await expect(dialog.locator('[data-anote-band] p').first()).toContainText('(new on this computer).');
+    await expect(dialog.getByRole('heading', { name: 'Add the note to Qwen Code?' })).toBeVisible();
     await expect(rowsOf(page)).toHaveCount(1);
     await expect(dialog.locator('input[type="checkbox"]')).toHaveCount(0);
-    await expect(rowsOf(page).locator('.ib-anote-path')).toHaveText('~/.pi/agent/AGENTS.md');
-    await expect(dialog.locator('[data-anote-primary]')).toHaveText('Add to Pi');
-    await shot(page, 'checklist-02-later-one-agent', ['desktop', 'narrow']);
-    await dialog.getByRole('button', { name: 'Not now' }).click();
+    await expect(rowsOf(page).locator('.ib-anote-path')).toHaveText('~/.qwen/QWEN.md');
+    await expect(dialog.locator('[data-anote-primary]')).toHaveText('Add to Qwen Code');
+    await shot(page, 'connect-line-04-qwen-asked', ['desktop', 'narrow']);
+    await dialog.locator('[data-anote-primary]').click();
+    await expect(dialog.getByRole('heading', { name: 'Added the note to Qwen Code' })).toBeVisible();
+    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText('Created');
+    await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
-    await expect.poll(() => config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'gemini', 'pi']);
-    expect(existsSync(join(fake.home, '.pi', 'agent', 'AGENTS.md'))).toBe(false);
-    await page.reload();
-    await expectNoDialog(page);
+    expect(readFileSync(qwenNote, 'utf8')).toContain(INBOX_NOTE_START);
+    expect(config(root).inboxAgentNotes.asked).toContain('qwen');
+    await loadSettled(page, () => page.reload());
+    await expect(lineOf(page)).toHaveCount(0);
+    await expect(dialogOf(page)).toHaveCount(0);
 
     // Cursor keeps its rules in the app (Customize → Rules): its note is offered to copy by hand, never written or reported added.
     mkdirSync(join(fake.home, '.cursor'), { recursive: true });
@@ -279,15 +313,11 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
   } finally {
     await context.close().catch(() => {});
     await removeInboxScratch(root);
-    // A failure halfway must not leave a folder the cleanup cannot empty.
-    try {
-      chmodSync(join(fake.home, '.gemini'), 0o755);
-    } catch {}
     fake.remove();
   }
 });
 
-test('stress: every note agent at once, long and non-Latin paths, at 1280 and 375', async ({ browser }) => {
+test('stress: every proven agent at once, long and non-Latin paths: written by itself, one line at 1280 and 375', async ({ browser }) => {
   test.setTimeout(180_000);
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-agents-stress-');
@@ -295,9 +325,11 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
   fake.install('codex', 'gemini', 'pi');
   const codexHome = join(fake.home, 'Library', 'Application Support', 'com.openai.codex', 'profiles', 'work-laptop-2026-q4');
   mkdirSync(codexHome, { recursive: true });
+  // An override with text: Codex reads it instead of AGENTS.md, so the note goes there.
   writeFileSync(join(codexHome, 'AGENTS.override.md'), '# Work rules\n');
   mkdirSync(join(fake.home, '.gemini'), { recursive: true });
-  writeFileSync(join(fake.home, '.gemini', 'settings.json'), JSON.stringify({ context: { fileName: 'instructions-for-every-gemini-session-on-this-machine.md' } }));
+  const geminiFile = 'instructions-for-every-gemini-session-on-this-machine.md';
+  writeFileSync(join(fake.home, '.gemini', 'settings.json'), JSON.stringify({ context: { fileName: geminiFile } }));
   const piDir = join(fake.home, 'ジョン・スミス', '.config', 'pi', 'agent');
   mkdirSync(piDir, { recursive: true });
   const claudeDir = join(fake.home, 'Documents', 'مشاريع', 'وكلاء', '.claude');
@@ -306,7 +338,9 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
   const openCodeDir = join(fake.home, '.config', 'opencode');
   mkdirSync(openCodeDir, { recursive: true });
   writeFileSync(join(openCodeDir, 'opencode.json'), JSON.stringify({ plugin: ['@plannotator/opencode'] }));
+  // OpenCode's global AGENTS.md exists: it gets the note too.
   writeFileSync(join(openCodeDir, 'AGENTS.md'), '# OpenCode rules\n');
+  markTourDecided(join(root, 'data'));
   const env = envFor(fake, root, { CODEX_HOME: codexHome, PI_CODING_AGENT_DIR: piDir, CLAUDE_CONFIG_DIR: claudeDir });
   const run = (args: string[]) => spawnSync(binary, ['inbox', ...args], { env, cwd: root, encoding: 'utf8', timeout: 90_000 });
   const context = await newContext(browser);
@@ -315,24 +349,50 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
     expect(started.status, started.stderr).toBe(0);
     const person = run(['--no-open']);
     expect(person.status, person.stderr).toBe(0);
+    expect(readFileSync(join(codexHome, 'AGENTS.override.md'), 'utf8').startsWith(`# Work rules\n\n${INBOX_NOTE_START}\n`)).toBe(true);
+    expect(existsSync(join(codexHome, 'AGENTS.md'))).toBe(false);
+    expect(readFileSync(join(fake.home, '.gemini', geminiFile), 'utf8')).toContain(INBOX_NOTE_START);
+    expect(readFileSync(join(piDir, 'AGENTS.md'), 'utf8')).toContain(INBOX_NOTE_START);
+    expect(readFileSync(join(openCodeDir, 'AGENTS.md'), 'utf8').startsWith(`# OpenCode rules\n\n${INBOX_NOTE_START}\n`)).toBe(true);
+    expect(readFileSync(join(claudeDir, 'rules', 'plannotator-inbox.md'), 'utf8')).toContain(INBOX_NOTE_START);
+
     const page = await context.newPage();
-    await page.goto(started.stdout.trim());
-    const dialog = dialogOf(page);
-    await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Gemini CLI', 'Pi', 'OpenCode', 'Claude Code']);
-    await expect(dialog.locator('[data-anote-primary]')).toHaveText('Add to 5 agents');
-    // The whole path is in the DOM (and the title), however it is cut on screen.
-    await expect(rowsOf(page).nth(0).locator('.ib-anote-path')).toHaveText('~/Library/Application Support/com.openai.codex/profiles/work-laptop-2026-q4/AGENTS.override.md');
-    await expect(rowsOf(page).nth(4).locator('.ib-anote-path')).toHaveText('~/Documents/مشاريع/وكلاء/.claude/rules/plannotator-inbox.md');
-    // The footer stays in view however long the list.
-    await page.setViewportSize({ width: 1280, height: 560 });
-    await expect(dialog.locator('[data-anote-primary]')).toBeInViewport();
+    await loadSettled(page, () => page.goto(started.stdout.trim()));
+    const line = lineOf(page);
+    await expect(line).toBeVisible();
+    // The order follows when each was written (some at the start, some after the run): the set is what matters.
+    const paths = Object.fromEntries(
+      await line.locator('[data-note-agent]').evaluateAll((els) => els.map((el) => [el.getAttribute('data-note-agent'), el.getAttribute('data-note-path')])),
+    );
+    expect(paths).toEqual({
+      'claude-code': '~/Documents/مشاريع/وكلاء/.claude/rules/plannotator-inbox.md',
+      codex: '~/Library/Application Support/com.openai.codex/profiles/work-laptop-2026-q4/AGENTS.override.md',
+      gemini: `~/.gemini/${geminiFile}`,
+      pi: '~/ジョン・スミス/.config/pi/agent/AGENTS.md',
+      opencode: '~/.config/opencode/AGENTS.md',
+    });
+    // Never a dialog for them.
+    await expect(dialogOf(page)).toHaveCount(0);
+    // The paths live in tooltips: the line stays one quiet line, its button in view, at both widths. With no thread
+    // yet this is the first-run screen, where the line is in the ask slot under Try it (inbox-foundation.md), below
+    // five agents' Done list and the Left to do list: the screen scrolls to the line's top first, so what is proved
+    // is that nothing pushes Got it out of the line or the window sideways.
+    const gotIt = line.getByRole('button', { name: 'Got it' });
+    const lineFits = async (width: number) => {
+      await line.evaluate((el) => el.scrollIntoView({ block: 'start', inline: 'nearest' }));
+      await expect(gotIt).toBeInViewport();
+      const box = (await line.boundingBox())!;
+      const button = (await gotIt.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(button.x).toBeGreaterThanOrEqual(box.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    };
+    await lineFits(DESKTOP.width);
     await page.setViewportSize(NARROW);
-    await expect(dialog.locator('[data-anote-primary]')).toBeInViewport();
-    await shot(page, 'checklist-04-stress', ['desktop', 'narrow']);
-    await dialog.getByRole('button', { name: 'Not now' }).click();
-    await expect(dialog).toHaveCount(0);
-    expect(readFileSync(join(codexHome, 'AGENTS.override.md'), 'utf8')).toBe('# Work rules\n');
+    await lineFits(NARROW.width);
+    await page.setViewportSize(DESKTOP);
+    await shot(page, 'connect-line-05-stress', ['desktop', 'narrow']);
   } finally {
     await context.close().catch(() => {});
     await removeInboxScratch(root);

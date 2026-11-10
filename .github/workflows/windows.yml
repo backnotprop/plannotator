@@ -1,12 +1,12 @@
 name: Windows
 
 # The Windows jobs: the uninstall lifecycle, the Qwen Code installer steps, the
-# code review diagram engine build, the Pi extension's Node runtime, and
-# install.cmd / install.ps1 end to end. They are part of the full tier: on a PR
-# they run only once it has the `ci:full` label (adding the label starts them
-# on the current head; every later push runs them again). Pushes to main and
-# manual runs always run them. The `Full CI (all green)` job at the end is what
-# the merge script requires.
+# code review diagram engine build, the Claude Code mod's Windows shells, the
+# Pi extension's Node runtime, and install.cmd / install.ps1 end to end. They
+# are part of the full tier: on a PR they run only once it has the `ci:full`
+# label (adding the label starts them on the current head; every later push
+# runs them again). The nightly run on main and manual runs always run them.
+# The `Full CI (all green)` job at the end is what the merge script requires.
 
 on:
   workflow_dispatch:
@@ -14,16 +14,18 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened, labeled]
-  push:
-    branches:
-      - main
+  # Main is not run after every merge: the merge train already ran this
+  # workflow on the tree it merges. A nightly run on main catches a hand
+  # merge, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "22 7 * * *"
 
 permissions:
   contents: read
 
-# One run per PR, and one per main: a newer push cancels the older run. Adding
-# any other label starts a run that skips every job; it gets a group of its own
-# so it cannot cancel the real one. Manual runs are never cancelled.
+# One run per PR: a newer push cancels the older run. Adding any other label
+# starts a run that skips every job; it gets a group of its own so it cannot
+# cancel the real one. Nightly and manual runs are never cancelled.
 concurrency:
   group: windows-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
@@ -55,7 +57,7 @@ jobs:
   # minutes per run). Only these files can change what those tests run: the
   # installers, their tests, the Qwen Code extension they install, the test
   # setup, and this workflow. The same Qwen Code tests also run under pwsh in
-  # the unit lanes on every PR. Anything this cannot resolve (a push to main, a
+  # the unit lanes on every PR. Anything this cannot resolve (the nightly run, a
   # manual run, a checkout that is not the PR merge commit) runs the jobs:
   # skipping is the risky direction. A skipped job reports as skipped, not
   # missing.
@@ -200,6 +202,31 @@ jobs:
       - name: Check the built engine
         run: bun test tests/entry-assets.test.ts --test-name-pattern 'apps/review/dist/diagram-engine holds the engine'
 
+  claude-code-mod-windows:
+    # The Claude Code mod's Windows code on real Windows: Windows paths, the
+    # Git Bash lookup, the shell pick and its probe, every Windows PowerShell
+    # twin of the mod's scripts, and the compaction hook under Windows
+    # PowerShell and pwsh. The tests use temporary folders and a renamed
+    # ping.exe as the CLI: no Inbox, agent or real plannotator runs.
+    name: Claude Code mod (Windows)
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run the mod's Windows tests
+        run: bun test apps/hook/hooks/mod/paths.test.ts apps/hook/hooks/mod/git-bash.test.ts apps/hook/hooks/mod/shell.test.ts apps/hook/hooks/mod/powershell.test.ts apps/hook/hooks/mod/inbox-reminder.test.ts apps/hook/hooks/mod/delivery.test.ts
+
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
     # npm-style `pi` shim pair. This catches regressions where `where pi`
@@ -238,6 +265,11 @@ jobs:
 
       - name: Run agent job .cmd shim tests (Pi server)
         run: bun test apps/pi-extension/server/agent-jobs-windows-cmd-shim.test.ts
+
+      # Inbox launch's Windows paths and env: PATH by any spelling, PowerShell commands run for real, Hidden and
+      # System folders, and a .cmd CLI through cmd.exe with a tree kill (stub scripts and node only).
+      - name: Run Inbox launch Windows tests
+        run: bun test packages/server/inbox-launch-windows.test.ts
 
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
@@ -693,7 +725,7 @@ jobs:
   # the diagram engine build may skip when their gate found nothing for them).
   full-ci:
     name: Full CI (all green)
-    needs: [uninstall-windows, qwen-gate, qwen-installers-windows, diagram-engine-gate, diagram-engine-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows]
+    needs: [uninstall-windows, claude-code-mod-windows, qwen-gate, qwen-installers-windows, diagram-engine-gate, diagram-engine-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

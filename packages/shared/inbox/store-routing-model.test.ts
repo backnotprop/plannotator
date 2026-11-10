@@ -70,8 +70,6 @@ interface ModelThread {
   id: string;
   project: number;
   person: boolean;
-  /** The agent session that started an unnamed agent thread (its default thread). */
-  starter: string | null;
   /** The current name's key, or null. */
   name: string | null;
   namedBy: "agent" | "person" | "auto" | null;
@@ -103,10 +101,8 @@ test("an independent model of routing predicts every send; a compose name never 
           if (op.name !== null) {
             const open = routes.map(byId).filter((t) => t.project === project && t.name === key(op.name!) && !t.resolved);
             expected = open.at(-1)?.id ?? null;
-          } else if (op.session) {
-            const own = threads.filter((t) => t.project === project && !t.person && t.name === null && t.starter === op.session).at(-1);
-            expected = own && !own.resolved ? own.id : null;
           }
+          // No name: always a new thread, whatever the session already has open.
           const sent = store.sendMessage({
             project_id: projectId(project),
             author: { kind: "agent", host: "test", session: op.session, name: null },
@@ -117,7 +113,7 @@ test("an independent model of routing predicts every send; a compose name never 
             expect(sent.thread_id).toBe(expected);
           } else {
             expect(sent.thread_id).toBe(sent.id);
-            threads.push({ id: sent.id, project, person: false, starter: op.name === null ? op.session : null, name: op.name === null ? null : key(op.name), namedBy: op.name === null ? null : "agent", resolved: false, to: null });
+            threads.push({ id: sent.id, project, person: false, name: op.name === null ? null : key(op.name), namedBy: op.name === null ? null : "agent", resolved: false, to: null });
             if (op.name !== null) routes.push(sent.id);
           }
           // The property, said outright: a named send lands in a person's thread only if an agent named it so.
@@ -145,7 +141,7 @@ test("an independent model of routing predicts every send; a compose name never 
           expect(started === null).toBe(typedTaken);
           if (started) {
             const named = op.name !== null && !(op.auto && taken(op.project, op.name, null));
-            threads.push({ id: started, project: op.project, person: true, starter: null, name: named ? key(op.name!) : null, namedBy: named ? (op.auto ? "auto" : "person") : null, resolved: false, to: op.session });
+            threads.push({ id: started, project: op.project, person: true, name: named ? key(op.name!) : null, namedBy: named ? (op.auto ? "auto" : "person") : null, resolved: false, to: op.session });
           }
         } else if (op.op === "name") {
           const target = pick(op.target);
@@ -203,4 +199,24 @@ test("an independent model of routing predicts every send; a compose name never 
     }),
     { numRuns: 150 },
   );
+});
+
+test("a send with no reply_to and no thread starts a new thread, though the same session has an open one in the project", () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-routing-new-"));
+  roots.push(dir);
+  const store = InboxStore.open(dir);
+  const project_id = store.ensureProject({ name: "repo0", root: "/work/repo0" }).id;
+  const author = { kind: "agent" as const, host: "test", session: "ses_long", name: null };
+  const old = store.sendMessage({ project_id, author, body: "Weeks-old status." }).message;
+  const next = store.sendMessage({ project_id, author, body: "An unrelated update." });
+  expect(store.listRow(old.thread_id)!.resolved_at).toBeNull();
+  expect(next.message.thread_id).toBe(next.message.id);
+  expect(next.message.thread_id).not.toBe(old.thread_id);
+  // reply_to and the same `thread` name still add to a thread.
+  expect(store.sendMessage({ project_id, author, body: "Follow-up.", reply_to: old.id }).message.thread_id).toBe(old.thread_id);
+  const named = store.sendMessage({ project_id, author, body: "Docs, part 1.", thread: "docs" }).message;
+  expect(store.sendMessage({ project_id, author, body: "Docs, part 2.", thread: "docs" }).message.thread_id).toBe(named.thread_id);
+  // And a reopened store routes the same.
+  const again = InboxStore.open(dir).sendMessage({ project_id, author, body: "After a restart." }).message;
+  expect(again.thread_id).toBe(again.id);
 });

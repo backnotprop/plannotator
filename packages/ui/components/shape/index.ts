@@ -5,7 +5,9 @@ export { Pebble, PEBBLE_REST } from './Pebble';
 export { ShapeDiagram, ShapeDrawn, SHAPE_FRAME_CSS, NO_MARKS, type MarkState, type ShapeDrawnProps } from './ShapeDrawn';
 export { ShapeInline, shapePlainText } from './inline';
 export { ShapeGrid, ShapeThumb, shapeAgo, filterShapeItems, type ShapeGridItem } from './ShapeGrid';
+export type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 export type {
+  ShapeBoxOptions,
   ShapeCodeGuideProps,
   ShapeCodeHoverCardProps,
   ShapeCodeHoverRequest,
@@ -13,6 +15,10 @@ export type {
   ShapeHost,
   ShapeLoaded,
   ShapePanelTab,
+  ShapeReviewAt,
+  ShapeReviewNarrow,
   ShapeSessionStatus,
+  ShapeShowMeInput,
   ShapeSurfaceProps,
+  ShapeSurfaceReview,
 } from './types';

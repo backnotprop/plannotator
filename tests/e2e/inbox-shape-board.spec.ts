@@ -4,11 +4,12 @@
  *
  * What it proves:
  *  - the kit's `pick` works: a radio inside a drawing fades the other paths, with annotation off and on, and opens no box;
- *  - annotation is off until Annotate: no ring on hover, no box on a click; on, both work, and an SVG part can be picked;
+ *  - annotation is off until the crosshair (Comment): no box on a click; on, a click picks an SVG part, and nothing
+ *    rings under the pointer (inbox-shape-box.spec.ts has the crosshair itself);
  *  - a nested SVG clips (a crop stays cropped), and a lone `class="dash"` is an outline, not a solid box;
  *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
  *  - a number shows its bubble on hover, with its picture and line;
- *  - What to know reads as paragraphs; a board saved with Requirements still opens, its words all there;
+ *  - `views.know` is not drawn: no tab, no words under the drawing; a board saved with Requirements still opens, without them;
  *  - a phone pans a canvas with no tall drawing.
  *
  * Build first: see inbox.spec.ts.
@@ -73,6 +74,8 @@ async function openBoard(browser: Browser, id: string, options: Parameters<Brows
   return { context, page, problems };
 }
 const view = (page: Page, name: string) => page.locator('.shp-dock').getByRole('button', { name, exact: true }).click();
+/** The Inbox's comment mode: the crosshair in Annotate's place. */
+const crosshair = (page: Page) => page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true });
 /** Reads the live drawing, in its shadow root. */
 const drawing = <T,>(page: Page, fn: (root: ShadowRoot) => T) =>
   page.evaluate(`(${fn.toString()})(document.querySelector('.shp-view:not(.leaving) .shp-drawn-host').shadowRoot)`) as Promise<T>;
@@ -99,7 +102,7 @@ test('pick follows a path, off and on annotation, and opens no box', async ({ br
   expect(await drawing(page, (r) => (r.querySelector('input.f-a') as HTMLInputElement).checked)).toBe(true);
   await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
 
-  await page.locator('.shp-dock').getByRole('button', { name: 'Annotate' }).click();
+  await crosshair(page).click();
   await page.locator('.shp-view:not(.leaving) label.pick', { hasText: 'All paths' }).click();
   await page.waitForTimeout(500);
   expect(await faded()).toEqual(['1.00', '1.00']);
@@ -118,10 +121,11 @@ test('annotation is off until asked for; an SVG part can be picked once it is on
   await part.click();
   await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
 
-  await page.locator('.shp-dock').getByRole('button', { name: 'Annotate' }).click();
+  await crosshair(page).click();
   await page.mouse.move(5, 5);
   await part.hover();
-  await expect(page.locator('.shp-pin-hover')).toHaveCount(1);
+  // The crosshair rings nothing under the pointer; the click still picks the part.
+  await expect(page.locator('.shp-pin-hover')).toHaveCount(0);
   await part.click();
   await expect(page.locator('[data-comment-popover]')).toContainText('Path A box');
   expect(problems).toEqual([]);
@@ -151,7 +155,7 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   expect(styles.href).toContain('/files/');
   expect((await page.request.get(new URL(styles.href!, w.url).href)).status()).toBe(200);
 
-  await page.locator('.shp-view:not(.leaving) [data-ref="1"]').hover();
+  await page.locator('.shp-view:not(.leaving) .shp-drawn [data-ref="1"]').hover();
   const peek = page.locator('.shp-peek');
   await expect(peek).toContainText('One line about it.');
   await expect(peek.locator('.shp-peek-crop')).toBeVisible();
@@ -170,14 +174,18 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   await context.close();
 });
 
-test('What to know is paragraphs; a board saved with Requirements still opens with all its words', async ({ browser }) => {
+test('views.know is not drawn: no tab, no words, the drawing is the last thing in the view; a board saved with Requirements still opens without them', async ({ browser }) => {
   const { context, page, problems } = await openBoard(browser, store('know', board));
-  await view(page, 'What to know');
-  const know = page.locator('.shp-know');
-  await expect(know.locator('p')).toHaveCount(2);
-  await expect(know.locator('p').first()).toContainText('The first thing to know');
-  await expect(know.locator('.shp-rb')).toHaveText('1');
-  expect(await know.locator('p').first().evaluate((p) => parseFloat(getComputedStyle(p).fontSize))).toBeGreaterThanOrEqual(16);
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'Shape', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'What to know', exact: true })).toHaveCount(0);
+  await expect(page.locator('.shp-know')).toHaveCount(0);
+  await expect(page.locator('.shp-root')).not.toContainText('The first thing to know');
+  // Scrolled to its end, the Shape view holds the drawing and nothing after it.
+  const last = await page.locator('.shp-view:not(.leaving)').evaluate((v) => {
+    v.scrollTop = v.scrollHeight;
+    return v.lastElementChild?.classList.contains('shp-drawn') ?? false;
+  });
+  expect(last).toBe(true);
   await context.close();
   expect(problems).toEqual([]);
 
@@ -191,9 +199,10 @@ test('What to know is paragraphs; a board saved with Requirements still opens wi
   writeFileSync(file, `${JSON.stringify(v)}\n`);
 
   const old = await openBoard(browser, id);
-  await view(old.page, 'What to know');
-  const words = old.page.locator('.shp-know');
-  for (const line of ['What I understand', 'Who gets it', 'At least 2 days', 'Never a guest', 'Open:', 'Nothing waits.']) await expect(words).toContainText(line);
+  await expect(old.page.locator('.shp-dock').getByRole('button', { name: 'Shape', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(old.page.locator('.shp-view:not(.leaving) .shp-drawn')).toHaveCount(1);
+  await expect(old.page.locator('.shp-know')).toHaveCount(0);
+  await expect(old.page.locator('.shp-root')).not.toContainText('What I understand');
   expect(old.problems).toEqual([]);
   await old.context.close();
 });

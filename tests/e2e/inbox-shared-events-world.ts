@@ -32,6 +32,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 export const repo = resolve(__dirname, '../..');
 export const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -236,6 +237,7 @@ export async function openTab(world: World, options: { url?: string; timeout?: n
   });
   const started = Date.now();
   await page.goto(options.url ?? world.url, { timeout: options.timeout ?? 30_000 });
+  await clearSidebarPeek(page);
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: options.timeout ?? 30_000 });
   const ms = Date.now() - started;
   world.pages.push(page);
@@ -332,13 +334,16 @@ export async function expectEveryRecordOnce(
   return { total: world.reference.length, perTab, exactTabs };
 }
 
+/** The thread the agent's work goes into: one thread, however many messages (a message with no thread name starts a new one). */
+export const WORK_THREAD = 'billing work';
+
 /** Write messages continuously until stopped (each one a few store lines); answers how many went. */
 export function keepSending(sim: SimAgent, project: string, everyMs = 60): { stop: () => Promise<number> } {
   let running = true;
   let sent = 0;
   const loop = (async () => {
     while (running) {
-      await sim.send({ project_path: project, body: `Progress note ${sent + 1}: still going.` });
+      await sim.send({ project_path: project, thread: WORK_THREAD, body: `Progress note ${sent + 1}: still going.` });
       sent += 1;
       await new Promise((done) => setTimeout(done, everyMs));
     }

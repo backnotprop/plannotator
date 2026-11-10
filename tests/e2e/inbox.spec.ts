@@ -309,11 +309,12 @@ test('agents write three threads in two projects; the rows land in the six secti
   if (await notice.count()) await notice.click();
   const stoppedRow = page.locator(`[data-section-id="stopped"] [data-thread-id="${stopped.thread_id}"]`);
   await expect(stoppedRow).toBeVisible();
-  await expect(stoppedRow.locator('.ib-badge')).toHaveText('Stopped');
+  // One question mark, filled in the Stopped tint (approval "inbox-question-mark").
+  await expect(stoppedRow.locator('.ib-qn[data-wait-step="stop"] .ib-sr')).toHaveText('Stopped on you: 2 questions');
   await expect(stoppedRow).toContainText('2 questions');
   await expect(stoppedRow).toContainText('billing-svc');
   const holdingRow = page.locator(`[data-section-id="holding"] [data-thread-id="${holding.thread_id}"]`);
-  await expect(holdingRow.locator('.ib-badge')).toHaveText('Holds up 3');
+  await expect(holdingRow.locator('.ib-qn[data-wait-step="hold"]')).toHaveCount(1);
   const namedRow = page.locator(`[data-section-id="waiting"] [data-thread-id="${named.thread_id}"]`);
   // The thread's name is the row's title (approval "list-rows-mail-icons").
   await expect(namedRow.locator('.ib-title')).toHaveText('refund-webhooks');
@@ -373,7 +374,7 @@ test('a project folder filters the list and the sections still apply', async () 
   await expect(page.locator('.ib-row .ib-subj :is(.ib-mk, .ib-badge)')).toHaveCount(0);
   const rightOf = async (sel: string) => Math.round((await page.locator(sel).boundingBox())!.x + (await page.locator(sel).boundingBox())!.width);
   for (const cell of ['.ib-cw', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
-  expect(await rightOf(`${stoppedRow} .ib-bcol .ib-badge`)).toBe(await rightOf(`${stoppedRow} .ib-bcol`));
+  expect(await rightOf(`${stoppedRow} .ib-cq .ib-qn`)).toBe(await rightOf(`${stoppedRow} .ib-cq`));
   expect(await rightOf(`${named} .ib-cq`)).toBeLessThanOrEqual(await leftOf(page, `${named} .ib-t`));
   await shot('1.2-project-filter');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
@@ -583,7 +584,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   await nav.getByRole('link', { name: 'Agents' }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
@@ -611,8 +612,8 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
-  // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
-  await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
+  // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
+  await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
   await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();

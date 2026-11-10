@@ -19,8 +19,8 @@ let url = '';
 
 test.beforeAll(() => {
   const dataDir = join(inboxScratch('inbox-feedback-search-phone-'), 'data');
-  mkdirSync(dataDir);
-  const env = { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir, PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_INBOX_TAILSCALE: '0', PLANNOTATOR_INBOX_PHONES: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_NOTES: '0' };
+  mkdirSync(dataDir, { recursive: true });
+  const env = { ...process.env, HOME: join(dataDir, '..'), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir, PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_INBOX_TAILSCALE: '0', PLANNOTATOR_INBOX_PHONES: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_NOTES: '0' };
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
@@ -80,7 +80,7 @@ test('the line is a full 44 px target', async ({ page }) => {
 test('with the keyboard down, a few lines show and Send stays put', async ({ page }) => {
   await openSheet(page);
   const before = await rect(page, send);
-  await page.keyboard.type('the diff view is slow', { delay: 15 });
+  await page.keyboard.type('mermaid diagram rendering', { delay: 15 });
   await expect(page.locator('[data-feedback-related] li:visible')).toHaveCount(3);
   expect(await rect(page, send)).toEqual(before);
 });

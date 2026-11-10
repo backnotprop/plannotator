@@ -19,9 +19,10 @@
  *    session works and whether a turn runs (`project_path`, `started_at`,
  *    `busy`, `idle_since`), and a `state` event says when that changes: the
  *    Inbox's list of live sessions, the ones New message can reach.
- *  - The wake text: a stable first line, a stable fixed instruction line, then
- *    the person's words verbatim, framed as their answer or their message,
- *    then a closing line naming the thread, read_thread and --help.
+ *  - The wake text: a stable first line, a stable fixed instruction line, the
+ *    line naming the thread, then the person's words verbatim, framed as their
+ *    answer or their message, then a closing line naming read_thread, search
+ *    and --help.
  *
  * The CONTRACT section below is pure (no imports, no runtime APIs beyond the
  * language) because the Claude Code mod can import only its own folder: it
@@ -29,6 +30,25 @@
  * `inbox-contract.test.ts` there fails when the two differ (edit here, then
  * paste). The server imports the path constants from here.
  */
+
+/** The folder name of one session's claim on one delivery (`inbox/claims/`): a moved reply is a new delivery for the next session. */
+export function inboxClaimName(replyId: string, session: string): string {
+  return `${replyId}.${session.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`;
+}
+
+/**
+ * The stop notice of a thread handed to another session goes by its own id, not the reply's. A connection only keeps the
+ * id and reports it, so what any connection or wake keeps per id (settled, claims, a T3 request), and its report, can
+ * never stand for the person's words when the reply moves back to that session. Older connections included.
+ */
+export function inboxStopNoticeId(replyId: string): string {
+  return `${replyId}-stop`;
+}
+
+/** The reply a stop notice's id belongs to; null for any other id. */
+export function inboxStopNoticeReply(id: string): string | null {
+  return id.length > '-stop'.length && id.endsWith('-stop') ? id.slice(0, -'-stop'.length) : null;
+}
 
 // --- CONTRACT (copied byte for byte into apps/hook/hooks/mod/inbox-contract.ts; edit packages/shared/inbox/connection.ts, then paste) ---
 
@@ -46,6 +66,7 @@ export const INBOX_TOOL_ACTIONS = [
   'search',
   'resolve_message',
   'snooze_thread',
+  'thread_pulls',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -150,7 +171,7 @@ export const INBOX_REPLY_TO_CHECK = 'Before reply_to into a thread you have not 
  * `owner/repo#123` links on the project's own forge, so a GitHub ref from a
  * GitLab project needs its URL.
  */
-export const INBOX_REF_LINK_RULE = "A bare #123 links to this project's repository. For an issue or PR in another repo, write owner/repo#123 or its full URL (in a GitLab project, a GitHub one needs its URL)."
+export const INBOX_REF_LINK_RULE = "A bare #123 links to this project's repository (where your session started, or `project_path`), even in a message about another repo; a word before it (`docs #12`, `docs PR #12`) does not change that. For any other repo's issue or PR, write owner/repo#123 (its `git remote -v`) or its full URL in every mention, repeats and choices too; relaying another agent's report, rewrite its bare refs. In a GitLab project, a GitHub one needs its URL."
 
 /** The card's `say` and `you`: a pointer to the rule on `body`, not the rule again (every request carries both). */
 export const INBOX_REF_LINK_POINTER = "Refs link as in send_message's body."
@@ -401,23 +422,86 @@ export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlast
  * `inboxSteps`): off, no agent text carries any of it.
  */
 export const INBOX_STEPS_LEAD =
-  'your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.'
+  "The person's checklist for this thread, only for multi-step work you're both aligned on. Start one when the person gives the go-ahead on work with several steps. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one."
 
-/** The agent tool's line for the `steps` action (the owner, 2026-11-03): short, so the description stays under 2,048. */
-export const INBOX_STEPS_ACTION_LINE = "keep the person's checklist for this thread current (details on the steps field)."
+/** The agent tool's line for the `steps` action (the owner, 2026-11-07): short, so the description stays under 2,048. */
+export const INBOX_STEPS_ACTION_LINE = "person's checklist for multi-step work you're aligned on (see the steps field)."
 
 /** The `steps` field (the action's, and send_message's while steps are on): the approved text, then where a list goes before there is a thread. */
 export const INBOX_STEPS_FIELD_DESCRIPTION = `steps: ${INBOX_STEPS_LEAD} No thread yet: send it with the send_message that starts one.`
 
 /**
  * The wake's one line on a reply in a thread where the session keeps steps
- * (approval "inbox-thread-steps", approved text): "Your steps here: 3 of 6
- * done; doing: X. Update them if that changed." Without a step in progress,
+ * (approval "inbox-thread-steps", amended 2026-11-07, approved text): "Your
+ * checklist here: 3 of 6 done; doing: X. If you're still working on this,
+ * keep it current." Without a step in progress,
  * the `doing` part is left out.
  */
 export function inboxStepsWakeLine(steps: { done: number; total: number; doing: string | null }): string {
-  return `Your steps here: ${steps.done} of ${steps.total} done${steps.doing ? `; doing: ${steps.doing}` : ''}. Update them if that changed.`
+  return `Your checklist here: ${steps.done} of ${steps.total} done${steps.doing ? `; doing: ${steps.doing}` : ''}. If you're still working on this, keep it current.`
 }
+
+/**
+ * A thread's PRs (approval "inbox-pr-binding", 2026-11-08; the owner's
+ * approved text, word for word). send_message's `pulls` field: through the
+ * MCP server's field, every connection's `plannotator_inbox` tool carries it.
+ */
+export const INBOX_PULLS_FIELD_DESCRIPTION =
+  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123`, `group/sub/project!45`, or the URL. Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+
+/** The `thread_pulls` tool's description (approved text). The agent tool lists the name only (INBOX_AGENT_ACTIONS_NO_LINE). */
+export const INBOX_THREAD_PULLS_DESCRIPTION =
+  "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too."
+
+/** The `thread_pulls` tool's `add` field (approved text). */
+export const INBOX_THREAD_PULLS_ADD_DESCRIPTION = "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`."
+
+/** The `thread_pulls` tool's `remove` field (approved text). */
+export const INBOX_THREAD_PULLS_REMOVE_DESCRIPTION =
+  'PRs to take off: no longer part of this work (moved elsewhere, abandoned). Not merged ones; they stay. ["all"] takes off every one.'
+
+/**
+ * The wake's one line when the person changed the thread's PRs since the
+ * session last saw them (approved text): "The person changed this thread's
+ * PRs: added northwind/design-tokens#88; removed northwind/web-app#1305."
+ * An edit alone never wakes anyone: the line rides the next wake.
+ */
+export function inboxPullsWakeLine(changes: { added: readonly string[]; removed: readonly string[] }): string {
+  const parts = [
+    ...(changes.added.length > 0 ? [`added ${changes.added.join(', ')}`] : []),
+    ...(changes.removed.length > 0 ? [`removed ${changes.removed.join(', ')}`] : []),
+  ]
+  return `The person changed this thread's PRs: ${parts.join('; ')}.`
+}
+
+/** A command's `pulls_changed` as the wake may print it, or null (absent, empty, or not the Inbox's shape). */
+function wakePullsChanged(value: unknown): { added: string[]; removed: string[] } | null {
+  if (!value || typeof value !== 'object') return null
+  const list = (v: unknown): string[] | null => {
+    if (!Array.isArray(v) || v.length > 20) return null
+    const out: string[] = []
+    for (const item of v) {
+      // One ref each, no control or separator characters: it goes into the session's prompt.
+      if (typeof item !== 'string' || item.length === 0 || item.length > 300 || /[\p{Cc}\p{Zl}\p{Zp}\s,;]/u.test(item)) return null
+      out.push(item)
+    }
+    return out
+  }
+  const { added, removed } = value as Record<string, unknown>
+  const a = list(added ?? [])
+  const r = list(removed ?? [])
+  if (!a || !r || a.length + r.length === 0) return null
+  return { added: a, removed: r }
+}
+
+/**
+ * The wake's one line when the person's reply answers the receiving session's
+ * questions in a thread where that session has no checklist yet, while the
+ * person has the checklist on (the owner, 2026-11-09: "when the person answers
+ * questions"). Never on a plain reply or a 👍; never once the session has a
+ * list there.
+ */
+export const INBOX_STEPS_START_WAKE_LINE = "If these answers start work with several steps, start a checklist here (the steps action). If not, skip it."
 
 /** A command's `steps` as the wake may print it, or null (absent, or not the Inbox's shape). */
 function wakeSteps(value: unknown): { done: number; total: number; doing: string | null } | null {
@@ -435,7 +519,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
 
 /**
  * The agent tool's own line for an action whose Inbox lead is long (the
@@ -443,7 +527,7 @@ export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
  * OpenCode request carries it).
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
-  send_message: "Message the person (markdown), in your session's open thread (see `thread`).",
+  send_message: "Message the person (markdown); with no reply_to or thread, it starts a new thread.",
   resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
   // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
@@ -460,12 +544,46 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * was). Fixed text: the agent tool's `body` field, the MCP server's `body`
  * field and `plannotator inbox --help` carry it whole.
  */
+/**
+ * Option lines (approval "inbox-question-tradeoffs"; DRAFT words, awaiting the owner's OK): `Pros:`, `Cons:` and
+ * `Prototype:` under a `- [ ]` choice, and a question's own `Prototype:` line. On every copy of send_message's body.
+ */
+export const INBOX_OPTION_LINES_RULE =
+  'Indented under a `- [ ]` choice (not a plain bullet), only when it helps the person pick: `Pros: <item>; <item>` and `Cons: <item>; <item>` (the card lines them up across options), and `Prototype: <page>`, a page they try before picking: an HTML file you also attach, or the http://localhost address of an app you are running (the send is refused if it does not answer). One `Prototype:` line at the block\'s own indent is one page for all the options.'
+
 export const INBOX_PICTURES_RULE =
-  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each: `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
+  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each, inside the choice (not in the text above the question): `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
 /** The `attachments` field's line on pictures (fixed text, on every copy of the field). */
 export const INBOX_ATTACHMENTS_PICTURES_LINE =
   'Screenshots and pictures go in the body instead (`![alt](path)`); attach what the person should open or click through.'
+
+/**
+ * Bro mode's line (approval "bro-mode", 2026-11-05; the owner's own words, and only the owner changes them). While the
+ * person has Bro mode on (config.json `inboxBro`) it goes in send_message's `body` field and nowhere else; off, the
+ * field is what it was before.
+ */
+export const INBOX_BRO_LINE =
+  "Don't use jargon and speak coherently. State things more simply and concisely, like one human talking to another. Don't drop important details, especially if the user asks for them."
+
+/** A `body` description with the line, right after its first words. */
+export function inboxBodyWithBro(description: string): string {
+  return description.replace('The message, markdown.', `The message, markdown. ${INBOX_BRO_LINE}`)
+}
+
+/**
+ * A remembered tool list as it reads with Bro mode off: only a running Inbox can say the switch is on, and a list kept
+ * from one that had it on must not outlive the person turning it off.
+ */
+export function inboxToolsWithoutBro(tools: InboxToolInfo[]): InboxToolInfo[] {
+  return tools.map((tool) => {
+    const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined
+    const body = properties?.body
+    if (typeof body?.description !== 'string' || !body.description.includes(INBOX_BRO_LINE)) return tool
+    const description = body.description.replace(` ${INBOX_BRO_LINE}`, '')
+    return { ...tool, inputSchema: { ...tool.inputSchema, properties: { ...properties, body: { ...body, description } } } }
+  })
+}
 
 /**
  * The agent tool's own words for the fields whose Inbox description is long
@@ -499,6 +617,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       INBOX_PICTURES_RULE,
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
+      INBOX_OPTION_LINES_RULE,
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
       '',
@@ -507,13 +626,13 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       INBOX_REF_LINK_RULE,
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
-    thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
-    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
+    thread: "A short thread name, one line: the same name in this project is the same open thread, across sessions. With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
+    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
   read_thread: {
-    thread_id: 'A thread id. read_thread shows its open questions, the newest messages in full, and earlier ones one line each.',
+    thread_id: 'A thread id. read_thread shows its open questions, its PRs, the newest messages in full, and earlier ones one line each.',
   },
   submit_guide: {
     guide: "The guide in get_guide_brief's output_schema, as an object or its JSON.",
@@ -673,7 +792,9 @@ export function inboxAgentTool(
       }
       // The agent tool's own short words where the Inbox's are long; the rest is the Inbox's.
       const own = INBOX_AGENT_FIELD_DESCRIPTIONS[tool.name]?.[name]
-      properties[name] = { ...schema, description: (own ?? (typeof schema.description === 'string' ? schema.description : '')).trim() }
+      const served = typeof schema.description === 'string' ? schema.description : ''
+      // The running Inbox says Bro mode is on by carrying the line in the field these words stand in for.
+      properties[name] = { ...schema, description: (own === undefined ? served : served.includes(INBOX_BRO_LINE) ? inboxBodyWithBro(own) : own).trim() }
     }
   }
   for (const [name, users] of usedBy) {
@@ -684,24 +805,260 @@ export function inboxAgentTool(
 }
 
 /**
+ * A string that reads as a piece of JSON rather than a value: it opens with
+ * `{"` or `["`, or holds a quote, a comma or colon, and another quote or
+ * bracket (`", "` or `": [`), which is what is left when a value's quoting
+ * broke and the rest of the call ran into it.
+ */
+const INBOX_JSON_FRAGMENT_RE = /^\s*[{[]\s*"|"\s*[,:]\s*["[{]/
+
+/**
+ * Whether an agent tool call with no action the Inbox has reads as input
+ * that never arrived as fields (an agent's call with broken quoting, which a
+ * host hands over empty, as one leftover field, or with the rest of the call
+ * inside a value), rather than a readable call that names no action or a
+ * wrong one: an action holding quotes, brackets, colons or commas; or no
+ * action and nothing at all, only fields no Inbox tool takes, or a value
+ * that holds JSON.
+ */
+export function inboxInputUnread(input: Record<string, unknown>, tools: readonly InboxToolInfo[]): boolean {
+  const { action, ...rest } = input
+  if (typeof action === 'string') return /["{}[\]:,\n]/.test(action)
+  if (action !== undefined) return false
+  const keys = Object.keys(rest)
+  if (keys.length === 0) return true
+  const known = new Set(tools.flatMap((tool) => Object.keys(propertiesOf(tool))))
+  if (keys.every((key) => !known.has(key))) return true
+  return Object.values(rest).some((value) => typeof value === 'string' && INBOX_JSON_FRAGMENT_RE.test(value))
+}
+
+/** What an agent tool call whose input did not arrive as fields answers: what arrived, the quoting to check, a call that reads, and the actions. */
+export function inboxUnreadInputText(input: unknown, tools: readonly InboxToolInfo[]): string {
+  let got: string
+  if (input === null || input === undefined) got = 'it arrived empty'
+  else if (typeof input !== 'object') got = `it arrived as a ${typeof input}, not fields`
+  else if (Array.isArray(input)) got = 'it arrived as a list, not fields'
+  else {
+    const keys = Object.keys(input)
+    const named = keys.slice(0, 3).map((key) => JSON.stringify(key.slice(0, 40))).join(', ')
+    got = keys.length === 0 ? 'it arrived empty' : `it arrived as ${named}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}`
+  }
+  return `Invalid plannotator_inbox call: its input could not be read as fields (${got}). Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
+}
+
+/**
+ * The key Claude Code hands a tool call under when it could not parse the
+ * model's JSON: `{"__unparsedToolInput": {"raw": "<the model's text>", "len":
+ * <its length>}}`, `raw` cut at 2,048 characters. A session sent the same
+ * call with a bare `"supersedes": msg_…/q-…,` six times this way and was
+ * told only "action must be one of …".
+ */
+export const INBOX_UNPARSED_INPUT_KEY = '__unparsedToolInput'
+
+/** What a host's unparsed wrapper holds: the model's text and its full length (absent: as long as `raw`). */
+function unparsedInputOf(input: unknown): { raw: string; len: number } | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const wrapper = (input as Record<string, unknown>)[INBOX_UNPARSED_INPUT_KEY]
+  if (!wrapper || typeof wrapper !== 'object') return null
+  const { raw, len } = wrapper as { raw?: unknown; len?: unknown }
+  if (typeof raw !== 'string') return null
+  return { raw, len: typeof len === 'number' && Number.isFinite(len) && len > raw.length ? len : raw.length }
+}
+
+/** An Inbox id an agent writes bare: a message id, optionally with a question or action item key. */
+const INBOX_BARE_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}(?:\/[aq]-[0-9a-f]{8}(?:-\d{1,3})?)?$/
+
+/**
+ * Where JSON text first fails to read, by a small reader of its own (an
+ * engine's parse error may not give a position): the character offset, what
+ * is wrong there (`bare`: a value with no quotes; `unterminated`: a string
+ * that never ends; `unexpected`: anything else), the field being read, and,
+ * for `bare`, the token. Null when the text reads.
+ */
+function jsonFailure(text: string): { at: number; kind: 'bare' | 'unterminated' | 'unexpected'; field: string | null; token?: string } | null {
+  let i = 0
+  let field: string | null = null
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i]!)) i++
+  }
+  const fail = (kind: 'bare' | 'unterminated' | 'unexpected', at = i, token?: string) => ({ at, kind, field, ...(token ? { token } : {}) })
+  type Failure = ReturnType<typeof fail>
+  const str = (): Failure | string => {
+    const start = i++
+    let out = ''
+    while (i < text.length) {
+      const c = text[i]!
+      if (c === '"') {
+        i++
+        return out
+      }
+      if (c === '\\') i++
+      else if (c < ' ') return fail('unexpected', i)
+      out += c
+      i++
+    }
+    return fail('unterminated', start)
+  }
+  const value = (): Failure | null => {
+    ws()
+    const c = text[i]
+    if (c === '{') {
+      i++
+      ws()
+      if (text[i] === '}') return (i++, null)
+      for (;;) {
+        ws()
+        if (text[i] !== '"') return fail('unexpected')
+        const key = str()
+        if (typeof key !== 'string') return key
+        ws()
+        if (text[i] !== ':') return fail('unexpected')
+        i++
+        const outer = field
+        field = key
+        const inner = value()
+        if (inner) return inner
+        ws()
+        // A failure right after the value is still about this field (an inner quote with no backslash).
+        if (text[i] !== ',' && text[i] !== '}') return fail('unexpected')
+        field = outer
+        if (text[i++] === '}') return null
+      }
+    }
+    if (c === '[') {
+      i++
+      ws()
+      if (text[i] === ']') return (i++, null)
+      for (;;) {
+        const inner = value()
+        if (inner) return inner
+        ws()
+        if (text[i] === ',') {
+          i++
+          continue
+        }
+        if (text[i] === ']') return (i++, null)
+        return fail('unexpected')
+      }
+    }
+    if (c === '"') {
+      const read = str()
+      return typeof read === 'string' ? null : read
+    }
+    const literal = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)(?![A-Za-z0-9_\/-])/.exec(text.slice(i))
+    if (literal) return (i += literal[0].length, null)
+    const bare = /^[A-Za-z0-9_][A-Za-z0-9_.\/-]*/.exec(text.slice(i))
+    return bare ? fail('bare', i, bare[0]) : fail('unexpected')
+  }
+  const failure = value()
+  if (failure) return failure
+  ws()
+  return i < text.length ? fail('unexpected') : null
+}
+
+/** About 40 characters of `text` around `at`, on one line, with an arrow after the spot. */
+function spotOf(text: string, at: number, end: number): string {
+  const line = (part: string) => part.replace(/\s+/g, ' ')
+  return `${at > 20 ? '…' : ''}${line(text.slice(Math.max(0, at - 20), end))} ←`
+}
+
+/**
+ * A call Claude Code could not parse (INBOX_UNPARSED_INPUT_KEY), read again:
+ * when the text is whole, each bare value that is an Inbox id
+ * (`msg_…/q-…`) or an action name gets its quotes (and a bare id in a
+ * field that takes a list becomes a one-item list), and a text that then
+ * reads is the call, with a line saying what was read. Only those shapes are
+ * mended. Otherwise the refusal names the spot: the character and the text
+ * around it, or, when the host cut the text, the field the cut fell in.
+ */
+function readUnparsedInput(
+  unparsed: { raw: string; len: number },
+  tools: readonly InboxToolInfo[],
+): { input: Record<string, unknown>; note?: string } | { error: string } {
+  const { raw, len } = unparsed
+  const actions = new Set<string>([...tools.map((tool) => tool.name), ...INBOX_TOOL_ACTIONS])
+  const lists = new Set(tools.flatMap((tool) => Object.entries(propertiesOf(tool)).filter(([, schema]) => schema.type === 'array').map(([name]) => name)))
+  if (raw.length >= len) {
+    let text = raw
+    const mended: { field: string | null; value: string }[] = []
+    for (let tries = 0; tries < 20; tries++) {
+      const failure = jsonFailure(text)
+      if (!failure) break
+      const token = failure.kind === 'bare' ? failure.token! : ''
+      const id = INBOX_BARE_ID_RE.test(token)
+      if (!id && !(failure.field === 'action' && actions.has(token))) break
+      const inList = /\[\s*$/.test(text.slice(0, failure.at)) || /,\s*$/.test(text.slice(0, failure.at)) && mended.some((m) => m.field === failure.field)
+      const quoted = JSON.stringify(token)
+      const wrap = id && !inList && failure.field !== null && lists.has(failure.field)
+      text = text.slice(0, failure.at) + (wrap ? `[${quoted}]` : quoted) + text.slice(failure.at + token.length)
+      mended.push({ field: failure.field, value: wrap ? `[${quoted}]` : quoted })
+    }
+    if (!jsonFailure(text)) {
+      const input = JSON.parse(text) as unknown
+      if (input && typeof input === 'object' && !Array.isArray(input)) {
+        if (mended.length === 0) return { input: input as Record<string, unknown> }
+        const fields = [...new Set(mended.map((m) => m.field ?? 'a value'))].join(', ')
+        const read = mended.map((m) => m.value).join(', ')
+        return {
+          input: input as Record<string, unknown>,
+          note: `Your call's JSON had ${mended.length === 1 ? 'an unquoted value' : 'unquoted values'} (${fields}); ${mended.length === 1 ? 'it was' : 'they were'} read as ${read}. Quote every string value.`,
+        }
+      }
+    }
+  }
+  const failure = jsonFailure(raw)
+  const prefix = 'Invalid plannotator_inbox call: '
+  if (raw.length < len && (!failure || failure.at >= raw.length - 1 || failure.kind === 'unterminated')) {
+    const where = failure?.field ? `inside ${failure.field}` : 'past what arrived'
+    const what = failure?.field ?? 'the long text'
+    return {
+      error: `${prefix}this call was ${len} characters and only the first ${raw.length} arrived readable; the JSON breaks ${where}. Check that quotes and backslashes inside ${what} are escaped, or send a shorter ${what} and attach the rest as a file.`,
+    }
+  }
+  if (!failure) return { error: inboxUnreadInputText({ [INBOX_UNPARSED_INPUT_KEY]: null }, tools) }
+  if (failure.kind === 'bare') {
+    return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + Math.min(failure.token!.length, 20))} this value needs double quotes. Fix that spot and call again.` }
+  }
+  if (failure.kind === 'unterminated') {
+    return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + 20)} this string never ends. Check that quotes and backslashes inside ${failure.field ?? 'it'} are escaped, then call again.` }
+  }
+  // A string that ended before the text did (`"He said "ship it""`): an inner quote with no backslash.
+  const endedEarly = /"\s*$/.test(raw.slice(0, failure.at)) && /^[^\s,:}\]]/.test(raw.slice(failure.at))
+  const why = endedEarly ? `the string before this spot ended early: a double quote inside ${failure.field ?? 'a string'} needs a backslash (\\").` : 'here.'
+  return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + 1)} ${why} Fix that spot and call again.` }
+}
+
+/**
  * The Inbox tool call an agent tool call stands for: the action's own fields
  * (any other field is refused, naming the action's fields) plus the filled
  * arguments that tool takes. An agent's own `project_path` (shape-checked
  * here) comes back as `projectPath`, with the working folder still in
  * `arguments`: the connection resolves it against that folder, refuses a
  * path that is not an existing folder, and puts the result in
- * `arguments.project_path` before calling the Inbox.
+ * `arguments.project_path` before calling the Inbox. A call the host could
+ * not parse (INBOX_UNPARSED_INPUT_KEY) is read again first; when a bare id
+ * or action name was mended, `note` says so and the connection puts it
+ * after the result (inboxResultWithNote).
  */
 export function inboxToolCall(
   input: unknown,
   tools: readonly InboxToolInfo[],
   filled: InboxFilledArguments,
-): { name: string; arguments: Record<string, unknown>; projectPath?: string } | { error: string } {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Invalid plannotator_inbox call: expected an object with an action.' }
+): { name: string; arguments: Record<string, unknown>; projectPath?: string; note?: string } | { error: string } {
+  const unparsed = unparsedInputOf(input)
+  if (unparsed) {
+    const read = readUnparsedInput(unparsed, tools)
+    if ('error' in read) return read
+    const call = inboxToolCall(read.input, tools, filled)
+    if (!read.note) return call
+    return 'error' in call ? { error: `${call.error} (${read.note})` } : { ...call, note: read.note }
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: inboxUnreadInputText(input, tools) }
   const { action, ...rest } = input as Record<string, unknown>
   if (action === INBOX_REMOVED_ACTION) return { error: INBOX_REMOVED_ACTION_TEXT }
   const tool = tools.find((candidate) => candidate.name === action)
   if (!tool) {
+    if (inboxInputUnread(input as Record<string, unknown>, tools)) return { error: inboxUnreadInputText(input, tools) }
     return {
       error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (this Plannotator Inbox has no ${action}; update Plannotator for it)` : ''}.`,
     }
@@ -725,6 +1082,11 @@ export function inboxToolCall(
   }
   for (const name of INBOX_FILLED_ARGUMENTS) if (name in own) args[name] = filled[name]
   return projectPath === undefined ? { name: tool.name, arguments: args } : { name: tool.name, arguments: args, projectPath }
+}
+
+/** A tool result's text with a call's `note` (inboxToolCall) after it, on a line of its own; unchanged without one. */
+export function inboxResultWithNote(text: string, note: string | undefined): string {
+  return note ? `${text}\n\n${note}` : text
 }
 
 /**
@@ -905,6 +1267,13 @@ export interface InboxReplyCommand {
    */
   ack_of?: string
   /**
+   * With `ack_of`: the emoji the person reacted with from the 👍's tray
+   * (approval "inbox-reaction-tray"), the one they ended on when the Undo
+   * window closed, with their name for it when it has one. The wake is
+   * `inboxAckLine` with it. Absent for 👍 Looks good.
+   */
+  ack_reaction?: { emoji: string; label?: string }
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -984,6 +1353,58 @@ export interface InboxReplyCommand {
    * an older connection ignores it.
    */
   steps?: { done: number; total: number; doing: string | null }
+  /**
+   * What the person changed in the thread's PRs since the receiving session
+   * last saw them (approval "inbox-pr-binding"), each PR as an agent writes
+   * it: the wake adds `inboxPullsWakeLine`. Only on a wake for the thread's
+   * owner; absent otherwise, and an older connection ignores it.
+   */
+  pulls_changed?: { added: string[]; removed: string[] }
+  /**
+   * The person's reply answers the receiving session's questions in a thread
+   * where it keeps no checklist, while the person has steps on: the wake adds
+   * INBOX_STEPS_START_WAKE_LINE. Absent otherwise (and always with `steps`);
+   * an older connection ignores it.
+   */
+  steps_start?: true
+  /**
+   * What the wake's details line says about the thread (approval
+   * "inbox-wake-context"). Absent on a Tidy, a 👍, a hand-off notice and a
+   * brand new thread; an older connection ignores it and delivers `body` as
+   * it always did. Without it (an older Inbox too) the wake still names the
+   * thread, `[Thread <id>]`, and `body` stays whole.
+   */
+  context?: InboxWakeContext
+}
+
+/** A command's `context`: the thread at the moment the Inbox handed the command over. */
+export interface InboxWakeContext {
+  /** The thread's messages, as read_thread counts them. */
+  messages: number
+  /** What waits on the person in the thread, as read_thread's header lists it. */
+  open_questions: number
+  open_actions: number
+  /** When the session this goes to last wrote in the thread. Absent when it never did. */
+  last_agent_at?: string
+  /** The session's own message the person answered, only when it is not the session's latest. */
+  replying_to?: InboxWakeReplyingTo
+  /**
+   * The still-open sentence `body` carries for a connection that has no
+   * details line (`inboxStillOpenLine`): this connection's wake leaves it out.
+   * `body` stays as stored, so an older connection still says it.
+   */
+  still_open_line?: string
+  /** Where in `body` the store wrote it: the wake takes out that paragraph only, never words the person typed. */
+  still_open_at?: number
+}
+
+export interface InboxWakeReplyingTo {
+  id: string
+  at: string
+  /** About its first ten words, plain text. Without one, the wake counts what the message asked instead. */
+  quote?: string
+  questions?: number
+  actions?: number
 }
 
 /**
@@ -1076,6 +1497,38 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * The poll and `state` field (`true`) by which the Claude Code mod says its
+ * session refused the reply it tried to put in, and holds every reply until
+ * the person types there: Claude Code drops a plugin's prompt after the
+ * person stopped the session, until their own next input (#2780). The window
+ * words a waiting reply "Stopped: goes in when you type in that session"
+ * (approval "inbox-stopped-reply"). `false` on a `state` event clears it.
+ * An older Inbox ignores it; an older connection never sends it.
+ */
+export const INBOX_HELD_POLL_FIELD = 'held'
+
+/**
+ * The poll field by which a connection says which session ids its
+ * conversation continues, nearest first (a string, or a list of at most 8):
+ * the host gave the conversation a new session id (Claude Code's branch of a
+ * conversation, whose transcript names the session it came from, and its
+ * hand-over to a new session, which the old transcript records). Set by the
+ * host from its own records, never by the model: it is no tool argument.
+ * While a session it names is not live, the Inbox hands this session what
+ * waits for that one (packages/server/inbox-continuations.ts); a session that
+ * still polls keeps its own. An older Inbox ignores it; an older connection
+ * never sends it.
+ */
+export const INBOX_CONTINUES_POLL_FIELD = 'continues'
+
+/**
+ * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
+ * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
+ * An older Inbox ignores it.
+ */
+export const INBOX_STEER_POLLS_POLL_FIELD = 'steer_polls'
+
+/**
  * The poll field (`true`) by which a connection says it can answer Ask AI
  * live. An older connection never sends it, so a question never waits for it.
  */
@@ -1106,6 +1559,38 @@ export function parseInboxAskWaits(text: string): boolean {
 }
 
 /**
+ * The poll field (`true`) by which a Claude Code connection says it reloads
+ * Plannotator by itself (`/reload-plugins`, owner approval "cc-auto-reload")
+ * when a poll answer carries INBOX_RELOAD_FIELD. An older connection never
+ * sends it, so it is never told.
+ */
+export const INBOX_AUTO_RELOAD_POLL_FIELD = 'auto_reload'
+
+/**
+ * Set on a poll answer to a connection that sent INBOX_AUTO_RELOAD_POLL_FIELD
+ * while the Inbox judges its session outdated and a reload brings it up to
+ * date (`claudeSessionOutdated`, fix `restart`): `{ installed }`, the version
+ * a reload loads (null when the registry names none). A state, said on every
+ * answer: an answer without it says no reload is needed.
+ */
+export const INBOX_RELOAD_FIELD = 'reload'
+
+export interface InboxReloadOffer {
+  installed: string | null
+}
+
+export function parseInboxReloadOffer(text: string): InboxReloadOffer | null {
+  try {
+    const value = (JSON.parse(text) as Record<string, unknown>)[INBOX_RELOAD_FIELD]
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const installed = (value as Record<string, unknown>).installed
+    return { installed: typeof installed === 'string' && installed.trim() && installed.length <= 64 ? installed.trim() : null }
+  } catch {
+    return null
+  }
+}
+
+/**
  * The turn a connection submits when a reply it put into a running turn
  * arrived as that turn ended, so the model never read it: the reply is in
  * the conversation already, so this only points at it.
@@ -1131,7 +1616,7 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
 
 /** The fixed second line of every wake: who is speaking, and how to answer. */
 export const INBOX_WAKE_INSTRUCTION =
-  "The person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
+  "This is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
  * The fixed second line of a Re-ask wake (approval "inbox-reask"): the person
@@ -1232,35 +1717,146 @@ export function inboxRedirectedLine(asker: string, id: string): string {
 }
 
 /**
- * The whole of a 👍 Looks good wake under its first line, and the body of
- * the note the Inbox stores for it: the person read the message and needs
- * nothing more.
+ * The person's reaction as a wake and read_thread say it (approval
+ * "inbox-reaction-tray", addendum 2026-11-07T12:20Z: every reaction, 👍
+ * included, is one quick label): one short emoji (pictographic, a flag or a
+ * keycap) with no spaces or controls, and its name with controls made spaces
+ * and invisible format characters taken out (the joiner emoji use stays), at
+ * most 24 characters ('' when it has none). 👍 Looks good when there is no
+ * reaction (an ack from before the tray, an older Inbox), when it is not one,
+ * or for 👍 with no name.
  */
-export function inboxAckLine(messageId: string): string {
-  return `The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`
+export function inboxAckReaction(value: unknown): { emoji: string; label: string } {
+  const thumbs = { emoji: '👍', label: 'Looks good' }
+  if (!value || typeof value !== 'object') return thumbs
+  const { emoji, label } = value as { emoji?: unknown; label?: unknown }
+  if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 16 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(emoji) || /[\s\p{Cc}\p{Cf}]/u.test(emoji.replace(/[\u200d\ufe0f\u{e0020}-\u{e007f}]/gu, ''))) return thumbs
+  const text = typeof label === 'string' ? label.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/(?!\u200d)\p{Cf}/gu, '').replace(/\s+/g, ' ').trim() : ''
+  const name = [...text].slice(0, 24).join('').trim()
+  if (!name && emoji === '👍') return thumbs
+  return { emoji, label: name }
 }
 
 /**
- * The thread id a wake's closing line names: the Inbox's own id shape only
- * (`msg_` + a ULID today), so nothing else a command carries reaches the
- * prompt there. Anything else (an older Inbox without the field) is ''.
+ * The whole of a reaction's wake under its first line, and the body of the
+ * note the Inbox stores for it: the reaction the person ended on when the
+ * Undo window closed (`inboxAckReaction`), with its name when it has one.
+ */
+export function inboxAckLine(messageId: string, reaction?: unknown): string {
+  const picked = inboxAckReaction(reaction)
+  return `The person reacted ${picked.emoji}${picked.label ? ` ${picked.label}` : ''} to your message (${messageId}).`
+}
+
+/**
+ * The thread id a wake names: the Inbox's own id shape only (`msg_` + a ULID
+ * today), so nothing else a command carries reaches the prompt there.
+ * Anything else (an older Inbox without the field) is ''.
  */
 function wakeThreadId(value: unknown): string {
   return typeof value === 'string' && /^msg_[0-9A-Za-z]{1,64}$/.test(value) ? value : ''
 }
 
+/** The closing line of every wake but a 👍's, after the body: how to read more, and where the Inbox explains itself. */
+export const INBOX_WAKE_CLOSING_LINE = '[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]'
+
+/** How long ago `at` was, in short plain words ("a minute ago", "11 hours ago"), or '' when it is not a time. */
+export function inboxWakeAgo(at: unknown, now: number): string {
+  const then = typeof at === 'string' ? Date.parse(at) : Number.NaN
+  if (!Number.isFinite(then)) return ''
+  const minutes = Math.floor((now - then) / 60_000)
+  // Also a clock a little behind the writer's.
+  if (minutes < 1) return 'just now'
+  if (minutes < 2) return 'a minute ago'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 2) return 'an hour ago'
+  if (hours < 24) return `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  return days < 2 ? 'a day ago' : `${days} days ago`
+}
+
+const wakeCount = (value: unknown): number | null => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null)
+
+const wakePlural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
 /**
- * The closing line of every wake, after the body: which thread it is, how to
- * read more of it, and where the Inbox explains itself.
- * `[thread <id> · more: <tool> read_thread · how it works: plannotator inbox --help]`,
- * with the tool named as the host registered it (the mod's
- * `mcp__<server>__plannotator_inbox`). Without a thread id (an older Inbox)
- * the thread part is left out.
+ * `[Thread <id>: 14 messages, 1 question open, don't re-ask it. Your last
+ * message was a minute ago]`, under the wake's first lines, or '' without the
+ * Inbox's data (an older Inbox). A Re-ask asks for the questions again, so it
+ * leaves out "don't re-ask". `queued`: the text goes into a host's queue and
+ * may wait there through a turn, so it never says "nothing open": the agent
+ * may have asked something by the time it reads this.
  */
-export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX_TOOL_NAME): string {
+export function inboxWakeDetailsLine(threadId: unknown, context: unknown, options: { now: number; reask?: boolean; queued?: boolean }): string {
   const thread = wakeThreadId(threadId)
-  const tool = typeof toolName === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(toolName.trim()) ? toolName.trim() : INBOX_TOOL_NAME
-  return `[${thread ? `thread ${thread} · ` : ''}more: ${tool} read_thread · how it works: plannotator inbox --help]`
+  if (!thread || !context || typeof context !== 'object') return ''
+  const { messages, open_questions, open_actions, last_agent_at } = context as Record<string, unknown>
+  const count = wakeCount(messages)
+  const questions = wakeCount(open_questions)
+  const actions = wakeCount(open_actions)
+  if (count === null || questions === null || actions === null) return ''
+  const open: string[] = []
+  if (questions > 0) open.push(`${wakePlural(questions, 'question')} open${options.reask ? '' : `, don't re-ask ${questions === 1 ? 'it' : 'them'}`}`)
+  if (actions > 0) open.push(`${wakePlural(actions, 'action item')} open`)
+  const state = open.join(', ') || (options.queued ? '' : 'nothing open')
+  const ago = inboxWakeAgo(last_agent_at, options.now)
+  return `[Thread ${thread}: ${wakePlural(count, 'message')}${state ? `, ${state}` : ''}${ago ? `. Your last message was ${ago}` : ''}]`
+}
+
+/**
+ * Text an agent wrote, as a wake may quote it: one line, no control, format or
+ * separator characters, and no brackets or double quotes, so it can neither
+ * start another line of the wake nor end this one early.
+ */
+function wakeQuote(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const flat = value
+    .replace(/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/[[\]]/g, '')
+    .replace(/"/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  const chars = [...flat]
+  return chars.length > 120 ? `${chars.slice(0, 120).join('').trimEnd()}…` : flat
+}
+
+/**
+ * `[Replying to your message from 6 hours ago (<id>): "The first words…"]`, or,
+ * with no words to quote, `…(<id>), with 3 questions]`. '' without the Inbox's data.
+ */
+export function inboxWakeReplyingLine(target: unknown, now: number): string {
+  if (!target || typeof target !== 'object') return ''
+  const { id, at, quote, questions, actions } = target as Record<string, unknown>
+  const message = wakeThreadId(id)
+  const ago = inboxWakeAgo(at, now)
+  if (!message || !ago) return ''
+  const head = `Replying to your message from ${ago} (${message})`
+  const words = wakeQuote(quote)
+  if (words) return `[${head}: "${words}"]`
+  const asked: string[] = []
+  if ((wakeCount(questions) ?? 0) > 0) asked.push(wakePlural(questions as number, 'question'))
+  if ((wakeCount(actions) ?? 0) > 0) asked.push(wakePlural(actions as number, 'action item'))
+  return `[${head}${asked.length > 0 ? `, with ${asked.join(' and ')}` : ''}]`
+}
+
+/**
+ * The command as a wake with a details line words it: the body without the
+ * still-open sentence, only when the details line says it instead (it prints,
+ * and counts a question open). Otherwise, and when that sentence is all the
+ * body holds, the body stays.
+ */
+export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; context?: unknown }>(command: T): T {
+  if (!command.context || typeof command.context !== 'object') return command
+  const { still_open_line: line, still_open_at: at, ...context } = command.context as Record<string, unknown>
+  if (typeof line !== 'string' || line === '') return command
+  if (!inboxWakeDetailsLine(command.thread_id, context, { now: 0 }) || !wakeCount(context.open_questions)) return { ...command, context }
+  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !command.body.startsWith(line, at)) return { ...command, context }
+  const end = at + line.length
+  const alone = (at === 0 || command.body.slice(at - 2, at) === '\n\n') && (end === command.body.length || command.body.slice(end, end + 2) === '\n\n')
+  if (!alone) return { ...command, context }
+  const body = [command.body.slice(0, Math.max(0, at - 2)), command.body.slice(end + 2)].filter((part) => part !== '').join('\n\n')
+  return { ...command, context, body: body === '' ? command.body : body }
 }
 
 /**
@@ -1268,10 +1864,11 @@ export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX
  * (the title is the command's `subject`, or `a reply` / `a message` without
  * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
- * saying so under it), then the words verbatim, then the closing line
- * (`inboxWakeClosingLine`, naming `toolName`, the tool as the host
- * registered it). Never the thread re-sent. A 👍 Looks good (`ack_of`) is the
- * first line and `inboxAckLine`, closed by `[thread <id>]` alone.
+ * saying so under it), the details and Replying to lines when the Inbox sent
+ * their data (`inboxWakeDetailsLine`, `inboxWakeReplyingLine`), then the words
+ * verbatim, then INBOX_WAKE_CLOSING_LINE. Never the thread re-sent. A 👍 Looks
+ * good (`ack_of`) is the first line and `inboxAckLine`, closed by
+ * `[thread <id>]` alone.
  */
 export function inboxWakeText(
   command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & {
@@ -1282,6 +1879,7 @@ export function inboxWakeText(
     continues_thread?: boolean
     name_thread?: boolean
     ack_of?: string
+    ack_reaction?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -1292,39 +1890,53 @@ export function inboxWakeText(
     reask_one?: unknown
     tidy?: boolean
     steps?: unknown
+    pulls_changed?: unknown
+    steps_start?: unknown
+    context?: unknown
   },
-  toolName: string = INBOX_TOOL_NAME,
+  now: number = Date.now(),
+  wording: { queued?: boolean } = {},
 ): string {
   // Tidy: the body is the wake; it spans threads, so the closing line names none.
   if (command.tidy === true) {
-    return `Plannotator Inbox: ${(command.subject ?? '').replace(/\s+/g, ' ').trim() || 'Tidy'} (${command.id})\n${command.body}\n\n${inboxWakeClosingLine(null, toolName)}`
+    return `Plannotator Inbox: ${(command.subject ?? '').replace(/\s+/g, ' ').trim() || 'Tidy'} (${command.id})\n${command.body}\n\n${INBOX_WAKE_CLOSING_LINE}`
   }
   if (typeof command.ack_of === 'string' && command.ack_of !== '') {
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
-    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of)}${thread ? `\n\n[thread ${thread}]` : ''}`
+    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
+  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
+  // with none there yet and the person's answers in this reply, the line that says when to start one.
   const steps = wakeSteps(command.steps)
-  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${inboxWakeClosingLine(command.thread_id, toolName)}`
+  // What the person changed in the thread's PRs (approval "inbox-pr-binding"), its own paragraph too.
+  const pulls = wakePullsChanged(command.pulls_changed)
+  const stepsLine = steps ? inboxStepsWakeLine(steps) : command.steps_start === true ? INBOX_STEPS_START_WAKE_LINE : ''
+  const closing = `${pulls ? `\n\n${inboxPullsWakeLine(pulls)}` : ''}${stepsLine ? `\n\n${stepsLine}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
+  const { body, context } = inboxWakeCommand(command)
+  const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true, queued: wording.queued === true })
+  const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''
+  // No details (a brand new thread, a hand-off notice, an older Inbox): the wake still names its thread.
+  const thread = wakeThreadId(command.thread_id)
+  const facts = details ? `\n${details}${target ? `\n${target}` : ''}` : thread ? `\n[Thread ${thread}]` : ''
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   // The thread was handed to another session: the notice alone.
   if (command.handed_away && typeof command.handed_away === 'object') {
     const to = wakeName(command.handed_away.to) || 'another agent'
-    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${facts}${closing}`
   }
   // Handed this thread: it is this session's now; read it first.
   if (command.handoff && typeof command.handoff === 'object') {
     const from = wakeName(command.handoff.from) || 'another agent'
-    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_HANDOFF_INSTRUCTION}\n${inboxHandoffLine(from, command.id)}\n\n${command.body}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_HANDOFF_INSTRUCTION}\n${inboxHandoffLine(from, command.id)}${facts}\n\n${body}${closing}`
   }
   // Tagged into a thread another session owns: what it is, then read the thread first.
   if (command.tagged && typeof command.tagged === 'object') {
     const owner = wakeName(command.tagged.owner) || 'another agent'
     if (command.added === true) {
-      return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_ADDED_INSTRUCTION}\n${inboxAddedLine(owner, command.id)}\n\n${command.body}${closing}`
+      return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_ADDED_INSTRUCTION}\n${inboxAddedLine(owner, command.id)}${facts}\n\n${body}${closing}`
     }
-    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_TAGGED_INSTRUCTION}\n${inboxTaggedLine(owner, command.id)}\n\n${command.body}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_TAGGED_INSTRUCTION}\n${inboxTaggedLine(owner, command.id)}${facts}\n\n${body}${closing}`
   }
   const others = Array.isArray(command.also_tagged)
     ? command.also_tagged
@@ -1353,7 +1965,7 @@ export function inboxWakeText(
       ? `\n${inboxContinuesLine(command.id)}`
       : ''
   const naming = command.name_thread === true ? `\n${INBOX_NAME_THREAD_LINE}` : ''
-  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}\n\n${command.body}${closing}`
+  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}${facts}\n\n${body}${closing}`
 }
 
 /**
@@ -1363,3 +1975,10 @@ export function inboxWakeText(
  * never this long without one.
  */
 export const INBOX_SESSION_LIVE_MS = 30_000
+
+/**
+ * A claimed reply whose claimant stopped saying it is alive for this long has
+ * a claimant that quit: the Claude Code mod reports it then, and the Inbox
+ * reads it as stuck once that session is gone too.
+ */
+export const INBOX_UNDELIVERED_AFTER_MS = 60_000

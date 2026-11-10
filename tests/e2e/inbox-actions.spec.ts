@@ -202,14 +202,15 @@ test('the list: no new section; the action item sits in Stopped on you and its r
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
   await expect(stopped).toContainText('Approve the production deploy on Vercel');
-  // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words.
+  // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words: a
+  // blocked row's marks say its state first (approval "inbox-question-mark", #2929).
   for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {
     await expect(row(page, id).locator('[data-action-count]')).toHaveAttribute('data-action-count', String(actions));
     await expect(row(page, id).locator('.ib-qn')).toHaveCount(questions);
   }
-  await expect(row(page, threads.vercel)).toHaveAccessibleName(/1 action to do/);
-  await expect(row(page, threads.npm)).toHaveAccessibleName(/1 action to do 1 question/);
-  await expect(row(page, threads.staging)).toHaveAccessibleName(/3 actions to do/);
+  await expect(row(page, threads.vercel)).toHaveAccessibleName(/Stopped on you: 1 action item/);
+  await expect(row(page, threads.npm)).toHaveAccessibleName(/1 action item.*1 question/);
+  await expect(row(page, threads.staging)).toHaveAccessibleName(/3 action items/);
   // No "Action item" section band, page or strip.
   await expect(page.getByText('Action item', { exact: true })).toHaveCount(0);
   await shot(page, '01-list');
@@ -453,7 +454,10 @@ test('phone (WebKit, iPhone 15): the checklist, 44 px targets', async () => {
     await expect(note).toBeVisible();
     expect((await note.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await note.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
-    await expect(page.locator('section.ib-pane [data-foot-status] [data-draft-foot]')).toContainText('1 done');
+    // A phone's foot draws no status (approval "reply-bar-pairs"): Edit draft counts it and names it.
+    const draft = page.locator('section.ib-pane .ib-pfoot [data-edit-draft]');
+    await expect(draft).toHaveAccessibleName(/^Draft 1: 1 done\. Edit draft$/);
+    await expect(draft.locator('[data-draft-count]')).toHaveText('1');
     await shot(page, '10b-phone-in-draft');
     await context.close();
   } finally {

@@ -5,13 +5,44 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNews, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
 }
 
 const sections = (...rows: InboxListRow[]): InboxListSection[] => [{ id: 'waiting', label: 'Waiting on you', threads: rows }];
+
+// The list's pill (ListNewPill.tsx) counts what "N new" counts, never its own idea of news.
+describe('heldNews', () => {
+  const at = (minute: number) => `2026-10-07T10:0${minute}:00Z`;
+  const inGroup = (r: InboxListRow, section: InboxListRow['section']) => ({ ...r, section }) as InboxListRow;
+
+  test('the threads "N new" counts, each with the group Show lands it in; the open thread and the person\'s own reply are not among them', () => {
+    const shown = sections(row('a', 'api', at(0), 'agent'), row('b', 'api', at(0), 'agent'), row('open', 'api', at(0), 'agent'));
+    const latest = sections(
+      inGroup(row('a', 'api', at(5), 'agent'), 'new'),
+      inGroup(row('b', 'api', at(6), 'person'), 'sent'),
+      inGroup(row('c', 'api', at(7), 'agent'), 'quiet'),
+      inGroup(row('open', 'api', at(8), 'agent'), 'new'),
+    );
+    const open = { threadId: 'open' };
+    const news = heldNews(shown, latest, undefined, open);
+    expect(news.map((item) => item.lands)).toEqual(['new', 'quiet']);
+    expect(news).toHaveLength(heldNotice(shown, latest, undefined, open).count);
+  });
+
+  test('a second agent message in a thread already counted is a new arrival: its key changes, its thread still counts once', () => {
+    const shown = sections(row('a', 'api', at(0), 'agent'));
+    const first = heldNews(shown, sections(inGroup(row('a', 'api', at(5), 'agent'), 'new')));
+    const second = heldNews(shown, sections(inGroup(row('a', 'api', at(6), 'agent'), 'new')));
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0]!.key).not.toBe(first[0]!.key);
+    // The same read again is the same arrival.
+    expect(heldNews(shown, sections(inGroup(row('a', 'api', at(6), 'agent'), 'new')))).toEqual(second);
+  });
+});
 
 describe('heldNotice', () => {
   test('a new thread and a newer agent message count; the person\'s own reply does not', () => {
@@ -104,6 +135,23 @@ describe('heldNotice', () => {
 });
 
 describe('refreshHeldRows', () => {
+  // The failure this guards: every list read drew the whole list (and the window with it) again, though most reads
+  // after a record or an own save change no row on screen.
+  test('a read that changes no row on screen keeps the list drawn, and a changed row changes only its section', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T10:01:00Z', 'agent');
+    const shown: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [a] },
+      { id: 'quiet', label: 'Quiet', threads: [b] },
+    ];
+    expect(refreshHeldRows(shown, [{ id: 'quiet', label: 'Quiet', threads: [b, a] }])).toBe(shown);
+    const seen = { ...b, unseen: 0, subject: 'Seen' } as InboxListRow;
+    const next = refreshHeldRows(shown, [{ id: 'quiet', label: 'Quiet', threads: [seen, a] }], { threadId: 'b' });
+    expect(next).not.toBe(shown);
+    expect(next[0]).toBe(shown[0]);
+    expect(next[1]!.threads[0]).toBe(seen);
+  });
+
   // The failure this guards: after the person's reply was delivered, the held
   // list kept the row's whole old state, so it said "Saved for <agent>" until
   // a reload while the thread beside it said "Delivered".
@@ -488,6 +536,43 @@ describe('putRowBack (Undo of Mark read on a seen update held in New)', () => {
   });
 });
 
+// e2e S1 (tests/e2e/inbox-keyboard-journeys.spec.ts): Mark read on a row, another thread closes and the list
+// tidies (the read row goes into folded Quiet), then Undo. The Undo's write only swaps the row in place
+// (App.tsx afterWrite), so without putReadRowBack the row, waiting on the person again, stayed hidden in Quiet.
+describe('putReadRowBack (Undo of Mark read after the list settled)', () => {
+  const bySection = (...rows: InboxListRow[]): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: rows.filter((t) => t.section === id) }));
+  const at = (id: string, time: string, section: InboxListRow['section'], unread: boolean) => ({ ...row(id, 'shop', time, 'agent'), section, unread }) as InboxListRow;
+  const ids = (list: InboxListSection[]) => list.filter((s) => s.threads.length > 0).map((s) => `${s.id}:${s.threads.map((t) => t.thread_id).join(',')}`);
+
+  test('a settle put the read row into Quiet; Undo brings it back between the same neighbours, in its state now', () => {
+    const x = at('x', '2026-10-20T12:00:00Z', 'waiting', true);
+    const y = at('y', '2026-10-20T08:00:00Z', 'waiting', true);
+    const q = at('q', '2026-10-20T07:00:00Z', 'quiet', false);
+    const pressed = bySection(x, at('c', '2026-10-20T10:00:00Z', 'waiting', true), y, q);
+    // Mark read: the server's row is Quiet. The list holds still, then the tidy after a close settles it.
+    const read = at('c', '2026-10-20T10:00:00Z', 'quiet', false);
+    const settled = settleOwn(replaceHeldRow(pressed, read), bySection(x, y, read, q));
+    expect(ids(settled)).toEqual(['waiting:x,y', 'quiet:c,q']);
+    // Undo: the row waits on the person again. The write alone swaps it in place, still in Quiet.
+    const unread = at('c', '2026-10-20T10:00:00Z', 'waiting', true);
+    const latest = bySection(x, unread, y, q);
+    const written = addOwnThreads(replaceHeldRow(settled, unread), latest, ['c']);
+    expect(drawnSection(written, 'c')).toBe('quiet');
+    const back = putReadRowBack(written, pressed, unread)!;
+    expect(ids(back)).toEqual(['waiting:x,c,y', 'quiet:q']);
+    expect(back.find((s) => s.id === 'waiting')!.threads[1]).toBe(unread);
+  });
+
+  test('a row that never moved, or is not on screen, is left alone', () => {
+    const c = at('c', '2026-10-20T10:00:00Z', 'waiting', true);
+    const pressed = bySection(c);
+    expect(putReadRowBack(pressed, pressed, c)).toBeNull();
+    expect(putReadRowBack(bySection(), pressed, c)).toBeNull();
+    expect(putReadRowBack(pressed, bySection(), c)).toBeNull();
+  });
+});
+
 // Snooze (approval "inbox-snooze"): the band is one more group to the held list.
 describe('the Snoozed band', () => {
   const asleep = (r: InboxListRow) => ({ ...r, snoozed: { until: '2026-10-08T12:00:00Z', at: '2026-10-07T10:00:00Z' } }) as InboxListRow;
@@ -521,10 +606,48 @@ describe('the Snoozed band', () => {
     const both = settleThread(settled, model([], [asleep(a), sooner]), 'b');
     expect(both.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['b', 'a']);
   });
+
+  // P1 of the #2716 review: with no thread open, `event: snoozes` settled the person's own pending reads and
+  // archives too, so a clock or another tab moved rows under the pointer. Only the rows whose snooze changed move.
+  test('snoozeChangedRows: a row snoozed or unsnoozed elsewhere moves; a return by the clock and every other row do not', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent');
+    const c = row('c', 'docs-site', '2026-10-07T08:00:00Z', 'agent');
+    const d = row('d', 'docs-site', '2026-10-07T07:00:00Z', 'agent');
+    // On screen: a and b in Waiting, b read in place (held: section quiet), c and d snoozed in the band.
+    const readB = { ...b, section: 'quiet', unread: false } as InboxListRow;
+    const shown = model([a, readB], [asleep(c), asleep(d)]);
+    // Read now: a snoozed in another tab, c unsnoozed there, d back by the clock, b still read.
+    const back = { ...d, snooze_back: '2026-10-08T12:00:00Z', last_at: '2026-10-08T12:00:00Z' } as InboxListRow;
+    const latest = model([readB, { ...c, section: 'waiting' } as InboxListRow, back], [asleep(a)]);
+    const moving = snoozeChangedRows(shown, latest);
+    expect(moving.sort()).toEqual(['a', 'c']);
+    const next = moving.reduce((list, id) => settleThread(list, latest, id), shown);
+    expect(drawnSection(next, 'a')).toBe('snoozed');
+    expect(drawnSection(next, 'c')).toBe('waiting');
+    // b keeps its place in Waiting until the list settles; d waits behind "N new" in the band.
+    expect(drawnSection(next, 'b')).toBe('waiting');
+    expect(drawnSection(next, 'd')).toBe('snoozed');
+    // Nothing changed: nothing moves.
+    expect(snoozeChangedRows(next, latest).filter((id) => id !== 'd')).toEqual([]);
+  });
+
+  // N1 of the #2716 review: Undo of a write whose row the list already settled away puts the row back; a snoozed
+  // one goes into the band, not its own section.
+  test('addOwnThreads puts a snoozed row into the band, soonest first', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent');
+    const shown = model([], [asleep(b)]);
+    const sooner = { ...asleep(a), snoozed: { until: '2026-10-07T18:00:00Z', at: '2026-10-07T10:00:00Z' } } as InboxListRow;
+    const next = addOwnThreads(shown, model([], [sooner, asleep(b)]), ['a']);
+    expect(next.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['a', 'b']);
+    expect(next.find((s) => s.id === 'waiting')!.threads).toEqual([]);
+  });
 });
 
 // The open row is drawn read as its look goes out (the owner, 2026-11-02: its hover action must be Mark unread at
-// once). Unbolding a row that still waits on the person (a question, picks not sent) would hide that it waits.
+// once), in the group it is drawn in. A row with questions open unbolds too (the owner, 2026-11-08) and keeps its
+// group; only picks not sent ("Answered, not sent") keep a row bold, since it waits on the person's Send.
 describe('markHeldRowLooked', () => {
   const news = (id: string, extra: Partial<InboxListRow> = {}) =>
     ({ ...row(id, 'docs-site', '2026-10-07T10:00:00Z', 'agent'), section: 'new', unseen: 1, unread: true, answered_not_sent: false, ...extra }) as InboxListRow;
@@ -537,12 +660,16 @@ describe('markHeldRowLooked', () => {
     expect(rowIn(looked, 'b')).toMatchObject({ unseen: 1, unread: true });
   });
 
-  test('a row that still waits on the person stays bold', () => {
+  test('a row with questions open reads seen and not bold where it is; picks not sent stay bold', () => {
     const list: InboxListSection[] = [
+      { id: 'stopped', label: 'Stopped on you', threads: [news('s', { section: 'stopped' })] },
+      { id: 'holding', label: 'Holding up work', threads: [news('h', { section: 'holding' })] },
       { id: 'waiting', label: 'Waiting on you', threads: [news('q', { section: 'waiting' })] },
       { id: 'new', label: 'New since you looked', threads: [news('p', { answered_not_sent: true })] },
     ];
-    expect(rowIn(markHeldRowLooked(list, new Set(['q'])), 'q')).toMatchObject({ unseen: 0, unread: true, section: 'waiting' });
-    expect(rowIn(markHeldRowLooked(list, new Set(['p'])), 'p')).toMatchObject({ unseen: 0, unread: true });
+    const looked = markHeldRowLooked(list, new Set(['s', 'h', 'q', 'p']));
+    expect(looked.map((s) => `${s.id}:${s.threads.map((r) => r.thread_id).join(',')}`)).toEqual(['stopped:s', 'holding:h', 'waiting:q', 'new:p']);
+    for (const id of ['s', 'h', 'q']) expect(rowIn(looked, id)).toMatchObject({ unseen: 0, unread: false });
+    expect(rowIn(looked, 'p')).toMatchObject({ unseen: 0, unread: true });
   });
 });

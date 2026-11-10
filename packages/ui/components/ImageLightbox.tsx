@@ -181,7 +181,13 @@ export const ImageLightbox: React.FC<{
    * no swipe.
    */
   swipe?: boolean;
-}> = ({ src, alt, onClose, images, regions, swipe }) => {
+  /**
+   * Which of `images` opens first when more than one of them is `src` (one
+   * picture shown for two choices): its place in `images`. Ignored unless that
+   * image is `src`. Additive: absent, the first image that is `src` opens.
+   */
+  at?: number;
+}> = ({ src, alt, onClose, images, regions, swipe, at }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -194,7 +200,8 @@ export const ImageLightbox: React.FC<{
     const focus = regions?.focusId ? regions.annotations.find((a) => a.id === regions.focusId) : undefined;
     const focusSrc = focus ? regionOf(focus)?.src : undefined;
     const byFocus = focusSrc ? list.findIndex((i) => i.writtenSrc === focusSrc) : -1;
-    return Math.max(0, byFocus >= 0 ? byFocus : list.findIndex((i) => i.src === src));
+    const named = at !== undefined && list[at]?.src === src ? at : -1;
+    return Math.max(0, byFocus >= 0 ? byFocus : named >= 0 ? named : list.findIndex((i) => i.src === src));
   });
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [scale, setScale] = useState<number | null>(null);

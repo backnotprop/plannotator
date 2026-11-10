@@ -41,14 +41,18 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_STEER_POLLS_POLL_FIELD,
+  inboxClaimName,
   INBOX_TAGS_POLL_FIELD,
   INBOX_TOOL_NAME,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
   inboxSessionThreadsText,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -93,13 +97,12 @@ function rememberedToolsFileOf(dataDir: string): string {
 }
 
 /**
- * The claim folder of one delivery. A reply that tags agents goes to several
- * sessions, which may share this data dir (two Pi sessions, Pi and OpenCode):
- * a tagged session's claim names its session too, so each is delivered once.
+ * The claim folder of one delivery. A reply can go to several sessions, which may share this data dir (two Pi
+ * sessions, Pi and OpenCode): a reply that tags agents, or one moved after its session stopped holding the claim. So
+ * the claim names the session too, and each is delivered once.
  */
-function claimDirOf(dataDir: string, replyId: string, taggedSession?: string | null): string {
-  const name = taggedSession ? `${replyId}.${taggedSession.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}` : replyId;
-  return join(dataDir, "inbox", "claims", name);
+function claimDirOf(dataDir: string, replyId: string, session: string): string {
+  return join(dataDir, "inbox", "claims", inboxClaimName(replyId, session));
 }
 
 /** One session's lease on one host: which of its processes polls and delivers. */
@@ -190,7 +193,7 @@ export async function discoverInboxTools(
   } catch {
     remembered = null;
   }
-  const tools = parseInboxToolList(remembered);
+  const tools = inboxToolsWithoutBro(parseInboxToolList(remembered));
   return tools.length > 0 ? tools : null;
 }
 
@@ -262,7 +265,9 @@ export class InboxAgentConnection {
       if (/not found|unknown tool/i.test(message)) return { text: `This Plannotator Inbox has no ${call.name}; update Plannotator. (${message})`, isError: true };
       return { text: `The Plannotator Inbox refused the call: ${message}`, isError: true };
     }
-    return inboxToolResultText(answer.result);
+    const result = inboxToolResultText(answer.result);
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    return { ...result, text: inboxResultWithNote(result.text, call.note) };
   }
 
   /**
@@ -658,11 +663,13 @@ export class InboxWake {
       (this.steerable || busy === false);
     if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true;
-      try {
-        await this.deliverNext(this.idleTicks < 2 && urgent);
-      } finally {
-        this.delivering = false;
-      }
+      // Not awaited: a steer resolves only when the message enters the run, which a long tool call can hold for
+      // minutes, and the tick has to go on polling meanwhile, or the session reads as ended (the Claude Code mod's way).
+      void this.deliverNext(this.idleTicks < 2 && urgent)
+        .catch(() => undefined)
+        .finally(() => {
+          this.delivering = false;
+        });
     }
   }
 
@@ -732,6 +739,7 @@ export class InboxWake {
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+        [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,
         // What this process loaded (additive): the Inbox says when the session runs an older one.
@@ -756,6 +764,9 @@ export class InboxWake {
       }
       this.backoffMs = 0;
       this.retryAt = 0;
+      // What the Inbox stopped handing out is done with here: handed out again (the reply moved back), it is new.
+      const handedOut = new Set(commands.map((command) => command.id));
+      for (const id of this.settled) if (!handedOut.has(id)) this.settled.delete(id);
       for (const command of commands) {
         // A later poll may carry `now` (the person pressed Send now): the newest command wins.
         if (!this.settled.has(command.id)) this.pending.set(command.id, command);
@@ -776,14 +787,17 @@ export class InboxWake {
    * running turn when one runs (`steer`), else as a turn at once.
    */
   private async deliverNext(urgent = false): Promise<void> {
-    const command = this.pending.values().next().value as InboxReplyCommand | undefined;
-    if (!command) return;
+    const waiting = this.pending.values().next().value as InboxReplyCommand | undefined;
+    if (!waiting) return;
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0);
     if (fresh === null || this.disposed) return;
-    if (!fresh.some((candidate) => candidate.id === command.id)) {
-      this.settle(command.id);
+    // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
+    const command = fresh.find((candidate) => candidate.id === waiting.id);
+    if (!command) {
+      // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
+      this.pending.delete(waiting.id);
       return;
     }
     const busy = await this.target.isBusy();
@@ -794,7 +808,12 @@ export class InboxWake {
     }
     // The person may have moved to another process since the last tick.
     if (this.disposed || !this.holdLease(Date.now())) return;
-    const claim = claimDirOf(this.connection.dataDir, command.id, command.tagged ? this.sessionId : null);
+    // An older version's claim, by the reply id alone: that process took it (the Inbox removes it when it moves the reply).
+    if (!command.tagged && existsSync(join(this.connection.dataDir, "inbox", "claims", command.id))) {
+      this.settle(command.id);
+      return;
+    }
+    const claim = claimDirOf(this.connection.dataDir, command.id, this.sessionId);
     try {
       mkdirSync(join(claim, ".."), { recursive: true, mode: 0o700 });
       mkdirSync(claim, { mode: 0o700 });
@@ -803,6 +822,9 @@ export class InboxWake {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") this.settle(command.id);
       return;
     }
+    // Who holds it: the Inbox calls it stuck only once this process is gone (never while it may still deliver).
+    writeQuietly(join(claim, "by"), this.instanceId);
+    writeQuietly(join(claim, "pid"), String(process.pid));
     if (steering) {
       try {
         await this.target.steer!(inboxWakeText(command), command);

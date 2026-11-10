@@ -22,6 +22,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import { agentName } from '../tags';
 import { stackLink, startLayer } from './topology';
+import { person, possessiveTail, wordsText, type Words } from './words';
 
 export { inboxPullLabel };
 
@@ -109,7 +110,7 @@ function isTree(open: readonly InboxPull[]): boolean {
 }
 
 /** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
-function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
+export function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
   const chain: InboxPull[] = [];
   for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
   return chain;
@@ -244,6 +245,30 @@ export function handoffStack(stack: InboxPullStack, links: Readonly<Record<strin
 }
 
 /**
+ * Step 2's line on using the thread, every PR's (the owner on a teammate's PR: "You should also be encouraged to use the
+ * review thread with the user"; approved in `pull-handoff-pushes`).
+ */
+const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiting for me.';
+
+/** " on dana/web-app (a fork)" after a branch whose head is on a fork, so the agent knows where it lives; else nothing. */
+function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
+  const fork = pull.head_repo;
+  return fork && REPO.test(fork) && fork.toLowerCase() !== pull.repo.toLowerCase() ? ` on ${fork} (a fork)` : '';
+}
+
+/**
+ * The branch is the person's to push: they opened the PR (all `mine` says), and a head on a fork is under their own login,
+ * compared as `mine` compares logins, exactly. A fork in an organization they own reads as someone else's. Not
+ * `inboxReviewIsOf`'s rule, which counts every fork out: a PR from the person's own fork is still theirs to update.
+ */
+function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 'head_repo'>): boolean {
+  if (!pull.mine) return false;
+  const fork = pull.head_repo;
+  if (!fork || fork.toLowerCase() === pull.repo.toLowerCase()) return true;
+  return REPO.test(fork) && fork.split('/')[0] === pull.author;
+}
+
+/**
  * Step 1 of the hand-off, one line: the guided review through phase 1's `/review-curate` (its approved instructions
  * go with the message as the skills block). One PR: its diff against its base, the person's words (custom curation)
  * after `/review-curate`, and on a teammate's PR what the person might ask its author. A stack (approval
@@ -269,10 +294,12 @@ const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform 
 
 /**
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
- * text (`.product/approved/pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the rest of a stack's wording
- * awaits approval): help me review and understand it, and change no code unless I say so; what it is; then the
- * guided review (`pullHandoffAskLine`) and the discussion, with no push, comment, approval or merge. One version for
- * every PR, the person's own or a teammate's. Everything from the forge is its author's: titles through
+ * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the
+ * rest of a stack's wording awaits approval): help me review and understand it; what it is; then the guided review
+ * (`pullHandoffAskLine`) and the discussion. On the person's own PRs (`branchIsMine`), feedback is made and pushed where the
+ * agent can, and the next round comes in the same thread, as a local review's does (`localReviewMessage`). With any open
+ * layer that isn't theirs to push, no code changes unless the person says so and no push. Never a comment, approval or merge. A head on a fork is
+ * named (`forkWords`). Everything from the forge is its author's: titles through
  * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
  * narrowed first (`handoffStack`).
  */
@@ -284,9 +311,14 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const where = REPO.test(stack.repo) ? (stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`) : null;
   const repository = where ? `- Repository: ${where}` : null;
   const heading = `${noun[0]!.toUpperCase()}${nouns.slice(1)}`;
-  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}. Don't change any code unless I explicitly tell you to.`;
+  const pushable = layers.every(branchIsMine);
+  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${pushable ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
-  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. Don't push to the ${many ? 'branches' : 'branch'}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
+  const branch = many ? 'branches' : 'branch';
+  const feedback = pushable
+    ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+    : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
+  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
@@ -298,7 +330,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
       `- Number: ${inboxPullLabel(pull)}`,
       repository,
       url ? `- Link: ${url}` : null,
-      base ? `- Branch: ${head ? `${head}, ` : ''}into ${base}` : null,
+      base ? `- Branch: ${head ? `${head}${forkWords(pull)}, ` : ''}into ${base}` : null,
       `- Author: ${pull.mine ? 'me' : authorOf(pull)}`,
     ];
     return [opening, facts.filter(Boolean).join('\n'), whatToDo].join('\n\n');
@@ -306,7 +338,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const list = layers.map((l) => {
     const url = pullUrl(l);
     const branch = safeBranch(l.head);
-    return `- ${inboxPullLabel(l)} ${pullTitleLine(l.title)}${url ? ` · ${url}` : ''}${branch ? ` · branch ${branch}` : ''}`;
+    return `- ${inboxPullLabel(l)} ${pullTitleLine(l.title)}${url ? ` · ${url}` : ''}${branch ? ` · branch ${branch}${forkWords(l)}` : ''}`;
   });
   const base = safeBranch(stack.open_base);
   const about = ['Stack', repository, base ? `- Lands into: ${base}, in list order` : null, stackAuthors(layers)];
@@ -358,43 +390,51 @@ function stackAuthors(layers: readonly InboxPull[]): string {
   return `- Authors: ${[...by].map(([who, labels]) => `${who} (${labels.join(', ')})`).join(', ')}`;
 }
 
-const possessive = (name: string) => (name.endsWith('s') ? `${name}'` : `${name}'s`);
+/** A PR the person's review was asked for (the owner's words): "Review requested · tomas's PR", or "Review requested" with no author. */
+export const requestedParts = (author: string | null | undefined): Words => (author ? ['Review requested · ', person(author, "'s"), ' PR'] : ['Review requested']);
 
-/** Why a PR is where it is, in words ("Tomas asked for your review"). */
+export const requestedWords = (author: string | null | undefined): string => wordsText(requestedParts(author));
+
+/** Why a PR is where it is, in words ("Review requested · tomas's PR"). */
 export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link: InboxPullLink | null): string {
+  return wordsText(reasonParts(item, link));
+}
+
+/** `reasonWords` in parts: the people it names stay people (`words.ts`). */
+export function reasonParts(item: Pick<InboxPullItem, 'reason' | 'focus'>, link: InboxPullLink | null): Words {
   const pull = item.focus;
   switch (item.reason) {
     case 'requested':
-      return pull.author ? `${pull.author} asked for your review` : 'Your review was asked for';
+      return requestedParts(pull.author);
     case 'assigned':
-      return 'Assigned to you';
+      return ['Assigned to you'];
     case 'agent_ready': {
       // Its review thread (the person's ask, or the agent's own thread that names it); the agent unnamed, only the ask.
       const name = linkAgentName(link);
-      return name ? `${agentThreadWords(name, link?.agent?.ended === true)} · your review` : 'Your review';
+      return [name ? `${agentThreadWords(name, link?.agent?.ended === true)} · your review` : 'Your review'];
     }
     case 'running':
-      return 'Checks running';
+      return ['Checks running'];
     case 'changes':
-      return 'Changes requested';
+      return ['Changes requested'];
     case 'failing':
-      return 'Checks failed';
+      return ['Checks failed'];
     case 'conflicts':
-      return 'Has conflicts';
+      return ['Has conflicts'];
     case 'approved':
-      return `${pull.approved_by ?? 'Approved'}${pull.approved_by ? ' approved' : ''}${pull.checks === 'success' ? ' · checks passed' : ''}`;
+      return [...(pull.approved_by ? [person(pull.approved_by), ' approved'] : ['Approved']), ...(pull.checks === 'success' ? [' · checks passed'] : [])];
     case 'approved_running':
-      return 'Approved · checks running';
+      return ['Approved · checks running'];
     case 'draft':
-      return 'Draft';
+      return ['Draft'];
     case 'review':
-      return pull.reviewers[0] ? `Waiting on ${possessive(pull.reviewers[0])} review` : 'Waiting on review';
+      return pull.reviewers[0] ? ['Waiting on ', person(pull.reviewers[0], possessiveTail(pull.reviewers[0])), ' review'] : ['Waiting on review'];
     case 'others':
-      return pull.author ? `Waiting on ${pull.author}` : 'Waiting on others';
+      return pull.author ? ['Waiting on ', person(pull.author)] : ['Waiting on others'];
     case 'merged':
-      return 'Merged';
+      return ['Merged'];
     case 'closed':
-      return 'Closed';
+      return ['Closed'];
   }
 }
 

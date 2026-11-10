@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import katex from 'katex';
-import { InlineMarkdown, resetDigitHexIssueRefs, setDigitHexIssueRefs, trimUrlTail } from './InlineMarkdown';
+import { InlineMarkdown, resetCrossRepoRefsWithoutRepo, resetDigitHexIssueRefs, setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, trimUrlTail } from './InlineMarkdown';
 import { CodePathValidationContext, type CodePathValidationContextValue } from './CodePathValidationContext';
 import { getMathRenderer, getMathRendererSource, resetMathRenderer, setMathRenderer } from '../utils/math';
 
@@ -444,5 +444,102 @@ describe('cross-repo owner/repo#N refs', () => {
     const html = render('Run `gh pr view owner/repo#12`', GH);
     expect(html).not.toContain('<a');
     expect(html).toContain('<code');
+  });
+});
+
+describe('cross-repo refs where the caller names no repo (crossRepoRefsWithoutRepo)', () => {
+  const render = (text: string, opts: { githubRepo?: string; repoHost?: string } = {}) => renderToStaticMarkup(createElement(InlineMarkdown, { text, ...opts }));
+  const hrefs = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+  beforeEach(resetCrossRepoRefsWithoutRepo);
+  afterEach(resetCrossRepoRefsWithoutRepo);
+
+  test('off (every host but one that opts in): it stays plain text', () => {
+    expect(render('The fix (backnotprop/plannotator#2948) is merged.')).not.toContain('<a');
+  });
+
+  test('on: it links on github.com as written; a bare #N still needs a repo', () => {
+    setCrossRepoRefsWithoutRepo(true);
+    const html = render('The fix (backnotprop/plannotator#2948) is merged, see #12.');
+    expect(hrefs(html)).toEqual(['https://github.com/backnotprop/plannotator/issues/2948']);
+    expect(html).toContain('>backnotprop/plannotator#2948</a>');
+    expect(html).toContain('#12');
+  });
+
+  test("on: a caller that names its repo keeps that repo's forge (GitLab host, unknown host plain)", () => {
+    setCrossRepoRefsWithoutRepo(true);
+    expect(hrefs(render('See group/project#7 and #3.', { githubRepo: 'team/app', repoHost: 'gitlab.example.com' }))).toEqual([
+      'https://gitlab.example.com/group/project/-/issues/7',
+      'https://gitlab.example.com/team/app/-/issues/3',
+    ]);
+    expect(render('See owner/repo#5', { githubRepo: 'a/b', repoHost: 'git.internal.example' })).not.toContain('<a');
+  });
+
+  test('{ host }: it links on that host by the forge rule; a host no link can be formed for leaves it plain', () => {
+    setCrossRepoRefsWithoutRepo({ host: 'gitlab.example.com' });
+    expect(hrefs(render('See group/project#7 and #3.'))).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
+    // A caller with its own repo keeps it.
+    expect(hrefs(render('See owner/repo#5', { githubRepo: 'acme/web', repoHost: 'github.com' }))).toEqual(['https://github.com/owner/repo/issues/5']);
+    setCrossRepoRefsWithoutRepo({ host: 'git.internal.example' });
+    expect(render('See owner/repo#5')).not.toContain('<a');
+    setCrossRepoRefsWithoutRepo(false);
+    expect(render('See owner/repo#5')).not.toContain('<a');
+  });
+
+  test('on: paths, versions, addresses, code and URLs are still not refs', () => {
+    setCrossRepoRefsWithoutRepo(true);
+    for (const text of ['docs/guide.md#2', 'src/foo.ts#10', '../repo#3', 'owner/repo.git#4', 'v1.2.3/beta#4', 'node 20.1/x#2', 'example.com/page#1', 'john@owner/repo#1', 'and/or#1', '1/2#3', 'Run `gh pr view owner/repo#12`']) {
+      expect(hrefs(render(text))).toEqual([]);
+    }
+    const url = 'https://example.com/search?q=owner/repo#12';
+    expect(hrefs(render(`Open ${url} now`))).toEqual([url]);
+  });
+});
+
+describe('code spans: a run of N backticks closes at the next run of exactly N', () => {
+  test('a double-backtick span holds a single backtick', () => {
+    expect(renderInline('``use `x` here``')).toContain('<code class="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">use `x` here</code>');
+  });
+
+  test('one space comes off each side, so a span can start and end with a backtick', () => {
+    expect(renderInline('`` `x` ``')).toContain('>`x`</code>');
+    // All spaces: nothing is stripped.
+    expect(renderInline('`` ``')).toContain('> </code>');
+  });
+
+  test('a run with no closing run of its length stays literal, all of it', () => {
+    const html = renderInline('``a` b');
+    expect(html).not.toContain('<code');
+    expect(html).toContain('``a` b');
+  });
+
+  test('single-backtick spans read as before, several on a line', () => {
+    const html = renderInline('`a` and ``b``');
+    expect(html.match(/<code /g)?.length).toBe(2);
+    expect(html).toContain('>a</code>');
+    expect(html).toContain('>b</code>');
+  });
+});
+
+describe('a link label is markdown too, without links inside it', () => {
+  test('code in a label renders as code inside the link', () => {
+    const html = renderInline('[`README.md`](https://example.com/readme)');
+    expect(html).toMatch(/<a [^>]*href="https:\/\/example.com\/readme"[^>]*><code [^>]*>README.md<\/code><\/a>/);
+    expect(html).not.toContain('`');
+  });
+
+  test('code among words in a label', () => {
+    const html = renderInline('[the `card --help` page](https://example.com/help)');
+    expect(html).toMatch(/<a [^>]*>the <code [^>]*>card --help<\/code> page<\/a>/);
+  });
+
+  test('emphasis in a label', () => {
+    expect(renderInline('[**bold** text](https://example.com)')).toMatch(/<a [^>]*><strong[^>]*>bold<\/strong> text<\/a>/);
+  });
+
+  test('a URL, a ref or a nested link in a label stays text: one link, never a link in a link', () => {
+    for (const label of ['see https://x.com', 'issue #12', '[inner](https://inner.example)', '<https://x.com>', '@someone']) {
+      const html = renderInline(`[${label}](https://example.com)`);
+      expect(html.match(/<a /g)?.length).toBe(1);
+    }
   });
 });

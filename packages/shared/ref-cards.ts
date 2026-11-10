@@ -6,7 +6,8 @@
  * Read only: one `gh api graphql` / `glab api graphql` call per ref, always a
  * `query` (the module refuses to load otherwise); it is the endpoint `gh pr
  * view` reads too. Nothing runs until a person rests on a link long enough for
- * the card to open, so drawing a message costs nothing.
+ * the card to open, or opens a thread's Links (the rows on screen read their
+ * state), so drawing a message costs nothing.
  *
  * - GitHub: `issueOrPullRequest` answers both kinds in one call. When GitHub
  *   refuses the account in use (404/401/403/SAML), every other account signed

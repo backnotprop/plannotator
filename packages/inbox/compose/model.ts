@@ -4,9 +4,11 @@
  * React and no requests here, so each rule is tested alone.
  */
 
+import { parseInboxGitUrl } from '@plannotator/core/inbox-git-url';
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
+import { inboxLaunchNotReadyWords, inboxMachineLaunchWords } from '@plannotator/core/inbox-launch-ready';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -112,9 +114,10 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
  * first-run screen) names its session; focus then starts in the message.
  * A draft saved with nobody in To opens the same way as a plain one.
  */
-export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null }): { chosen: string | null; focus: 'to' | 'message' } {
+export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown; launch?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
-  return { chosen, focus: chosen ? 'message' : 'to' };
+  // "+" on a project row (F3), and Agents' Add agent: To is filled, so the cursor starts in the message.
+  return { chosen, focus: chosen || request.start || request.launch ? 'message' : 'to' };
 }
 
 /** "started 2:41 PM": when the session started, without its host. */
@@ -306,6 +309,9 @@ const ACTION_WORDS = ['new', 'message', 'idea', 'ask', 'send'];
 /** A typed word that calls an action: the whole word, or 3 letters or more of its start ("mes", not "me"). */
 const callsAction = (word: string): boolean => ACTION_WORDS.some((action) => action === word || (word.length >= 3 && action.startsWith(word)));
 
+/** A typed word that calls "New review…". */
+const callsReview = (word: string): boolean => word.length >= 3 && ['review', 'pull'].some((action) => action.startsWith(word) || word === action);
+
 /**
  * The query names an action word whole ("new", "send"): its actions sit above
  * the search results. Otherwise they sit below any results.
@@ -317,7 +323,7 @@ export function namesActionWord(query: string): boolean {
     .some((word) => ACTION_WORDS.includes(word));
 }
 
-export type ComposeAction = { kind: 'new' } | { kind: 'message'; target: ComposeTarget };
+export type ComposeAction = { kind: 'new' } | { kind: 'review' } | { kind: 'message'; target: ComposeTarget };
 
 /**
  * The palette's Actions group. An empty query: "New message…" and the session
@@ -325,28 +331,30 @@ export type ComposeAction = { kind: 'new' } | { kind: 'message'; target: Compose
  * a word is one of the action words or 3 letters or more of one's start, and
  * each live session whose host or project matches every word (at most 4).
  */
-export function composeActions(query: string, targets: readonly ComposeTarget[], last: string | null): ComposeAction[] {
+export function composeActions(query: string, targets: readonly ComposeTarget[], last: string | null, reviews = false): ComposeAction[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) {
     const lastTarget = last ? targets.find((t) => t.session === last) : undefined;
-    return [{ kind: 'new' }, ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
+    return [{ kind: 'new' }, ...(reviews ? [{ kind: 'review' as const }] : []), ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
   }
   const out: ComposeAction[] = [];
-  if (words.some(callsAction)) out.push({ kind: 'new' });
+  if (words.some(callsAction) && !(reviews && words.some(callsReview))) out.push({ kind: 'new' });
+  // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
+  if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {
     const hay = `${hostLabel(target.host)} ${target.host} ${target.project.name}`.toLowerCase();
     return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
-  const naming = words.filter((word) => !callsAction(word));
+  const naming = words.filter((word) => !callsAction(word) && !(reviews && callsReview(word)));
   if (naming.length > 0) for (const target of named.slice(0, 4)) out.push({ kind: 'message', target });
   return out;
 }
 
 export const actionLabel = (action: ComposeAction): string =>
-  action.kind === 'new' ? 'New message…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
+  action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
 
-// ── Launch: start a new session from To (behind `inboxLaunch.enabled`; docs/agent-guides/inbox-launch.md) ──
+// ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
 /** A project the folder menu lists (`InboxComposeLaunch.projects`). */
 export type LaunchProject = InboxComposeLaunch['projects'][number];
@@ -360,6 +368,56 @@ export interface ComposeStart {
   project: LaunchProject;
   /** A new scratch folder ("New scratch folder" in the folder menu), made when the person sends. */
   scratch?: true;
+  /**
+   * A folder under that machine's home that is not one of its projects ("Another folder on <machine>…"), as the server
+   * takes it (`~/code/billing-api`): `project` stands in for it (`folderProject`), and the Send names the folder.
+   */
+  folder?: string;
+  /** With `folder`: Create a folder (approval "launch-create-clone"): the Send makes it. */
+  create?: true;
+  /** With `folder`: Clone from a git URL (approval "launch-create-clone"): the Send clones the repo into it, then starts. */
+  clone?: ComposeClone;
+}
+
+/** A clone pick: the URL as pasted (the server reads it again), and what the words name (`acme/billing-api` on github.com). */
+export interface ComposeClone {
+  url: string;
+  host: string;
+  slug: string;
+  branch?: string;
+}
+
+/**
+ * A failed clone's Change the URL (E5): the run line asks the window for New message with the URL in the folder
+ * menu's filter, To the same agent and machine, and the same words (`ComposeRequest.clone`).
+ */
+export const COMPOSE_CLONE_EVENT = 'plannotator-inbox:compose-clone';
+export interface ComposeCloneRequest {
+  url: string;
+  agent: string;
+  machine: string | null;
+  /** The folder the clone was going to (`~/…`). */
+  folder: string | null;
+  body: string;
+}
+
+/** A draft's clone pick as compose holds it, its words read from the URL again (null: the URL is no repo's now). */
+export function cloneOfUrl(url: string, branch?: string): ComposeClone | null {
+  const repo = parseInboxGitUrl(url);
+  if (!repo || repo.kind !== 'repo') return null;
+  const pickedBranch = branch ?? repo.branch;
+  return { url, host: repo.host, slug: repo.slug, ...(pickedBranch ? { branch: pickedBranch } : {}) };
+}
+
+/** A folder start's stand-in project: never a project id, so no project's facts or check marks are taken for it. */
+export function folderProject(folder: string, name: string): LaunchProject {
+  return { id: `folder:${folder}`, name, root: folder, exists: true };
+}
+
+/** A `~/…` path as an absolute one under `home` (as a draft keeps a project's root); as it is without a home. */
+export function untildePath(path: string, home: string | null): string {
+  if (!home || !(path === '~' || path.startsWith('~/'))) return path;
+  return `${home.replace(/\/+$/, '')}${path.slice(1)}`;
 }
 
 /** The folder menu's "New scratch folder" as the pick (`ComposeStart.project.id`): never a project id (`prj_…`). */
@@ -375,6 +433,11 @@ export function scratchFolderOf(root: string, threadName: string): string {
   return `${root.replace(/\/+$/, '')}/${inboxScratchSlug(threadName)}`;
 }
 
+/** The folder menu shows "Another folder…" for no filter, or one its words match. */
+export function otherFolderMatches(query: string): boolean {
+  return queryWords(query).every((w) => 'another folder'.includes(w));
+}
+
 /** The folder menu shows "New scratch folder" for no filter, or one its words match. */
 export function scratchMatches(query: string): boolean {
   return queryWords(query).every((w) => 'new scratch folder'.includes(w));
@@ -385,7 +448,8 @@ const queryWords = (query: string) => query.toLowerCase().split(/\s+/).filter(Bo
 /** The project a new session starts in by default: the one the person is looking at, else the most recently active. */
 export function defaultStartProject(launch: InboxComposeLaunch | undefined, current: { id: string | null; root: string | null } | null): LaunchProject | null {
   if (!launch || launch.projects.length === 0) return null;
-  return launch.projects.find((p) => isCurrent(p, current)) ?? launch.projects[0]!;
+  // The current project by its id first: with linked machines, another machine may have a folder at the same path.
+  return (current?.id ? launch.projects.find((p) => p.id === current.id) : undefined) ?? launch.projects.find((p) => isCurrent(p, current)) ?? launch.projects[0]!;
 }
 
 /**
@@ -420,5 +484,161 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
 
 /** The status line beside Send for a start: none, as for a message to a live session, unless the folder is gone (screen 13). */
 export function startStatusLine(start: ComposeStart): string {
-  return start.project.exists ? '' : 'Pick a folder to start in.';
+  if (!start.project.exists) return 'Pick a folder to start in.';
+  // C13, decision 11a: what the Send does first.
+  return start.clone ? `Clones ${start.clone.slug}, then starts ${start.name}.` : '';
+}
+
+// ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──
+
+/** A machine as compose sees it (`GET /api/inbox/machines`). */
+export interface LaunchMachine {
+  id: string;
+  name: string;
+  self: boolean;
+  state: 'online' | 'connecting' | 'offline' | 'needs_update' | 'revoked';
+  since: string;
+  /** Agents can start there (true), launch is off there (false), its Inbox is too old to say (null). */
+  launch?: boolean | null;
+}
+
+/** A linked machine's last good sessions read (its launch block and home), kept while it sleeps. */
+export interface MachineLaunchRead {
+  launch?: InboxComposeLaunch;
+  home: string | null;
+}
+
+/** A folder-menu project with the machine it is on: absent for this computer's. */
+export type MachineLaunchProject = LaunchProject & { machine?: string; machine_name?: string };
+
+/** One machine's group in the folder menu. */
+export interface LaunchGroup {
+  /** The machine's id, or null for this computer. */
+  machine: string | null;
+  name: string;
+  self: boolean;
+  /** That machine is asleep (offline): what it shows is its last read, and a Send waits for it. */
+  asleep: boolean;
+  /** The caption's quiet words after the name: "this computer", "asleep", or null. */
+  quiet: string | null;
+  /** Its home folder, for `~/…` paths (each machine's own). */
+  home: string | null;
+  projects: MachineLaunchProject[];
+  /** The project the person last started an agent in on this machine, when it is listed (drawn first). */
+  last: string | null;
+  /** "New scratch folder" there. */
+  scratch: { root: string } | null;
+  /** The agent can't start there: one disabled row in place of its projects; `fix`, what to do there, under its line. */
+  notice: { line: string; command: string | null; fix: string | null } | null;
+}
+
+/** Where the person last started an agent, per machine id: when, and in which project (from the merged list). */
+export type LaunchHistory = ReadonlyMap<string, { at: string; project: string }>;
+
+/**
+ * Where the person last started an agent on each machine, from the list's rows: a launched thread's row carries
+ * `run` (its key, even when null), and the merged list names its `machine`. Each machine keeps its newest.
+ */
+/** The agent the person started last from New message (a launched row's addressee), for "+" on a project row (F3); null: none yet. */
+export function lastLaunchAgent(rows: readonly { created_at: string; run?: unknown; addressee?: { host: string } | null }[]): string | null {
+  let last: { at: string; host: string } | null = null;
+  for (const row of rows) {
+    if (!('run' in row) || !row.addressee) continue;
+    if (!last || row.created_at > last.at) last = { at: row.created_at, host: row.addressee.host };
+  }
+  return last?.host ?? null;
+}
+
+/** "+" on a project row's tip and name (F1, F4): the project, its machine when it is another, and that it waits while asleep. */
+export function newSessionTip(name: string, machineName: string | null, asleep: boolean): string {
+  return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
+}
+
+/** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
+export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boolean): boolean {
+  return launchEnabled === true && !guestPage;
+}
+
+/**
+ * "+" on one project row: hidden where it can't start anything, so a press never opens New message with an empty To
+ * or a folder to pick again. That machine's launch block (this computer's, or a linked machine's last read): no
+ * agent to start there, or the project's folder isn't there any more. A linked machine with launch off (`launch:
+ * false`) has none either. Not read yet, or asleep: shown (F4: it starts when the machine is back).
+ */
+export function projectCanStart(project: { id: string; root: string }, block: InboxComposeLaunch | null | undefined, machineLaunch?: boolean | null): boolean {
+  if (machineLaunch === false) return false;
+  if (!block) return true;
+  if (block.agents.length === 0) return false;
+  const known = block.projects.find((p) => p.id === project.id) ?? block.projects.find((p) => p.root === project.root);
+  return known?.exists !== false;
+}
+
+export function launchHistory(rows: readonly { machine?: string; project: { id: string }; created_at: string; run?: unknown }[]): Map<string, { at: string; project: string }> {
+  const out = new Map<string, { at: string; project: string }>();
+  for (const row of rows) {
+    if (!row.machine || !('run' in row)) continue;
+    const had = out.get(row.machine);
+    if (!had || row.created_at > had.at) out.set(row.machine, { at: row.created_at, project: row.project.id });
+  }
+  return out;
+}
+
+/**
+ * The folder menu's groups for `agent`. No linked machine (or none with anything to offer): one group, this
+ * computer's, and `grouped` false, so the menu is exactly what it was. Otherwise one group per machine with a caption,
+ * the machine the person started an agent on last first (this computer first when none says), a project on several
+ * machines under each. A machine where the agent can't start shows one disabled line in its words
+ * (`inboxLaunchNotReadyWords`, `inboxMachineLaunchWords`). A linked machine never read yet shows nothing.
+ */
+export function launchGroups(input: {
+  agent: InboxLaunchAgent | null;
+  /** This computer's launch block and home, and its id and name in the machines list (null before it). */
+  self: { launch: InboxComposeLaunch | undefined; home: string | null; id: string | null; name: string | null };
+  machines: readonly LaunchMachine[];
+  reads: ReadonlyMap<string, MachineLaunchRead>;
+  history?: LaunchHistory;
+}): { grouped: boolean; groups: LaunchGroup[] } {
+  const { agent, self, reads } = input;
+  const history = input.history ?? new Map();
+  const groupOf = (machine: string | null, name: string, isSelf: boolean, asleep: boolean, block: InboxComposeLaunch | undefined, home: string | null, words: string | null): LaunchGroup | null => {
+    const quiet = isSelf ? 'this computer' : asleep ? 'asleep' : null;
+    const base = { machine, name, self: isSelf, asleep, quiet, home, projects: [] as MachineLaunchProject[], last: null, scratch: null, notice: null };
+    if (words) return { ...base, notice: { line: words, command: null, fix: null } };
+    if (!block || !agent) return null;
+    if (block.agents.some((a) => a.agent === agent)) {
+      const seen = history.get((isSelf ? self.id : machine) ?? '');
+      const listed = block.projects.map((p) => (machine ? { ...p, machine, machine_name: name } : { ...p }));
+      const last = seen && listed.some((p) => p.id === seen.project) ? seen.project : null;
+      return { ...base, projects: listed, last, scratch: block.scratch ?? null };
+    }
+    const not = block.not_ready?.find((n) => n.agent === agent);
+    if (!not) return null;
+    const said = inboxLaunchNotReadyWords({ agent: not.name, code: not.code, machine: isSelf ? null : name, overSsh: not.over_ssh === true });
+    // Signed out: what to do there goes under the line (the check can be wrong, and the fix says how to read it again).
+    // The other reasons keep their one line (a missing plugin has its command to copy).
+    return { ...base, notice: { line: said.line, command: said.command, fix: not.code === 'signed_out' ? said.fix : null } };
+  };
+  const mine = groupOf(null, self.name ?? 'This computer', true, false, self.launch, self.home, null);
+  const linked = input.machines.filter((m) => !m.self && m.state !== 'revoked');
+  const theirs = linked.map((m, i) => {
+    const asleep = m.state === 'offline';
+    const read = reads.get(m.id);
+    // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
+    // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
+    const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
+    const words = off ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
+    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
+  });
+  const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {
+    const group = g.group;
+    return !!group && (group.projects.length > 0 || !!group.scratch || !!group.notice);
+  });
+  const grouped = all.length > 1 || (all.length === 1 && !all[0]!.group.self);
+  if (!grouped) return { grouped: false, groups: all.map((g) => ({ ...g.group, last: null })) };
+  // The machine the person started an agent on last, first; the rest as they were (this computer, then the linked ones).
+  const at = (id: string) => history.get(id)?.at ?? '';
+  // In each group, the project the person last started an agent in there leads ("· you started it here last").
+  const lead = (g: LaunchGroup): LaunchGroup => (g.last ? { ...g, projects: [...g.projects.filter((p) => p.id === g.last), ...g.projects.filter((p) => p.id !== g.last)] } : g);
+  const groups = [...all].sort((a, b) => (at(a.id) === at(b.id) ? a.order - b.order : at(a.id) > at(b.id) ? -1 : 1)).map((g) => lead(g.group));
+  return { grouped: true, groups };
 }

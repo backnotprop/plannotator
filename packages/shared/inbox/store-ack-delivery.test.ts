@@ -190,3 +190,100 @@ describe("a 👍 that can no longer go when its window ends", () => {
   });
 
 });
+
+describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", () => {
+  test("the note carries the emoji the window closed on, with its name; read_thread shows it too, after a restart", () => {
+    const { store, clock, sent, dir } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🦄" });
+    clock.now += 4_000;
+    // Changed inside the Undo window: the one it ends on is the one that goes.
+    store.ackMessage(sent.id, true, { emoji: "🚀", label: "Ship it" });
+    clock.now += WINDOW;
+    const [settled] = store.settleAcks(WINDOW);
+    const note = store.message(settled!.ack!.note_id!)!;
+    expect(note.body).toBe(`The person reacted 🚀 Ship it to your message (${sent.id}).`);
+    expect(note.ack_reaction).toEqual({ emoji: "🚀", label: "Ship it" });
+    expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([note.id]);
+    expect(store.agentThread(sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: settled!.ack!.at, reaction: { emoji: "🚀", label: "Ship it" } });
+    const reopened = InboxStore.open(dir, { now: () => new Date(clock.now) });
+    expect(reopened.agentThread(sent.id)!.messages[0]!.ack).toMatchObject({ reaction: { emoji: "🚀", label: "Ship it" } });
+    expect(reopened.message(note.id)!.ack_reaction).toEqual({ emoji: "🚀", label: "Ship it" });
+  });
+
+  test("an emoji with no name: the note says the emoji alone; 👍 Looks good reads as the same quick label", () => {
+    const { store, clock, sent } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🎉" });
+    clock.now += WINDOW;
+    const [settled] = store.settleAcks(WINDOW);
+    const note = store.message(settled!.ack!.note_id!)!;
+    expect(note.body).toBe(`The person reacted 🎉 to your message (${sent.id}).`);
+    expect(note.ack_reaction).toEqual({ emoji: "🎉" });
+
+    const plain = setup();
+    plain.store.ackMessage(plain.sent.id, true, null);
+    plain.clock.now += WINDOW;
+    const [thumbs] = plain.store.settleAcks(WINDOW);
+    const thumbsNote = plain.store.message(thumbs!.ack!.note_id!)!;
+    expect(thumbsNote.body).toBe(`The person reacted 👍 Looks good to your message (${plain.sent.id}).`);
+    expect(thumbsNote.ack_reaction).toBeUndefined();
+    // An ack always carries a reaction as an agent reads it, 👍 included (addendum 2026-11-07T12:20Z).
+    expect(plain.store.agentThread(plain.sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: thumbs!.ack!.at, reaction: { emoji: "👍", label: "Looks good" } });
+  });
+
+  // Owner, 2026-11-07: "Reaction should go away after sending and only come back when I can send a new one".
+  test("once sent it never changes: another emoji is refused after the window, a delivered one can't be taken back or withdrawn by Move back, and no second note is written", () => {
+    const { store, clock, sent } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🎉" });
+    clock.now += WINDOW;
+    const [settled] = store.settleAcks(WINDOW);
+    const noteId = settled!.ack!.note_id!;
+    const notes = () => store.pendingReplies("ses_a").map((m) => m.id);
+    const refused = (fn: () => void) => {
+      try {
+        fn();
+      } catch (error) {
+        return (error as { code?: string }).code;
+      }
+      return "not refused";
+    };
+    // Sent, not yet delivered: another emoji (any path: the tray, the … picker, the API) is refused; the same 👍 again writes nothing.
+    expect(refused(() => store.ackMessage(sent.id, true, { emoji: "🧪", label: "Add tests" }))).toBe("ack_sent");
+    expect(refused(() => store.ackMessage(sent.id, true, null))).toBe("ack_sent");
+    const cursor = store.cursor();
+    store.ackMessage(sent.id, true);
+    store.ackMessage(sent.id, true, { emoji: "🎉" });
+    expect(store.cursor()).toBe(cursor);
+    expect(notes()).toEqual([noteId]);
+
+    store.recordDelivery(noteId, { host: "claude-code", session: "ses_a" });
+    expect(refused(() => store.ackMessage(sent.id, false))).toBe("ack_sent");
+    expect(refused(() => store.ackMessage(sent.id, true, { emoji: "🧪" }))).toBe("ack_sent");
+    store.markRead(sent.id, false);
+    store.markRead(sent.id, true);
+    expect(store.message(sent.id)!.ack).toMatchObject({ note_id: noteId, reaction: { emoji: "🎉" } });
+    expect(refused(() => store.ackMessage(sent.id, true, { emoji: "🧪" }))).toBe("ack_sent");
+    expect([...store.thread(sent.id)!.messages, ...store.pendingReplies("ses_a")].filter((m) => m.ack_of)).toEqual([]);
+    expect(store.agentThread(sent.id)!.messages[0]!.ack).toMatchObject({ reaction: { emoji: "🎉" } });
+
+    // The agent's next message takes a new one.
+    const next = store.sendMessage({ project_id: sent.project_id, author: AGENT, body: "Tagged 0.29.", reply_to: sent.id }).message;
+    store.ackMessage(next.id, true, { emoji: "🧪", label: "Add tests" });
+    expect(store.message(next.id)!.ack).toMatchObject({ reaction: { emoji: "🧪", label: "Add tests" }, settled_seq: null });
+  });
+
+  test("another emoji on a marked message changes only the emoji; null is 👍 Looks good again; none keeps it", () => {
+    const { store, sent } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🦄" });
+    const at = store.message(sent.id)!.ack!.at;
+    store.ackMessage(sent.id, true, { emoji: "🧪", label: "Add tests" });
+    expect(store.message(sent.id)!.ack).toMatchObject({ at, reaction: { emoji: "🧪", label: "Add tests" } });
+    const before = store.cursor();
+    // The plain call (an older window) leaves the emoji as it is, and writes nothing.
+    store.ackMessage(sent.id, true);
+    expect(store.cursor()).toBe(before);
+    expect(store.message(sent.id)!.ack!.reaction).toEqual({ emoji: "🧪", label: "Add tests" });
+    store.ackMessage(sent.id, true, null);
+    expect(store.message(sent.id)!.ack!.reaction).toBeUndefined();
+    expect(store.message(sent.id)!.ack!.at).toBe(at);
+  });
+});

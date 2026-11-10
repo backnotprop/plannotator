@@ -58,8 +58,8 @@
 .shp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
 .shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
-.shp-claim a, .shp-know a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
-.shp-claim code, .shp-know code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
+.shp-claim a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.shp-claim code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
 .shp-fresh-text { animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both; }
 
 /* ── the stage: views erase out and draw in ── */
@@ -78,16 +78,16 @@
 .shp-stage.reduce .shp-view.leaving { animation: shp-fade-out .16s linear forwards; -webkit-mask-image: none; mask-image: none; }
 .shp-stage.reduce .shp-view.entering [data-step], .shp-stage.reduce .shp-view.v-code.entering { animation: shp-fade-only .16s linear both; animation-delay: 0s; }
 
-/* A marked part (What to know; drawn views carry the same rules in their shadow root). */
-.shp-know .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
-.shp-stage.pinpointing .shp-know [data-mark] { cursor: pointer; }
-.shp-know .mk.noted { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, transparent); }
-.shp-know .mk.erasing { animation: shp-erase .42s cubic-bezier(.55,0,.45,1) forwards; -webkit-mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); }
-.shp-know .mk.fresh { background-image: linear-gradient(color-mix(in oklab, var(--primary) 16%, transparent), color-mix(in oklab, var(--primary) 16%, transparent)); background-repeat: no-repeat; background-size: var(--s) 100%; animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both, shp-swash 2.6s cubic-bezier(.3,.6,.2,1) both; transition: background-size 0s; }
 @keyframes shp-redraw { from { opacity: 0; transform: translateY(5px); filter: blur(2px); } }
 @keyframes shp-swash { 0% { --s: 0%; } 22% { --s: 100%; } 70% { --s: 100%; opacity: 1; } 100% { --s: 100%; background-color: transparent; } }
-.shp-stage.reduce .shp-know .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
-.shp-stage.reduce .shp-know .mk.fresh { animation: none; background-size: 100% 100%; }
+
+/* A box being dragged: a thin line and hardly any fill, like the Mac's screenshot selection. */
+@media (pointer: fine) {
+  .shp-stage.boxing, .shp-stage.boxing * { cursor: crosshair; -webkit-user-select: none; user-select: none; }
+}
+.shp-cross-btn { padding: 0 9px; }
+.shp-tbtn.shp-cross-btn.on { color: var(--primary); }
+.shp-box-band { position: fixed; pointer-events: none; z-index: 31; border-radius: 2px; box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 85%, transparent); background: color-mix(in oklab, var(--primary) 5%, transparent); }
 
 .shp-pin-hover { position: fixed; pointer-events: none; border-radius: 8px; box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--primary) 75%, transparent); background: color-mix(in oklab, var(--primary) 5%, transparent); z-index: 30; transition: all .12s ease-out; }
 
@@ -99,6 +99,13 @@
 /* A wide canvas on a phone, with no tall drawing: readable, and it pans. */
 .shp-drawn.canvas.pan:not(.tall) { justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; }
 .shp-drawn.canvas.pan:not(.tall) .shp-drawn-fit { overflow: clip; }
+/* Which way there is more: that side fades out (ShapeDrawn sets the widths as it scrolls), and a short track under the drawing shows where you are in it. */
+.shp-drawn.canvas.pan:not(.tall) { scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); }
+.shp-drawn.canvas.pan:not(.tall)::-webkit-scrollbar { display: none; }
+.shp-pan-track { position: absolute; left: 0; top: 0; width: 56px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--foreground) 12%, transparent); pointer-events: none; }
+.shp-pan-track > i { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: color-mix(in oklab, var(--foreground) 45%, transparent); }
+/* At the top of its view, under the claim, rather than in the middle of it. */
+.shp-drawn.canvas.top:not(.tall) { align-items: flex-start; }
 .shp-drawn.canvas:not(.tall) .shp-drawn-host { position: absolute; left: 0; top: 0; }
 
 /* ── the pill: "Board updated", "1 change waits for the agent" ── */
@@ -124,19 +131,6 @@
 .shp-tstrip { padding-left: 6px; border-left: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
-
-/* ── What to know: prose, set for reading ── */
-.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
-.shp-know p { margin: 0 0 1em; padding: 2px 0; }
-.shp-know p:last-child { margin-bottom: 0; }
-/* An old board's Requirements: plain lines under their group's name. */
-.shp-know h3 { margin: 1.4em 0 .25em; font-size: inherit; font-weight: 600; }
-.shp-know section p, .shp-know section ~ p { margin-bottom: .2em; }
-.shp-know section + p { margin-top: 1.4em; }
-.shp-to-code { appearance: none; border: 0; background: transparent; margin-left: 8px; padding: 2px 4px; border-radius: 5px; font: 500 12px/1 var(--font-mono); color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity .15s; }
-.shp-know p:hover .shp-to-code, .shp-to-code:focus-visible { opacity: 1; }
-.shp-to-code:hover { color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
-@media (hover: none) { .shp-to-code { opacity: 1; } }
 
 /* ── Code: the Guided Review, and the whole file over it ── */
 .shp-guidewrap { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 88px 32px; }
@@ -234,9 +228,6 @@
 .shp-root.phone .shp-claim { font-size: 15px; }
 .shp-root.phone .shp-view { padding: 14px 16px 90px; }
 .shp-root.phone .shp-view.v-code { padding: 0; }
-.shp-root.phone .shp-req-group { grid-template-columns: 1fr; gap: 6px; padding: 12px 0; }
-.shp-root.phone .shp-req-group li { font-size: 15.5px; }
-.shp-root.phone .shp-to-code { display: none; }
 .shp-root.phone .shp-guidewrap { padding: 0 0 80px; }
 .shp-root.phone .shp-codeview { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 0 12px 84px; gap: 10px; }
 .shp-root.phone .shp-file-bar { left: 12px; right: 12px; }
@@ -310,3 +301,343 @@
 .shp-more:hover { background: var(--muted); }
 .shp-root.panel-open:not(.phone) .shp-more { right: calc(var(--pw) + 28px); }
 .shp-root.phone .shp-more { right: 12px; bottom: 66px; }
+
+/* ── Follow an example (approval "trace-it-board", r5; the path on its rail from r7) ── The card sits where the
+   board already puts its status, above the dock; the picture makes room for it. App tokens and the dock's own buttons;
+   one accent (the board's mark colour); three text roles: title 14/20 500, body 13/20, meta 12/16 (code: mono 12/20).
+   Spacing on a 4px grid. Space and alignment do the separating, not lines.
+   Motion is transform and opacity only: the skin and the parts FLIP, stacks cross-fade. */
+.shp-ex-card { --ex-ease: cubic-bezier(.22, 1, .36, 1); --ex-edge: color-mix(in oklab, var(--foreground) 11%, transparent);
+  --ex-band: color-mix(in oklab, var(--primary) 11%, transparent);
+  --ex-mono: 400 12px/20px var(--font-mono, ui-monospace, monospace);
+  position: absolute; left: 50%; bottom: 76px; translate: -50% 0; z-index: 24; isolation: isolate;
+  width: min(640px, calc(100% - 24px)); box-sizing: border-box;
+  color: var(--foreground); font: 400 13px/20px var(--font-sans); font-feature-settings: "ss01", "ss02", "cv01";
+  animation: shp-ex-card-in .24s var(--ex-ease) both; }
+.shp-ex-card.expanded { width: min(1180px, calc(100% - 32px)); }
+@keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
+.shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
+.shp-ex-card.leaving { pointer-events: none; }
+/* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
+/* It keeps sliding with the dock when a panel opens. */
+.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: left .32s cubic-bezier(.2,.8,.2,1), translate .26s cubic-bezier(.22, 1, .36, 1); }
+.shp-root.follow-sheet .shp-pill { z-index: 26; }
+.shp-ex-skin { position: absolute; inset: 0 0 var(--ex-cut, 0px); z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
+  box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }
+.shp-ex-in { padding: 8px 12px 12px; }
+.shp-ex-card p { margin: 0; }
+
+/* The one bar: where you step on the left, where you are in the middle, which example and how much on the right. */
+.shp-ex-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "nav . side" "text text text"; column-gap: 12px; row-gap: 8px; align-items: center; }
+.shp-ex-card.expanded:not(.narrow) .shp-ex-bar { grid-template-areas: "nav text side"; }
+.shp-ex-navs { grid-area: nav; justify-items: start; }
+.shp-ex-card.expanded .shp-ex-navs > :not(.cur) { display: none; }
+.shp-ex-texts { grid-area: text; min-width: 0; }
+.shp-ex-side { grid-area: side; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.shp-ex-tabs { margin-right: 4px; max-width: min(460px, 42vw); overflow-x: auto; scrollbar-width: none; }
+.shp-ex-tabs .shp-tbtn { height: 28px; padding: 0 10px; flex: 0 1 auto; min-width: 0; }
+.shp-ex-tabs .tn { display: block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Stacks: every state in one cell (so the card keeps its size), the one on now cross-fades in. */
+.shp-ex-stack { display: grid; }
+.shp-ex-stack > * { grid-area: 1 / 1; opacity: 0; visibility: hidden; transition: opacity .12s ease-out, visibility 0s linear .12s; }
+.shp-ex-stack > .cur { opacity: 1; visibility: visible; transition: opacity .2s ease-out .04s, visibility 0s; }
+
+.shp-ex-text { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; align-items: start; align-content: start; }
+.shp-ex-text.all { grid-template-columns: minmax(0, 1fr); }
+.shp-ex-card.expanded:not(.narrow) .shp-ex-text { align-items: center; align-content: center; min-height: 32px; }
+.shp-ex-count { display: inline-flex; align-items: center; gap: 4px; font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shp-ex-does { font-size: 14px; font-weight: 500; line-height: 20px; text-wrap: pretty; }
+.shp-ex-card.expanded .shp-ex-does { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.shp-ex-sub { margin-top: 4px !important; color: var(--muted-foreground); text-wrap: pretty; }
+.shp-ex-fn { appearance: none; border: 0; background: none; padding: 0; font: var(--ex-mono); color: var(--muted-foreground); cursor: pointer;
+  text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent); text-underline-offset: 3px; transition: color .15s ease, text-decoration-color .15s ease; }
+/* A step's number: the picture's tag, in the card. */
+.shp-ex-n { display: inline-grid; place-items: center; flex: none; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 6px; background: color-mix(in oklab, var(--primary) 14%, transparent); color: var(--primary); font: 600 11.5px/18px var(--font-sans); font-variant-numeric: tabular-nums; }
+.shp-ex-n.now { background: var(--primary); color: var(--primary-foreground, #fff); }
+
+.shp-ex-nav { display: flex; align-items: center; gap: 0; }
+.shp-ex-icon, .shp-ex-quiet, .shp-ex-step, .shp-ex-more { appearance: none; border: 0; background: transparent; color: var(--muted-foreground); height: 28px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; font: 400 13px/20px var(--font-sans); white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease, transform .12s ease; }
+.shp-ex-icon, .shp-ex-more.icon { width: 28px; padding: 0; }
+.shp-ex-quiet, .shp-ex-more { padding: 0 8px; }
+.shp-ex-nav .shp-ex-icon { color: var(--foreground); width: 32px; height: 32px; }
+.shp-ex-step { padding: 0 8px 0 12px; color: var(--foreground); background: color-mix(in oklab, var(--muted) 70%, transparent); }
+.shp-ex-icon:disabled { opacity: .3; cursor: default; }
+.shp-ex-icon:active:not(:disabled), .shp-ex-quiet:active, .shp-ex-step:active, .shp-ex-more:active { transform: scale(.97); }
+.shp-ex-card button:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+.shp-ex-note { margin-top: 8px !important; font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); text-wrap: pretty; }
+
+/* Open: what goes in, what happens, what comes out. Every step in one cell; the one on now shows. */
+.shp-ex-ios { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); margin-top: 8px; max-height: min(340px, 40dvh); }
+.shp-ex-card.phone .shp-ex-ios { max-height: none; }
+.shp-ex-ios > .shp-ex-io { grid-area: 1 / 1; visibility: hidden; align-self: start; min-width: 0; max-height: 100%; min-height: calc(100% - var(--ex-cut, 0px)); }
+/* A phone's sheet sizes to the step on now: the board scrolls there, so nothing else moves. */
+.shp-ex-card.phone .shp-ex-ios { display: block; }
+.shp-ex-card.phone .shp-ex-ios > .shp-ex-io { max-height: none; }
+.shp-ex-card.phone .shp-ex-ios > .shp-ex-io:not(.cur) { position: absolute; inset: 0 0 auto 0; }
+.shp-ex-io.panes { grid-template-rows: minmax(0, 1fr); }
+/* Short of room, the checks give way first, as far as their floor (floorChecks); then the signature, down to a line. */
+.shp-ex-scroll { position: relative; flex: 0 1000000 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-inline: -8px; padding-inline: 8px; }
+.shp-ex-many { font-variant-numeric: tabular-nums; opacity: .8; margin-left: 2px; }
+.shp-ex-ios > .shp-ex-io.cur, .shp-ex-ios > .shp-ex-io.leaving { visibility: visible; }
+.shp-ex-io.cur { visibility: visible; }
+.shp-ex-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.shp-ex-cap { flex: none; white-space: nowrap; font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
+.shp-ex-caps { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.shp-ex-card .tk { color: var(--shiki-dark); }
+html.light .shp-ex-card .tk { color: var(--shiki-light); }
+
+/* Values: one mono size, tabular; a literal takes its type's colour from the Code view's theme. */
+.shp-ex-val { display: inline-block; font: var(--ex-mono); font-variant-numeric: tabular-nums; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shp-ex-val code { font: inherit; }
+/* The handed-on value keeps its ring, drawn in the margin so its text stays on the column. */
+.shp-ex-val.hand { margin-inline: -6px; padding-inline: 6px; border-radius: 6px; background: color-mix(in oklab, var(--primary) 8%, var(--popover)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 32%, transparent); }
+.shp-ex-ghost { position: absolute; z-index: 3; margin: 0; pointer-events: none; will-change: transform;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent), 0 6px 16px -8px rgb(0 0 0 / .35); }
+.shp-ex-card .pl { font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
+.shp-ex-none { font: 400 12px/24px var(--font-sans); color: var(--muted-foreground); }
+
+@property --shp-ex-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --shp-ex-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@supports (animation-timeline: scroll()) {
+  .shp-ex-scroll, .shp-ex-vars, .shp-ex-sig { mask-image: linear-gradient(#0000, #000 var(--shp-ex-t), #000 calc(100% - var(--shp-ex-b)), #0000); animation: shp-ex-edges linear both; animation-timeline: scroll(self); }
+  .shp-ex-card.narrow .shp-ex-scroll, .shp-ex-card.narrow .shp-ex-vars, .shp-ex-card.narrow .shp-ex-sig { mask-image: none; animation: none; }
+  @keyframes shp-ex-edges { 0% { --shp-ex-t: 0px; --shp-ex-b: 20px; } 8% { --shp-ex-t: 20px; } 92% { --shp-ex-b: 20px; } 100% { --shp-ex-t: 20px; --shp-ex-b: 0px; } }
+}
+
+/* Goes in: name, value, where it came from. Three columns, on one width per step. */
+.shp-ex-vars { font: var(--ex-mono); list-style: none; margin: 4px -6px 0; padding: 0 6px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.shp-ex-vars > li { display: grid; grid-template-columns: minmax(0, var(--nw)) minmax(0, 1fr) minmax(0, max-content); column-gap: 12px; align-items: baseline; padding: 2px 0; }
+.shp-ex-vars > li.tall, .shp-ex-card.narrow .shp-ex-vars > li.tall { display: flex; flex-wrap: wrap; column-gap: 12px; padding-block: 2px 6px; }
+.shp-ex-vars > li.tall .nm { order: 1; max-width: 100%; }
+.shp-ex-vars > li.tall .shp-ex-src { order: 2; margin-left: auto; max-width: min(100%, var(--sw)); }
+.shp-ex-vars > li.tall .vl { order: 3; flex: 1 0 100%; }
+/* A name too long to share its line: the value and its source take the next one. */
+.shp-ex-vars > li.wide .nm { flex: 1 0 100%; }
+.shp-ex-vars > li.wide .vl { order: 2; flex: 1 1 0; min-width: 0; }
+.shp-ex-vars > li.wide .shp-ex-src { order: 3; }
+.shp-ex-vars .nm { font: var(--ex-mono); color: var(--muted-foreground); overflow-wrap: break-word; min-width: 0; }
+.shp-ex-vars .vl { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
+.shp-ex-src { display: inline-flex; align-items: baseline; justify-content: flex-end; justify-self: end; gap: 0; max-width: var(--sw, 100%); min-width: 0; font: var(--ex-mono); color: var(--muted-foreground); white-space: nowrap; }
+.shp-ex-src .l { flex: none; }
+span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.shp-ex-src.handed { appearance: none; border: 0; background: none; padding: 0; align-items: center; gap: 4px; font: 400 12px/20px var(--font-sans); cursor: pointer; }
+.shp-ex-src.link { appearance: none; border: 0; background: none; padding: 0; cursor: pointer; }
+.shp-ex-line { appearance: none; border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; cursor: pointer; font: var(--ex-mono); color: var(--muted-foreground); white-space: nowrap; }
+.shp-ex-line .l { flex: none; }
+.shp-ex-line .u { display: inline-flex; min-width: 0; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: text-decoration-color .15s ease; }
+.shp-ex-oi { flex: none; opacity: .5; transition: opacity .15s ease, transform .15s ease; }
+
+/* What happens: the signature, then one line per check; the line that decided it is the band the eye lands on. */
+.shp-ex-sig { display: block; flex: 0 1 auto; min-height: 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-top: 4px; font: var(--ex-mono); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shp-ex-sig .ln { display: block; padding-left: 4ch; text-indent: -4ch; }
+.shp-ex-checks { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.shp-ex-checks > li { display: flex; flex-wrap: wrap; column-gap: 8px; align-items: baseline; margin-inline: -8px; padding: 2px 8px; border-radius: 6px; }
+.shp-ex-checks .mk { flex: none; align-self: start; margin-top: 3px; color: var(--muted-foreground); }
+.shp-ex-checks .cond { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 22px); font: var(--ex-mono); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; }
+.shp-ex-checks li:not(.decides) .cond, .shp-ex-checks li:not(.decides) .got { opacity: .78; }
+.shp-ex-checks .got { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; column-gap: 12px; margin-left: auto; padding-left: 16px; text-align: right; }
+.shp-ex-checks .say { font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
+.shp-ex-checks li.skip > * { opacity: .45 !important; }
+.shp-ex-checks li.decides { background: var(--ex-band); }
+.shp-ex-checks li.decides .mk { color: var(--primary); }
+.shp-ex-checks .dec { font: 500 12px/20px var(--font-sans); color: var(--primary); }
+.shp-ex-checks .short { font: 500 12px/20px var(--font-sans); color: var(--destructive); }
+
+/* Comes out: the code's last line. */
+.shp-ex-ret { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; min-width: 0; }
+.shp-ex-ret .nm { font: var(--ex-mono); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.shp-ex-type { font: var(--ex-mono); }
+.shp-ex-rr { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; column-gap: 12px; min-width: 0; max-width: 100%; }
+.shp-ex-io.panes .shp-ex-rr { margin-left: auto; }
+
+.shp-ex-io.panes .shp-ex-ret { margin-top: auto; padding-top: 8px; }
+.shp-ex-io.panes .shp-ex-ret .shp-ex-cap { flex: none; width: 72px; }
+
+/* The steps are a rail with the picture's own tags; the step is read beside it. */
+.shp-ex-card.expanded:not(.narrow) .shp-ex-in { display: grid; grid-template-columns: 232px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); padding: 0; }
+/* The rail's ground is on the skin, so it ends with the card on the card's own curve. */
+.shp-ex-card.expanded:not(.narrow) .shp-ex-skin { background: linear-gradient(90deg, color-mix(in oklab, var(--foreground) 3.5%, var(--popover)) 232px, var(--popover) 232px); }
+.shp-ex-card.expanded:not(.narrow) .shp-ex-main { min-width: 0; padding: 8px 12px 12px 16px; }
+.shp-ex-card.expanded:not(.narrow) .shp-ex-text { grid-template-columns: minmax(0, 1fr); }
+.shp-ex-card.expanded:not(.narrow) .shp-ex-count { display: none; }
+.shp-ex-rail { display: flex; flex-direction: column; align-self: start; box-sizing: border-box; min-width: 0; min-height: calc(100% - var(--ex-cut, 0px)); padding: 8px; }
+.shp-ex-rail .shp-ex-tabs { margin: 0 0 8px; max-width: 100%; align-self: flex-start; overflow: visible; flex-wrap: wrap; height: auto; }
+.shp-ex-rail .shp-ex-tabs .tn { max-width: 25ch; }
+.shp-ex-stops { display: flex; flex-direction: column; row-gap: 2px; flex: none; max-height: min(256px, 28dvh); overflow-y: auto; scrollbar-width: thin; }
+.shp-ex-stop { appearance: none; position: relative; border: 0; background: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; border-radius: 6px; text-align: left; color: var(--muted-foreground); font: 400 13px/20px var(--font-sans); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.shp-ex-stop .st { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-ex-stop.on { background: var(--ex-band); color: var(--foreground); font-weight: 500; }
+.shp-ex-rail .shp-ex-note { margin-top: auto !important; padding: 8px 8px 4px; }
+.shp-ex-card:not(.narrow) .shp-ex-io.panes { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 8fr); column-gap: 24px; }
+.shp-ex-card:not(.narrow) .shp-ex-col.fn:only-child { grid-column: 1 / -1; }
+.shp-ex-card .shp-ex-col.in, .shp-ex-card .shp-ex-col.fn { padding-top: 4px; }
+.shp-ex-strip { display: flex; align-items: center; column-gap: 4px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; }
+.shp-ex-strip .shp-ex-stop { width: auto; flex: none; min-height: 32px; padding: 4px 6px; }
+.shp-ex-strip .shp-ex-stop .st { max-width: 24ch; }
+
+@media (hover: hover) {
+  .shp-ex-icon:hover:not(:disabled), .shp-ex-quiet:hover, .shp-ex-step:hover, .shp-ex-more:hover { background: color-mix(in oklab, var(--muted) 80%, transparent); color: var(--foreground); }
+  .shp-ex-fn:hover { color: var(--foreground); text-decoration-color: currentColor; }
+  .shp-ex-src.link:hover, .shp-ex-line:hover { color: var(--foreground); }
+  .shp-ex-src.link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .shp-ex-line:hover .u { text-decoration-color: currentColor; }
+  .shp-ex-line:hover .shp-ex-oi { opacity: 1; transform: translate(1px, -1px); }
+  .shp-ex-stop:not(.on):hover { background: color-mix(in oklab, var(--foreground) 5%, transparent); color: var(--foreground); }
+}
+
+/* Narrow: one column. A phone: a bottom sheet with the same states; the dock steps aside while it is up. */
+.shp-ex-card.narrow .shp-ex-io.panes { display: flex; flex-direction: column; row-gap: 12px; }
+.shp-ex-card.narrow .shp-ex-vars, .shp-ex-card.narrow .shp-ex-scroll { overflow: visible; }
+/* One column reads what decided it first, then what went in; beside a board, the step scrolls as one. */
+.shp-ex-card.narrow:not(.phone) .shp-ex-ios { max-height: min(260px, 32dvh); }
+.shp-ex-card.narrow:not(.phone) .shp-ex-io.panes { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-inline: -8px; padding-inline: 8px; }
+.shp-ex-card.narrow .shp-ex-col { flex: none; }
+.shp-ex-card.narrow .shp-ex-io.panes .shp-ex-col.fn { order: 1; }
+.shp-ex-card.narrow .shp-ex-io.panes .shp-ex-col.in { order: 2; }
+.shp-ex-card.narrow .shp-ex-col.fn > .shp-ex-scroll { order: 1; }
+.shp-ex-card.narrow .shp-ex-col.fn > .shp-ex-sig { order: 2; margin-top: 8px; opacity: .8; }
+.shp-ex-card.narrow .shp-ex-col.fn > .shp-ex-ret { order: 3; }
+.shp-ex-card.narrow .shp-ex-vars > li { grid-template-columns: minmax(0, min(var(--nw), 44%)) minmax(0, 1fr) minmax(0, max-content); column-gap: 8px; }
+.shp-ex-card.narrow .shp-ex-io.panes .shp-ex-ret { margin-top: 6px; }
+.shp-ex-card.phone { position: absolute; left: 0; right: 0; bottom: 0; translate: none; width: 100%; animation-name: shp-ex-sheet-in; }
+.shp-ex-card.phone .shp-ex-skin { border-radius: 18px 18px 0 0; }
+.shp-ex-card.phone .shp-ex-in { max-height: var(--ex-room, 72dvh); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; padding: 0 16px max(12px, env(safe-area-inset-bottom)); }
+@keyframes shp-ex-sheet-in { from { transform: translateY(24px); opacity: 0; } }
+.shp-ex-grab { display: flex; justify-content: center; width: 100%; height: 20px; padding: 8px 0 0; border: 0; background: none; cursor: pointer; }
+.shp-ex-grab span { width: 36px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
+.shp-root.follow-sheet .shp-dock { opacity: 0; pointer-events: none; transform: translate(-50%, 16px); transition: opacity .2s ease, transform .2s cubic-bezier(.22, 1, .36, 1); }
+.shp-ex-card.phone .shp-ex-bar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "side" "text"; }
+.shp-ex-card.phone .shp-ex-side { justify-content: space-between; }
+.shp-ex-card.phone .shp-ex-tabs { max-width: none; flex: 0 1 auto; }
+/* The sheet sizes to the step on now (its skin follows); the board scrolls on a phone, so nothing else moves. */
+.shp-ex-card.phone .shp-ex-texts { position: relative; }
+.shp-ex-card.phone .shp-ex-texts > :not(.cur) { position: absolute; inset: 0 0 auto 0; }
+.shp-ex-foot { position: sticky; bottom: calc(-1 * max(12px, env(safe-area-inset-bottom))); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px -8px 0; padding: 4px 0; background: var(--popover); }
+.shp-ex-foot .shp-ex-navs { margin-left: auto; }
+.shp-ex-card.phone .shp-ex-nav .shp-ex-icon { width: 44px; height: 40px; }
+
+/* A phone, open: one row of controls that stays while the sheet scrolls, then the sentence, the rule that decided it and what comes out. */
+.shp-ex-card.phone.expanded .shp-ex-main { display: flex; flex-direction: column; }
+.shp-ex-card.phone.expanded .shp-ex-bar { display: contents; }
+.shp-ex-card.phone.expanded .shp-ex-side { order: -1; position: sticky; top: 0; z-index: 2; gap: 0; justify-content: flex-start; margin-inline: -8px; padding: 2px 0 2px 5px; background: var(--popover); }
+.shp-ex-card.phone .shp-ex-strip { flex: 1 1 0; min-width: 0; margin: 0; column-gap: 0; }
+.shp-ex-card.phone .shp-ex-strip .shp-ex-stop { min-height: 36px; padding: 0 3px; background: none; }
+.shp-ex-card.phone.expanded .shp-ex-nav .shp-ex-icon { width: 36px; height: 36px; }
+.shp-ex-card.phone.expanded .shp-ex-count { display: none; }
+.shp-ex-card.phone.expanded .shp-ex-text { grid-template-columns: minmax(0, 1fr); }
+.shp-ex-card.phone.expanded .shp-ex-texts { margin-top: 2px; }
+.shp-ex-card.phone .shp-ex-io.panes { row-gap: 4px; }
+.shp-ex-card.phone .shp-ex-caps { align-items: center; min-height: 28px; }
+.shp-ex-reveal { appearance: none; border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 4px; min-height: 28px; cursor: pointer; }
+.shp-ex-card.phone .shp-ex-type { display: none; }
+.shp-ex-card.phone .shp-ex-col.fn > .shp-ex-sig { order: 0; margin-top: 2px; }
+.shp-ex-card.phone .shp-ex-io.panes .shp-ex-ret { padding-top: 4px; }
+/* A phone's sentence is the step: never cut. */
+.shp-ex-card.phone.expanded .shp-ex-does { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.shp-ex-checks li.two { row-gap: 0; }
+.shp-ex-checks li.two .got { flex: 1 0 100%; box-sizing: border-box; justify-content: flex-start; margin-left: 0; padding-left: 22px; text-align: left; column-gap: 8px; }
+.shp-ex-checks .cm { font: var(--ex-mono); color: var(--muted-foreground); }
+/* The board above a sheet: edges that fade, or no board. */
+.shp-root.follow-sheet .shp-view.v-how { mask-image: linear-gradient(#0000, #000 16px); transition: opacity .18s ease-out; }
+.shp-root.follow-sheet .shp-view.shp-ex-covered { opacity: 0; pointer-events: none; }
+.shp-ex-card.phone .shp-ex-skin::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 20px; pointer-events: none; background: linear-gradient(#0000, var(--background)); }
+.shp-ex-card.phone.over .shp-ex-skin::before { display: none; }
+/* A long value has its own line, and its source the next. */
+.shp-ex-card.phone .shp-ex-vars > li.long .vl { order: 2; flex: 1 0 100%; }
+.shp-ex-card.phone .shp-ex-vars > li.long .shp-ex-src { order: 3; margin-left: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shp-ex-card, .shp-ex-card.phone { animation: shp-ex-fade .15s linear both; }
+  .shp-ex-stack > * { transition: opacity .15s linear, visibility 0s linear .15s; }
+  .shp-ex-stack > .cur { transition: opacity .15s linear, visibility 0s; }
+  .shp-root.follow-sheet .shp-dock { transition: opacity .15s linear; transform: translate(-50%, 0); }
+  .shp-pill { transition: none; }
+  .shp-ex-icon, .shp-ex-quiet, .shp-ex-step, .shp-ex-more { transition: background-color .15s, color .15s; }
+  .shp-ex-icon:active:not(:disabled), .shp-ex-quiet:active, .shp-ex-step:active, .shp-ex-more:active { transform: none; }
+}
+@keyframes shp-ex-fade { from { opacity: 0; } }
+/* A function or file the host cannot open is named only. */
+code.shp-ex-fn, span.shp-ex-line { cursor: default; text-decoration: none; }
+
+/*
+ * Stack badges (approval "stack-show-me", addendum 2026-11-06; ShapeStack.tsx, only with `stackBadges`): the row of
+ * a stack's PRs under the claim, a tag's card by it (a bottom sheet on a phone) and the code popup's way back. The PR
+ * colour comes from its hue (`--shp-h`, one per PR however many: `shapeStackHues`), kept off the board's purple; the
+ * drawing's tags use the same colours (stackBadges.ts). The popup is drawn outside the board: its chips carry the hue.
+ */
+.shp-stk-chip, .shp-stk-pr {
+  --c: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); --c-soft: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, var(--shp-paper, var(--background)));
+}
+.shp-stk-ic { display: inline-flex; flex: none; }
+.shp-stk-ic svg { display: block; }
+.shp-stk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 2px; }
+.shp-stk-row-l { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); margin-right: 2px; }
+.shp-stk-chip { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, transform .1s ease; }
+.shp-stk-chip .shp-stk-ic { color: var(--c); }
+.shp-stk-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.shp-stk-chip-t { color: var(--muted-foreground); }
+@media (hover: hover) { .shp-stk-chip:hover { background: color-mix(in oklab, var(--foreground) 10%, transparent); } }
+.shp-stk-chip.on, .shp-stk-chip.on:hover { background: var(--c-soft); color: var(--c); }
+.shp-stk-chip.on .shp-stk-chip-t { color: var(--c); }
+.shp-stk-chip:active { transform: scale(.97); }
+.shp-root.phone .shp-stk-row { gap: 6px; margin-top: 10px; }
+
+/* A PR as a coloured chip ("#2547"), with its title beside it. */
+.shp-stk-prlink { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--foreground); text-decoration: none; }
+a.shp-stk-prlink:hover .shp-stk-prt { text-decoration: underline; text-underline-offset: 3px; }
+.shp-stk-pr { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 6px; border-radius: 6px;
+  background: var(--c-soft); color: var(--c); font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace); white-space: nowrap; }
+button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+@media (hover: hover) { button.shp-stk-pr:hover { background: var(--c); color: var(--shp-paper, var(--background)); } }
+.shp-stk-prt { font-weight: 600; font-size: var(--ib-fs-15, 15px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The card by a tag. */
+.shp-stk-card { position: absolute; z-index: 40; width: min(400px, calc(100% - 24px)); padding: 12px 14px; border-radius: 12px;
+  background: var(--popover, var(--background)); color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--border), 0 16px 40px -18px rgb(0 0 0 / .4); outline: none;
+  animation: shp-stk-in .16s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes shp-stk-in { from { opacity: 0; transform: translateY(-4px); } }
+.shp-stk-card.sheet { left: 0; right: 0; bottom: 0; width: auto; max-height: 72%; overflow: auto; padding: 8px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+  border-radius: 16px 16px 0 0; animation-name: shp-stk-up; animation-duration: .22s; }
+@keyframes shp-stk-up { from { transform: translateY(100%); } }
+.shp-stk-grip { width: 36px; height: 4px; margin: 2px auto 12px; border-radius: 2px; background: color-mix(in oklab, var(--foreground) 22%, transparent); }
+.shp-stk-card-h { display: flex; align-items: center; gap: 8px; }
+.shp-stk-card-h .shp-stk-prlink { flex: 1; }
+.shp-stk-x { flex: none; margin-right: -6px; }
+.shp-stk-card-part { margin: 10px 0 2px; font-size: var(--ib-fs-15, 15px); }
+.shp-stk-card-part b { font-weight: 600; }
+.shp-stk-card-said { margin: 0 0 8px; font-size: var(--ib-fs-15, 15px); line-height: 1.45; text-wrap: pretty; }
+.shp-stk-files { list-style: none; margin: 0; padding: 0; }
+.shp-stk-frow { appearance: none; border: 0; margin: 0; width: 100%; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 6px; border-radius: 8px;
+  background: transparent; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; transition: background-color .12s ease; }
+@media (hover: hover) { .shp-stk-frow:hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); } }
+.shp-stk-fic { flex: none; color: var(--muted-foreground); }
+.shp-stk-fname { flex: none; font: 500 var(--ib-fs-13, 13px)/1.2 var(--font-mono, ui-monospace, monospace); }
+.shp-stk-fdir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ib-fs-12, 12px)/1.2 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+.shp-stk-counts { flex: none; display: inline-flex; gap: 6px; font: 500 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+.shp-stk-counts .add { color: color-mix(in oklab, #1a7f37 64%, var(--foreground)); }
+.shp-stk-counts .del { color: color-mix(in oklab, #cf222e 64%, var(--foreground)); }
+.shp-stk-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 10px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--border); }
+.shp-stk-also { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.shp-stk-read { appearance: none; border: 0; margin: 0 0 0 auto; padding: 4px 2px; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 500; cursor: pointer; }
+@media (hover: hover) { .shp-stk-read:hover { text-decoration: underline; text-underline-offset: 3px; } }
+.shp-stk-card.sheet .shp-stk-read { margin-left: 0; }
+
+/* The code popup's way back and its files. */
+.shp-stk-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 52px; padding: 8px 52px 8px 16px; background: color-mix(in oklab, var(--foreground) 4%, var(--background)); }
+.shp-stk-back { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px 0 6px; border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 7%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .shp-stk-back:hover { background: color-mix(in oklab, var(--foreground) 11%, transparent); } }
+.shp-stk-by { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.shp-stk-pager { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.shp-stk-pg { appearance: none; border: 0; margin: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: none; color: var(--foreground); cursor: pointer; }
+.shp-stk-pg:disabled { opacity: .35; cursor: default; }
+@media (hover: hover) { .shp-stk-pg:hover:not(:disabled) { background: color-mix(in oklab, var(--foreground) 8%, transparent); } }
+.shp-stk-file-path { margin: 12px 16px; font: var(--ib-fs-13, 13px)/1.4 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+@media (pointer: coarse) { .shp-stk-chip { height: 36px; } .shp-stk-frow { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .shp-stk-card, .shp-stk-card.sheet { animation: shp-ex-fade .15s linear both; } .shp-stk-chip, .shp-stk-chip:active { transform: none; transition: background-color .15s, color .15s; } }

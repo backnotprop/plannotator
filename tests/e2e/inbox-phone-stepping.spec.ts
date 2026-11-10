@@ -85,7 +85,7 @@ async function world() {
     body: 'The new checkout, its copy, the pay page, the retry policy and the receipt.',
   });
   const ids = Object.fromEntries((sent.attachments as { id: string; name: string }[]).map((a) => [a.name, a.id])) as Record<string, string>;
-  return { root, url, agent, project, thread: sent.thread_id as string, ids };
+  return { root, url, agent, project, thread: sent.thread_id as string, first: sent.message_id as string, ids };
 }
 
 const pane = (page: Page) => page.locator('[data-attachment-pane]');
@@ -105,7 +105,7 @@ for (const phone of [
 ])
   for (const scheme of phone.schemes)
   test(`on a phone, ${phone.name}, ${scheme}: the pill opens every file in one tap, and a swipe steps where it can`, async () => {
-    const { root, url, agent, project, thread, ids } = await world();
+    const { root, url, agent, project, thread, first, ids } = await world();
     const { defaultBrowserType: _ignored, ...device } = phone.device;
     // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
     const browser: Browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
@@ -264,6 +264,7 @@ for (const phone of [
       // the comment count and the pill: the page again in a second message after eight notes ("14/14"), 12 comments on it.
       const more = await agent.send({
         project_path: project,
+        reply_to: first,
         subject: 'Checkout: notes',
         attachments: [...Array.from({ length: 8 }, (_, i) => `checkout/note-${i + 1}.txt`), 'checkout/pay.html'],
         body: 'Eight notes and the pay page again.',

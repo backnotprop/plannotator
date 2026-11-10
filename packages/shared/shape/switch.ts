@@ -15,6 +15,15 @@ export function shapeSwitchOn(): boolean {
   return loadConfig().inboxShape === true;
 }
 
+/**
+ * The boards work: Shape on, and only Shape (approval "code-review-029-shape-off": Code review on brings no board,
+ * no Show me and no Shape text). A broken config.json is off. Quiet for what reads it on every request; the `shape`
+ * command warns, as it did.
+ */
+export function shapeBoardsOn(options: { quiet?: boolean } = { quiet: true }): boolean {
+  return loadConfig(options).inboxShape === true;
+}
+
 /** Turn Shape on or off; false when config.json could not be saved (nothing changed). */
 export function setShapeSwitch(on: boolean): boolean {
   return saveConfig({ inboxShape: on }) && shapeSwitchOn() === on;

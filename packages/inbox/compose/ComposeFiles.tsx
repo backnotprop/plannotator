@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxDraftFile, type InboxDraftPasted, type InboxUpload } from '@plannotator/core/inbox-types';
 import type { DraftFileUploader, ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { InboxApiError } from '../api';
+import { ownAttachmentInPaste, type OwnAttachmentPaste } from './reusePaste';
+import type { ReuseSource } from '../reuse';
 import { httpDraftFileUploader } from '../replyDraftHttp';
 import { formatBytes } from '../format';
 import { Icon, type IconName } from '../icons';
@@ -32,6 +34,10 @@ export interface ComposeFile {
   preview: string | null;
   /** A long paste attached as a file (pastedText.ts): the words it holds, so Put back can return them. */
   pasted?: PastedText | null;
+  /** A file already in the Inbox, added by reference: its bytes' hash from the first moment. */
+  reuse?: { sha256: string } | null;
+  /** Just pointed at (added again): the tile says so for a moment. */
+  flash?: boolean;
 }
 
 /** A long paste the person can put back in the box. */
@@ -110,6 +116,8 @@ export function useComposeFiles(
   initial: readonly InboxDraftFile[],
   options: {
     onPasted?: (names: string[]) => void;
+    /** A reused file's bytes are in this message already: for the host's polite live region. */
+    onAlready?: (name: string) => void;
     machine?: string | null;
     text?: ComposeFilesText;
     onPutBack?: () => void;
@@ -132,6 +140,8 @@ export function useComposeFiles(
   filesRef.current = files;
   const onPasted = useRef(options.onPasted);
   onPasted.current = options.onPasted;
+  const onAlready = useRef(options.onAlready);
+  onAlready.current = options.onAlready;
   const onPutBack = useRef(options.onPutBack);
   onPutBack.current = options.onPutBack;
   // Linked machines: a reply to another machine's thread uploads its files to that machine.
@@ -207,9 +217,132 @@ export function useComposeFiles(
     return key;
   };
 
-  const add = useCallback((list: Iterable<File>) => {
-    for (const file of list) addOne(file);
+  /** Each file to its upload; their keys, in order (for a host that may take them out again: an Undo). */
+  const add = useCallback((list: Iterable<File>): string[] => {
+    const keys: string[] = [];
+    for (const file of list) keys.push(addOne(file));
+    return keys;
   }, []);
+
+  /** The tile holding these bytes, whichever way they came. */
+  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.state !== 'refused' && (file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256 || file.upload?.shown_sha256 === sha256)), []);
+
+  const flash = (key: string) => {
+    patch(key, { flash: true });
+    setTimeout(() => patch(key, { flash: false }), 900);
+  };
+
+  /**
+   * A file the Inbox already holds, as a tile (the attachment's reuse button). No bytes travel: the answer is a
+   * pending upload naming the same blob. Bytes already in this message are not added twice: their tile says so.
+   */
+  const addExisting = useCallback((source: ReuseSource) => {
+    const here = holding(source.sha256);
+    if (here) {
+      flash(here.key);
+      onAlready.current?.(source.name);
+      return;
+    }
+    const reuse = uploader.current.reuse;
+    if (!reuse) return;
+    // Tried again after a refusal: this try takes the refused tile's place.
+    const tried = filesRef.current.filter((file) => file.state === 'refused' && file.reuse?.sha256 === source.sha256).map((file) => file.key);
+    if (tried.length > 0) {
+      filesRef.current = filesRef.current.filter((file) => !tried.includes(file.key));
+      setFiles((current) => current.filter((file) => !tried.includes(file.key)));
+      tried.forEach(release);
+    }
+    const key = `local-${newUuid()}`;
+    const fresh: ComposeFile = { key, name: source.name, size: source.size, state: 'uploading', progress: 0, upload: null, error: null, preview: source.preview, reuse: { sha256: source.sha256 } };
+    filesRef.current = [...filesRef.current, fresh];
+    setFiles((current) => [...current, fresh]);
+    const controller = new AbortController();
+    aborts.current.set(key, controller);
+    const settled = reuse(source.id, source.version, { signal: controller.signal, sha256: source.sha256 })
+      .then((upload) => {
+        // The draft held these bytes under another name (a big changed file is listed by its stat): one tile, now known by both.
+        const here = filesRef.current.find((file) => file.key !== key && file.state !== 'refused' && file.upload?.sha256 === upload.sha256);
+        if (here) {
+          filesRef.current = filesRef.current.filter((file) => file.key !== key);
+          setFiles((current) => current.filter((file) => file.key !== key));
+          patch(here.key, { reuse: { sha256: source.sha256 }, flash: true });
+          setTimeout(() => patch(here.key, { flash: false }), 900);
+          onAlready.current?.(source.name);
+          return null;
+        }
+        patch(key, { state: 'done', progress: 1, upload });
+        return upload;
+      })
+      .catch((cause) => {
+        if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+          patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+        }
+        return null;
+      })
+      .finally(() => {
+        aborts.current.delete(key);
+        inFlight.current.delete(key);
+      });
+    inFlight.current.set(key, settled);
+    onPasted.current?.([source.name]);
+  }, [holding]);
+
+  /**
+   * A picture of this Inbox, pasted (reusePaste.ts): the file itself, with its own name and no new bytes. The name and
+   * hash come with the answer. Refused (its thread went, its current version is not readable), the paste goes on as a
+   * paste: `pictures` are what the clipboard held.
+   */
+  const addPasted = (own: OwnAttachmentPaste, pictures: readonly File[]) => {
+    const key = `local-${newUuid()}`;
+    const fresh: ComposeFile = { key, name: 'Adding…', size: 0, state: 'uploading', progress: 0, upload: null, error: null, preview: own.src, reuse: { sha256: '' } };
+    filesRef.current = [...filesRef.current, fresh];
+    setFiles((current) => [...current, fresh]);
+    const drop = () => {
+      filesRef.current = filesRef.current.filter((file) => file.key !== key);
+      setFiles((current) => current.filter((file) => file.key !== key));
+    };
+    const controller = new AbortController();
+    aborts.current.set(key, controller);
+    const settled = uploader.current.reuse!(own.id, own.version, { signal: controller.signal })
+      .then((upload) => {
+        const here = holding(upload.sha256);
+        if (here && here.key !== key) {
+          drop();
+          flash(here.key);
+          onAlready.current?.(upload.name);
+          return null;
+        }
+        patch(key, { state: 'done', progress: 1, upload, name: upload.name, size: upload.size, reuse: { sha256: upload.sha256 } });
+        onPasted.current?.([upload.name]);
+        return upload;
+      })
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return null;
+        if (pictures.length > 0) {
+          drop();
+          namesRef.current = [...namesRef.current, ...pictures.map((file) => file.name)];
+          add(pictures);
+          onPasted.current?.(pictures.map((file) => file.name));
+        } else {
+          patch(key, { state: 'refused', name: 'Picture', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+        }
+        return null;
+      })
+      .finally(() => {
+        aborts.current.delete(key);
+        inFlight.current.delete(key);
+      });
+    inFlight.current.set(key, settled);
+  };
+
+  /** Take these bytes out of the message (the reuse button's second click). */
+  const removeHolding = useCallback((sha256: string) => {
+    const here = holding(sha256);
+    if (!here) return;
+    release(here.key);
+    filesRef.current = filesRef.current.filter((file) => file.key !== here.key);
+    setFiles((current) => current.filter((file) => file.key !== here.key));
+  }, [holding]);
 
   const remove = useCallback((key: string) => {
     release(key);
@@ -281,6 +414,13 @@ export function useComposeFiles(
       const data = event.clipboardData;
       const phone = isPhone();
       const list = pastedFiles(data, namesRef.current, new Date(), { phone });
+      // A picture copied from this Inbox is that file, not a new one. Another machine's thread: its files are not ours to name.
+      const own = !machine.current && uploader.current.reuse ? ownAttachmentInPaste(data, location.origin) : null;
+      if (own) {
+        event.preventDefault();
+        addPasted(own, list);
+        return true;
+      }
       if (list.length === 0) return pasteLongText(event);
       // Text the person meant still pastes natively, unless it is 32 KB or more: a tile beside the files then.
       // On a phone an image's own link (paste.ts) is not inserted.
@@ -527,9 +667,11 @@ export function useComposeFiles(
     [],
   );
 
+  // A file is this Inbox's to reuse: not across to another machine's thread, and not for a host that keeps bytes elsewhere.
+  const canReuse = !options.machine && Boolean(uploader.current.reuse);
   const uploaded = files.filter((file) => file.state === 'done' && file.upload).map((file) => file.upload!);
   const uploading = files.some((file) => file.state === 'uploading');
-  return { files, add, attach, remove, forget, reset, detach, current, paste, takeText, putBack, pastedDraft, draftFiles, restoreDraft, follow, uploaded, uploading };
+  return { files, add, canReuse, addExisting, holding, removeHolding, attach, remove, forget, reset, detach, current, paste, takeText, putBack, pastedDraft, draftFiles, restoreDraft, follow, uploaded, uploading };
 }
 
 /** A phone's picker offers the photo library and Files (iOS gives no Paste for a picture in a text field). */
@@ -660,6 +802,8 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
   switch (upload ? readInboxAttachmentKind(upload.kind) : null) {
     case 'image':
       return 'photo';
+    case 'audio':
+      return 'music';
     case 'html':
     case 'code':
       return 'code';
@@ -670,11 +814,12 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
   }
 }
 
-function detailOf(file: ComposeFile): string {
-  if (file.state === 'refused') return file.error ?? 'Not attached.';
-  if (file.state === 'uploading') return `Uploading… ${Math.round(file.progress * 100)}% of ${formatBytes(file.size)}`;
+/** The line under a tile's name: words, then its separator and size. A narrow tile cuts only the words. */
+function detailOf(file: ComposeFile): { words: string; size: string } {
+  const size = formatBytes(file.state === 'uploading' ? file.size : file.upload!.size);
+  if (file.state === 'uploading') return file.reuse ? { words: 'Adding…', size: ` ${size}` } : { words: `Uploading… ${Math.round(file.progress * 100)}%`, size: ` of ${size}` };
   const upload = file.upload!;
-  return `${inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type)}, ${formatBytes(upload.size)}`;
+  return { words: inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type), size: `, ${size}` };
 }
 
 /** True for the first PASTED_UNDO_MS after `at`, then false (re-rendered when it turns). */
@@ -778,9 +923,10 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
         ) : (
         <div
           key={file.key}
-          className={`ib-cp-file${file.state === 'refused' ? ' ib-refused' : ''}`}
+          className={`ib-cp-file${file.state === 'refused' ? ' ib-refused' : ''}${file.flash ? ' ib-cp-flash' : ''}`}
           data-compose-file={file.state}
           data-compose-file-name={file.name}
+          data-compose-file-reuse={file.reuse ? '' : undefined}
         >
           {file.preview ? (
             <span className="ib-fi ib-thumb">
@@ -793,10 +939,17 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
           )}
           <span className="ib-att-text">
             <FileName name={file.name} className="ib-nm" />
-            <span className={file.state === 'refused' ? 'ib-cp-ferr' : 'ib-kd'} role={file.state === 'refused' ? 'alert' : undefined}>
-              {detailOf(file)}
-            </span>
-            {file.state === 'uploading' && (
+            {file.state === 'refused' ? (
+              <span className="ib-cp-ferr" role="alert">
+                {file.error ?? 'Not attached.'}
+              </span>
+            ) : (
+              <span className="ib-kd ib-kd-split">
+                <span className="ib-kd-w">{detailOf(file).words}</span>
+                <span className="ib-kd-n">{detailOf(file).size}</span>
+              </span>
+            )}
+            {file.state === 'uploading' && !file.reuse && (
               <span className="ib-cp-prog" aria-hidden="true">
                 <i style={{ width: `${Math.round(file.progress * 100)}%` }} />
               </span>

@@ -57,7 +57,7 @@ function scripted(answer: (url: string) => Response | Promise<Response> = () => 
   return s;
 }
 
-const URL_A = "https://avatars.githubusercontent.com/u/1?v=4";
+const URL_A = "https://avatars.githubusercontent.com/u/1?s=96&v=4";
 
 /** The cached pictures once the trim (run off the request's path) has brought them down to `count`, or after 2 s. */
 async function settledImages(dir: string, count: number): Promise<string[]> {
@@ -83,6 +83,31 @@ describe("PR authors' pictures", () => {
     avatars.allow("github.com", { priya: URL_A });
     expect(await avatars.get("github.com", "tomas")).toEqual({ ok: false, miss: "unknown" });
     expect(s.fetched).toEqual([]);
+  });
+
+  test("a GitHub picture is asked for at a face's size, its full upload or a smaller size it named; others stay as given", async () => {
+    const s = scripted();
+    const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
+    avatars.allow("github.com", {
+      full: "https://avatars.githubusercontent.com/u/1000002?u=4f69eb&v=4",
+      small: "https://avatars.githubusercontent.com/u/1000001?s=48&v=4",
+      sized: "https://avatars.githubusercontent.com/u/1000003?size=48",
+    });
+    avatars.allow("ghe.example", { server: "https://ghe.example/avatars/u/7?v=4" });
+    avatars.allow("gitlab.com", { lab: "https://gitlab.com/uploads/-/system/user/avatar/9/me.png?width=64" });
+    await avatars.get("github.com", "full");
+    await avatars.get("github.com", "small");
+    await avatars.get("github.com", "sized");
+    await avatars.get("ghe.example", "server");
+    await avatars.get("gitlab.com", "lab");
+    expect(s.fetched).toEqual([
+      "https://avatars.githubusercontent.com/u/1000002?u=4f69eb&v=4&s=96",
+      // GraphQL's avatarUrl(size: 48) is soft at 28 px on a 2x screen: a face is drawn at up to 48, so 96.
+      "https://avatars.githubusercontent.com/u/1000001?s=96&v=4",
+      "https://avatars.githubusercontent.com/u/1000003?s=96",
+      "https://ghe.example/avatars/u/7?v=4&s=96",
+      "https://gitlab.com/uploads/-/system/user/avatar/9/me.png?width=64",
+    ]);
   });
 
   test("a picture read within the day is served from the cache: no second fetch, in this process or the next", async () => {
@@ -180,11 +205,11 @@ describe("PR authors' pictures", () => {
     const s = scripted();
     s.options.lookup = async (name) => (name === "ghe.corp.example" ? ["10.0.0.5"] : ["10.0.0.9"]);
     const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
-    avatars.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3", eve: "https://intranet.corp.example/x.png", loop: "http://127.0.0.1:8123/a.png" });
+    avatars.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3?s=96", eve: "https://intranet.corp.example/x.png", loop: "http://127.0.0.1:8123/a.png" });
     expect((await avatars.get("ghe.corp.example", "ana")).ok).toBe(true);
     expect(await avatars.get("ghe.corp.example", "eve")).toEqual({ ok: false, miss: "not_public" });
     expect(await avatars.get("ghe.corp.example", "loop")).toEqual({ ok: false, miss: "not_https" });
-    expect(s.fetched).toEqual(["https://ghe.corp.example/avatars/u/3"]);
+    expect(s.fetched).toEqual(["https://ghe.corp.example/avatars/u/3?s=96"]);
 
     const sandboxed = scripted();
     const fake = createPullAvatars({ ...sandboxed.options, env: { PLANNOTATOR_TEST_SANDBOX: "1" }, dir: tempDir() });
@@ -301,31 +326,31 @@ describe("PR authors' pictures", () => {
       const privateNames = async () => ["10.0.0.5"];
       // The forge on 443: a redirect to :8443 (or :444) on its name is not the forge.
       for (const location of ["https://ghe.corp.example:8443/x.png", "https://ghe.corp.example:444/x.png"]) {
-        const s = scripted((url) => (url.endsWith("/avatars/u/3") ? redirect(location) : picture()));
+        const s = scripted((url) => (url.endsWith("/avatars/u/3?s=96") ? redirect(location) : picture()));
         s.options.lookup = privateNames;
         const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
-        avatars.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3" });
+        avatars.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3?s=96" });
         expect(await avatars.get("ghe.corp.example", "ana")).toEqual({ ok: false, miss: "not_public" });
-        expect(s.fetched).toEqual(["https://ghe.corp.example/avatars/u/3"]);
+        expect(s.fetched).toEqual(["https://ghe.corp.example/avatars/u/3?s=96"]);
       }
       // On 443 named outright, the same forge: followed.
-      const same = scripted((url) => (url.endsWith("/avatars/u/3") ? redirect("https://ghe.corp.example:443/x.png") : picture()));
+      const same = scripted((url) => (url.endsWith("/avatars/u/3?s=96") ? redirect("https://ghe.corp.example:443/x.png") : picture()));
       same.options.lookup = privateNames;
       const onDefault = createPullAvatars({ ...same.options, dir: tempDir() });
-      onDefault.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3" });
+      onDefault.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3?s=96" });
       expect((await onDefault.get("ghe.corp.example", "ana")).ok).toBe(true);
 
       // A self-managed forge on :8443. The list's host never carries a port (`ghe.corp.example`); the avatar URLs the
       // forge returned do. Its pictures on :8443 are its own; a redirect from there to 443 (or :9443) is not the forge.
       const ported = scripted((url) =>
-        url.endsWith("/avatars/u/4") ? redirect("https://ghe.corp.example/x.png") : url.endsWith("/avatars/u/5") ? redirect("https://ghe.corp.example:9443/x.png") : url.endsWith("/avatars/u/6") ? redirect("https://ghe.corp.example:8443/y.png") : picture(),
+        url.endsWith("/avatars/u/4?s=96") ? redirect("https://ghe.corp.example/x.png") : url.endsWith("/avatars/u/5?s=96") ? redirect("https://ghe.corp.example:9443/x.png") : url.endsWith("/avatars/u/6") ? redirect("https://ghe.corp.example:8443/y.png") : picture(),
       );
       ported.options.lookup = privateNames;
       const onPort = createPullAvatars({ ...ported.options, dir: tempDir() });
       onPort.allow("ghe.corp.example", {
-        ana: "https://ghe.corp.example:8443/avatars/u/3",
-        bo: "https://ghe.corp.example:8443/avatars/u/4",
-        cy: "https://ghe.corp.example:8443/avatars/u/5",
+        ana: "https://ghe.corp.example:8443/avatars/u/3?s=96",
+        bo: "https://ghe.corp.example:8443/avatars/u/4?s=96",
+        cy: "https://ghe.corp.example:8443/avatars/u/5?s=96",
         di: "https://ghe.corp.example:8443/avatars/u/6",
       });
       expect((await onPort.get("ghe.corp.example", "ana")).ok).toBe(true);

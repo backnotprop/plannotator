@@ -58,6 +58,7 @@ import {
 import {
 	handleFavicon,
 	handleImageRequest,
+	handleStarAskRequest,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
@@ -73,7 +74,7 @@ import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts"
 import { isNotionAvailable } from "./integrations.ts";
 import { getAvailableOpenInApps, handleOpenInRequest } from "./open-in-apps.ts";
 
-import { getRepoInfo } from "./project.ts";
+import { getSourceRepoInfo } from "./project.ts";
 import { isThisMachineRequest } from "./this-machine.ts";
 import {
 	refuseReferenceRead,
@@ -693,8 +694,14 @@ export async function startAnnotateServer(options: {
 		return legacyDurable && (archived || !hasContent);
 	};
 
-	// Detect repo info (cached for this session)
-	const repoInfo = getRepoInfo();
+	// Repo identity follows the annotated source when it is on disk and in a repo.
+	// A source outside any repo and rootless sessions (URLs, agent messages, live
+	// apps) keep the launch directory.
+	const repoInfoCwd =
+		options.mode === "annotate-folder" && options.folderPath
+			? options.folderPath
+			: bundleRoot ?? (draftFilePath ? dirname(draftFilePath) : undefined);
+	const repoInfo = getSourceRepoInfo(repoInfoCwd);
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
 	// Set once bound: "Ask this session" answers only a loopback Host with this port.
@@ -1211,6 +1218,9 @@ export async function startAnnotateServer(options: {
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			}
+		} else if (url.pathname.startsWith("/api/star-ask/")) {
+			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
+			if (!(await handleStarAskRequest(req, res, url, "annotate", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (htmlAssets.handle(req, res, url)) {
@@ -1403,8 +1413,8 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
 			handleFileBrowserStreamRequest(req, res, url);
 			return;
-		} else if (url.pathname === "/favicon.png") {
-			handleFavicon(res);
+		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
+			handleFavicon(res, url.pathname);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			// Exit posts carry no body: the nonce rides the query string.
 			if (checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, serverSession) === "mismatch") {

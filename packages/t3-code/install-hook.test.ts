@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, sym
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { configureT3Hook, hasPlanHookOverlap } from "./install-hook";
-import { parseT3HookCommand, t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { parseT3HookCommand, quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -40,6 +40,21 @@ test("install updates only the T3 hook, preserving shared settings and mixed Bas
   expect(configureT3Hook(file, executable, dataDir, false)).toBe(false);
 });
 
+test("reinstall replaces the SDK-only gate earlier builds wrote, so T3's own entrypoint reaches the binary", () => {
+  // What regresses: a hook written before T3 named its entrypoint staying in
+  // settings beside the new one (or never opening inside a T3 thread).
+  const { file, executable, dataDir } = fixture();
+  const old = `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=${quoteHookWord(dataDir)} ${quoteHookWord(executable)} t3-hook;; esac`;
+  writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: old }] }] } }));
+  expect(configureT3Hook(file, executable, dataDir, true)).toBe(true);
+  const hooks = JSON.parse(readFileSync(file, "utf8")).hooks.PreToolUse;
+  expect(hooks).toHaveLength(1);
+  expect(hooks[0].hooks).toEqual([{ type: "command", command: t3HookCommand(executable, dataDir), timeout: 10 }]);
+  writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: old }] }] } }));
+  expect(configureT3Hook(file, executable, dataDir, false)).toBe(true);
+  expect(JSON.parse(readFileSync(file, "utf8")).hooks?.PreToolUse ?? []).toEqual([]);
+});
+
 test("remove without an installed hook writes nothing and malformed settings stay intact", () => {
   const { file, executable, dataDir } = fixture();
   expect(configureT3Hook(file, executable, dataDir, false)).toBe(false);
@@ -66,8 +81,9 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   mkdirSync(join(executable, ".."), { recursive: true });
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n%s\\n" "$PLANNOTATOR_DATA_DIR" "$1"\n', { mode: 0o755 });
   const run = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)],
-    { env: { PATH: "/usr/bin:/bin", ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
-  for (const entrypoint of ["sdk-ts", "sdk-py"]) {
+    { env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME!, ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
+  // T3 Code names itself `t3-code`; other Agent SDK apps report `sdk-…`.
+  for (const entrypoint of ["sdk-ts", "sdk-py", "t3-code"]) {
     const result = run(entrypoint);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(dataDir + "\nt3-hook\n");
@@ -81,6 +97,8 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   expect(parseT3HookCommand(t3HookCommand(executable, dataDir) + " && echo unrelated")).toBeUndefined();
   expect(parseT3HookCommand("/other/custom-command t3-hook")).toBeUndefined();
   expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) /other/custom-command t3-hook;; esac')).toBeUndefined();
+  // The SDK-only gate earlier builds wrote is still found, so reinstall and uninstall replace it.
+  expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=\'/d\' \'/bin/plannotator\' t3-hook;; esac')).toEqual({ executable: "/bin/plannotator" });
   // The ungated form earlier builds wrote is still recognized, so reinstall and uninstall replace it.
   expect(parseT3HookCommand(`PLANNOTATOR_DATA_DIR='/data' '${executable}' t3-hook`)).toEqual({ executable });
 });
@@ -100,17 +118,30 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
     stdin: Buffer.from(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_fixture", session_id: "fixture", cwd: join(file, ".."), tool_input: { command: "plannotator annotate notes.md --gate" } })),
     stdout: "pipe", stderr: "pipe",
   });
-  const hooked = hook("sdk-ts");
-  expect(hooked.exitCode).toBe(0);
-  expect(JSON.parse(hooked.stdout.toString())).toEqual({});
+  for (const entrypoint of ["sdk-ts", "t3-code"]) {
+    const hooked = hook(entrypoint);
+    expect(hooked.exitCode).toBe(0);
+    expect(JSON.parse(hooked.stdout.toString())).toEqual({});
+  }
   const interactive = hook("cli");
   expect(interactive.exitCode).toBe(0);
   expect(interactive.stdout.toString()).toBe("");
   // The binary's own gate, for a hook registered without the shell's: `{}` before any startup work.
-  const direct = Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: "cli" }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
-  expect(direct.exitCode).toBe(0);
-  expect(JSON.parse(direct.stdout.toString())).toEqual({});
-  expect(direct.stderr.toString()).toBe("");
+  // Unparseable input that gets past the binary's entrypoint checks is logged to t3-code/hook.log,
+  // so the log shows whether `t3-code` got through them.
+  const hookLog = join(dataDir, "t3-code", "hook.log");
+  mkdirSync(join(dataDir, "t3-code"), { recursive: true });
+  const direct = (entrypoint: string) => Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
+  const gated = direct("cli");
+  expect(gated.exitCode).toBe(0);
+  expect(JSON.parse(gated.stdout.toString())).toEqual({});
+  expect(gated.stderr.toString()).toBe("");
+  expect(existsSync(hookLog)).toBe(false);
+  // T3's own entrypoint passes the binary's gate.
+  const t3 = direct("t3-code");
+  expect(t3.exitCode).toBe(0);
+  expect(JSON.parse(t3.stdout.toString())).toEqual({});
+  expect(existsSync(hookLog)).toBe(true);
   const removed = Bun.spawnSync([executable, "t3-hook", "remove", "--settings", file], { env, stdout: "pipe", stderr: "pipe" });
   expect(removed.exitCode).toBe(0);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({});

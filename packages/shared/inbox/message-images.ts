@@ -92,7 +92,7 @@ export function inboxMessageImageRefs(body: string): Set<string> {
 }
 
 /** Fenced code blocks and inline code spans, blanked to spaces (line breaks kept) so the image grammar never matches inside them. */
-function blankCode(body: string): string {
+export function blankCode(body: string): string {
   const blank = (text: string) => text.replace(/[^\n]/g, " ");
   const lines = body.split("\n");
   let fence: string | null = null;
@@ -470,6 +470,32 @@ export async function readInboxMessageImageAsync(input: InboxMessageImageInput):
   const read = await readImageFileAsync(located.real);
   if (!read.ok) return read;
   return finishImage(read.bytes, located, read.mtime);
+}
+
+/**
+ * One picture by its absolute path, wherever it is on this computer: an
+ * attached HTML page's picture outside its folder (packages/server/html-assets.ts,
+ * `pictures`). `refused` is judged on the path as named and on its realpath,
+ * so a symlink into a hidden folder is refused too (`403 image_hidden`); then
+ * rule 4: one descriptor, a regular file within the caps, the bytes sniffed
+ * as an image (an SVG by its `<svg>` root), never the name's type. Never throws.
+ */
+const HIDDEN_ANYWHERE = "That image is a .env file, or in a hidden folder.";
+
+export async function readInboxPictureAsync(named: string, refused: (path: string) => boolean): Promise<InboxMessageImageResult> {
+  if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) return refuse(400, "validation_error", "path: not a usable image path.");
+  if (refused(named)) return refuse(403, "image_hidden", HIDDEN_ANYWHERE);
+  let real: string;
+  try {
+    real = realpathSync(named);
+  } catch (error) {
+    if (isPermissionError(error)) return failRead(403, "image_unreadable", UNREADABLE);
+    return { ...failRead(404, "image_missing", "That image is not on disk."), notYet: true };
+  }
+  if (refused(real)) return refuse(403, "image_hidden", HIDDEN_ANYWHERE);
+  const read = await readImageFileAsync(real);
+  if (!read.ok) return read;
+  return finishImage(read.bytes, { real, named }, read.mtime);
 }
 
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);

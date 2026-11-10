@@ -32,6 +32,20 @@
  * - Prompt: the first non-blank line that is not a choice or a
  *   recommendation. No prompt means the block is not a question: the parser
  *   returns null and the renderer falls back to the plain directive callout.
+ * - Id label: before the prompt, a short lower-case `id:` or `key:` line
+ *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
+ *   token with no spaces, not ending in `?`) is the asker's own label for
+ *   the question, as agents write it: it is never the prompt (the line
+ *   after it is), but nothing the asker wrote is hidden: it shows as the
+ *   first context line, the small line under the question. The key is still
+ *   hashed from the label line, as it was when the label was the prompt:
+ *   the store keeps each question's key from the send, while the window
+ *   computes it again from the body, so a question stored with a leading
+ *   label keeps its picks, answers and supersedes. The value itself is never
+ *   the key. A label with nothing after it to ask stays the prompt (and is
+ *   not context too). A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   we…?`) is the prompt as before, and an `id:` line after the prompt is
+ *   context.
  * - Context: every other prose line (before or after the choices). A
  *   `Context:` line after the prompt is always context: it never continues
  *   the choice, bullet or recommendation above it.
@@ -149,6 +163,28 @@ export interface QuestionChoice {
   /** A picture choice: the choice's first markdown image. The picture picks
    *  the choice; the answer is still the label. Absent otherwise. */
   image?: QuestionChoiceImage;
+  /** `Pros:` under a `- [ ]` choice (option lines, the Plannotator Inbox):
+   *  its items, split on `;`. Absent otherwise: the line stays in the
+   *  description. */
+  pros?: string[];
+  /** `Cons:` (or `Trade-off:`) under a `- [ ]` choice, as `pros`. */
+  cons?: string[];
+  /** `Prototype:` (or `Try:`) under a `- [ ]` choice: the page that shows
+   *  this option, as `QuestionPrototype`. Option lines only. */
+  prototype?: QuestionPrototype;
+}
+
+/**
+ * A prototype as written: `Prototype: proto/a.html`, `Prototype:
+ * http://localhost:3000/checkout?v=a`, `Prototype: <target>` or `Prototype:
+ * [Name](target)`. `target` is the path or address exactly as written; the
+ * host decides what it opens (the Inbox: an attached HTML file, or an app
+ * running on this computer through its live proxy).
+ */
+export interface QuestionPrototype {
+  target: string;
+  /** The link's text, when written as `[Name](target)`. */
+  label?: string;
 }
 
 /** The picture of a picture choice (`- [ ] Label — ![alt](src)`). */
@@ -215,6 +251,9 @@ export interface ParsedQuestion {
   why?: string;
   /** `Reversible: no — <why>`. Absent means reversible (`yes`, or no line). */
   reversible?: QuestionIrreversible;
+  /** `Prototype:` at the block's own indent: one page every option shows
+   *  (option lines only, `ParseQuestionBlockOptions.optionLines`). */
+  prototype?: QuestionPrototype;
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -264,6 +303,11 @@ const CHOICE_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+)\)/;
 // What may follow a recommendation that names the start of a choice label
 // (`Recommended: Unpin it` for `Unpin it: the toast says…`).
 const LABEL_HEAD_SEP_RE = /^(?:\s*[:—–(]|\s+-\s)/;
+// A recommendation that is only a label's leading token, a letter or a
+// number (`Recommended: A` for `A · Yes`), names the label when the token is
+// followed by a middle dot.
+const LABEL_TOKEN_RE = /^(?:[a-z]|\d+)$/;
+const LABEL_TOKEN_SEP_RE = /^ · /;
 // At the start of the line (no indentation), so an indented line under a
 // choice stays that choice's continuation.
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
@@ -276,6 +320,10 @@ const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
 const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
 const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
 const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
+// An asker's own label for the question before the prompt (`id: sd-approach`):
+// a lower-case `id` or `key`, optionally after a short `name_` / `name-`,
+// a colon, one token with no spaces that does not end in `?`. Shown as context.
+const ID_LABEL_RE = /^\s*(?:[a-z][a-z0-9]{0,15}[_-])?(?:id|key)\s*:\s*\S{0,79}[^\s?]\s*$/;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -484,7 +532,9 @@ const QUESTION_KEY_RE = /^q-[0-9a-f]{8}(?:-\d{1,3})?$/;
  * The one choice a recommendation names by the start of its label: the
  * choice whose label (or any of its other names, such as a task list's full
  * text) begins with the text and then a separator (`:` `—` `–` ` - ` `(`),
- * compared case-insensitively with emphasis and spacing folded
+ * or whose leading letter or number the text is, followed by ` · `
+ * (`Recommended: A` names `A · Yes`), compared case-insensitively with
+ * emphasis and spacing folded
  * (`Recommended: Unpin it` names `Unpin it: the toast says…`). -1 when no
  * choice or several do. `names` holds each choice's names, label first.
  */
@@ -497,7 +547,9 @@ export const recommendationHeadChoice = (
   const begins = (value: string | undefined): boolean => {
     if (!value) return false;
     const folded = value.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return folded.startsWith(target) && LABEL_HEAD_SEP_RE.test(folded.slice(target.length));
+    if (!folded.startsWith(target)) return false;
+    const rest = folded.slice(target.length);
+    return LABEL_HEAD_SEP_RE.test(rest) || (LABEL_TOKEN_RE.test(target) && LABEL_TOKEN_SEP_RE.test(rest));
   };
   const hits = names.flatMap((entry, i) => ((typeof entry === 'string' ? [entry] : entry).some(begins) ? [i] : []));
   return hits.length === 1 ? hits[0] : -1;
@@ -644,18 +696,65 @@ const matchRecommendation = (
   return fallback !== -1 ? [fallback] : [];
 };
 
-type ContractField = 'stakes' | 'shows' | 'why' | 'reversible';
+type ContractField = 'stakes' | 'shows' | 'why' | 'reversible' | 'prototype';
 type ContractValue =
   | { field: 'stakes' | 'why'; value: string }
   | { field: 'shows'; value: QuestionShows }
-  | { field: 'reversible'; value: QuestionIrreversible | null };
+  | { field: 'reversible'; value: QuestionIrreversible | null }
+  | { field: 'prototype'; value: QuestionPrototype };
+
+// Option lines (`ParseQuestionBlockOptions.optionLines`): under a `- [ ]`
+// choice, `Pros:`, `Cons:` (aliases `Pro:`, `Con:`, `Trade-off:`) and
+// `Prototype:` (alias `Try:`), any case, emphasis around the label allowed.
+const OPTION_LINE_RE = /^[*_]{0,2}(pros?|cons?|trade-?offs?|prototype|try)[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.*?)\s*$/i;
+const PROTOTYPE_LINK_RE = /^\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?\s*\)\.?$/;
+const PROTOTYPE_ANGLED_RE = /^<([^>\s]+)>\.?$/;
+
+/** A prototype line's value: `[Name](target)`, `<target>`, or one bare
+ *  target (no spaces: "Try: run it twice" is prose). Null when it is none. */
+const readPrototypeValue = (raw: string): QuestionPrototype | null => {
+  const value = raw.replace(/[*_]{1,2}$/, '').trim();
+  const link = value.match(PROTOTYPE_LINK_RE);
+  if (link) return link[2] ? { target: link[2], ...(link[1].trim() ? { label: link[1].trim() } : {}) } : null;
+  const angled = value.match(PROTOTYPE_ANGLED_RE);
+  if (angled) return { target: angled[1] };
+  return /^\S+$/.test(value) ? { target: value.replace(/\.$/, '') } : null;
+};
+
+/** One option line read (`Pros:` and `Cons:` items, or a prototype), or
+ *  null when the line is not one or its value is empty or not a target. */
+export const readOptionLine = (
+  line: string,
+): { field: 'pros' | 'cons'; value: string[] } | { field: 'prototype'; value: QuestionPrototype } | null => {
+  const m = line.trim().match(OPTION_LINE_RE);
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  if (name === 'prototype' || name === 'try') {
+    const value = readPrototypeValue(m[2]);
+    return value ? { field: 'prototype', value } : null;
+  }
+  const items = m[2]
+    .replace(/[*_]{1,2}$/, '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (items.length === 0) return null;
+  return { field: name.startsWith('pro') ? 'pros' : 'cons', value: items };
+};
+
+/** A question's own `Prototype:` (or `Try:`) line at the block's indent:
+ *  one page for every option (option lines only). */
+const readSharedPrototypeLine = (line: string): ContractValue | null => {
+  const read = readOptionLine(line);
+  return read && read.field === 'prototype' ? read : null;
+};
 
 /** A contract line (`Stakes:`, `Shows:`, `Why:`, `Reversible:`) read, or
  *  null when the line is not one or its value does not fit (prose). */
 const readContractLine = (line: string): ContractValue | null => {
   const m = line.match(CONTRACT_LINE_RE);
   if (!m) return null;
-  const field = m[1].toLowerCase() as ContractField;
+  const field = m[1].toLowerCase() as Exclude<ContractField, 'prototype'>;
   const value = m[2].replace(/[*_]{1,2}$/, '').trim();
   if (!value) return null;
   if (field === 'stakes' || field === 'why') return { field, value };
@@ -820,6 +919,16 @@ export interface ParseQuestionBlockOptions {
    *  annotate pass false (approval "inbox-decision-mode": plan review shows
    *  the lines as plain text); picture choices are read either way. */
   contractLines?: boolean;
+  /** Read option lines (approval "inbox-question-tradeoffs"): `Pros:`,
+   *  `Cons:` and `Prototype:` lines indented under a `- [ ]` choice go into
+   *  that choice's `pros`, `cons` and `prototype` (the first of each wins; a
+   *  later one is description), and a `Prototype:` line at the block's own
+   *  indent is the question's shared `prototype`. Default false: each line
+   *  stays where it always went (a choice's description, or context), so
+   *  plan review, annotate and every older reader show it as text. The key,
+   *  labels and answers of `- [ ]` choices are the same either way. Only the
+   *  Plannotator Inbox passes true. */
+  optionLines?: boolean;
 }
 
 export const parseQuestionBlock = (
@@ -830,11 +939,18 @@ export const parseQuestionBlock = (
   if (!isQuestionDirectiveKind(directiveKind)) return null;
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
+  const readOptionLines = options?.optionLines === true;
   if (typeof body !== 'string' || body.length > MAX_QUESTION_BODY_CHARS) return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
   let prompt = '';
   let promptLine = -1;
+  // The text the key is hashed from when an id label came first: the label
+  // line, which builds before the label was dropped read as the prompt, so a
+  // stored question keeps its key (and its picks, answers and supersedes).
+  let keyText: string | undefined;
+  let keyTextLine = -1;
+  let keyTextContext = -1;
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
@@ -870,7 +986,7 @@ export const parseQuestionBlock = (
   let decisionFlag = false;
   let decision: QuestionDecisionLink | undefined;
   const replaces: string[] = [];
-  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null } = {};
+  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null; prototype?: QuestionPrototype } = {};
   // A code fence open anywhere in the body after the prompt: a contract line
   // inside it is code, never read.
   let bodyFence: string | null = null;
@@ -948,6 +1064,18 @@ export const parseQuestionBlock = (
       openBullet = null;
       continue;
     }
+    // The asker's own label before the prompt (`id: sd-approach`): never the
+    // prompt, but it still shows, as the first context line, and the first
+    // one stays the key's text (see `keyText`).
+    if (!prompt && ID_LABEL_RE.test(line)) {
+      if (keyText === undefined) {
+        keyText = line.trim().replace(/^#{1,6}\s+/, '');
+        keyTextLine = i;
+        keyTextContext = contextLines.length;
+      }
+      pushContext(line.trimEnd());
+      continue;
+    }
     if (!prompt) {
       // A heading marker on the prompt line (`### Which…?`) is dropped.
       prompt = line.trim().replace(/^#{1,6}\s+/, '');
@@ -963,10 +1091,13 @@ export const parseQuestionBlock = (
     const fenceBefore = bodyFence;
     trackBodyFence(line);
     const atBlockIndent = indentWidth(line) <= indentWidth(lines[promptLine] ?? '');
-    const contractLine = fenceBefore || bodyFence || continuationFence || !atBlockIndent ? null : readContractLine(line);
+    const contractLine =
+      fenceBefore || bodyFence || continuationFence || !atBlockIndent
+        ? null
+        : (readContractLine(line) ?? (readOptionLines ? readSharedPrototypeLine(line) : null));
     if (contractLine && !(contractLine.field in contract)) {
       (contract as Record<string, unknown>)[contractLine.field] = contractLine.value;
-      if (!readContractLines) pushContext(line.trim());
+      if (!readContractLines && contractLine.field !== 'prototype') pushContext(line.trim());
       lastChoice = -1;
       recommendationOpen = false;
       if (openBullet) {
@@ -1027,6 +1158,13 @@ export const parseQuestionBlock = (
       trackContinuationFence(line);
       const c = choices[lastChoice];
       const extra = line.trim();
+      // An option line (`Pros:`, `Cons:`, `Prototype:`), read once per field: never the description.
+      const optionLine = readOptionLines && !continuationFence ? readOptionLine(extra) : null;
+      if (optionLine && c[optionLine.field] === undefined) {
+        if (optionLine.field === 'prototype') c.prototype = optionLine.value;
+        else c[optionLine.field] = optionLine.value;
+        continue;
+      }
       if (c.description) c.description = `${c.description} ${extra}`;
       else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
@@ -1072,6 +1210,13 @@ export const parseQuestionBlock = (
     pushContext(line.trimEnd());
   }
 
+  // A label and nothing to ask: the label is the prompt, as before it was
+  // read, and leaves the context.
+  if (!prompt && keyText !== undefined) {
+    prompt = keyText;
+    promptLine = keyTextLine;
+    dropContext.add(keyTextContext);
+  }
   if (!prompt) return null;
 
   // A pick question written with plain bullets: the bullets are the choices.
@@ -1191,13 +1336,14 @@ export const parseQuestionBlock = (
     ...(recommendation ? { recommendation } : {}),
     ...(suggestedText ? { suggestedText } : {}),
     ...(markedAt.length > 0 ? { recommendedMarker: true as const } : {}),
-    key: questionKey(kind, prompt),
+    key: questionKey(kind, keyText ?? prompt),
     ...(!readDecisionLines ? {} : decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
     ...(replaces.length > 0 ? { replaces } : {}),
     ...(readContractLines && contract.stakes ? { stakes: contract.stakes } : {}),
     ...(readContractLines && contract.shows ? { shows: contract.shows } : {}),
     ...(readContractLines && contract.why ? { why: contract.why } : {}),
     ...(readContractLines && contract.reversible ? { reversible: contract.reversible } : {}),
+    ...(readOptionLines && contract.prototype ? { prototype: contract.prototype } : {}),
   };
 };
 

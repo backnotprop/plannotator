@@ -133,6 +133,22 @@ test("an Inbox that starts on an existing store resolves its projects' remotes; 
   expect(await settledRepo(second, threadId)).toEqual({ display: "group/sub/platform", host: "gitlab.example.com" });
 });
 
+test("the projects list carries a project's origin host once resolved; a folder without a repo carries none", async () => {
+  const root = tempRoot();
+  const widgets = gitProject(root, "widgets", "git@gitlab.example.com:team/widgets.git");
+  const notes = join(root, "notes");
+  mkdirSync(notes);
+  const server = await startInboxServer({ dataDir: join(root, "data") });
+  servers.push(server);
+  const widgetsThread = await send(server, widgets, "See #7.");
+  await send(server, notes, "Notes from the meeting.");
+  expect(await settledRepo(server, widgetsThread)).toEqual({ display: "team/widgets", host: "gitlab.example.com" });
+  const response = await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`);
+  const { projects } = (await response.json()) as { projects: { name: string; repo_host?: string | null }[] };
+  expect(projects.find((p) => p.name === "widgets")?.repo_host).toBe("gitlab.example.com");
+  expect(projects.find((p) => p.name === "notes")).not.toHaveProperty("repo_host");
+});
+
 test("peek answers what the cache holds, however old, and never reads", async () => {
   let clock = 0;
   const reads: string[] = [];

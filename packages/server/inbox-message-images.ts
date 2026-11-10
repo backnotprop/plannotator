@@ -20,9 +20,12 @@
  */
 
 import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
+import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
+import { syncSection } from "./inbox-perf";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_MESSAGE_IMAGE_ROUTE = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/image$/;
@@ -63,11 +66,21 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     // An agent's images come from anywhere; a person's own message (a phone, the relay, a tailnet login) from its project.
     anywhere: message.author.kind === "agent",
   });
-  return inboxImageResponse(req, result);
+  return inboxImageResponse(req, result, inboxImageWidth(url));
 }
 
-/** Safe image bytes and cache validators shared by message bodies and Markdown attachments. */
-export function inboxImageResponse(req: Request, result: InboxMessageImageResult): Response {
+/** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
+export function contentDisposition(type: "inline" | "attachment", name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * Safe image bytes and cache validators shared by message bodies and Markdown attachments. `to`: the width the
+ * window draws it at (`?w=`), served as a smaller copy when the picture is wider (inbox-image-scale.ts).
+ */
+export async function inboxImageResponse(req: Request, result: InboxMessageImageResult, to: number | null = null): Promise<Response> {
   if (!result.ok) return refuse(result.status, result.code, result.error);
   // The validator is the SHA-256 of the bytes served (read once, at most the
   // cap), so it changes whenever the file does. `no-cache`: the file lives on
@@ -78,12 +91,24 @@ export function inboxImageResponse(req: Request, result: InboxMessageImageResult
     ...GUARD_HEADERS,
     "Content-Type": result.contentType,
     "Cache-Control": "private, no-cache",
+    // Shown in place, under the name the body gave it: a browser's Save Image As saves "empty-cart.png", not "image.png".
+    "Content-Disposition": contentDisposition("inline", basename(result.named)),
     ETag: etag,
     // As code review's image route: the header's size, when it parses.
     ...(result.width !== undefined && result.height !== undefined
       ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
       : {}),
   };
+  if (inboxImageScales(result.contentType, result.width, to, result.bytes.byteLength)) {
+    const scaledTag = scaledEtag(etag, to);
+    const scaledHeaders = { ...headers, ETag: scaledTag };
+    if (ifNoneMatchHits(req.headers.get("if-none-match"), scaledTag)) return new Response(null, { status: 304, headers: scaledHeaders });
+    const scaled = await scaleInboxImage(new Uint8Array(result.bytes), result.contentType, to, etag);
+    if (scaled) {
+      const sized = { ...scaledHeaders, "Content-Type": scaled.contentType, "X-Image-Width": String(scaled.width), "X-Image-Height": String(scaled.height) };
+      return new Response(req.method === "HEAD" ? null : scaled.bytes, { headers: { ...sized, "Content-Length": String(scaled.bytes.byteLength) } });
+    }
+  }
   if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
   return new Response(req.method === "HEAD" ? null : new Uint8Array(result.bytes), {
     headers: { ...headers, "Content-Length": String(result.bytes.byteLength) },
@@ -146,6 +171,11 @@ export function createInboxImageCapture(
   const pauseMs = options.pauseMs ?? INBOX_IMAGE_CAPTURE_PAUSE_MS;
   const retryMs = options.retryMs ?? INBOX_IMAGE_CAPTURE_RETRY_MS;
   const queue = new Set<string>();
+  /**
+   * Threads whose messages had nothing left to capture, at the thread's version then (`store.threadVersion`): a
+   * read of one that has not changed since starts no pass (its gaps are still none).
+   */
+  const settled = new Map<string, string>();
   /** Per message (least recently tried first), when each costly refusal was last tried. */
   const attempts = new Map<string, Map<string, number>>();
   let running: Promise<void> | null = null;
@@ -161,7 +191,15 @@ export function createInboxImageCapture(
   const lastTried = (messageId: string, ref: string) => attempts.get(messageId)?.get(ref) ?? -Infinity;
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
-    for (const { message, refs } of store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder)) {
+    const version = store.threadVersion(threadId);
+    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
+    if (gaps.length === 0) {
+      settled.delete(threadId);
+      settled.set(threadId, version);
+      while (settled.size > ATTEMPTS_MAX_MESSAGES) settled.delete(settled.keys().next().value!);
+      return;
+    }
+    for (const { message, refs } of gaps) {
       if (stopped) return;
       const now = Date.now();
       const due = refs.filter((ref) => now - lastTried(message.id, ref) >= retryMs).slice(0, MESSAGE_BATCH);
@@ -192,7 +230,7 @@ export function createInboxImageCapture(
           await captured.discard();
           continue;
         }
-        store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body));
+        syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body)));
         await captured.commit();
         budget.bytes += captured.bytes;
         if (budget.bytes >= passBytes) {
@@ -217,6 +255,7 @@ export function createInboxImageCapture(
   return {
     schedule(threadId) {
       if (stopped) return;
+      if (settled.get(threadId) === store.threadVersion(threadId)) return;
       queue.add(threadId);
       if (running) return;
       running = (async () => {

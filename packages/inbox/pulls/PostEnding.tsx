@@ -20,8 +20,8 @@ import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary'
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { inboxApi } from '../api';
 import { RowAgentTiles } from '../components/RowAgents';
+import { Tip } from '../components/Tip';
 import { Icon } from '../icons';
-import { usePhone } from '../phone';
 import type { PlatformAction } from '../guide/platform-post-types';
 import { platformRules, postablePull, postedSignature, postedWords, resolvePlatformDecisionAction } from './postRules';
 
@@ -93,10 +93,11 @@ export interface PostEndingProps {
   headSha?: string | null;
   /** The server refused the commit posted to (`pull_moved`; on GitHub `pull_commit_gone`, a force-push): the host reads the PR again. */
   onMoved?: () => void;
+  /** Why this person's review has no agent to go to: said on the forge's mark. */
+  note?: string;
 }
 
-export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved }: PostEndingProps) {
-  const phone = usePhone();
+export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved, note }: PostEndingProps) {
   const target = useMemo(() => {
     const listed = postablePull(pull);
     if (!listed || headSha === undefined) return listed;
@@ -123,8 +124,9 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
     setOpen(mode);
   }, []);
   // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
-  // comment already posted on this PR is never posted again, at any head (Start review keeps its comments after a
-  // post); a follow-up carries only what is new (or a main comment).
+  // comment already posted on this PR is never posted again, at any head (a guard for a host whose comments outlive a
+  // post, or come back before it drops them: Start review drops what went); a follow-up carries only what is new (or a
+  // main comment).
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
   const sameKey = !!done && !!target && done.key === target.key;
   const sameHead = sameKey && done!.head === target!.head_sha;
@@ -177,18 +179,30 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
     [run],
   );
 
-  if (!target || !rules || !spec) return agent ? <>{agent.control}</> : null;
+  if (!target || !rules || !spec)
+    return agent ? (
+      <>
+        <Tip content={`Send to ${agent.name}`}>
+          <span className="ib-rv-dest-lone" role="img" aria-label={`Your verdict goes to ${agent.name}`} data-review-going="agent">
+            <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />
+          </span>
+        </Tip>
+        {agent.control}
+      </>
+    ) : null;
 
+  const forgeMark = target.platform === 'github' ? <Icon name="github" size={15} className="ib-rv-dest-mark" /> : <PRPlatformIcon platform={target.platform} className="ib-rv-dest-mark" />;
   const choice = agent && (
     <div className="ib-seg ib-seg-sm ib-rv-dest" role="radiogroup" aria-label="Where your review goes" data-review-destination={destination}>
       {(['forge', 'agent'] as const).map((value) => {
         const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : `Send to ${agent.name}`;
         return (
-          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-review-destination-choice={value} title={words}>
-            <input type="radio" name={name} checked={destination === value} onChange={() => choose(value)} aria-label={words} />
-            {value === 'forge' ? <PRPlatformIcon platform={target.platform} className="ib-rv-dest-mark" /> : <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />}
-            {!phone && <span aria-hidden="true">{value === 'forge' ? rules.label : agent.name}</span>}
-          </label>
+          <Tip key={value} content={words}>
+            <label className="ib-seg-o" data-on={destination === value ? '' : undefined} data-review-destination-choice={value}>
+              <input type="radio" name={name} checked={destination === value} onChange={() => choose(value)} aria-label={words} />
+              {value === 'forge' ? forgeMark : <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />}
+            </label>
+          </Tip>
         );
       })}
     </div>
@@ -197,6 +211,13 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
   return (
     <>
       {choice}
+      {!agent && (
+        <Tip content={`${isDone ? 'Posted' : 'Posts'} to the ${rules.mrLabel} on ${rules.label}${note ? `. ${note}` : ''}`}>
+          <span className="ib-rv-dest-lone" role="img" aria-label={`Your review goes to the ${rules.mrLabel} on ${rules.label}`} data-review-going="forge">
+            {forgeMark}
+          </span>
+        </Tip>
+      )}
       {destination === 'agent' && agent ? (
         agent.control
       ) : (

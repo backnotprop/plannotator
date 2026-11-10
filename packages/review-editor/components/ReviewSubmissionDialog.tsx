@@ -96,6 +96,8 @@ interface ReviewSubmissionDialogProps {
   recoveryPersistsRefresh: boolean;
   mrLabel: string;
   platformLabel: string;
+  /** The PR this goes on, when no comment target names it (the Inbox's Post). */
+  postingTo?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +140,10 @@ function buildOutsideDiffSection(annotations: CodeAnnotation[], permalink?: Revi
   const entries = annotations
     .filter((a) => a.outsideDiff && (a.scope ?? 'line') === 'line' && (a.text || a.suggestedCode))
     .map((a) => {
-      const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
-      const link = permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
+      // The link opens the head commit: an old side's line number is not that line there, so it goes unlinked and says its side.
+      const oldSide = a.side === 'old';
+      const lines = `${a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`}${oldSide ? ', old side' : ''}`;
+      const link = oldSide ? undefined : permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
       const where = link ? `[${a.filePath} (${lines})](${link})` : `${a.filePath} (${lines})`;
       const code = a.anchorText ?? a.originalCode;
       // Capped (GitHub refuses a review body over 65,536 characters); the
@@ -477,6 +481,7 @@ export function ReviewSubmissionDialog({
   recoveryPersistsRefresh,
   mrLabel,
   platformLabel,
+  postingTo,
 }: ReviewSubmissionDialogProps) {
   const isCompactTouchLayout = useCompactTouchLayout();
   const generalCommentRef = useRef<HTMLTextAreaElement>(null);
@@ -592,6 +597,12 @@ export function ReviewSubmissionDialog({
           </div>
         )}
         {!bodyLocked && <div className="mb-3" />}
+
+        {postingTo && !hasTargets && (
+          <p className="mb-3 text-sm text-muted-foreground" data-review-posting-to="">
+            Posting to <span className="font-medium text-foreground">{postingTo}</span>
+          </p>
+        )}
 
         {/* Targets */}
         {submission.targets.length > 0 && (

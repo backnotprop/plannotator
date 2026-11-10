@@ -56,6 +56,16 @@ describe('what may enter the debug log', () => {
     expect(cleanWindowRecord({ t: 1, ev: 'send_press', thread: 'a-0123abcd-2' })).toEqual({ t: 1, side: 'window', ev: 'send_press' });
   });
 
+  test("a crash breadcrumb keeps the dead page's id, the ids it had open and its memory in MB; words are dropped", () => {
+    const FILE = 'att_01J9Z3V5K8Q2W4E6R7T8Y9M0NP';
+    const gone = { t: 1, ev: 'renderer_gone', last_page: PAGE, ms: 4200, thread: MSG, file: FILE, view: 'full', heap: 912, imgs: 190, discarded: false };
+    expect(cleanWindowRecord(gone)).toEqual({ ...gone, side: 'window' });
+    expect(cleanWindowRecord({ t: 1, ev: 'mem', heap: 455.4, heap_limit: 4295, imgs: 190, nodes: 19499 })).toEqual({ t: 1, side: 'window', ev: 'mem', heap: 455, heap_limit: 4295, imgs: 190, nodes: 19499 });
+    expect(cleanWindowRecord({ t: 1, ev: 'slow_ui', what: 'record-refresh', ms: 208, heap: 600 })).toEqual({ t: 1, side: 'window', ev: 'slow_ui', what: 'record-refresh', ms: 208, heap: 600 });
+    const words = { last_page: 'pmy-private-note', file: 'design/salaries.md', view: 'the layoffs', heap: 'big', imgs: -1, nodes: 'many', discarded: 'yes' };
+    expect(cleanWindowRecord({ t: 1, ev: 'renderer_gone', ...words })).toEqual({ t: 1, side: 'window', ev: 'renderer_gone' });
+  });
+
   test('voice lines keep their fixed words and timings; dictated words, a transcript or a free value are dropped', () => {
     expect(cleanWindowRecord({ t: 1, ev: 'voice_press', input: 'press', phase: 'opening', mode: 'tap' })).toEqual({ t: 1, side: 'window', ev: 'voice_press', input: 'press', phase: 'opening', mode: 'tap' });
     expect(cleanWindowRecord({ t: 1, ev: 'voice_phase', phase: 'idle', prompting: false, slow: true, trouble: 'micfailed' })).toEqual({ t: 1, side: 'window', ev: 'voice_phase', phase: 'idle', prompting: false, slow: true, trouble: 'micfailed' });
