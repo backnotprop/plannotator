@@ -3002,3 +3002,9 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
+
+## `useSkillReferenceAutocomplete` `commands` / `onCommand` (unreleased; additive, opt-in, no core change)
+
+- **`commands?: readonly SkillCatalogEntry[]`** and **`onCommand?: (command, text) => void`**. A host's own rows in the `/` list that are not skills (the Inbox's `/side`). They are listed after the catalog's leading `plannotator` rows; a catalog skill with the same name wins; `$` never lists them; the list opens for them even with an empty catalog. Picking one inserts nothing: the typed trigger leaves the text through `setText`, focus is left to the host, and `onCommand` gets the row and the text that is left. A command is never painted (`referenceTokens`) or counted (`humanOnlyReferences`), and never reaches an export. Absent: unchanged.
+
+Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.

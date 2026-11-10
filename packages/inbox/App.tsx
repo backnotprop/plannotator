@@ -6967,6 +6967,7 @@ function Inbox() {
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
             onSide={ask.side}
+            onSideWords={ask.sideWords}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
             replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}

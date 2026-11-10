@@ -75,8 +75,17 @@ export function useSkillReferenceAutocomplete(options: {
    * Absent: every entry, as before. Keep its identity stable across renders.
    */
   catalogFilter?: (entry: SkillCatalogEntry) => boolean;
+  /**
+   * A host's own commands (opt-in; the Inbox's `/side`): rows the `/` list offers that are not skills. They are
+   * listed after the catalog's leading host-served rows (root `plannotator`), a skill with the same name wins, and
+   * `$` never lists them. Picking one inserts nothing: the typed trigger leaves the text (`setText`) and `onCommand`
+   * gets the row and the words that are left. A command typed and not picked is plain text: never painted, never a
+   * reference. Absent: none, as before. Keep its identity stable across renders.
+   */
+  commands?: readonly SkillCatalogEntry[];
+  onCommand?: (command: SkillCatalogEntry, text: string) => void;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
   const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
@@ -105,13 +114,22 @@ export function useSkillReferenceAutocomplete(options: {
   }, [enabled, reloads]);
 
   const trigger: SkillTriggerContext | null = useMemo(() => {
-    if (!enabled || catalog.length === 0 || caret === null) return null;
+    if (!enabled || (catalog.length === 0 && !commands?.length) || caret === null) return null;
     return findSkillTrigger(text, caret);
-  }, [enabled, catalog, text, caret]);
+  }, [enabled, catalog, commands, text, caret]);
+
+  // What a `/` lists: the catalog, with the host's commands after its leading host-served rows.
+  const slashList = useMemo(() => {
+    const offered = commands?.filter((command) => !catalog.some((skill) => skill.name === command.name)) ?? [];
+    if (offered.length === 0) return catalog;
+    const lead = catalog.findIndex((skill) => skill.root !== 'plannotator');
+    const at = lead === -1 ? catalog.length : lead;
+    return [...catalog.slice(0, at), ...offered, ...catalog.slice(at)];
+  }, [catalog, commands]);
 
   const items = useMemo(
-    () => (trigger ? filterSkillCatalog(catalog, trigger.query) : []),
-    [catalog, trigger],
+    () => (trigger ? filterSkillCatalog(trigger.trigger === '/' ? slashList : catalog, trigger.query) : []),
+    [catalog, slashList, trigger],
   );
 
   const open = trigger !== null && items.length > 0 && trigger.start !== dismissedStart;
@@ -164,6 +182,16 @@ export function useSkillReferenceAutocomplete(options: {
       if (!trigger || !el) return;
       const item = items[index];
       if (!item) return;
+      if (commands?.includes(item)) {
+        // A command: the typed trigger goes, nothing is inserted, and focus is the host's to place.
+        const rest = text.slice(0, trigger.start) + text.slice(el.selectionStart);
+        setText(rest);
+        setCaret(trigger.start);
+        setActiveIndex(null);
+        setDismissedStart(trigger.start);
+        onCommand?.(item, rest);
+        return;
+      }
       const result = insertSkillReference(text, el.selectionStart, trigger, item);
       setText(result.text);
       setCaret(result.caret);
@@ -189,7 +217,7 @@ export function useSkillReferenceAutocomplete(options: {
         el.setSelectionRange(result.caret, result.caret);
       }, 0);
     },
-    [items, setText, text, textareaRef, trigger],
+    [commands, items, onCommand, setText, text, textareaRef, trigger],
   );
 
   const onKeyDown = useCallback(

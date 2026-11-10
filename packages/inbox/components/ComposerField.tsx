@@ -74,6 +74,18 @@ export interface InboxComposerTags {
   note?: (props: { id: string; tagged: readonly TagOption[]; focusField: () => void }) => React.ReactNode;
 }
 
+/**
+ * A command of the Inbox's own in the `/` list (the reply box's `/side`): a window action, not a skill. Picking it
+ * sends nothing to the agent: the typed `/…` leaves the words and `run` gets what is left.
+ */
+export interface ComposerCommand {
+  /** The name typed after `/`. */
+  name: string;
+  /** The list's one line. */
+  description: string;
+  run: (words: string) => void;
+}
+
 export interface InboxComposerFieldProps {
   value: string;
   onChange: (value: string) => void;
@@ -98,6 +110,8 @@ export interface InboxComposerFieldProps {
   voiceNoteGlide?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
+  /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
+  commands?: readonly ComposerCommand[];
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -119,6 +133,7 @@ export function InboxComposerField({
   voice,
   voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
+  commands,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -136,6 +151,12 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
+  const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
+    () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
+    [commands],
+  );
+  const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
     setText: onChange,
@@ -143,6 +164,8 @@ export function InboxComposerField({
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
     catalogFilter: skillFilter,
+    commands: commandRows,
+    onCommand: runCommand,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
