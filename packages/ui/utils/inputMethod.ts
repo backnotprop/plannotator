@@ -11,11 +11,18 @@ const DEFAULT_METHOD: InputMethod = 'drag';
  */
 const DEFAULT_HTML_METHOD: InputMethod = 'pinpoint';
 
+/**
+ * Whether the input-method switch offers Word (`AnnotationToolstrip`'s
+ * `offerWordInputMethod` default). Off: the method exists and a stored `word`
+ * is honoured, but no control chooses it.
+ */
+export const WORD_INPUT_METHOD_OFFERED = false;
+
 /** Which document surface the input method applies to. */
 export type InputMethodSurface = 'markdown' | 'html';
 
 function parseInputMethod(value: unknown): InputMethod | null {
-  return value === 'drag' || value === 'pinpoint' ? value : null;
+  return value === 'drag' || value === 'pinpoint' || value === 'word' ? value : null;
 }
 
 /**
@@ -56,7 +63,9 @@ export function resolveInputMethod(
   now: number = Date.now(),
 ): InputMethod {
   if (surface === 'html') {
-    return parseHtmlRecord(savedHtml, now) ?? DEFAULT_HTML_METHOD;
+    // Raw HTML has no Word method: a stored one is Select there.
+    const html = parseHtmlRecord(savedHtml, now);
+    return html === 'word' ? 'drag' : html ?? DEFAULT_HTML_METHOD;
   }
   return parseInputMethod(savedShared) ?? DEFAULT_METHOD;
 }
