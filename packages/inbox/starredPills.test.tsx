@@ -28,6 +28,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { Sidebar } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { movePin } = await import('./pins');
+const { PHONE_QUERY } = await import('./phone');
 const { STARRED_ABOVE_COOKIE, STARRED_ABOVE_LABEL, fitPills, pillName, resetStarredAboveForTests } = await import('./starredPills');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
@@ -274,6 +275,23 @@ describe('the choice', () => {
     act(() => el.querySelector<HTMLButtonElement>('[data-tidy-menu]')!.click());
     await settle();
     expect(document.querySelector('[data-starred-above-option]')!.getAttribute('aria-checked')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)("a phone's navigation sheet follows the choice too: no Starred section in it while the pills are on", () => {
+    const saved = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ media: query, matches: query === PHONE_QUERY, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    restore.push(() => void (window.matchMedia = saved));
+    stored.set(STARRED_ABOVE_COOKIE, '1');
+    const on = draw({ phone: true });
+    expect(on.el.querySelector('[data-pinned-section]')).toBeNull();
+    expect(on.el.querySelector('[data-sidebar-section="pinned"]')).toBeNull();
+    expect(pillIds(on.el)).toEqual(STARS.map((r) => r.thread_id));
+    unmount();
+    stored.delete(STARRED_ABOVE_COOKIE);
+    resetStarredAboveForTests();
+    const off = draw({ phone: true });
+    expect(sidebarStars(off.el)).toEqual(STARS.map((r) => r.thread_id));
+    expect(off.el.querySelector('[data-starred-pills]')).toBeNull();
   });
 
   test.skipIf(!hasDom)("the tour ignores this browser's choice: its sidebar keeps the section and its list has no pills and no item", async () => {
