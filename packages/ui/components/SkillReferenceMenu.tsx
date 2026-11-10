@@ -34,6 +34,12 @@ interface SkillReferenceMenuProps {
    * Absent: every row alike, as before.
    */
   groupHostRows?: boolean;
+  /**
+   * A host's own glyph for a row, in place of the cube (opt-in; the Inbox gives each of its built-ins one). It must
+   * be the cube's frame (16 px, `shrink-0`, decorative: `aria-hidden`), so no row changes size. Null or undefined
+   * for a row keeps the cube. Absent: the cube on every row, as before.
+   */
+  rowIcon?: (item: SkillCatalogEntry) => React.ReactNode;
 }
 
 /** Vertical gap between the composer wrapper and the menu (mb-1.5 / mt-1.5 = 6px). */
@@ -115,6 +121,7 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   prefer,
   maxListHeight,
   groupHostRows = false,
+  rowIcon,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -227,7 +234,7 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
               index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'
             }`}
           >
-            <SkillIcon className={hostRow ? 'text-primary' : undefined} />
+            {rowIcon?.(item) ?? <SkillIcon className={hostRow ? 'text-primary' : undefined} />}
             {/* data-skill-item-part: a host's styling hook (the Inbox lays a row out in two lines on a phone). */}
             <span data-skill-item-part="name" className="shrink-0 font-semibold text-foreground">{item.name}</span>
             <span data-skill-item-part="description" className="min-w-0 flex-1 truncate text-muted-foreground">

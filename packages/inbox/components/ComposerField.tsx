@@ -46,6 +46,7 @@ import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
+import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
@@ -249,6 +250,7 @@ export function InboxComposerField({
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
               groupHostRows
+              rowIcon={builtinSkillIcon}
               boundary={boundary}
               prefer={caretMenu?.prefer ?? 'above'}
               maxListHeight={maxListHeight}
