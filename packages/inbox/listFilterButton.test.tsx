@@ -24,7 +24,7 @@ const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { ListFilterEmpty, clearedFrom } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, setListFilterPullsForTests, useListFilter } = await import('./listFilter');
+const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, useListFilter } = await import('./listFilter');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   setSystemTime();
   if (hasDom) act(() => root?.unmount());
-  setListFilterPullsForTests(null);
+  list = LIST;
   resetStorageBackend();
   resetListFilterForTests();
   if (!hasDom) return;
@@ -92,11 +92,14 @@ const LIST = sections({
   new: [row('n-web', 'web', 3, 'codex', 'new', 'open'), row('n-docs-old', 'docs', 24 * 40, 'claude-code', 'new')],
 });
 
+/** The list the harness draws: LIST unless a test swaps it. */
+let list = LIST;
+
 /** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
 function Harness({ scoped }: { scoped: boolean }) {
   const [picks, setPicks] = useListFilter();
   const applied = appliedFilter(picks, scoped);
-  const base = scoped ? LIST.map((s) => ({ ...s, threads: s.threads.filter((r) => r.project.id === 'prj_web') })) : LIST;
+  const base = scoped ? list.map((s) => ({ ...s, threads: s.threads.filter((r) => r.project.id === 'prj_web') })) : list;
   const shown = filterListSections(base, applied, Date.now());
   const none = pickCount(applied) > 0 && shown.every((s) => s.threads.length === 0);
   return (
@@ -272,7 +275,6 @@ describe.skipIf(!hasDom)('the funnel', () => {
   });
 
   test('the menu: Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {
-    setListFilterPullsForTests(true);
     const el = render();
     await press(funnel());
     const groups = [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-group], [data-list-filter-menu] [data-list-filter-project]')].map(
@@ -288,11 +290,20 @@ describe.skipIf(!hasDom)('the funnel', () => {
     expect(badge()).toBe('2');
   });
 
-  test('with the Pull request group off (until PR linking lands) the menu has no such group', async () => {
+  test('no thread in the list has a PR: no Pull request group, until a remembered pick of it needs unticking', async () => {
+    list = LIST.map((s) => ({ ...s, threads: s.threads.map((r) => ({ ...r, pulls: undefined })) }));
     render();
     await press(funnel());
     expect($('[data-list-filter-group="pulls"]')).toBeNull();
     expect($('[data-list-filter-pull]')).toBeNull();
+    stored.set(LIST_FILTER_COOKIE, JSON.stringify({ projects: [], updated: null, agents: [], pulls: ['open'] }));
+    const el = rerender();
+    expect(badge()).toBe('1');
+    expect(el.textContent).toContain('No threads match');
+    await press(funnel());
+    await click($('[data-list-filter-pull="open"]')!);
+    expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-web', 'n-docs-old']);
+    expect(badge()).toBeNull();
   });
 
   test('a reload keeps the picks (this browser\'s cookie)', async () => {
