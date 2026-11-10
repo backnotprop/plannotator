@@ -574,6 +574,7 @@ packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
 packages/inbox/tabIconChoice.test.tsx
+packages/inbox/themeChooser.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
@@ -669,7 +670,6 @@ packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
-packages/inbox/themeChooser.test.tsx
 packages/inbox/agents/faceFan.test.tsx
 packages/inbox/starredPills.test.tsx
 packages/inbox/phoneSidebarSheet.test.tsx
