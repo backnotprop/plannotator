@@ -23,7 +23,6 @@ import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
-import { getPressAndDrag, setPressAndDrag } from './utils/pressAndDragPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
@@ -205,23 +204,6 @@ export interface PlannotatorUIConfig {
    */
   pageMarks?: boolean;
   /**
-   * web-highlighter's `pressAndDrag`: a text selection released outside the
-   * document (over a side panel, a toolbar, outside the window) still becomes
-   * a highlight, and `useAnnotationHighlighter` checks the selection at a
-   * release anywhere on the page, not only inside the document
-   * (`utils/pressAndDragPolicy`). Read when a document's highlighter is made,
-   * so set it before documents mount. It needs a web-highlighter that has the
-   * option; with 0.8.2 nothing changes. Default: false, every selection
-   * exactly as before. Plannotator's own apps do not pass it.
-   */
-  pressAndDrag?: boolean;
-  /**
-   * web-highlighter's `pressAndDragThreshold`: how far, in CSS px, a press
-   * must move to count as a drag. Used only with `pressAndDrag`. Default: the
-   * library's own (4).
-   */
-  pressAndDragThreshold?: number;
-  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
@@ -278,12 +260,6 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
-  if (config.pressAndDrag !== undefined || config.pressAndDragThreshold !== undefined) {
-    setPressAndDrag(
-      config.pressAndDrag ?? getPressAndDrag().on,
-      config.pressAndDragThreshold ?? getPressAndDrag().threshold,
-    );
-  }
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
