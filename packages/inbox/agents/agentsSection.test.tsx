@@ -280,6 +280,20 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
+test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents, both rows opening it", () => {
+  // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
+  // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
+  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
+  const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
+  const opened: string[] = [];
+  mount(<Sidebar {...sidebarProps({ pins: [starred], agentRows: [starred, threadRow('thr_other', 'ses_s2', 'Only running')], onOpenPin: (row) => opened.push(`pin:${row.thread_id}`), onOpenAgentThread: (id) => opened.push(`agent:${id}`) })} />);
+  expect(document.querySelectorAll('[data-pinned-row="thr_star"]')).toHaveLength(1);
+  expect(names(surface()!)).toEqual(['Starred and running', 'Only running']);
+  act(() => document.querySelector<HTMLElement>('[data-pinned-row="thr_star"]')!.click());
+  act(() => surface()!.querySelector<HTMLElement>('[data-sidebar-agent="ses_s1"] .ib-proj')!.click());
+  expect(opened).toEqual(['pin:thr_star', 'agent:thr_star']);
+});
+
 test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, no Add buttons; only a press on the heading opens it', async () => {
   // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
   const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
