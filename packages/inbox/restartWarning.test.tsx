@@ -324,6 +324,23 @@ test.skipIf(!hasDom)('the installed plugin behind this Inbox (0.28.24 under Inbo
     host?.remove();
     await openThread();
     await until(() => !!note()?.querySelector('[data-reload-lead="update_plugin"]'), 'the update lead under the reply');
+    // The sidebar's "Reload Claude Code N" counts it too (once the plugin is not updated by itself, nothing else in view
+    // says so), marked as needing the update first, and opens the Settings → Agents above.
+    act(() => root?.unmount());
+    host?.remove();
+    await renderApp();
+    await until(() => !!document.querySelector('[data-restart-sidebar]'), 'the sidebar row, plugin behind');
+    const behind = document.querySelector<HTMLButtonElement>('[data-restart-sidebar]')!;
+    expect(Number(behind.getAttribute('data-restart-update'))).toBeGreaterThanOrEqual(1);
+    await act(async () => behind.click());
+    await until(() => !!document.querySelector('[data-agent-sessions="claude-code"] [data-reload-lead="update_plugin"]'), 'the update lead from the row');
+    // The person updates the plugin: the row stays (a /reload-plugins is still due), without the update step.
+    act(() => root?.unmount());
+    host?.remove();
+    installedPlugin('0.28.25');
+    await settle(2_200);
+    await renderApp();
+    await until(() => !!document.querySelector('[data-restart-sidebar]') && !document.querySelector('[data-restart-update]'), 'the row, a reload alone');
   } finally {
     installedPlugin('0.28.25');
     // The Inbox re-reads the registry at most every 2 s; let the next test see 0.28.25 again.

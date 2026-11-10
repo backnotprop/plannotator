@@ -2765,13 +2765,19 @@ export interface InboxSessionOutdated {
 }
 
 /**
- * The live sessions a reload alone brings up to date, per runtime: the
- * sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
+ * The live sessions a reload brings up to date (for Claude Code, also after
+ * a plugin update: `update_first`), per runtime: the sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
  * runtime has some). Additive beside `restart_claude_code`.
  */
 export interface InboxRestartAgents {
   total: number;
   runtimes: Partial<Record<InboxReloadRuntime, number>>;
+  /**
+   * Of the Claude Code ones, those whose plugin on disk is itself behind this
+   * Inbox (`update_plugin`): the plugin update comes before `/reload-plugins`.
+   * Additive; absent when none.
+   */
+  update_first?: number;
 }
 
 /** One open session as Settings → Agents lists it. */

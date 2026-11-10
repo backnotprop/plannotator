@@ -992,13 +992,15 @@ function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (
  * "Reload Claude Code N" (owner approval "restart-warning"), generalized to
  * every runtime (owner approval "reload-hosts"): the sessions still on the
  * Plannotator from before an update. One runtime names itself ("Reload Pi",
- * "Restart Oh My Pi"); more than one reads "Reload agents". A real button
+ * "Restart Oh My Pi"); more than one reads "Reload agents". Claude Code
+ * sessions whose plugin on disk is behind count too (`update_first`): the
+ * Settings → Agents it opens leads with the update command. A real button
  * named by its words and count; what it does is in its description. Opens
  * Settings → Agents, which lists them.
  */
 function RestartSessionsRow({ agents, onOpen }: { agents: InboxRestartAgents; onOpen: () => void }) {
   return (
-    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} onClick={onOpen}>
+    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} data-restart-update={agents.update_first || undefined} onClick={onOpen}>
       <Icon name="refresh" />
       <span className="ib-rw-label">{restartAgentsLabel(agents)}</span>
       <span className="ib-n">{formatCount(agents.total)}</span>
