@@ -7,6 +7,7 @@ import type { DiagramTheme } from '../utils/diagram-render';
 import { diagramShadowAmount } from '../utils/diagramShadow';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
@@ -60,6 +61,38 @@ function inlineHeight(state: DiagramRenderState | null): string {
   const px = Math.round(size.height * (NOMINAL_WIDTH_PX / size.width)) + 48;
   return `min(65vh, ${Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, px))}px)`;
 }
+
+const ICON_BUTTON = 'p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground';
+
+/** Copies the fence's text in one press, from either view, with a brief check mark. */
+const CopySourceButton: React.FC<{ source: string }> = ({ source }) => {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const label = copied ? 'Copied' : 'Copy source';
+  return (
+    <button
+      type="button"
+      onClick={() => void copyTextToClipboard(source).then((ok) => ok && setCopied(true))}
+      className={ICON_BUTTON}
+      title={label}
+      aria-label="Copy source"
+    >
+      {copied ? (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+};
 
 function newAnnotationId(): string {
   const c = globalThis.crypto;
@@ -370,10 +403,11 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
         {svgReady && !showSource && (
           <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+            <CopySourceButton source={block.content} />
             <button
               type="button"
               onClick={() => setShowSource(true)}
-              className="p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
+              className={ICON_BUTTON}
               title="Show source"
               aria-label="Show source"
             >
@@ -384,7 +418,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <button
               type="button"
               onClick={() => setIsExpanded(true)}
-              className="p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
+              className={ICON_BUTTON}
               title="Expand diagram"
               aria-label="Expand diagram"
               data-diagram-expand=""
@@ -397,17 +431,20 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
         )}
         {showSource ? (
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowSource(false)}
-              className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="Show diagram"
-              aria-label="Show diagram"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </button>
+            <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1">
+              <CopySourceButton source={block.content} />
+              <button
+                type="button"
+                onClick={() => setShowSource(false)}
+                className={ICON_BUTTON}
+                title="Show diagram"
+                aria-label="Show diagram"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
             <DiagramInlineSource block={block} kind={kind} />
           </div>
         ) : (
