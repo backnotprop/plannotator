@@ -2,7 +2,7 @@
    the animated agent marks (approval "inbox-agent-icon-motion"; motion.ts). Theme tokens only. */
 
 /* ---------- the section: straight on the sidebar's ground, like Projects, with no panel behind it (the owner,
-   2026-11-09: "I like it without background"). Closed, its heading alone. ---------- */
+   2026-11-09: "I like it without background"). Closed, its heading alone and nothing under it. ---------- */
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
 .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
 /* Add agent and Add machine: the heading's quiet icon buttons, always shown while the section is open (not only on
@@ -14,7 +14,6 @@
 .pn-inbox .ib-agents-body { margin-top: 2px; }
 .pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
-.pn-inbox .ib-agents-body[data-closed] .ib-agents-group + .ib-agents-group { margin-top: 0; }
 
 /* A machine: a small quiet grey caption, flush left, no icon. Still the machine's filter (its old Machines row). */
 .pn-inbox .ib-agents-cap .ib-proj { height: 30px; padding-left: 9px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
@@ -24,9 +23,9 @@
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .ib-proj { padding-left: 9px; }
 .pn-inbox .ib-sbagent .ib-proj .ib-name { min-width: 0; }
 /* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
-   section with no row left, and the next heading 2 px under it while it is closed with no row left. */
+   section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
 .pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
-.pn-inbox .ib-sidescroll > .ib-agentsec:has(> .ib-agents-body[data-closed]:empty) + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
+.pn-inbox .ib-sidescroll > .ib-agentsec[data-closed] + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
 .pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
 
 /* The hover card: who, where and when, calm. */

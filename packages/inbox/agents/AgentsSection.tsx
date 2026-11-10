@@ -13,7 +13,9 @@ import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './mode
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
  * of Machines: a section like Projects, straight on the sidebar's ground with no panel behind it. Its heading is
  * "Agents" with the Plannotator goggles in the heading grey; while it is open the heading carries two buttons, +
- * (Add agent) and laptop-plus (Add machine); closed, it is the heading alone (and the row on show).
+ * (Add agent) and laptop-plus (Add machine); closed, it is the heading alone: no row, no
+ * machine name, not even for the thread or the machine on show (the owner, 2026-11-09: "It's a human-controlled list";
+ * unlike Pinned and Projects, which keep where you are). Only a press on its heading opens or closes it.
  * Under it the agents, each a 24 px animated mark (motion.ts) and its name. A machine that has no agent shows nothing.
  * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
  * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
@@ -163,7 +165,7 @@ export function AgentsSection(props: AgentsSectionProps) {
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
-    // background"). Closed: its heading only (and the row on show). Open: its heading carries Add agent and Add machine.
+    // background"). Closed: its heading only. Open: its heading carries Add agent and Add machine.
     <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />)}
@@ -184,11 +186,11 @@ export function AgentsSection(props: AgentsSectionProps) {
       </div>
       <div className="ib-agents-body" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-agents-section="" data-flat={captions ? undefined : ''} data-closed={props.closed ? '' : undefined}>
         {empty && !props.closed && <div className="ib-side-empty ib-agents-empty">Agents show here while they run.</div>}
-        {filled.map((group) => {
+        {/* Closed, nothing is drawn under the heading, whatever thread or machine is open (unlike Pinned and Projects). */}
+        {(props.closed ? [] : filled).map((group) => {
           const machine = group.machine;
-          const rows = group.agents.filter((entry) => !props.closed || agentOn(entry));
+          const rows = group.agents;
           const captionOn = captions && !!machine && machineOn(machine.id);
-          if (props.closed && rows.length === 0 && !captionOn) return null;
           const away = machine ? isAway(machine) : false;
           const notice = machine && props.onMachineUpdate ? machineNotice(machine) : null;
           return (

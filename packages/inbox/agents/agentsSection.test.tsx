@@ -280,7 +280,7 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
-test.skipIf(!hasDom)('closed, Agents is a heading like any other section: no Add buttons, only the row on show; opening brings the buttons and the rows back; never a panel', async () => {
+test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, no Add buttons; only a press on the heading opens it', async () => {
   // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
   const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
   const stored = new Map<string, string>();
@@ -293,27 +293,45 @@ test.skipIf(!hasDom)('closed, Agents is a heading like any other section: no Add
 });
 
 async function closedAgents() {
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
-  const props = sidebarProps({ machines: three(), agentRows: [threadRow('thr_1', 'ses_s1', 'Invoice retries')], openThreadId: 'thr_1', onAddAgent: noop, onAddMachine: noop });
-  mount(<Sidebar {...props} />);
+  const both = (state: InboxAgent['state'] = 'idle') => [group([agent('ses_s1', { state }), agent('ses_s2')], SELF), group([agent('ses_m1')], MAC)];
+  setInboxAgents(both());
+  const rowsOf = [threadRow('thr_1', 'ses_s1', 'Invoice retries')];
+  const props = (over: Partial<SidebarProps> = {}) => sidebarProps({ machines: three(), agentRows: rowsOf, onAddAgent: noop, onAddMachine: noop, ...over });
+  mount(<Sidebar {...props()} />);
   const header = () => document.querySelector<HTMLButtonElement>('[data-sidebar-section="agents"]')!;
   const state = () => ({
-    closed: surface()!.hasAttribute('data-closed'),
+    open: header().getAttribute('aria-expanded'),
     buttons: [...surface()!.querySelectorAll('[data-agents-add]')].map((b) => b.getAttribute('data-agents-add')),
     rows: [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')),
+    captions: surface()!.querySelectorAll('[data-machine]').length,
+    under: surface()!.querySelector('[data-agents-section]')!.childElementCount,
   });
-  expect(state()).toEqual({ closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+  const shut = { open: 'false', buttons: [], rows: [], captions: 0, under: 0 };
+  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   act(() => header().click());
-  expect(header().getAttribute('aria-expanded')).toBe('false');
-  // The heading stays, with its goggles; the thread on show keeps its row, as a closed Projects keeps its project.
-  expect(state()).toEqual({ closed: true, buttons: [], rows: ['ses_s1'] });
+  expect(state()).toEqual(shut);
   expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
+  // The thread of a listed agent opens (the person is replying in it): still the heading alone.
+  mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
+  expect(state()).toEqual(shut);
+  // That machine's list is shown: no machine name either.
+  mount(<Sidebar {...props({ openThreadId: 'thr_1', machineId: MAC })} />);
+  expect(state()).toEqual(shut);
+  // An agent starts, and an agent's state changes (it now waits on the person): closed stays closed.
+  act(() => setInboxAgents([...both('waiting'), group([agent('ses_n1')], MINI)]));
+  expect(state()).toEqual(shut);
+  // Every agent gone: no empty line under a closed heading.
+  act(() => setInboxAgents([group([], SELF)]));
+  expect(state()).toEqual(shut);
   // A new draw (a reload's) is still closed.
+  act(() => setInboxAgents(both()));
   unmountAll();
-  mount(<Sidebar {...props} />);
-  expect(state()).toEqual({ closed: true, buttons: [], rows: ['ses_s1'] });
+  mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
+  expect(state()).toEqual(shut);
+  // The person presses the heading: everything is back, the open thread's agent marked.
   act(() => header().click());
-  expect(state()).toEqual({ closed: false, buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2'] });
+  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-current')).toBe('page');
 }
 
 test.skipIf(!hasDom)("a machine's name shows only while agents show from more than one machine, and a machine with no agent shows nothing", () => {
