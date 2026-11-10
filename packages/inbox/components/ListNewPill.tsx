@@ -49,7 +49,7 @@ interface Where {
 }
 
 /**
- * The header of the group a row lands in, which is where Show will put it (news is the newest row of its group).
+ * The top of the group a row lands in, which is where Show will put it (news is the newest row of its group).
  * A group with no row yet is not drawn: the next one drawn stands in. Null with `edge`: List has no groups and
  * news lands at its top; past the last group drawn, it lands at the list's end.
  */
@@ -57,7 +57,9 @@ function landing(body: HTMLElement, lands: InboxListGroupId, order: readonly str
   if (body.querySelector('[data-flat-list]')) return { band: null, edge: 'top' };
   for (const id of order.slice(Math.max(0, order.indexOf(lands)))) {
     const band = body.querySelector(`.ib-group[data-section-id="${id}"] > .ib-band`);
-    if (band) return { band, edge: 'top' };
+    // The group's first row is where the news will be (a phone's header sticks to the top of the view while its
+    // group is on screen, so the header itself says nothing); a closed group has only its header.
+    if (band) return { band: band.nextElementSibling ?? band, edge: 'top' };
   }
   return { band: null, edge: 'bottom' };
 }
