@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -346,6 +346,23 @@ const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.Re
     <>{children}</>
   );
 
+/**
+ * Fits the Other field to its lines: one at least (`rows={1}`: its height, padding, border and any min-height
+ * as a one-line field), its CSS max-height at most, scrolling past that. Returns where the "+" mark goes
+ * beside a field of several lines (centred on the first line, where a one-line field centres it), else null.
+ */
+function fitOtherField(field: HTMLTextAreaElement): number | null {
+  field.style.height = '';
+  field.style.overflowY = '';
+  const one = field.offsetHeight;
+  // Its border (no scrollbar while it is one line or growing: its overflow is hidden).
+  const full = field.scrollHeight + (field.offsetHeight - field.clientHeight);
+  if (full <= one + 1) return null;
+  field.style.height = `${full}px`;
+  if (field.scrollHeight > field.clientHeight + 1) field.style.overflowY = 'auto';
+  return one > 15 ? (one - 15) / 2 : null;
+}
+
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
   indexed,
@@ -688,6 +705,43 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     && (otherBy === 'row' || (otherBy === null && !otherFocused));
   const other = suggestionPicked ? '' : storedOther;
   const otherOn = other.trim() !== '';
+  // The Other field holds as many lines as its words take (typed or wrapped),
+  // from one (its height when it was a one-line field) up to its cap: fitted
+  // on each change, and again when its width changes (its words re-wrap).
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const [otherGlyphTop, setOtherGlyphTop] = useState<number | null>(null);
+  const otherWidthRef = useRef(-1);
+  const fitOther = () => {
+    const field = otherRef.current;
+    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    otherWidthRef.current = field ? field.clientWidth : -1;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => fitOther(), [other, readOnly, otherOn]);
+  useEffect(() => {
+    const field = otherRef.current;
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const refit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitOther);
+    };
+    // Only a new width re-wraps; the heights this fit sets come back here too.
+    const watch = new ResizeObserver(() => {
+      if (field.clientWidth !== otherWidthRef.current) refit();
+    });
+    watch.observe(field);
+    // A web font that arrives late re-wraps the words at the same width.
+    let live = true;
+    document.fonts?.ready.then(() => live && refit(), () => {});
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      watch.disconnect();
+    };
+    // fitOther reads only refs; the field is new when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, otherOn]);
   // Picture choices: each choice's picture URL (null: none, or not shown).
   const pictures = question.choices.map((c) => (c.image ? pictureSrc(c.image.src) : null));
   const showTiles = pictureChoices
@@ -1032,11 +1086,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
                     otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
                   )}
+                  // Several lines: the mark stays beside the first, where one line centres it.
+                  style={otherGlyphTop === null ? undefined : { alignSelf: 'flex-start', marginTop: otherGlyphTop }}
                 >
                   {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-                <input
-                  type="text"
+                {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
+                    Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                <textarea
+                  ref={otherRef}
+                  rows={1}
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
                   onFocus={() => {
@@ -1049,7 +1108,11 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   disabled={readOnly}
                   placeholder={readOnly ? '' : 'Other…'}
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-                  className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+                  data-question-other=""
+                  className={cx(
+                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    !readOnly && 'max-h-48',
+                  )}
                 />
               </div>
             )}

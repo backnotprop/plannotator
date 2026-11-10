@@ -954,7 +954,8 @@ const ANSWERS_GROUP_LINE = /^### Your (?:message|file .+, attached to message) m
  * `at` ends, read by the grammar `formatQuestionAnswersSection` and
  * `composeInboxReplyBody` write: the heading, a blank line, the "N of M
  * questions answered." line, a blank line, then `### …` blocks of answer
- * lines (`Answer…`, `- …`, `> …`, `Note…`, `Skipped…`), each ended by a blank
+ * lines (`Answer…`, `- …`, `> …`, `  > …` (a multi-line Other under its
+ * bullet), `Note…`, `Skipped…`), each ended by a blank
  * line; or, for answers on several messages, `### Your message <id>`
  * sub-sections with the same grammar one level down. Returns the index of the
  * first line after it, or null when the text does not follow that grammar
@@ -986,7 +987,7 @@ function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "###
     i += 1;
     let body = 0;
     while (i < lines.length && lines[i] !== "") {
-      if (!/^(Answer|Note|Skipped|- |> |>$)/.test(lines[i]!)) return null;
+      if (!/^(Answer|Note|Skipped|- |> |>$| {2}> | {2}>$)/.test(lines[i]!)) return null;
       i += 1;
       body += 1;
     }

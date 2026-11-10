@@ -3068,3 +3068,11 @@ Pinned by `hooks/useAnnotationHighlighter.selectionEdges.test.tsx`, `hooks/useAn
 - Known: a triple click while the page scrolls under the pointer takes the block then under it (the browser's own triple click). A press on a list marker or other unselectable text starts no selection.
 
 Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`, `utils/wordAtPoint.test.ts` and `utils/inputMethod.test.ts`.
+
+## Questions: the Other field takes several lines (unreleased; every host, no opt-in; needs the core with the quoted Other)
+
+- **What changes for a host that does nothing.** `QuestionBlock`'s Other field is a `<textarea rows={1}>` instead of `<input type="text">`, same classes, same aria-label ("Other answer to question N"), plus `data-question-other`. Empty or holding one line it is the old field's height and the "+" mark sits where it sat. It grows a line at a time (typed, wrapped or pasted lines) up to `max-h-48`, then scrolls inside; a read-only card shows it whole. Enter and Shift+Enter make a new line (the textarea's own keys, as in the note and the free-text field); the card cancels no key, so a host's own ⌘/Ctrl+Enter still hears it.
+- **A host with its own CSS or tests on the field**: a selector `input[type="text"]` or `input[aria-label^="Other answer"]` no longer matches it; use `textarea[aria-label^="Other answer"]` or `[data-question-other]`. A test that takes a card's first `textarea` as the note now gets the Other field on a choice question. Plannotator's Inbox sizes it on a phone with `textarea[data-question-other]` (40 px for one line).
+- **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
+
+Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
