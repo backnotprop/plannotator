@@ -61,7 +61,7 @@
  * mid-turn.
  */
 
-import { INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN } from "@plannotator/core/inbox-rows-words";
+import { INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN } from "@plannotator/core/inbox-types";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";

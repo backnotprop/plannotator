@@ -21,7 +21,7 @@
  * the platform.
  */
 
-import { INBOX_ROWS_HELP_SECTION } from "@plannotator/core/inbox-rows-words";
+import { INBOX_ROWS_HELP_SECTION } from "@plannotator/core/inbox-types";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";

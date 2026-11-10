@@ -26,7 +26,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
-import { inboxRowsBy, type InboxRowsBy } from '@plannotator/core/inbox-rows-words';
+import { inboxRowsBy, type InboxRowsBy } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 

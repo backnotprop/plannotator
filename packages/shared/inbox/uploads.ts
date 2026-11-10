@@ -22,7 +22,7 @@
  * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
  */
 
-import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-rows-words";
+import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,

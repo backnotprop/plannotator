@@ -8572,7 +8572,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .ib-rws-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ib-rws-ask { margin: 14px 0 4px; }
   .pn-inbox .ib-rws-askrow :is(input, select, .ib-btn) { height: 40px; }
-  .pn-inbox .ib-rws-askrow input { font-size: 16px; }
+  .pn-inbox .ib-rws-askrow input { font-size: var(--ib-fs-16-in, 16px); }
   .ib-rws-ctl .ib-prow { min-height: 56px; }
 }
 
@@ -11710,6 +11710,3 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg { position: static; transform: none; flex: none; width: 44px; height: 44px; margin-left: auto; border-radius: 10px; }
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg::after { content: none; }
 .pn-inbox .ib-sb-sheet-in .ib-theme-tg .ib-ic { width: 20px; height: 20px; }
-/* The agent's mark beside its line on Settings → Rows (the change line, the ask box's log): the text's size. */
-.ib-rws :is(.ib-rws-last, .ib-rws-asklog) .ib-mk { width: 16px; height: 16px; flex: none; }
-.ib-rws :is(.ib-rws-last, .ib-rws-asklog) .ib-mk :is(svg, img) { width: 12px; height: 12px; }

@@ -952,7 +952,8 @@ describe("the window's routes: settings, restart, favicon", () => {
         if (chunk && chunk.value) text += decoder.decode(chunk.value);
       }
       controller.abort();
-      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1 })}`);
+      // With the look from before and who saved (the window: no one), for "<agent> changed" and Undo.
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1, prev: ["smallNames"], by: null })}`);
 
       // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
       const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });

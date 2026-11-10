@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_OPTIONS, type InboxRowsOption } from '@plannotator/core/inbox-types';
-import { INBOX_ROWS_ASK_BLOCK, INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN, INBOX_ROWS_LOOKS, INBOX_ROWS_SETTINGS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsLookOf } from '@plannotator/core/inbox-rows-words';
+import { INBOX_ROWS_ASK_BLOCK, INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN, INBOX_ROWS_LOOKS, INBOX_ROWS_SETTINGS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsLookOf } from '@plannotator/core/inbox-types';
 import { lookFromRows, rowsFromLook } from './listLook';
 import { ROWS_CONTROLS, ROWS_PRESETS, lookWithChoice } from './rowsControls';
 

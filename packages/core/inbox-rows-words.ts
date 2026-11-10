@@ -9,7 +9,9 @@
  * `inboxRowsCanonical`, exactly as a click on the page (packages/inbox/rowsControls.ts; rowsWords.test.ts holds the
  * two together).
  */
-import { INBOX_ROWS_DEFAULT, inboxRowsCanonical, type InboxRowsOption } from "./inbox-types";
+// inbox-types.ts re-exports this file (core adds no export of its own for it: a new one needs a published core), so the
+// two import each other: nothing of inbox-types is read while this file loads, only inside functions.
+import { inboxRowsCanonical, type InboxRowsOption } from "./inbox-types";
 
 /** The markers around what an agent receives with an ask from Settings → Rows, each on its own line. */
 export const INBOX_ROWS_ASK_OPEN = "<plannotator-rows-ask>";
@@ -175,7 +177,8 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
 
 /** The whole looks (`look=`): the page's "Start from". */
 export const INBOX_ROWS_LOOKS: readonly { value: string; label: string; rows: readonly InboxRowsOption[] }[] = [
-  { value: "balanced", label: "Balanced", rows: INBOX_ROWS_DEFAULT },
+  // The defaults (`INBOX_ROWS_DEFAULT`), written out for the reason above; rowsWords.test.ts holds them equal.
+  { value: "balanced", label: "Balanced", rows: ["smallNames"] },
   { value: "dense", label: "Dense", rows: ["compact", "smallNames", "relativeTime", "dividers", "statusMark"] },
   { value: "minimal", label: "Minimal", rows: ["smallNames", "hidePreview", "titleFirst"] },
   { value: "detailed", label: "Detailed", rows: ["roomy", "previewTwo", "marksThreads", "marksProjects", "repoLogo"] },

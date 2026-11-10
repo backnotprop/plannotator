@@ -8,7 +8,7 @@
  * section is inbox-help.test.ts's).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { INBOX_ROWS_USAGE, INBOX_ROWS_USAGE_LINE, INBOX_ROWS_WORDS } from "@plannotator/core/inbox-rows-words";
+import { INBOX_ROWS_USAGE, INBOX_ROWS_USAGE_LINE, INBOX_ROWS_WORDS } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { INBOX_COMMAND_USAGE, isSubcommandHelpInvocation } from "./cli";
 import { parseRowsCommand, runInboxRowsCommand } from "./inbox-rows-command";

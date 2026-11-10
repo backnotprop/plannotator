@@ -5,14 +5,14 @@
  *
  * A thin client over the route the window uses on this computer's listener (`GET` and `POST /api/inbox/settings`
  * `rows`, `rows_by`, `rows_undo`). It can reach row options only: it sends no other setting. Every word it prints is
- * core's (`@plannotator/core/inbox-rows-words`), the one place the owner's words live.
+ * core's (`@plannotator/core/inbox-types`), the one place the owner's words live.
  *
  * stdout: a text answer, or JSON with --json. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage
  * exits 2.
  */
 
 import { INBOX_ROWS_DEFAULT, inboxRowsRead, type InboxRowsOption } from "@plannotator/core/inbox-types";
-import { INBOX_ROWS_USAGE, INBOX_ROWS_WORDS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsListingJson, type InboxRowsBy } from "@plannotator/core/inbox-rows-words";
+import { INBOX_ROWS_USAGE, INBOX_ROWS_WORDS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsListingJson, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
