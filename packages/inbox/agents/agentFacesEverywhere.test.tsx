@@ -290,3 +290,39 @@ test.if(hasDom)('this browser’s faces from before show at once, go to the Inbo
   expect(posts.filter((p) => 'adopt' in p).length).toBe(2);
   expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces.ses_old.face).toBe('totman');
 });
+
+// The owner's rule (2026-11-10): a face is drawn in exactly the box the plain mark has in every row look, so no row's
+// height, gap or alignment moves, and a list with no face chosen is the same as before (measured: every look, wide,
+// beside a thread and at 390, 0 pixels differ; tools in the PR body). These pin what that rests on.
+test.if(hasDom)('a face takes the plain mark’s element and tile: same classes but `ib-face`, one picture in place of the glyph', () => {
+  const host = mount(
+    <>
+      <div data-s="plain">
+        <RowAgents participants={undefined} agent={author('ses_plain')} tip={false} />
+      </div>
+      <div data-s="faced">
+        <RowAgents participants={undefined} agent={author('ses_faced')} tip={false} />
+      </div>
+    </>,
+  );
+  act(() => faces.keepAgentFace('ses_faced', 'glass-blue'));
+  const plain = at(host, 'plain')!.querySelector('.ib-atile')!;
+  const faced = at(host, 'faced')!.querySelector('.ib-atile')!;
+  expect(faced.className).toBe(plain.className);
+  expect(faced.getAttribute('style')).toBe(plain.getAttribute('style'));
+  const [pm, fm] = [plain.firstElementChild!, faced.firstElementChild!];
+  expect(fm.className).toBe(`${pm.className} ib-face`);
+  expect(fm.getAttribute('style')).toBe(pm.getAttribute('style'));
+  expect([...fm.children].map((c) => c.tagName)).toEqual(['IMG']);
+  expect(fm.querySelector('img')!.getAttribute('class')).toBeNull();
+});
+
+test('the stylesheet gives a face nothing of its own but which Transparent picture shows (no size, tile or offset)', async () => {
+  const css = await Bun.file(new URL('../inbox.css', import.meta.url)).text();
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /ib-face/.test(selector!));
+  expect(rules.length).toBeGreaterThan(0);
+  for (const [, selector, body] of rules) {
+    const props = body!.split(';').map((d) => d.split(':')[0]!.trim()).filter(Boolean);
+    expect({ selector: selector!.trim(), props }).toEqual({ selector: selector!.trim(), props: ['display'] });
+  }
+});
