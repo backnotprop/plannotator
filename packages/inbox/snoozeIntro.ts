@@ -76,9 +76,9 @@ export function snoozeIntroTargetHolds(row: InboxListRow | null | undefined): bo
 }
 const targetRow = (rows: readonly InboxListRow[], threadId: string | null) => rows.find((r) => r.thread_id === threadId);
 
-/** What one load knows (read once: `due`) and what holds now. */
+/** What one load knows (`due`: the load's latch, reveal.ts `useLineLatch`) and what holds now. */
 export interface SnoozeIntroGate {
-  /** The Inbox has it due for this page (settings `snooze_intro.due`; never for a tailnet guest), read once per load. */
+  /** The Inbox has it due for this page (settings `snooze_intro.due`; never for a tailnet guest), as the load's latch holds it. */
   due: boolean;
   listLoaded: boolean;
   firstRun: boolean;
