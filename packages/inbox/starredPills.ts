@@ -13,7 +13,7 @@
 import { useSyncExternalStore } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
-import { pinnedLabel, pinnedState, type PinnedState } from './pins';
+import { pinnedState, type PinnedState } from './pins';
 
 export const STARRED_ABOVE_COOKIE = 'plannotator-inbox-starred-above';
 
@@ -89,9 +89,14 @@ export interface StarredPill {
   state: PinnedState;
 }
 
-/** The pills, in pin order: each thread's label, its project, its state, and whether another pill shares its label. */
-export function starredPills(rows: readonly InboxListRow[], projectNames?: ReadonlyMap<string, string>): StarredPill[] {
-  const labels = rows.map(pinnedLabel);
+/**
+ * The pills, in pin order: each thread's label, its project, its state, and whether another pill shares its label.
+ * `labelOf` is the list row's own title (InboxList's `titleOf`: the bold line, the thread's name, or what the row
+ * falls back to without one), never the sidebar's rule (`pinnedLabel`, which shows a subject that starts with the
+ * name): the owner, 2026-11-10, "the pill's label is the thread name".
+ */
+export function starredPills(rows: readonly InboxListRow[], labelOf: (row: InboxListRow) => string, projectNames?: ReadonlyMap<string, string>): StarredPill[] {
+  const labels = rows.map(labelOf);
   const seen = new Map<string, number>();
   for (const label of labels) seen.set(label, (seen.get(label) ?? 0) + 1);
   return rows.map((row, index) => ({

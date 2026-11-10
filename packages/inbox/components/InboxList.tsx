@@ -313,8 +313,11 @@ function subjectOf(row: InboxListRow): string {
   return row.subject ?? '(no subject)';
 }
 
-/** The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none. */
-function titleOf(row: InboxListRow): string {
+/**
+ * The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none.
+ * A starred pill is labelled with it too (StarredPills.tsx), so a pill and its row never name a thread differently.
+ */
+export function titleOf(row: InboxListRow): string {
   return row.thread_name?.trim() ? row.thread_name : subjectOf(row);
 }
 

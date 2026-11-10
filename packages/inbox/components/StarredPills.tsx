@@ -5,7 +5,7 @@ import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { agentName, formatCount } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { fitPills, moreName, pillName, pillWaits, starredPills, type StarredPill } from '../starredPills';
-import { rowAgent } from './InboxList';
+import { rowAgent, titleOf } from './InboxList';
 import type { PinnedAction } from './PinnedRow';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
@@ -47,7 +47,7 @@ export interface StarredPillsProps {
  */
 export function StarredPills(props: StarredPillsProps) {
   const { rows, phone } = props;
-  const pills = useMemo(() => starredPills(rows, props.projectNames), [rows, props.projectNames]);
+  const pills = useMemo(() => starredPills(rows, titleOf, props.projectNames), [rows, props.projectNames]);
   const byId = useMemo(() => new Map(pills.map((pill) => [pill.row.thread_id, pill])), [pills]);
   const nav = useRef<HTMLElement>(null);
   const list = useRef<HTMLUListElement>(null);

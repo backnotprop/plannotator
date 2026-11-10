@@ -348,6 +348,31 @@ describe('a pill', () => {
     expect(tip).toContain('Claude Code in billing-svc');
   });
 
+  test.skipIf(!hasDom)("the label is the list row's bold line: the thread's name, never a subject that starts with it", async () => {
+    // The sidebar's Starred row shows this thread's subject (it starts with the name); the pill and the list row do not.
+    const named = row('msg_named', 'Highlight fixes: three highlighting bugs found and fixed', 'new', { thread_name: 'Highlight fixes', unseen: 1 });
+    const { el } = draw({ start: [named, QUIET] });
+    const target = pill(el, 'msg_named');
+    expect(target.querySelector('.ib-star-n')!.textContent).toBe('Highlight fixes');
+    expect(target.getAttribute('aria-label')).toBe('Highlight fixes, billing-svc, New, starred');
+    // A thread with no name falls back as its row does, to the subject.
+    expect(pill(el, QUIET.thread_id).querySelector('.ib-star-n')!.textContent).toBe('Release train');
+    // The subject is the tooltip's second line, above the agent.
+    const tip = await tooltipOf(target);
+    expect(tip).toContain('Highlight fixes: three highlighting bugs found and fixed');
+    expect(tip).toContain('Claude Code in billing-svc');
+  });
+
+  test.skipIf(!hasDom)('"+N" names a hidden thread the same way', async () => {
+    layout(100, 50, 330);
+    const rows = Array.from({ length: 9 }, (_, i) => row(`msg_n${i}`, `Stream ${i}: notes for the week`, 'quiet', { thread_name: `Stream ${i}` }));
+    const { el } = draw({ start: rows });
+    await settle();
+    act(() => el.querySelector<HTMLButtonElement>('[data-pills-more]')!.click());
+    await settle();
+    expect(document.querySelector('[data-pills-more-item="msg_n8"] .ib-star-mi-l')!.textContent).toBe('Stream 8');
+  });
+
   test.skipIf(!hasDom)('two pills with one name both show their project', () => {
     const twin = row('msg_twin', 'Release train', 'quiet', { project: { id: 'prj_b', name: 'docs-site' } });
     const { el } = draw({ start: [QUIET, twin, WAIT] });
