@@ -116,10 +116,9 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     await expect(pill(page)).toHaveText('1 new');
     await expect(pill(page)).toHaveAccessibleName('1 new message below, show');
     await expect(line(page)).not.toBeInViewport();
-    // At the list's bottom edge, inside it.
-    const at = await placeIn(page, '[data-list-new-pill]');
-    expect(at.bottom).toBeGreaterThanOrEqual(8);
-    expect(at.bottom).toBeLessThanOrEqual(24);
+    // At the list's bottom edge, inside it, once it has risen into place (it comes in from 6 px lower).
+    await expect.poll(async () => (await placeIn(page, '[data-list-new-pill]')).bottom).toBeGreaterThanOrEqual(8);
+    expect((await placeIn(page, '[data-list-new-pill]')).bottom).toBeLessThanOrEqual(24);
     // The list held still: the same rows in the same order, the new one not drawn.
     expect(await order()).toEqual(before);
 
@@ -219,8 +218,8 @@ test('a 390 px phone: the pill is above the bottom edge with a 44 px target, and
     const first = await news();
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
     await expect(pill(page)).toHaveText('1 new');
-    const at = await placeIn(page, '[data-list-new-pill]');
-    expect(at.bottom).toBeGreaterThanOrEqual(8);
+    // Once it has risen into place (it comes in from 6 px lower).
+    await expect.poll(async () => (await placeIn(page, '[data-list-new-pill]')).bottom).toBeGreaterThanOrEqual(8);
     const target = await pill(page).evaluate((el) => {
       const after = getComputedStyle(el, '::after');
       return el.getBoundingClientRect().height - parseFloat(after.top) - parseFloat(after.bottom);
