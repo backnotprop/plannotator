@@ -4,11 +4,11 @@
  * its list switches it, adds a second one ("2 agents"), and the Reply arrow on
  * an older message aims it. The failure this catches: a reply that goes to
  * another agent than the one the pill names, a pill that moves when an agent
- * writes, or a one-agent thread that grows new UI on a computer.
+ * writes, or a one-agent thread that grows new UI.
  *
- * A phone (approval "inbox-phone-composer-picker"): the control is in the box's
- * row after Skills (a one-agent thread has its mark alone), and its list is a
- * bottom sheet; the last cases here.
+ * A phone (approval "inbox-phone-composer-picker"): under the same rule as a
+ * computer's pill (a one-agent thread has none), the control is in the box's
+ * row after Skills, and its list is a bottom sheet; the last cases here.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -628,25 +628,18 @@ test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: i
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
 });
 
-test.skipIf(!hasDom)('a phone, one agent: its mark alone in the row; the sheet names it, with no circle to add another, and offers the `@`; the draft still names no recipient', async () => {
+test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no control in the row and no sheet; the draft names no recipient', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   const text = await write(el, 'Ship it.');
-  const control = pill(el)!;
-  expect(control.closest('[data-reply-row]') !== null).toBe(true);
-  expect(control.hasAttribute('data-agent-mark')).toBe(true);
-  expect(control.textContent?.trim()).toBe('');
-  expect(control.getAttribute('aria-label')).toBe('Reply goes to Claude Code. Change');
+  expect(pill(el)).toBeNull();
+  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
+  expect(el.querySelector('[data-recipient-list], [data-sheet]')).toBeNull();
+  // The row is the paperclip, Skills and Send.
+  expect(el.querySelector('[data-reply-row][data-phone] [data-reply-skills]')).not.toBeNull();
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
-  await openList(el);
-  expect(sheetRows(el)).toEqual([['ses_claude', 'Claude Code', 'superfans', 'true']]);
-  expect(el.querySelector('[data-recipient-list] [data-recipient-tick]')).toBeNull();
-  expect(el.querySelector('[data-recipient-list] [data-recipient-tag]')?.textContent?.trim()).toBe('Tag another agent');
-  // Its row has nothing to change: it closes the sheet.
-  await act(async () => sheetRow(el, 'ses_claude').click());
-  await settle();
-  expect(sheetOpen(el)).toBe(false);
   await settle(1100);
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
   await send(el);
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
 });

@@ -1,8 +1,8 @@
 /**
  * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): on a phone the reply box's row
- * holds who gets the reply (the agent's mark alone in a one-agent thread, the mark and a name with several agents,
- * the first mark and a count with several recipients), New message's To is a pill in the foot's row, and both open a
- * bottom sheet. The failures this catches: a reply that goes to another agent than the control names, a sheet that
+ * holds who gets the reply in a thread with several agents (the mark and a name, or the first mark and a count with
+ * several recipients; a one-agent thread has no control, as on a computer), New message's To is a pill in the foot's
+ * row, and both open a bottom sheet. The failures this catches: a reply that goes to another agent than the control names, a sheet that
  * leaves focus nowhere (so the keyboard never comes back), the phone parts leaking onto a computer, and the typing
  * area's cap or the phone query drifting from phone.ts.
  *
@@ -161,17 +161,12 @@ const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 
 // ── the reply row, by state ──
 
-test.skipIf(!hasDom)('a phone, one agent: the row holds the paperclip, Skills, the agent\'s mark alone, then Send; the mark says who gets the reply', async () => {
+test.skipIf(!hasDom)('a phone, one agent: no agent control in the row (the paperclip, Skills, then Send), as on a computer; Send is the arrow', async () => {
   await openReply(ONE_AGENT(), true);
   const row = q('[data-reply-row][data-phone]')!;
   const order = [...row.querySelectorAll('[data-reply-attach], [data-reply-skills], [data-recipient], [data-reply-send]')].map((el) => [...el.attributes].find((a) => /^data-(reply-attach|reply-skills|recipient|reply-send)$/.test(a.name))!.name);
-  expect(order).toEqual(['data-reply-attach', 'data-reply-skills', 'data-recipient', 'data-reply-send']);
-  const mark = control()!;
-  expect(mark.hasAttribute('data-agent-mark')).toBe(true);
-  // The mark alone: no name beside it, no count.
-  expect(mark.textContent).toBe('');
-  expect(mark.querySelector('[data-agent-count]')).toBeNull();
-  expect(mark.getAttribute('aria-label')).toBe('Reply goes to Claude Code. Change');
+  expect(order).toEqual(['data-reply-attach', 'data-reply-skills', 'data-reply-send']);
+  expect(q('[data-recipient], [data-agent-mark], [data-agent-pill], [data-sheet]')).toBeNull();
   // Send is the arrow; its word stays as its name.
   expect(q('[data-reply-send]')!.textContent).toBe('Send');
   expect(q('[data-reply-send] svg')).not.toBeNull();
@@ -179,6 +174,9 @@ test.skipIf(!hasDom)('a phone, one agent: the row holds the paperclip, Skills, t
 
 test.skipIf(!hasDom)('a phone, several agents: the mark and a name, so the person sees who gets the reply; a session\'s title is the name', async () => {
   await openReply(TWO_AGENTS(), true);
+  const row = q('[data-reply-row][data-phone]')!;
+  // In the row, after Skills and before Send.
+  expect([...row.querySelectorAll('[data-reply-skills], [data-recipient], [data-reply-send]')].map((el) => (el.hasAttribute('data-recipient') ? 'recipient' : el.hasAttribute('data-reply-send') ? 'send' : 'skills'))).toEqual(['skills', 'recipient', 'send']);
   const pill = control()!;
   expect(pill.hasAttribute('data-agent-pill')).toBe(true);
   expect(pill.querySelector('.ib-apill-n')!.textContent).toBe('Pi');
@@ -232,11 +230,9 @@ test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the s
 });
 
 test.skipIf(!hasDom)('a phone: a tap outside the sheet closes it', async () => {
-  const text = await openReply(ONE_AGENT(), true);
+  const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
-  // One agent: nothing to add, so no circles; the row is checked.
-  expect(q('[data-recipient-tick]')).toBeNull();
   await click(q('[data-sheet-scrim]'));
   expect(sheet()).toBeNull();
   expect(document.activeElement).toBe(text);
@@ -259,7 +255,7 @@ test.skipIf(!hasDom)('a computer is as it was: a one-agent thread has no recipie
 });
 
 test.skipIf(!hasDom)('a phone: while the sheet is open focus stays in it, and what asked for focus gets it when the sheet closes', async () => {
-  const text = await openReply(ONE_AGENT(), true);
+  const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
   const close = q<HTMLButtonElement>('[data-reply-close]')!;
@@ -272,7 +268,7 @@ test.skipIf(!hasDom)('a phone: while the sheet is open focus stays in it, and wh
 });
 
 test.skipIf(!hasDom)('a phone: "Tag another agent" closes the sheet and leaves the caret in the reply, where the @ is typed', async () => {
-  const text = await openReply(ONE_AGENT(), true);
+  const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
   // happy-dom has no execCommand: the typing itself is the browser's.

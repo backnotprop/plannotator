@@ -4,13 +4,13 @@
  *
  * - `AgentPill`: the agent's mark, a short name that gives way with "…", and a small chevron. New message's To, and
  *   the reply row of a thread with several agents (the person sees who gets the reply).
- * - `AgentMark`: the mark alone, round like the paperclip and Skills beside it. The reply row of a thread with one
- *   agent, where it is seldom changed; with several recipients, the first mark and how many.
+ * - `AgentMark`: round like the paperclip and Skills beside it: the first recipient's mark and how many get the
+ *   reply, when several do.
  *
  * Both are 36 px tall with a 44 px touch area (phoneComposer.css).
  */
 import type { MouseEvent, Ref } from 'react';
-import { HostMark, Icon } from '../icons';
+import { HostMark } from '../icons';
 
 interface Common {
   open: boolean;
@@ -77,8 +77,7 @@ export function AgentPill({
 
 export function AgentMark({
   host,
-  count = 1,
-  ended = false,
+  count,
   open,
   onClick,
   ariaLabel,
@@ -86,26 +85,19 @@ export function AgentMark({
   keepFocus,
   attrs,
 }: Common & {
-  /** The first recipient's agent. Undefined: nobody is chosen. */
-  host?: string | null;
-  /** How many get the words: past one, a count at the button's corner. */
-  count?: number;
-  ended?: boolean;
+  /** The first recipient's agent. */
+  host: string | null;
+  /** How many get the words, shown at the button's corner. */
+  count: number;
 }) {
   return (
-    <button type="button" ref={buttonRef} className="ib-pchip ib-amark" data-agent-mark="" data-ended={ended ? '' : undefined} data-open={open ? '' : undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={ariaLabel} onMouseDown={keepFocus ? stay : undefined} onClick={onClick} {...attrs}>
-      {host === undefined ? (
-        <Icon name="user" size={20} />
-      ) : (
-        <span className="ib-amark-m">
-          <HostMark host={host} />
-        </span>
-      )}
-      {count > 1 && (
-        <span className="ib-amark-n" data-agent-count="" aria-hidden="true">
-          {count}
-        </span>
-      )}
+    <button type="button" ref={buttonRef} className="ib-pchip ib-amark" data-agent-mark="" data-open={open ? '' : undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={ariaLabel} onMouseDown={keepFocus ? stay : undefined} onClick={onClick} {...attrs}>
+      <span className="ib-amark-m">
+        <HostMark host={host} />
+      </span>
+      <span className="ib-amark-n" data-agent-count="" aria-hidden="true">
+        {count}
+      </span>
     </button>
   );
 }

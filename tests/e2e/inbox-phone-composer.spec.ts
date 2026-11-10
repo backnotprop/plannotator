@@ -4,12 +4,12 @@
  * mic, a round Send), and who gets the words opens a bottom sheet.
  *
  * Proved against the compiled binary under a temp PLANNOTATOR_DATA_DIR, at 390 px in WebKit as an iPhone and Chromium
- * as a Pixel, with three live sessions held by the bridge's real long-poll (one with a long label):
- * - Reply, one agent: the row's order, a 36 px round Send still named "Send", every control 44 px to press, the
- *   card's 8 px margins, nothing scrolling sideways; with the keyboard up the card ends 8 px over it, Send in reach,
- *   and a long reply scrolls inside 40% of what is left.
- * - The sheet: a dialog that takes focus from the field, a long label cut on one line, closed by Escape, the scrim
- *   and a drag down on its head; with reduced motion it does not slide.
+ * as a Pixel, with three live sessions held by the bridge's real long-poll (two with a long label):
+ * - Reply, one agent: no recipient control (as on a computer), the row's order, a 36 px round Send still named
+ *   "Send", every control 44 px to press, the card's 8 px margins, nothing scrolling sideways; with the keyboard up
+ *   the card ends 8 px over it, Send in reach, and a long reply scrolls inside 40% of what is left.
+ * - The sheet (a thread with two agents): a dialog that takes focus from the field and gives it back, a long label
+ *   cut on one line, closed by Escape, the scrim and a drag down on its head; with reduced motion it does not slide.
  * - Reply, two agents: the pill names the recipient, a row picks one, a circle adds one, and Send reaches both.
  * - New message: To in the foot's row, its sheet with the filter unfocused, the card 8 px over the keyboard with the
  *   title kept, the dialog's own ground under the keyboard. Chromium at 1440 x 900: none of it applies.
@@ -18,8 +18,8 @@
  * inbox-phone-compose-send.spec.ts: WebKit replays iOS readings (the visual viewport and `innerHeight` lose the
  * keyboard), Chromium the Android ones (only the visual viewport shrinks). Whether a real keyboard goes down or comes
  * back is read from focus alone. The drag is a mouse's pointer events, not a finger's. The 44 px press areas are read
- * with `elementFromPoint` 21 px above and below each control's centre and 20 px to each side (Send's area and the
- * mic's share one pixel column, which the later one wins). Voice is never on in the server: the page is told it is.
+ * with `elementFromPoint` 21 px above, below, left and right of each control's centre. Voice is never on in the
+ * server: the page is told it is.
  *
  * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for the pictures (default
  * .local/proof/phone-composer), the keyboard's stand-in drawn in grey.
@@ -45,6 +45,7 @@ const TWO_A = 'ses-composer-two-claude';
 const TWO_B = 'ses-composer-two-pi';
 /** Longer than the Inbox keeps (60 characters), so every place that shows it has to cut it. */
 const LABEL = 'Rework the billing export so very large CSV files stream to disk without a pause';
+const LABEL_TWO = 'Keep the checkout total from jumping when the promo field opens on the smallest phones';
 const LINES = Array.from({ length: 14 }, (_, i) => `Line ${i + 1}: the promo field moves under the order summary.`).join('\n');
 
 /** One live session: the bridge's long-poll, keeping what the person sent it. */
@@ -95,7 +96,7 @@ test.beforeAll(async () => {
   const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
   const polls = {
     [ONE]: new Poll(port, token, ONE, 'claude-code', project, LABEL),
-    [TWO_A]: new Poll(port, token, TWO_A, 'claude-code', project),
+    [TWO_A]: new Poll(port, token, TWO_A, 'claude-code', project, LABEL_TWO),
     [TWO_B]: new Poll(port, token, TWO_B, 'pi', project),
   };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -293,14 +294,14 @@ for (const engine of ENGINES) {
       }, [x, y]);
     }
 
-    test('reply, one agent: paperclip, Skills, the agent mark, the mic and a round Send, 44 px to press; the card floats 8 px from the edges and the keyboard', async () => {
+    test('reply, one agent: no recipient control; paperclip, Skills, the mic and a round Send, 44 px to press; the card floats 8 px from the edges and the keyboard', async () => {
       const page = await phone();
       await openBox(page, world.oneThread);
       const box = pane(page).locator('.ib-rbox');
       await expect(box.locator('[data-reply-row] [data-voice-mic]'), 'the mic is not on the row').toBeVisible();
-      await expect(recipient(page), 'a one-agent thread shows the agent as a mark').toHaveAttribute('data-agent-mark', '');
+      await expect(pane(page).locator('[data-recipient], .ib-sheet'), 'a one-agent thread has a recipient control or a sheet').toHaveCount(0);
       const row = await box.evaluate((el) => {
-        const parts = { paperclip: '.ib-rclip', Skills: '[data-reply-skills]', agent: '[data-recipient][data-agent-mark]', mic: '[data-voice-mic]', Send: '[data-reply-send]' };
+        const parts = { paperclip: '.ib-rclip', Skills: '[data-reply-skills]', mic: '[data-voice-mic]', Send: '[data-reply-send]' };
         const missed: string[] = [];
         const centres: number[] = [];
         for (const [name, selector] of Object.entries(parts)) {
@@ -310,16 +311,15 @@ for (const engine of ENGINES) {
           else {
             const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
             centres.push(x);
-            for (const [side, dx, dy] of [['above', 0, -21], ['below', 0, 21], ['left', -20, 0], ['right', 20, 0]] as const) if (!control.contains(document.elementFromPoint(x + dx, y + dy))) missed.push(`${name}, ${side}`);
+            for (const [side, dx, dy] of [['above', 0, -21], ['below', 0, 21], ['left', -21, 0], ['right', 21, 0]] as const) if (!control.contains(document.elementFromPoint(x + dx, y + dy))) missed.push(`${name}, ${side}`);
           }
         }
         const send = el.querySelector<HTMLElement>('[data-reply-send]')!;
         const s = send.getBoundingClientRect();
-        return { missed, centres, send: { width: s.width, height: s.height, radius: parseFloat(getComputedStyle(send).borderTopLeftRadius), right: s.right }, boxRight: el.getBoundingClientRect().right, agentWords: el.querySelector<HTMLElement>('[data-recipient]')!.innerText.trim(), sideways: document.documentElement.scrollWidth - window.innerWidth };
+        return { missed, centres, send: { width: s.width, height: s.height, radius: parseFloat(getComputedStyle(send).borderTopLeftRadius), right: s.right }, boxRight: el.getBoundingClientRect().right, sideways: document.documentElement.scrollWidth - window.innerWidth };
       });
-      expect(row.missed, 'a press 21 px above or below, or 20 px beside, a control\'s centre misses it').toEqual([]);
-      expect(row.centres, 'the row reads paperclip, Skills, agent, mic, Send from the left').toEqual([...row.centres].sort((a, b) => a - b));
-      expect(row.agentWords, 'the agent mark shows no words').toBe('');
+      expect(row.missed, 'a press 21 px from a control\'s centre misses it').toEqual([]);
+      expect(row.centres, 'the row reads paperclip, Skills, mic, Send from the left').toEqual([...row.centres].sort((a, b) => a - b));
       expect(Math.abs(row.send.width - 36), 'Send is 36 px wide').toBeLessThanOrEqual(1);
       expect(Math.abs(row.send.height - 36), 'Send is 36 px tall').toBeLessThanOrEqual(1);
       expect(row.send.radius, 'Send is round').toBeGreaterThanOrEqual(row.send.width / 2);
@@ -354,7 +354,8 @@ for (const engine of ENGINES) {
 
     test('the sheet: takes focus from the field, cuts a long label on one line, closes by Escape, the scrim and a drag down; no slide with reduced motion', async () => {
       const page = await phone();
-      await openBox(page, world.oneThread);
+      await openBox(page, world.twoThread);
+      await expect(replyField(page), 'the reply does not hold focus before the sheet opens').toBeFocused();
       const sheet = replySheet(page);
       await recipient(page).tap();
       await sheetOpen(sheet);
@@ -365,8 +366,8 @@ for (const engine of ENGINES) {
       expect(placed.fromSeen, 'the sheet runs past the window\'s bottom').toBeGreaterThanOrEqual(0);
       await expect(replyField(page), 'the field kept focus, so a real keyboard would stay up').not.toBeFocused();
       expect(await sheet.evaluate((el) => el.contains(document.activeElement)), 'focus is not in the sheet').toBe(true);
-      const title = sheet.locator(`[data-recipient-row="${ONE}"] .ib-sheet-t`);
-      await expect(title, 'the row does not show the session\'s label').toContainText(LABEL.slice(0, 40), { timeout: 30_000 });
+      const title = sheet.locator(`[data-recipient-row="${TWO_A}"] .ib-sheet-t`);
+      await expect(title, 'the row does not show the session\'s label').toContainText(LABEL_TWO.slice(0, 40), { timeout: 30_000 });
       const cut = await title.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const s = el.closest('[data-sheet]')!.getBoundingClientRect();
@@ -375,12 +376,11 @@ for (const engine of ENGINES) {
       expect(cut.cut, 'the long label is not cut').toBe(true);
       expect(cut.inside, 'the long label runs out of the sheet').toBe(true);
       expect(cut.height, 'the long label wraps').toBeLessThanOrEqual(24);
-      await shot(page, `${engine.name}-sheet-one`);
+      await shot(page, `${engine.name}-sheet-label`);
       await page.keyboard.press('Escape');
       await expect(sheet, 'Escape did not close the sheet').toHaveCount(0);
       await expect(pane(page).locator('.ib-rbox'), 'Escape closed the reply box too').toBeVisible();
-      // Soft: what follows still runs when focus goes elsewhere (a button takes focus when pressed, except on iOS).
-      await expect.soft(replyField(page), 'after Escape focus is not back in the reply (a real keyboard would stay down)').toBeFocused();
+      await expect(replyField(page), 'after Escape focus is not back in the reply (a real keyboard would stay down)').toBeFocused();
       await recipient(page).tap();
       await sheetOpen(sheet);
       await page.locator('[data-sheet-scrim]').tap({ position: { x: SIZE.width / 2, y: 96 } });
@@ -421,7 +421,7 @@ for (const engine of ENGINES) {
       await sheet.locator(`[data-recipient-row="${other}"] .ib-sheet-t`).tap();
       await expect(sheet, 'a tap on a row did not close the sheet').toHaveCount(0);
       await expect(recipient(page), 'the pill does not name the agent tapped').toHaveAttribute('data-recipient-chosen', other);
-      await expect.soft(replyField(page), 'after a pick focus is not in the reply (a real keyboard would stay down)').toBeFocused();
+      await expect(replyField(page), 'after a pick focus is not in the reply (a real keyboard would stay down)').toBeFocused();
       await recipient(page).tap();
       await sheetOpen(sheet);
       await sheet.locator('[data-recipient-tick][aria-checked="false"]').tap();
@@ -497,9 +497,13 @@ for (const engine of ENGINES) {
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
   test('none of it applies: the recipient pill, Send with its word, the To line', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${world.url}#thread=${world.twoThread}`);
-    await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
     const box = pane(page).locator('.ib-rbox');
+    for (const thread of [world.oneThread, world.twoThread]) {
+      await page.goto(`${world.url}#thread=${thread}`);
+      await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
+      await expect(box.locator('[data-reply-send]')).toBeVisible();
+      if (thread === world.oneThread) await expect(box.locator('[data-recipient]'), 'a one-agent thread has a recipient pill on the desktop').toHaveCount(0);
+    }
     await expect(box.locator('[data-recipient]'), 'the desktop lost its recipient pill').toHaveClass(/(^|\s)ib-rto(\s|$)/);
     await expect(pane(page).locator('.ib-rbox [data-agent-mark], .ib-rbox [data-agent-pill], .ib-sheet'), 'a phone part is drawn on the desktop').toHaveCount(0);
     expect((await box.locator('[data-reply-send] .ib-rsend-w').boundingBox())!.width, 'Send lost its word on the desktop').toBeGreaterThanOrEqual(20);

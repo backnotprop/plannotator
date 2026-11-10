@@ -4,7 +4,7 @@
  *
  * - A computer: Send, the paperclip, Skills and the mic at the left; one middle cell for what goes with the reply
  *   (the chips, or the one summary line when they don't fit) and who gets it; the bin at the far right.
- * - A phone (approval "inbox-phone-composer-picker"): the paperclip, Skills and who gets the reply at the left, the mic
+ * - A phone (approval "inbox-phone-composer-picker"): the paperclip, Skills and (several agents) who gets the reply at the left, the mic
  *   and Send (a round arrow) at the right edge. No bin: the Draft line above the box keeps Discard. What goes with the
  *   reply sits on its own line over the row (Thread.tsx).
  * - Voice (decision D5): while a take runs, its status takes the middle cell's place (a computer: the chips and the
@@ -50,7 +50,7 @@ export function ReplyRow({
   chips: ReactNode;
   /** A computer: the same as one line, drawn instead of the chips when they don't fit (`fold`). */
   summary: ReactNode;
-  /** Who gets the reply: a computer's pill when the thread has several agents; a phone's agent control, for any thread. */
+  /** Who gets the reply, when the thread has several agents: a computer's pill, a phone's agent control. */
   pill: ReactNode;
   /** A computer: the bin. */
   discard: ReactNode;

@@ -44,7 +44,6 @@
 .ib-apill-d { flex: none; color: var(--muted-foreground); font-weight: 450; }
 .ib-apill-c { flex: none; color: var(--muted-foreground); }
 
-.ib-amark[data-ended] .ib-amark-m { opacity: 0.45; }
 .ib-amark-m { display: inline-flex; }
 .ib-amark-m .ib-mk, .ib-amark-m .ib-mk > :is(svg, img) { width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); }
 /* Several recipients: how many, at the button's corner like an unread count. */

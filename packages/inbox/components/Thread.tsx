@@ -2705,10 +2705,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setRcptGone(new Map());
     rcptAsked.current = false;
   }, [thread.thread_id]);
-  // A phone's control is there for a one-agent thread too: its sheet never outlives the box it was opened from.
-  useEffect(() => {
-    if (!box.open) setRcptOpen(false);
-  }, [box.open]);
   // The draft's saves name the choice (the server keeps it with the words).
   useEffect(() => {
     if (pillActive) replyDraft.aim(rcptPick);
@@ -5652,35 +5648,25 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     aimReply(next);
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
-  // A phone (approval "inbox-phone-composer-picker"): the agent is in the box's row for every thread with an agent to
-  // name. With one agent there is nothing to choose: the control is its mark, and its sheet names it and offers the `@`.
-  const soleRecipient: RecipientRow | null = (() => {
-    if (!phone || pillActive || resolved) return null;
-    if (asking) return { session: asking.session, host: asking.host || null, label: asking.name, short: asking.name, state: askerEnded ? 'ended' : 'live' };
-    const words = wordsMessage(thread);
-    const who = words.author.kind === 'agent' ? words.author : words.to;
-    return who?.session ? { session: who.session, host: who.host ?? null, label: replyTo, short: replyTo, state: 'live' } : null;
-  })();
-  // The one place the reply's recipient control splits: a phone's is in the row with its sheet, a computer's is the pill.
-  const rcptPill = phone ? (
-    pillActive || soleRecipient ? (
-      <PhoneReplyRecipient
-        rows={pillActive ? rcptAgents : [soleRecipient!]}
-        chosen={pillActive ? rcptChosen : [soleRecipient!]}
-        several={pillActive}
-        open={rcptOpen}
-        onOpen={setRcptOpen}
-        onOnly={pillActive ? onlyRecipient : () => setRcptOpen(false)}
-        onToggle={toggleReplyRecipient}
-        onTagAnother={tagAnother}
-        section={sectionRef.current}
-        labels={sessionLabels}
-        folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
-      />
-    ) : null
-  ) : pillActive ? (
+  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
+  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
+  // one agent has no control at all.
+  const rcptPill = !pillActive ? null : phone ? (
+    <PhoneReplyRecipient
+      rows={rcptAgents}
+      chosen={rcptChosen}
+      open={rcptOpen}
+      onOpen={setRcptOpen}
+      onOnly={onlyRecipient}
+      onToggle={toggleReplyRecipient}
+      onTagAnother={tagAnother}
+      section={sectionRef.current}
+      labels={sessionLabels}
+      folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
+    />
+  ) : (
     <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} />
-  ) : null;
+  );
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}

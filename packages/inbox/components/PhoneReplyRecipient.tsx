@@ -1,14 +1,12 @@
 /**
  * Who gets the reply, on a phone (approval "inbox-phone-composer-picker"): the agent control in the reply box's row,
- * after the paperclip and Skills, and the sheet it opens. A computer keeps ReplyRecipient.tsx.
+ * after the paperclip and Skills, and the sheet it opens. A computer keeps ReplyRecipient.tsx. Like that pill it shows
+ * only in a thread with several agents (ThreadPane's `pillActive`): a one-agent thread has no control in its row.
  *
- * - A thread with one agent: its mark alone (`AgentMark`). The agent is seldom changed there; the sheet names it and
- *   offers the `@`.
- * - A thread with several: the mark and a short name with a chevron (`AgentPill`), so the person sees who gets the
- *   reply before Send. Several recipients: the first mark with how many.
- * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it, a check on who
- *   gets the reply. A tap on a row sends to that agent only and closes; with several agents the circle at a row's end
- *   adds it and the sheet stays; the last row types a real `@`.
+ * - One recipient: the mark and a short name with a chevron (`AgentPill`), so the person sees who gets the reply
+ *   before Send. Several recipients: the first mark with how many (`AgentMark`).
+ * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it. A tap on a row sends
+ *   to that agent only and closes; the circle at a row's end adds it and the sheet stays; the last row types a real `@`.
  *
  * The rules stay replyRecipients.ts and ThreadPane's (the choice, the most one reply goes to, Send).
  */
@@ -32,7 +30,6 @@ const AtSign = () => (
 export function PhoneReplyRecipient({
   rows,
   chosen,
-  several,
   open,
   onOpen,
   onOnly,
@@ -46,8 +43,6 @@ export function PhoneReplyRecipient({
   rows: readonly RecipientRow[];
   /** Who gets the reply now, the one it answers first (a typed `@` included). */
   chosen: readonly RecipientRow[];
-  /** The thread has several agents: the control names the recipient, and rows can be added to. */
-  several: boolean;
   open: boolean;
   onOpen: (open: boolean) => void;
   onOnly: (row: RecipientRow) => void;
@@ -77,13 +72,13 @@ export function PhoneReplyRecipient({
     <>
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
-      ) : several && chosen.length === 1 ? (
+      ) : chosen.length === 1 ? (
         <AgentPill {...control} host={first.host} label={titleOf(first) ?? first.short} detail={ended ? 'ended' : null} />
       ) : (
-        <AgentMark {...control} host={first.host} count={chosen.length} ended={ended} />
+        <AgentMark {...control} host={first.host} count={chosen.length} />
       )}
       <BottomSheet open={open} onClose={() => onOpen(false)} title={TITLE} host={section} attrs={{ 'data-recipient-list': '' }}>
-        <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable={several || undefined}>
+        <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
             const title = titleOf(row);
@@ -98,25 +93,21 @@ export function PhoneReplyRecipient({
                 attrs={{ 'data-recipient-row': row.session }}
                 onClick={() => onOnly(row)}
                 end={
-                  several ? (
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={on}
-                      aria-label={`Also send to ${title ?? row.label}`}
-                      className="ib-sheet-tick"
-                      data-recipient-tick={row.session}
-                      disabled={!canAddRecipient(row, chosenIds)}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onToggle(row);
-                      }}
-                    >
-                      <Icon name="check" size={13} />
-                    </button>
-                  ) : (
-                    on && <Icon name="check" size={18} className="ib-sheet-check" />
-                  )
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    aria-label={`Also send to ${title ?? row.label}`}
+                    className="ib-sheet-tick"
+                    data-recipient-tick={row.session}
+                    disabled={!canAddRecipient(row, chosenIds)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggle(row);
+                    }}
+                  >
+                    <Icon name="check" size={13} />
+                  </button>
                 }
               />
             );

@@ -7,8 +7,9 @@
  * T6). The owner, of the stacked chips it replaces: "very bad looking on mobile. not good, not acceptable".
  *
  * - The row (T6, and the owner's note on it: "maybe we don't need delete icon. I like attachment on left"): the
- *   paperclip first, then Skills and who gets the reply (approval "inbox-phone-composer-picker"), the mic and Send
- *   (a round arrow, still named "Send") at the right edge; no bin, and Discard stays on the Draft line above the box.
+ *   paperclip first, then Skills (and, in a thread with several agents, who gets the reply: approval
+ *   "inbox-phone-composer-picker"), the mic and Send (a round arrow, still named "Send") at the right edge; no bin,
+ *   and Discard stays on the Draft line above the box.
  * - Nothing waiting: no line, and no "2 picks" chip (the answers list above says it).
  * - Comments only: the line opens the comments list itself, and closing the list puts focus back on the line.
  * - Questions: the line opens a sheet; its "Skip them" skips them for this Send, and the line says so.
@@ -240,17 +241,15 @@ const rowOrder = (el: HTMLElement) =>
     c.hasAttribute('data-reply-attach') ? 'attach' : c.hasAttribute('data-reply-skills') ? 'skills' : c.hasAttribute('data-recipient') ? 'recipient' : c.hasAttribute('data-voice-mic') ? 'mic' : c.hasAttribute('data-reply-send') ? 'send' : 'bin',
   );
 
-test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, who gets the reply, then the mic and Send (an arrow named "Send") at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
+test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send (an arrow named "Send") at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
   // The mic is in the row only with voice on.
   const { adoptVoiceSettings } = await import('./voice');
   adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
   try {
     const el = await open({ questions: false });
-    expect(rowOrder(el)).toEqual(['attach', 'skills', 'recipient', 'mic', 'send']);
-    // One agent here: its mark alone, which opens a sheet. Send is the arrow; the word is still its name.
-    const recipient = el.querySelector('.ib-rbox [data-reply-row] [data-recipient]')!;
-    expect(recipient.hasAttribute('data-agent-mark')).toBe(true);
-    expect(recipient.getAttribute('aria-haspopup')).toBe('dialog');
+    // One agent here: no recipient control, as on a computer (it comes only with several agents:
+    // replyRecipient.test.tsx). Send is the arrow; the word is still its name.
+    expect(rowOrder(el)).toEqual(['attach', 'skills', 'mic', 'send']);
     const send = el.querySelector('.ib-rbox [data-reply-send]')!;
     expect(!!send.querySelector('svg.ib-rsend-i')).toBe(true);
     expect(send.textContent?.trim()).toBe('Send');
