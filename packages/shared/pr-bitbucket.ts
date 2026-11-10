@@ -6,8 +6,9 @@
  *
  * Auth: an Atlassian API token (app passwords are deprecated), sent as basic
  * auth with the Atlassian account email when one is configured, else as a
- * Bearer token. See resolveBitbucketCredentials in config.ts. The token is
- * never logged, echoed, or put in an error message.
+ * Bearer token. See resolveBitbucketCredentials in config.ts, and
+ * `commandCredentials` for `bitbucketTokenCommand`. The token is never logged,
+ * echoed, or put in an error message.
  *
  * Server-only (reads config.json, writes failed comments to the data dir).
  */
@@ -32,7 +33,9 @@ import {
   loadConfig,
   resolveBitbucketApiUrl,
   resolveBitbucketCredentials,
+  resolveBitbucketTokenCommand,
   type BitbucketCredentials,
+  type BitbucketTokenCommand,
 } from "./config";
 
 /** Scopes a Bitbucket API token needs for PR review. */
@@ -45,7 +48,8 @@ export const BITBUCKET_TOKEN_SCOPES = [
 
 const TOKEN_HELP =
   `Create an Atlassian API token with scopes (https://id.atlassian.com/manage-profile/security/api-tokens → "Create API token with scopes" → Bitbucket) ` +
-  `granting ${BITBUCKET_TOKEN_SCOPES.join(", ")}, then set PLANNOTATOR_BITBUCKET_EMAIL (your Atlassian account email) and PLANNOTATOR_BITBUCKET_TOKEN.`;
+  `granting ${BITBUCKET_TOKEN_SCOPES.join(", ")}, then set PLANNOTATOR_BITBUCKET_EMAIL (your Atlassian account email) and PLANNOTATOR_BITBUCKET_TOKEN, ` +
+  `or put bitbucketEmail and a bitbucketTokenCommand that prints the token (e.g. a Keychain lookup) in ~/.plannotator/config.json.`;
 
 export const BITBUCKET_MISSING_TOKEN_MESSAGE =
   `Bitbucket Cloud PR review needs an Atlassian API token. ${TOKEN_HELP}`;
@@ -67,13 +71,82 @@ interface BbContext {
   credentials: BitbucketCredentials | null;
 }
 
-function context(runtime: PRRuntime): BbContext {
+/** How long a token command's answer is reused before the command runs again. */
+export const BITBUCKET_TOKEN_COMMAND_TTL_MS = 5 * 60_000;
+/** A token command that has not answered by then (a prompt nobody saw) counts as failed. */
+export const BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS = 60_000;
+/**
+ * A failed command is not run again before this, so a Keychain item that prompts or is missing asks at most once a
+ * minute while the Inbox reads PR after PR. A timed-out command keeps running: the runtimes have no way to stop it.
+ */
+export const BITBUCKET_TOKEN_COMMAND_FAILURE_MS = 60_000;
+
+/** Token command → its answer, shared by every request in this process. Memory only. */
+const commandTokens = new Map<string, { at: number; token: Promise<string> }>();
+/** Token command → when it last failed, and how. */
+const commandFailures = new Map<string, { at: number; error: BitbucketApiError }>();
+
+/** Forget every token a command printed: the next request runs the command again (after Bitbucket refused one). */
+export function forgetBitbucketCommandTokens(): void {
+  commandTokens.clear();
+  commandFailures.clear();
+}
+
+/**
+ * Run the token command (no shell, through the runtime), or reuse its answer
+ * for `BITBUCKET_TOKEN_COMMAND_TTL_MS`. Concurrent requests share one run. A
+ * failure is answered again for `BITBUCKET_TOKEN_COMMAND_FAILURE_MS` without a
+ * run, and its message never carries what the command printed.
+ */
+async function commandCredentials(runtime: PRRuntime, command: BitbucketTokenCommand): Promise<BitbucketCredentials> {
+  const key = JSON.stringify(command.argv);
+  const failed = commandFailures.get(key);
+  if (failed && Date.now() - failed.at < BITBUCKET_TOKEN_COMMAND_FAILURE_MS) throw failed.error;
+  const hit = commandTokens.get(key);
+  let entry = hit && Date.now() - hit.at < BITBUCKET_TOKEN_COMMAND_TTL_MS ? hit : null;
+  if (!entry) {
+    const [cmd, ...args] = command.argv as [string, ...string[]];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new BitbucketApiError(`The Bitbucket token command (${cmd}) did not answer within ${BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS / 1000}s.`, 401)),
+        BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS,
+      );
+    });
+    const token = Promise.race([runtime.runCommand(cmd, args), timeout])
+      .then((result) => {
+        const value = result.exitCode === 0 ? result.stdout.trim() : "";
+        if (result.exitCode !== 0) {
+          throw new BitbucketApiError(`The Bitbucket token command (${cmd}) exited with code ${result.exitCode}. Run it yourself to see why.`, 401);
+        }
+        if (!value || /\s/.test(value)) {
+          throw new BitbucketApiError(`The Bitbucket token command (${cmd}) did not print a token. It must print the token and nothing else.`, 401);
+        }
+        return value;
+      })
+      .finally(() => clearTimeout(timer));
+    entry = { at: Date.now(), token };
+    commandTokens.set(key, entry);
+    const kept = entry;
+    token.catch((error: unknown) => {
+      if (commandTokens.get(key) === kept) commandTokens.delete(key);
+      const known = error instanceof BitbucketApiError ? error : new BitbucketApiError(`The Bitbucket token command (${cmd}) could not run.`, 401);
+      commandFailures.set(key, { at: Date.now(), error: known });
+    });
+  }
+  const token = await entry.token;
+  return { token, ...(command.email ? { email: command.email } : {}) };
+}
+
+async function context(runtime: PRRuntime): Promise<BbContext> {
   const apiBase = resolveBitbucketApiUrl();
+  const config = loadConfig();
+  const command = resolveBitbucketTokenCommand(config);
   return {
     fetch: runtime.fetch ?? globalThis.fetch,
     apiBase,
     apiOrigin: new URL(apiBase).origin,
-    credentials: resolveBitbucketCredentials(loadConfig()),
+    credentials: command ? await commandCredentials(runtime, command) : resolveBitbucketCredentials(config),
   };
 }
 
@@ -128,9 +201,12 @@ async function errorDetail(res: Response): Promise<string> {
 async function failure(res: Response, what: string): Promise<BitbucketApiError> {
   const detail = await errorDetail(res);
   if (res.status === 401) {
+    // A token command's answer may be the stale one: the next request asks the command again.
+    forgetBitbucketCommandTokens();
     return new BitbucketApiError(
       `Bitbucket rejected the API token (HTTP 401) while trying to ${what}. ` +
-        `Check that PLANNOTATOR_BITBUCKET_TOKEN is current and PLANNOTATOR_BITBUCKET_EMAIL is the Atlassian account email that owns it ` +
+        `Check that the token (PLANNOTATOR_BITBUCKET_TOKEN, or what bitbucketTokenCommand prints) is current and the email ` +
+        `(PLANNOTATOR_BITBUCKET_EMAIL or bitbucketEmail) is the Atlassian account email that owns it ` +
         `(unset the email to send the token as a Bearer token). ${TOKEN_HELP}`,
       401,
     );
@@ -304,7 +380,7 @@ function webUrl(ref: BitbucketPRRef): string {
 // --- Auth ---
 
 export async function checkBbAuth(runtime: PRRuntime): Promise<void> {
-  const ctx = context(runtime);
+  const ctx = await context(runtime);
   if (!ctx.credentials) throw new BitbucketApiError(BITBUCKET_MISSING_TOKEN_MESSAGE, 401);
   const res = await bbRequest(ctx, "/user");
   if (!res.ok) throw await failure(res, "read the current Bitbucket user");
@@ -312,7 +388,7 @@ export async function checkBbAuth(runtime: PRRuntime): Promise<void> {
 
 export async function getBbUser(runtime: PRRuntime): Promise<string | null> {
   try {
-    const ctx = context(runtime);
+    const ctx = await context(runtime);
     if (!ctx.credentials) return null;
     const user = await bbJson<BbAccount>(ctx, "/user", "read the current user");
     return accountName(user) || null;
@@ -343,7 +419,7 @@ export async function fetchBbPR(
   runtime: PRRuntime,
   ref: BitbucketPRRef,
 ): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
-  const ctx = context(runtime);
+  const ctx = await context(runtime);
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
   const destFullName = `${ref.workspace}/${ref.repo}`;
 
@@ -545,7 +621,7 @@ export function mapBitbucketComments(raw: BbComment[], patch?: string): Pick<PRC
 }
 
 export async function fetchBbPRContext(runtime: PRRuntime, ref: BitbucketPRRef): Promise<PRContext> {
-  const ctx = context(runtime);
+  const ctx = await context(runtime);
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
   const [pr, rawComments, statuses, patch] = await Promise.all([
     bbJson<BbPullRequest>(ctx, prPath, "fetch PR context"),
@@ -631,7 +707,7 @@ export async function fetchBbTree(
   sha: string,
 ): Promise<PRTreeResult | null> {
   try {
-    const ctx = context(runtime);
+    const ctx = await context(runtime);
     const paths: string[] = [];
     let next: string | undefined = `${refRepoPath(ref)}/src/${encodeURIComponent(sha)}/?max_depth=1000&pagelen=100`;
     let pages = 0;
@@ -657,7 +733,7 @@ export async function fetchBbFileContent(
   filePath: string,
 ): Promise<string | null> {
   try {
-    const ctx = context(runtime);
+    const ctx = await context(runtime);
     const res = await bbRequest(ctx, srcPath(ref, sha, filePath), { accept: "*/*" });
     if (!res.ok) return null;
     return await res.text();
@@ -677,7 +753,7 @@ export async function fetchBbFileBytes(
   filePath: string,
   maxBytes: number,
 ): Promise<PRFileBytesResult> {
-  const ctx = context(runtime);
+  const ctx = await context(runtime);
   const metaRes = await bbRequest(ctx, `${srcPath(ref, sha, filePath)}?format=meta`);
   if (metaRes.status === 404) return { kind: "missing" };
   if (!metaRes.ok) throw await failure(metaRes, "read file metadata");
@@ -731,7 +807,7 @@ export async function submitBbPRReview(
   body: string,
   fileComments: PRReviewFileComment[],
 ): Promise<PRReviewSubmissionResult> {
-  const ctx = context(runtime);
+  const ctx = await context(runtime);
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
   const generalBody = body.trim();
   let reviewBodyPosted = false;
@@ -858,7 +934,7 @@ export async function submitBbPRReview(
 
 export async function fetchBbPRList(runtime: PRRuntime, ref: BitbucketPRRef): Promise<PRListItem[]> {
   try {
-    const ctx = context(runtime);
+    const ctx = await context(runtime);
     const body = await bbJson<BbPage<BbPullRequest & { destination?: BbEndpoint }>>(
       ctx,
       `${refRepoPath(ref)}/pullrequests?state=OPEN&state=MERGED&state=DECLINED&sort=-updated_on&pagelen=30`,
@@ -880,3 +956,4 @@ export async function fetchBbPRList(runtime: PRRuntime, ref: BitbucketPRRef): Pr
     return [];
   }
 }
+

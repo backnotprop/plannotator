@@ -3,8 +3,8 @@
  * recorded (anonymized) api.bitbucket.org responses — see
  * tests/test-fixtures/bitbucket/fake-bitbucket.ts.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,16 +13,18 @@ import {
   type FakeBitbucketOptions,
 } from "../../tests/test-fixtures/bitbucket/fake-bitbucket";
 import {
+  BITBUCKET_TOKEN_COMMAND_FAILURE_MS,
   checkBbAuth,
   fetchBbFileBytes,
   fetchBbFileContent,
   fetchBbPR,
   fetchBbPRContext,
   fetchBbPRList,
+  forgetBitbucketCommandTokens,
   getBbUser,
   submitBbPRReview,
 } from "./pr-bitbucket";
-import { resolveBitbucketApiUrl, resolveBitbucketCredentials } from "./config";
+import { resolveBitbucketApiUrl, resolveBitbucketCredentials, resolveBitbucketTokenCommand } from "./config";
 import type { BitbucketPRRef, PRReviewFileComment, PRRuntime } from "./pr-types";
 
 const FIXTURES = join(import.meta.dir, "../../tests/test-fixtures/bitbucket");
@@ -54,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  forgetBitbucketCommandTokens();
   fake?.stop();
   fake = undefined;
   for (const k of ENV_KEYS) {
@@ -326,3 +329,99 @@ describe("config", () => {
     expect(resolveBitbucketCredentials({}, { PLANNOTATOR_BITBUCKET_TOKEN: " " })).toBeNull();
   });
 });
+
+describe("token command", () => {
+  const COMMAND = ["security", "find-generic-password", "-s", "bitbucket", "-w"];
+
+  /** A runtime whose only command is the token command; counts its runs. */
+  function commandRuntime(answer: { stdout?: string; exitCode?: number } = {}): PRRuntime & { runs: string[][] } {
+    const runs: string[][] = [];
+    return {
+      runs,
+      async runCommand(cmd, args) {
+        runs.push([cmd, ...args]);
+        return { stdout: answer.stdout ?? `${TOKEN}\n`, stderr: "", exitCode: answer.exitCode ?? 0 };
+      },
+    };
+  }
+
+  /** The fake API with no env token: credentials come from config.json in the sandboxed data dir. */
+  function useCommandConfig(config: Record<string, unknown>, options: Partial<FakeBitbucketOptions> = {}): FakeBitbucket {
+    const f = useFake(options);
+    delete process.env.PLANNOTATOR_BITBUCKET_TOKEN;
+    delete process.env.PLANNOTATOR_BITBUCKET_EMAIL;
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+    return f;
+  }
+
+  test("resolves only when no env token is set, paired with the config email", () => {
+    const config = { bitbucketTokenCommand: COMMAND, bitbucketEmail: "cfg@example.invalid", bitbucketToken: "cfg-token" };
+    expect(resolveBitbucketTokenCommand(config, {})).toEqual({ argv: COMMAND, email: "cfg@example.invalid" });
+    expect(resolveBitbucketTokenCommand(config, { PLANNOTATOR_BITBUCKET_TOKEN: "env-token" })).toBeNull();
+    // The env token wins over both config sources.
+    expect(resolveBitbucketCredentials(config, { PLANNOTATOR_BITBUCKET_TOKEN: "env-token" })).toEqual({ token: "env-token" });
+    // The command wins over the stored token.
+    expect(resolveBitbucketCredentials(config, {})).toBeNull();
+  });
+
+  test("a value that is not a list of words counts as unset, so the stored token is used", () => {
+    for (const bad of [[], "security -w", [""], ["security", 3], null]) {
+      const config = { bitbucketTokenCommand: bad as unknown as string[], bitbucketToken: "cfg-token" };
+      expect(resolveBitbucketTokenCommand(config, {})).toBeNull();
+      expect(resolveBitbucketCredentials(config, {})).toEqual({ token: "cfg-token" });
+    }
+  });
+
+  test("runs the command without a shell, once for several requests, and authenticates with what it printed", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    const rt = commandRuntime();
+    await checkBbAuth(rt);
+    expect(await getBbUser(rt)).toBe("Ada Reviewer");
+    expect(rt.runs).toEqual([COMMAND]);
+  });
+
+  test("the env token wins: the command never runs", async () => {
+    useFake();
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ bitbucketTokenCommand: COMMAND }));
+    await checkBbAuth(runtime);
+  });
+
+  test("a failing command says so without what it printed, and is not run again for a minute", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    const failing = commandRuntime({ stdout: "partial-secret", exitCode: 44 });
+    const error = await checkBbAuth(failing).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("exited with code 44");
+    expect((error as Error).message).not.toContain("partial-secret");
+    // A prompting or missing Keychain item must not ask again for every PR the Inbox reads.
+    expect(((await checkBbAuth(failing).catch((e: Error) => e)) as Error).message).toContain("exited with code 44");
+    expect(failing.runs).toHaveLength(1);
+    setSystemTime(new Date(Date.now() + BITBUCKET_TOKEN_COMMAND_FAILURE_MS + 1));
+    try {
+      await checkBbAuth(failing).catch(() => undefined);
+    } finally {
+      setSystemTime();
+    }
+    expect(failing.runs).toHaveLength(2);
+  });
+
+  test("a command that prints nothing, or more than one word, is refused", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    for (const stdout of ["", "\n", "two words"]) {
+      forgetBitbucketCommandTokens();
+      const error = await checkBbAuth(commandRuntime({ stdout })).catch((e: Error) => e);
+      expect((error as Error).message).toContain("did not print a token");
+      expect((error as Error).message).not.toContain("two words");
+    }
+  });
+
+  test("a token Bitbucket rejects is forgotten: the next request runs the command again", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    const stale = commandRuntime({ stdout: "stale-token" });
+    await expect(checkBbAuth(stale)).rejects.toThrow("HTTP 401");
+    const fresh = commandRuntime();
+    await checkBbAuth(fresh);
+    expect(fresh.runs).toEqual([COMMAND]);
+  });
+});
+

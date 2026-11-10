@@ -46,6 +46,47 @@ You can also put `bitbucketEmail` and `bitbucketToken` in `~/.plannotator/config
 
 Plannotator never logs the token and never sends it to the browser.
 
+### Read the token from a command
+
+An environment variable reaches every program your shell starts, including your agent and the commands it runs. To keep the token out of all of them, store it in a password manager and give Plannotator the command that prints it. For the macOS Keychain:
+
+```json
+{
+  "bitbucketEmail": "you@example.com",
+  "bitbucketTokenCommand": ["security", "find-generic-password", "-s", "bitbucket", "-w"]
+}
+```
+
+Put that in `~/.plannotator/config.json`. The command is a list of words, run without a shell. It must print only the token. Plannotator runs it only when it is about to call Bitbucket and keeps the token in memory for five minutes. The token never goes into an environment variable, a file, or a program Plannotator starts.
+
+`PLANNOTATOR_BITBUCKET_TOKEN` still wins when it is set. `bitbucketTokenCommand` wins over `bitbucketToken`.
+
+Atlassian's scoped API tokens are about 190 characters long. The `security add-generic-password -w` prompt cuts what you paste at 128 characters, so add the token through Keychain Access instead.
+
+Other password stores work the same way: any command that prints the token and nothing else.
+
+**Windows Credential Manager** (not tested on Windows yet). Windows PowerShell 5.1 (`powershell`, not `pwsh`) can read a credential stored with the built-in `PasswordVault`, with no extra module. Store the token once, in Windows PowerShell:
+
+```powershell
+[void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]
+(New-Object Windows.Security.Credentials.PasswordVault).Add((New-Object Windows.Security.Credentials.PasswordCredential('plannotator-bitbucket', 'you@example.com', (Read-Host 'Bitbucket API token'))))
+```
+
+Then read it back:
+
+```json
+{
+  "bitbucketEmail": "you@example.com",
+  "bitbucketTokenCommand": ["powershell", "-NoProfile", "-NonInteractive", "-Command", "[void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; $c = (New-Object Windows.Security.Credentials.PasswordVault).Retrieve('plannotator-bitbucket', 'you@example.com'); $c.RetrievePassword(); $c.Password"]
+}
+```
+
+A credential added with `cmdkey` or in the Credential Manager window is a different kind that this command does not read.
+
+**Linux** (the Secret Service, as GNOME Keyring and KWallet provide it): store the token with `secret-tool store --label="Bitbucket API token" service plannotator-bitbucket`, then use `["secret-tool", "lookup", "service", "plannotator-bitbucket"]`.
+
+**1Password**, on any system: `["op", "read", "op://Private/Bitbucket/token"]`, with the path of your own item.
+
 If the token is missing, rejected, or lacks a scope, `plannotator review` stops with a message that names the variables and the scopes to fix.
 
 ## Local checkout
