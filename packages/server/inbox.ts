@@ -109,6 +109,7 @@ import {
   INBOX_REMINDER_HOSTS,
   INBOX_TOOL_HOSTS,
   cookieHostState,
+  inboxChapterDiagramsOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -256,6 +257,7 @@ import {
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
+import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
@@ -518,6 +520,8 @@ export interface InboxServerOptions {
   shape?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
   system?: boolean;
+  /** Chapter diagrams, decided here instead of config.json `inboxChapterDiagrams` (tests). Absent: config.json decides on every request (on unless false). */
+  chapterDiagrams?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -1411,6 +1415,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
         // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
         shapeOn: () => shapeOn(),
+        // Chapter diagrams: get_guide_brief and submit_guide name a chapter's diagram only while it is on.
+        chapterDiagramsOn: () => chapterDiagramsOn(),
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
         snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
         snoozeMade: () => markSnoozeUsed(),
@@ -2761,6 +2767,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const systemWire = system.wire;
   /** The open PRs' files by head commit, for "Open PRs that change this" (read again only for a PR that moved). */
   const systemFiles = systemFilesCache();
+  /**
+   * Chapter diagrams, under Code review (Settings → Capabilities): on unless the person turned it off (config.json
+   * `inboxChapterDiagrams`). Off, get_guide_brief, submit_guide's `guide` field and the review skills name no chapter
+   * diagram, and the window draws one that still arrives folded. Read on every request.
+   */
+  const chapterDiagramsOn = () => options.chapterDiagrams ?? inboxChapterDiagramsOn(loadConfig());
+  /** The switch's state for the window: present only while Code review is on (the row shows only then), as System's. */
+  const chapterDiagramsWire = (): { chapter_diagrams?: { on: boolean } } => (codeReviewOn() ? { chapter_diagrams: { on: chapterDiagramsOn() } } : {});
+  const saveChapterDiagrams = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "chapter_diagrams: { on: boolean }.", { field: "chapter_diagrams" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: chapterDiagramsOn() };
+    const was = chapterDiagramsOn();
+    saveConfig({ inboxChapterDiagrams: on });
+    if (inboxChapterDiagramsOn(loadConfig()) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Every window follows at once (its Settings switch, the review skills it pastes, a chapter diagram's fold).
+    if (was !== chapterDiagramsOn()) for (const listener of capabilityListeners) listener();
+    return { on: chapterDiagramsOn() };
+  };
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -3065,6 +3092,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
   };
   /**
+   * The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): the owner's, a day or more after first use, while no
+   * sidebar layout was ever saved, until it was shown once. Outside the line, as the Launch tip: its claim stamps only
+   * `inboxReveals.sidebar_tip`.
+   */
+  const sidebarTipState = (owner: boolean): SidebarTipState => {
+    const config = loadConfig();
+    return {
+      owner,
+      customized: sidebarState().rev > 0 || config.inboxSidebar !== undefined,
+      firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+      tenure: snoozeIntroRelease,
+      saved: config.inboxReveals?.sidebar_tip,
+    };
+  };
+  const claimSidebarTip = (owner: boolean, key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = sidebarTipClaim(sidebarTipState(owner), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, sidebar_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -3081,6 +3131,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState(owner)),
+      // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
+      sidebar_tip: sidebarTipDue(sidebarTipState(owner), now.toISOString()),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -3219,6 +3271,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...heldSwitch("shape", shapeOn()),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
     ...systemWire(),
+    /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
+    ...chapterDiagramsWire(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -3401,7 +3455,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire() };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -5273,11 +5327,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
+          body.chapter_diagrams === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -5294,6 +5349,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.shape !== undefined && !owner) return localOnly();
         // System too (the drawings, and from B9 the jobs that keep them current); a malformed value throws here.
         if (system.check(body, owner) === "local_only") return localOnly();
+        // Chapter diagrams too (what get_guide_brief and the review skills offer agents): the owner's to change.
+        if (body.chapter_diagrams !== undefined && !owner) return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -5343,6 +5400,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
+        if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -5370,9 +5428,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = system.answer(body);
+        // Present while Code review is on, and always to the save that set it.
+        const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -5455,8 +5515,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -5474,6 +5534,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Launch tip: outside the line, its own stamp only (packages/shared/inbox/launch-tip.ts).
         if (id === "launch_tip") {
           return json({ show: claimLaunchTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
+        if (id === "sidebar_tip") {
+          return json({ show: claimSidebarTip(owner, key ?? null), reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

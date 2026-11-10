@@ -1249,6 +1249,38 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(pulls.avatarUrls("gitlab.com")).toEqual({});
   });
 
+  test("reviewers' and approvers' pictures come in the same read; only the people a listed PR names may be asked for", async () => {
+    // GitLab: who approved and who was asked, each with a picture; a reviewer the forge gave no picture is left out.
+    const gl = parseGitlabPulls(
+      JSON.stringify({
+        data: {
+          currentUser: {
+            username: "dana",
+            requested: { nodes: [GL_MR(6, { approvedBy: { nodes: [{ username: "lena-v", avatarUrl: "/uploads/-/system/user/avatar/3/l.png" }] }, reviewers: { nodes: [{ username: "nina-k", avatarUrl: "https://gitlab.example.org/n.png" }, { username: "kai" }] } })] },
+            authored: { nodes: [] },
+            merged: { nodes: [] },
+          },
+        },
+      }),
+      "gitlab.example.org",
+    )!;
+    expect(gl.avatars).toEqual({ "lena-v": "https://gitlab.example.org/uploads/-/system/user/avatar/3/l.png", "nina-k": "https://gitlab.example.org/n.png" });
+    // GitHub: a requested user and an approver have pictures; a team has none to ask for.
+    const reviewed = ghPull(3, {
+      author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2" },
+      reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "nina-k", avatarUrl: "https://avatars.githubusercontent.com/u/5" } }, { requestedReviewer: { __typename: "Team", slug: "platform" } }] },
+      latestReviews: { nodes: [{ state: "APPROVED", author: { login: "lena-v", avatarUrl: "https://avatars.githubusercontent.com/u/6" } }] },
+    });
+    const outside = ghPull(9, { reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "outsider", avatarUrl: "https://avatars.githubusercontent.com/u/9" } }] }, repository: { nameWithOwner: "elsewhere/thing" } });
+    const pulls = createInboxPulls({ run: forge(answerOf([reviewed, outside])).run });
+    const listed = await pulls.list(repos);
+    expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
+    const urls = pulls.avatarUrls("github.com");
+    expect(urls).toMatchObject({ tomas: "https://avatars.githubusercontent.com/u/2", "nina-k": "https://avatars.githubusercontent.com/u/5", "lena-v": "https://avatars.githubusercontent.com/u/6" });
+    expect(urls.outsider).toBeUndefined();
+    expect(urls.platform).toBeUndefined();
+  });
+
   test("a conflicting PR says so (GitHub `mergeable`, GitLab `conflicts`); an unknown one says nothing", () => {
     const gh = parseGithubPulls(JSON.stringify(answerOf([ghPull(1, { mergeable: "CONFLICTING" }), ghPull(2, { mergeable: "UNKNOWN" }), ghPull(3, { mergeable: "MERGEABLE" })])), "github.com")!;
     const by = Object.fromEntries(gh.pulls.map((p) => [p.number, p]));

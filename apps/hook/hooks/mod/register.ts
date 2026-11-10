@@ -1010,8 +1010,9 @@ export function register(on: On) {
   // Plannotator's plan hook turns the variable off, so where it would have
   // waived a removal prompt in bypass mode, the mod answers that prompt with
   // allow. The `tool.check` hook only watches the call's own verdict (which
-  // rule, hook or plugin asked); the person's own rules and hooks, and every
-  // enabled plugin's PreToolUse and PermissionRequest hooks, win.
+  // rule, hook or plugin asked); the person's own rules, a hook that asked on
+  // the call, and every PermissionRequest hook that could run for Bash (the
+  // person's or an enabled plugin's) win.
   on('tool.check', { tool: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     const verdict = await next(e)
     if (!allowed || typeof e.tool_use_id !== 'string') return verdict
@@ -1025,6 +1026,7 @@ export function register(on: On) {
 
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
+    let why = ''
     const decision = await answerRemovalPrompt(e, removalAsks, {
       variable: () => $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'),
       childSession: () => $.env.get('CLAUDE_CODE_CHILD_SESSION'),
@@ -1039,9 +1041,13 @@ export function register(on: On) {
         if (typeof text !== 'string') throw new Error(`unreadable: ${path}`)
         return text
       },
+      // Claude Code's own verdict for one part of a several-parts command; nothing runs.
+      check: (command) => $.tool.check({ tool: SHELL_TOOL, input: { command } }),
+    }, (reason) => {
+      why = reason
     })
     if (allowed.debugPath && (decision || isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS')))) {
-      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : 'left to the dialog'}`)
+      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : `left to the dialog${why ? `: ${why}` : ''}`}`)
     }
     return decision ? { decision } : next(e)
   })

@@ -8,7 +8,10 @@
  *    (placement A: the top of the code pane, full width);
  *  - a chapter without a diagram looking any different from before;
  *  - two chapters' drawings sharing one id (one would draw over the other);
- *  - an old guide whose overview carries a diagram no longer opening, or losing that diagram.
+ *  - an old guide whose overview carries a diagram no longer opening, or losing that diagram;
+ *  - Chapter diagrams off (Settings → Capabilities): a diagram that still arrives drawn open, or drawn at all before
+ *    the person opens it, or its Diagram header taking more than one click to open, or the person's own folds
+ *    (kept for when the switch is on) written over.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -155,7 +158,7 @@ const withChapterDiagrams = (sources: Array<string | null>, base: GuideSnapshot 
   },
 });
 const chapter = (i: number) => document.querySelector(`[data-guide-section="${i}"]`);
-const pane = () => <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
+const pane = (chapterDiagrams?: boolean) => <ReviewPane thread={thread} message={message} codeReview {...(chapterDiagrams === undefined ? {} : { chapterDiagrams })} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
 
 test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram at the top of that chapter's code pane, above its first file, with Expand", async () => {
   snapshot = withChapterDiagrams([LR]);
@@ -213,4 +216,33 @@ test.skipIf(!hasDom)("an old guide with an overview diagram still opens and draw
   expect(document.querySelector('[data-guide-overview-diagram="mermaid"] svg') !== null).toBe(true);
   expect(chapter(1)!.querySelector('[data-guide-chapter-diagram="mermaid"] svg') !== null).toBe(true);
   expect(rendered).toContain(TD);
+});
+
+test.skipIf(!hasDom)('Chapter diagrams off: a chapter diagram that arrives draws folded, and one click on its Diagram header opens it', async () => {
+  localStorage.removeItem('plannotator-guide-diagram-folds');
+  snapshot = withChapterDiagrams([LR]);
+  await mount(pane(false));
+  const box = chapter(0)!.querySelector<HTMLElement>('[data-guide-chapter-diagram="mermaid"]')!;
+  const header = box.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+  // Folded: the header is there and closed, the drawing is not, and the runtime was never asked for it.
+  expect([box.hasAttribute('data-folded'), header.getAttribute('aria-expanded'), header.textContent]).toEqual([true, 'false', 'Diagram']);
+  expect(box.querySelector('[data-guide-chapter-diagram-body]') === null).toBe(true);
+  expect(rendered).not.toContain(LR);
+  await act(async () => header.click());
+  await settle();
+  expect([box.hasAttribute('data-folded'), header.getAttribute('aria-expanded')]).toEqual([false, 'true']);
+  expect(box.querySelector('[data-guide-chapter-diagram-body] svg[data-drawn-overview]') !== null).toBe(true);
+  expect(rendered).toContain(LR);
+  // Folded again and opened again by hand: nothing is kept, so the person's own folds stay theirs for when it is on.
+  await act(async () => header.click());
+  expect(localStorage.getItem('plannotator-guide-diagram-folds') ?? '').toBe('');
+});
+
+test.skipIf(!hasDom)('Chapter diagrams on (the default): the same chapter diagram draws open', async () => {
+  localStorage.removeItem('plannotator-guide-diagram-folds');
+  snapshot = withChapterDiagrams([LR]);
+  await mount(pane(true));
+  const box = chapter(0)!.querySelector('[data-guide-chapter-diagram="mermaid"]')!;
+  expect([box.hasAttribute('data-folded'), box.querySelector('button[aria-expanded]')!.getAttribute('aria-expanded')]).toEqual([false, 'true']);
+  expect(rendered).toContain(LR);
 });

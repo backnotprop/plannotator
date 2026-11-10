@@ -56,6 +56,8 @@ export interface GuideReaderProps {
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
   /** Draws a chapter's html diagram (the guide host's `renderChapterDiagram`; Mermaid is drawn by the reader). Absent or null: no diagram. */
   renderChapterDiagram?: (diagram: GuideOverviewDiagram, index: number) => ReactNode | null;
+  /** Draw each chapter's diagram folded, its Diagram header closed (Chapter diagrams off); one click opens it. Absent: as before. */
+  chapterDiagramsFolded?: boolean;
   /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
   renderOverviewFigure?: () => ReactNode | null;
   /** Paint these lines (new side; `side: 'old'`: removed lines' numbers) and bring them into view; a new token moves again. */
