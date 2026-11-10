@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'r
 import { createPortal } from 'react-dom';
 import { HostMark } from '../icons';
 import { keepAgentFace, useAgentFace } from './agentFaces';
-import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, setAgentFaceArt, setAgentMarkState, showAgentFace, unmountAgentMark, type AgentMood } from './motion';
+import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, setAgentFaceArt, showAgentFace, unmountAgentMark } from './motion';
 
 let artLoad: Promise<void> | null = null;
 /** Our faces' pictures (faceArt.ts), fetched once, on the first click or for a face kept from before. */
@@ -18,32 +18,27 @@ export function loadAgentFaceArt(): Promise<void> {
 }
 
 /**
- * An agent's animated mark (motion.ts), 24 px, with no tile. A click on it shows the next face of the cycle (the
- * agent, Glass, Yellow, Transparent, Face) and never reaches the row; the face is kept for that agent until the next
- * click (agentFaces.ts). A host with no rig shows its plain mark, still, and cycles the same way. Decorative: the
- * row's words name the agent, and the cycle is a pointer's play, never a keyboard stop.
+ * An agent's animated mark (motion.ts), 24 px, with no tile: always alive, the same whatever the agent is doing, its
+ * own life seeded by the agent's id. A click on it shows the next face of the cycle (the agent, Glass, Yellow,
+ * Transparent, Face) and never reaches the row; the face is kept for that agent until the next click (agentFaces.ts).
+ * A host with no rig shows its plain mark, moved as a whole, and cycles the same way. Decorative: the row's words name
+ * the agent, and the cycle is a pointer's play, never a keyboard stop.
  */
-export function AgentMark({ id, host, state }: { id: string; host: string | null; state: AgentMood }) {
+export function AgentMark({ id, host }: { id: string; host: string | null }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const [stillTile, setStillTile] = useState<HTMLElement | null>(null);
+  const [plain, setPlain] = useState<HTMLElement | null>(null);
   const face = useAgentFace(id);
   const rig = agentRigOf(host);
   const clicked = useRef(false);
-  const stateRef = useRef(state);
-  stateRef.current = state;
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const tile = mountAgentMark(el, { rig, state: stateRef.current, face: 'agent', size: 24 });
-    setStillTile(rig ? null : tile);
+    setPlain(mountAgentMark(el, { rig, face: 'agent', size: 24, seed: id }));
     return () => {
-      setStillTile(null);
+      setPlain(null);
       unmountAgentMark(el);
     };
-  }, [rig]);
-  useEffect(() => {
-    if (ref.current) setAgentMarkState(ref.current, state);
-  }, [state, rig]);
+  }, [rig, id]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -62,7 +57,7 @@ export function AgentMark({ id, host, state }: { id: string; host: string | null
     return () => {
       live = false;
     };
-  }, [face, rig]);
+  }, [face, rig, id]);
   const cycle = (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -71,8 +66,8 @@ export function AgentMark({ id, host, state }: { id: string; host: string | null
   };
   return (
     <>
-      <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'still'} onClick={cycle} />
-      {stillTile && createPortal(<HostMark host={host} />, stillTile)}
+      <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} onClick={cycle} />
+      {plain && createPortal(<HostMark host={host} />, plain)}
     </>
   );
 }

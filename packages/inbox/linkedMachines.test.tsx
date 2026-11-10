@@ -24,6 +24,7 @@ const { MachinesSection } = (hasDom ? await import('./components/Machines') : {}
 const { ThreadWait } = (hasDom ? await import('./components/ThreadWait') : {}) as typeof import('./components/ThreadWait');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { machinesModel, machineProjectNames } = await import('./machines');
+const { setInboxAgents } = await import('./agentsList');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
@@ -108,6 +109,7 @@ afterEach(() => {
   host = null;
   document.body.innerHTML = '';
   globalThis.fetch = savedFetch;
+  setInboxAgents(null);
   resetStorageBackend();
 });
 
@@ -230,6 +232,10 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
+/** An agent running on each of the two machines: a machine's name shows in the sidebar only while agents show from more than one. */
+const anAgent = (id: string) => ({ id, session: id, host: 'claude-code', project: { id: 'prj_a', name: 'web-app' }, state: 'idle' as const, waiting: 0, live: true, started_at: '2026-11-09T09:14:00.000Z', last_seen_at: '2026-11-09T09:46:00.000Z' });
+const agentsOnBoth = () => act(() => setInboxAgents([{ machine: SELF, agents: [anAgent('ses_s1')], total: 1, ended_today: 0 }, { machine: MAC, agents: [anAgent('ses_m1')], total: 1, ended_today: 0 }]));
+
 test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates: a tailnet guest gets none, in the sidebar or on its Settings row', () => {
   const update = { phase: 'behind' as const, target: '0.28.49', from: '0.28.39', can_update: true, self_update: true };
   const list = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { update })];
@@ -240,6 +246,12 @@ test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a p
     root = null;
     host = null;
   };
+  // No agent on it: the machine is not named in the sidebar, so its word is not there either (it is in Settings).
+  mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
+  expect(host!.querySelector('[data-machine]')).toBeNull();
+  expect(host!.querySelector('.ib-mthing')).toBeNull();
+  fresh();
+  agentsOnBoth();
   mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
   expect(host!.querySelector('.ib-mthing')?.textContent).toBe('Update');
   fresh();
@@ -260,6 +272,7 @@ test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a p
 test.skipIf(!hasDom)("the sidebar's Agents names the machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet", () => {
   const picked: string[] = [];
   const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline')]);
+  agentsOnBoth();
   mount(<Sidebar {...sidebarProps({ machines: model, machineCounts: new Map([[SELF, 1], [MAC, 2]]), onMachine: (id) => picked.push(id) })} />);
   const headers = [...document.querySelectorAll('[data-sidebar-section]')].map((h) => h.getAttribute('data-sidebar-section'));
   expect(headers.indexOf('agents')).toBeGreaterThanOrEqual(0);

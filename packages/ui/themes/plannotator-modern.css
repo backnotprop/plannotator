@@ -1,7 +1,10 @@
-/* Plannotator Modern. Colors from BoardUI's free theme tokens: thanks to BoardUI
+/* Plannotator Modern. Light colors from BoardUI's free theme tokens: thanks to BoardUI
    (https://www.boardui.com, https://github.com/BoardUI/boardui).
 
-   Set on our tokens: BoardUI's secondary surface is the ground, its full surface the
+   Dark is the PaulMillr palette (themes/paulmillr.css: "PaulMillr — terminal color scheme"),
+   every color as that theme has it but its blue, which is the light half's blue. The fonts stay Modern's.
+
+   Light, set on our tokens: BoardUI's secondary surface is the ground, its full surface the
    card, its tertiary surface muted. Values are BoardUI's unless a comment says not.
 
    Neutrals stay hex on purpose: a hex grey has no hue, so color-mix(in oklch) with the
@@ -31,39 +34,41 @@
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE. */
 .theme-plannotator-modern {
-  --background: #171717;
-  --foreground: #fafafa;
-  --card: #121212;
-  --card-foreground: #fafafa;
-  --popover: #262626;
-  --popover-foreground: #fafafa;
-  /* BoardUI's blue-400. Its button blues under a white label cannot also be read as link text on these surfaces. */
-  --primary: #3392ff;
-  --primary-foreground: #0a0a0a;
-  --secondary: oklch(0.789 0.154 211.53);
-  --secondary-foreground: #0a0a0a;
-  --muted: #262626;
-  /* Not BoardUI's: its #737373 is 2.9:1 on the lightest chip it sits on (#2c2c2c). Raised only as far as 4.5:1 there. */
-  --muted-foreground: #949494;
-  --accent: oklch(0.705 0.213 47.604);
-  --accent-foreground: #0a0a0a;
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: #0a0a0a;
-  --border: #404040;
-  --input: #262626;
-  --ring: oklch(0.623 0.214 259.815);
-  /* lime-600, not BoardUI's lime-500: a calmer Approve button. Its dark label is 6.5:1, and as text it stays over 4.9:1 on every surface. */
-  --success: oklch(0.648 0.2 131.684);
-  --success-foreground: #0a0a0a;
-  --warning: oklch(0.795 0.184 86.047);
-  --warning-foreground: #0a0a0a;
+  /* Dark is the PaulMillr palette (see the header): the colors below are themes/paulmillr.css's, value for value,
+     but for the blue. utils/modernDarkPalette.test.ts fails when the two drift. */
+  --background: #000000;
+  --foreground: #f2f2f2;
+  --card: #2a2a2a;
+  --card-foreground: #f2f2f2;
+  --popover: #2a2a2a;
+  --popover-foreground: #f2f2f2;
+  /* Not PaulMillr's #396bd7: the blue of the light half below, so the theme has one blue. */
+  --primary: oklch(0.515 0.245 263);
+  --primary-foreground: #ffffff;
+  --secondary: #414141;
+  --secondary-foreground: #f2f2f2;
+  --muted: #2a2a2a;
+  --muted-foreground: #bbbbbb;
+  --accent: #66ccff;
+  --accent-foreground: #000000;
+  --destructive: #ff0000;
+  --destructive-foreground: #ffffff;
+  --border: #414141;
+  --input: #2a2a2a;
+  /* The primary, as PaulMillr's ring is its primary. */
+  --ring: oklch(0.515 0.245 263);
+  --success: #79ff0f;
+  --success-foreground: #000000;
+  --warning: #e7bf00;
+  --warning-foreground: #000000;
 
+  /* Modern's own, for both modes: the light block below sets no fonts. */
   --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --radius: 0.625rem;
 
-  --code-bg: #171717;
-  --focus-highlight: #3392ff;
+  --code-bg: #1a1a1a;
+  --focus-highlight: #66ccff;
 }
 
 .theme-plannotator-modern.light {
@@ -95,4 +100,6 @@
   --warning-foreground: #ffffff;
 
   --code-bg: #f7f7f7;
+  /* What light drew before dark became Paul Miller's (it came from the block above). */
+  --focus-highlight: #3392ff;
 }

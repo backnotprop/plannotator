@@ -48,7 +48,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     modeSupport: 'both',
     syntaxHighlighting: true,
     colors: {
-      dark: { primary: '#3392ff', secondary: 'oklch(0.789 0.154 211.53)', accent: 'oklch(0.705 0.213 47.604)', background: '#171717', foreground: '#fafafa' },
+      dark: { primary: 'oklch(0.515 0.245 263)', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
       light: { primary: 'oklch(0.515 0.245 263)', secondary: 'oklch(0.45 0.085 224.283)', accent: 'oklch(0.47 0.157 37.304)', background: '#f7f7f7', foreground: '#0a0a0a' },
     },
   },

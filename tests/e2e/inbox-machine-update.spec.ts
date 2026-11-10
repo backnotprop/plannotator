@@ -177,6 +177,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const m of [studio, mini]) await start(m);
   link(studio, mini);
   await expect.poll(async () => (await rowOf(mini))?.update?.phase, { timeout: 20_000 }).toBe('behind');
+  // An agent waiting on each machine: the sidebar names a machine (and shows its word) only while agents show from
+  // more than one machine.
+  await asked(studio, 'Which region for the new bucket');
+  await asked(mini, 'Which queue for the retries');
 
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   await context.grantPermissions(['notifications'], { origin: base(studio) });

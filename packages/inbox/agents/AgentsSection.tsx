@@ -10,13 +10,17 @@ import { AgentMark } from './AgentMark';
 import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './model';
 
 /**
- * The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09), in place of Machines:
- * an inset rounded panel, its heading "Agents" with the Plannotator goggles in the heading grey and two buttons always
- * shown, + (Add agent) and laptop-plus (Add machine). Under it each machine's agents: the machine's name a small quiet
- * grey caption flush left (still the machine's filter, as its Machines row was), its agents a small step in, each a
- * 24 px animated mark (motion.ts) and its name. No counts and no state marks; no lines; roomier gaps between machines.
- * No machine linked: one flat list. A click on an agent opens its thread; its hover card says where and when it
- * started, and its project.
+ * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
+ * of Machines: a section like Projects, straight on the sidebar's ground with no panel behind it. Its heading is
+ * "Agents" with the Plannotator goggles in the heading grey; while it is open the heading carries two buttons, +
+ * (Add agent) and laptop-plus (Add machine); closed, it is the heading alone: no row, no
+ * machine name, not even for the thread or the machine on show (the owner, 2026-11-09: "It's a human-controlled list";
+ * unlike Pinned and Projects, which keep where you are). Only a press on its heading opens or closes it.
+ * Under it the agents, each a 24 px animated mark (motion.ts) and its name. A machine that has no agent shows nothing.
+ * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
+ * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
+ * no caption, only the agents. No counts and no state marks; no lines; roomier gaps between machines. A click on an
+ * agent opens its thread; its hover card says where and when it started, and its project.
  *
  * Its data is the list's `agents` (agentsList.ts): drawing the section is what makes the window read the list again
  * on `event: deliveries` with `agents`.
@@ -116,7 +120,7 @@ const AgentRow = memo(
             onClick={(event) => props.onOpen(entry, event.currentTarget)}
             data-agent-open={props.opens}
           >
-            <AgentMark id={entry.agent.id} host={entry.agent.host} state={entry.agent.state} />
+            <AgentMark id={entry.agent.id} host={entry.agent.host} />
             <span className="ib-name" dir="auto">
               {entry.name}
             </span>
@@ -142,8 +146,11 @@ const AgentRow = memo(
 export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
   const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows), [groupsRead, props.machines, props.rows]);
-  const flat = groups.length === 1 && groups[0]!.machine === null;
-  const empty = groups.every((group) => group.agents.length === 0) && flat;
+  // A machine with no agent shows nothing, and a machine's name shows only while agents show from more than one
+  // machine (the owner, 2026-11-09): with one, the agents alone.
+  const filled = groups.filter((group) => group.agents.length > 0);
+  const captions = filled.filter((group) => group.machine !== null).length > 1;
+  const empty = filled.length === 0;
   const machineOn = (id: string) => props.page === 'inbox' && props.machineId === id;
   const agentOn = (entry: AgentEntry) => props.page === 'inbox' && !!entry.thread && props.openThreadId === entry.thread.id;
   // A launch not yet joined by its agent has no session to write to, only its thread.
@@ -157,15 +164,19 @@ export function AgentsSection(props: AgentsSectionProps) {
   openNow.current = open;
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
   return (
-    <div className="ib-sbagents" data-agents-surface="">
+    // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
+    // background"). Closed: its heading only. Open: its heading carries Add agent and Add machine.
+    <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />)}
-        <Tip content="Add agent">
-          <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
-            <Icon name="plus" />
-          </button>
-        </Tip>
-        {props.onAddMachine && (
+        {!props.closed && (
+          <Tip content="Add agent">
+            <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
+              <Icon name="plus" />
+            </button>
+          </Tip>
+        )}
+        {!props.closed && props.onAddMachine && (
           <Tip content="Add machine">
             <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add machine" data-agents-add="machine" onClick={props.pick(() => props.onAddMachine?.())}>
               <LaptopPlus />
@@ -173,18 +184,18 @@ export function AgentsSection(props: AgentsSectionProps) {
           </Tip>
         )}
       </div>
-      <div className="ib-agents-body" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-agents-section="" data-flat={flat ? '' : undefined} data-closed={props.closed ? '' : undefined}>
+      <div className="ib-agents-body" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-agents-section="" data-flat={captions ? undefined : ''} data-closed={props.closed ? '' : undefined}>
         {empty && !props.closed && <div className="ib-side-empty ib-agents-empty">Agents show here while they run.</div>}
-        {groups.map((group) => {
+        {/* Closed, nothing is drawn under the heading, whatever thread or machine is open (unlike Pinned and Projects). */}
+        {(props.closed ? [] : filled).map((group) => {
           const machine = group.machine;
-          const rows = group.agents.filter((entry) => !props.closed || agentOn(entry));
-          const captionOn = !!machine && machineOn(machine.id);
-          if (props.closed && rows.length === 0 && !captionOn) return null;
+          const rows = group.agents;
+          const captionOn = captions && !!machine && machineOn(machine.id);
           const away = machine ? isAway(machine) : false;
           const notice = machine && props.onMachineUpdate ? machineNotice(machine) : null;
           return (
             <div key={machine?.id ?? 'flat'} className="ib-agents-group" data-agents-machine={machine?.id ?? ''}>
-              {machine && (
+              {machine && captions && (
                 <div className="ib-mside ib-agents-cap" data-machine-notice={notice?.kind ?? undefined}>
                   <Tip content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
                     <button

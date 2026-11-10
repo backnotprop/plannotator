@@ -335,7 +335,8 @@ export function Sidebar(props: SidebarProps) {
    * The section that last held keyboard focus in this sidebar. A closed section's one row (the open pinned
    * thread, the project the list shows) goes when it stops being current (Escape closed the thread, Back left
    * the project): focus then moves to that section's header, never the page. Runs after Unpin's and Archive
-   * all's own fallbacks, which move focus first.
+   * all's own fallbacks, which move focus first. Agents keeps no row while closed: focus that was in it goes to its
+   * header the same way.
    */
   const asideRef = useRef<HTMLElement>(null);
   const focusedIn = useRef<SidebarSection | null>(null);
