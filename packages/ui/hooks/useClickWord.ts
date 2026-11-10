@@ -53,7 +53,7 @@ const ANNOTATION_UI = '.annotation-toolbar, [data-quick-label-picker]';
 
 export interface UseClickWordOptions {
   containerRef: RefObject<HTMLElement | null>;
-  /** On for the Word input method; off for Select, Pinpoint, read-only, a plan diff, vim focus. */
+  /** On in the Select input method; off for Pinpoint, read-only, a plan diff, vim focus. */
   enabled: boolean;
   /** One click on a word highlights it. Off in redline, where a stray click would delete a word. */
   clicksEnabled: boolean;
@@ -79,12 +79,12 @@ interface Press {
 const samePos = (a: TextPosition, node: Node | null, offset: number) => a.node === node && a.offset === offset;
 
 /**
- * The Word input method (`inputMethod: 'word'`), a variant of Select:
+ * Click a word, part of the Select input method:
  *
  * - One click on a word selects it at once and, unless a second click comes
  *   within CLICK_WORD_WAIT_MS, highlights it through `onSelectRange`, the same
  *   path pinpoint uses (snaps, quote repair, per-mode toolbar or composer).
- * - A press-and-drag selects whole words: the browser's own selection is
+ * - With `snapDrags` (off in the Viewer), a press-and-drag selects whole words: the browser's own selection is
  *   snapped to the start of the first word and the end of the last, live on
  *   every selection change and once more on release, so the library's normal
  *   pointer-end handler commits a word-snapped range.
@@ -218,13 +218,18 @@ export function useClickWord({ containerRef, enabled, clicksEnabled, snapDrags, 
       // Select now (no DOM change, so a second click still counts as a double click); highlight after the wait.
       sel.setBaseAndExtent(word.start.node, word.start.offset, word.end.node, word.end.offset);
       preview = word;
+      const clicked = wordRange(word).toString();
       const commit = () => {
         timer = undefined;
         const live = window.getSelection();
         const still = !!live && isPreviewSelection(live);
-        const range = wordRange(word);
         preview = null;
-        if (!still || !word.start.node.isConnected || !container.contains(range.commonAncestorContainer)) return;
+        // The document may have been replaced or edited under the wait (a host that remounts its
+        // body, a live edit): only the word that was clicked, still in place, is highlighted.
+        if (!still || !word.start.node.isConnected || !word.end.node.isConnected) return;
+        if (word.start.offset > word.start.node.length || word.end.offset > word.end.node.length) return;
+        const range = wordRange(word);
+        if (!container.contains(range.commonAncestorContainer) || range.toString() !== clicked) return;
         onSelectRangeRef.current(range);
       };
       arm = () => {

@@ -1,5 +1,5 @@
 /**
- * The Word input method's click: one click on a word selects it and, after a
+ * Click a word (part of Select): one click on a word selects it and, after a
  * short wait, hands the word to the shared highlight path.
  *
  * What must not regress: a click becoming a highlight where it has another
@@ -152,6 +152,42 @@ describe.if(hasDom)('useClickWord: a click on a word', () => {
 
     expect(picked).toEqual([]);
     expect(window.getSelection()!.isCollapsed).toBe(true);
+  });
+});
+
+describe.if(hasDom)('useClickWord: a document that changes during the wait', () => {
+  test('unmounted: nothing is handed over', async () => {
+    const { first, text, picked } = await mount();
+    click(first, { node: text, offset: 10 });
+    await act(async () => root?.unmount());
+    root = null;
+    await wait(AFTER);
+    expect(picked).toEqual([]);
+  });
+
+  test('the text under the click replaced by new nodes: nothing', async () => {
+    const { first, text, picked } = await mount();
+    click(first, { node: text, offset: 10 });
+    // A host that re-renders its body: same words, new nodes.
+    first.replaceChildren(document.createTextNode(TEXT));
+    await wait(AFTER);
+    expect(picked).toEqual([]);
+  });
+
+  test('the text edited in place so other words sit there: nothing', async () => {
+    const { first, text, picked } = await mount();
+    click(first, { node: text, offset: 10 });
+    text.data = 'Skip all flaky suites today.';
+    await wait(AFTER);
+    expect(picked).toEqual([]);
+  });
+
+  test('the text cut short of the word: nothing, and no error', async () => {
+    const { first, text, picked } = await mount();
+    click(first, { node: text, offset: 10 });
+    text.data = 'Run';
+    await wait(AFTER);
+    expect(picked).toEqual([]);
   });
 });
 

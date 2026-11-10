@@ -92,6 +92,7 @@ import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useClickWord } from '../hooks/useClickWord';
+import { getClickAWord } from '../utils/clickAWordPolicy';
 import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
@@ -168,6 +169,12 @@ export interface ViewerProps {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   inputMethod?: InputMethod;
+  /**
+   * Click a word (Select input method): one click on a word highlights it.
+   * Absent: `configurePlannotatorUI({ clickAWord })`, default on. This prop
+   * wins over that.
+   */
+  clickAWord?: boolean;
   taterMode: boolean;
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
@@ -859,6 +866,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   selectedAnnotationId,
   mode,
   inputMethod = 'drag',
+  clickAWord: clickAWordProp,
   taterMode,
   selectionActions,
   selectionActionsIcon,
@@ -1373,15 +1381,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onCodeBlockClick: hostComposes ? noHostCodeBlockClick : handlePinpointCodeBlockClick,
   });
   clearPinpointHoverRef.current = clearPinpointHover;
-  // The Word input method (off unless the host passes `inputMethod="word"`):
-  // one click on a word highlights it, a drag selects whole words. Redline
-  // keeps the word-snapped drag but not the click: a stray click must not
-  // delete a word. Off under read-only, a plan diff and vim focus.
+  // Click a word, part of Select: one click on a word highlights it; a drag is the browser's own
+  // selection, as always. Off with the `clickAWord` prop, else `configurePlannotatorUI({ clickAWord })`.
+  // Redline makes nothing of a click: a stray click must not delete a word. Pinpoint owns its
+  // clicks; off under read-only, a plan diff and vim focus.
+  const [clickAWordDefault] = useState(getClickAWord);
   useClickWord({
     containerRef,
-    enabled: inputMethod === 'word' && selectionCommentsOn && !(isPlanDiffActive ?? false) && !(vimModeActive && vim.focused),
+    enabled: (clickAWordProp ?? clickAWordDefault) && inputMethod !== 'pinpoint' && selectionCommentsOn && !(isPlanDiffActive ?? false) && !(vimModeActive && vim.focused),
     clicksEnabled: mode !== 'redline',
-    snapDrags: true,
+    snapDrags: false,
     annotationUiOpen: !!(toolbarState || hookCommentPopover || viewerCommentPopover || hookQuickLabelPicker || codeBlockQuickLabelPicker),
     onSelectRange: hostComposes ? hostPinpointRange : highlightRange,
   });

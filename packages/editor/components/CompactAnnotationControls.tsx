@@ -52,7 +52,7 @@ export const CompactAnnotationControls: React.FC<CompactAnnotationControlsProps>
       aria-label="Choose how to annotate"
     >
       <MethodButton
-        selected={inputMethod !== 'pinpoint'}
+        selected={inputMethod === 'drag'}
         label="Select text"
         description="Drag over text"
         icon={<SelectIcon />}
