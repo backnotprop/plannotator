@@ -168,7 +168,9 @@ import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
-import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
+import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount } from './markRead';
+import { MarkReadWarning } from './components/MarkReadWarning';
+import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import { noteStarred } from './starPop';
@@ -1140,6 +1142,8 @@ function Inbox() {
   const [restartAgents, setRestartAgents] = useState<InboxRestartAgents>(NO_RESTART_AGENTS);
   /** The update control's dialogs and what they read (GET /api/inbox/update). */
   const [updateDialog, setUpdateDialog] = useState<null | 'update' | 'restart' | 'failed'>(null);
+  /** The warning before a Mark read that sets questions aside, while it is up (`warnSetAside`). */
+  const [readWarning, setReadWarning] = useState<{ count: SetAsideCount; bulk: boolean; answer: (answer: SetAsideAnswer) => void } | null>(null);
   /** The update dialog for a linked machine (approval "inbox-machine-update"), and whether Snooze opened it. */
   const [machineUpdateOpen, setMachineUpdateOpen] = useState<{ id: string; snooze: boolean } | null>(null);
   const [updateDetails, setUpdateDetails] = useState<UpdateDetails | null>(null);
@@ -3469,6 +3473,38 @@ function Inbox() {
   };
 
   /**
+   * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10; markRead.ts
+   * `confirmSetAside`, components/MarkReadWarning.tsx). Resolves true to go on. A second ask while one is up cancels
+   * the first, so no Mark read waits forever.
+   */
+  const askingSetAside = useRef<((answer: SetAsideAnswer) => void) | null>(null);
+  const warnSetAside = (count: SetAsideCount, bulk: boolean): Promise<boolean> =>
+    confirmSetAside(
+      count,
+      // On by default on the server; absent (settings not read yet, an older Inbox): no warning.
+      settings?.mark_read_warning?.on === true,
+      (asked) =>
+        new Promise<SetAsideAnswer>((resolve) => {
+          askingSetAside.current?.({ go: false });
+          const answer = (value: SetAsideAnswer) => {
+            if (askingSetAside.current === answer) askingSetAside.current = null;
+            resolve(value);
+          };
+          askingSetAside.current = answer;
+          setReadWarning({ count: asked, bulk, answer });
+        }),
+      () => void toggleMarkReadWarning(false),
+    );
+
+  /** What Mark read would set aside on a thread the list has no row for (the open thread's own questions). */
+  const openThreadSetAside = (threadId: string): SetAsideCount => {
+    const open = thread?.thread_id === threadId ? thread : null;
+    if (!open) return setAsideCount([]);
+    const asked = open.messages.filter((m) => m.author.kind === 'agent').flatMap((m) => [...(m.questions ?? []), ...(m.actions ?? [])]);
+    return setAsideCount([{ questions: summarizeInboxQuestions(asked) }]);
+  };
+
+  /**
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
    * reopens them as they were. An agent stopped or held up on it makes the
@@ -3490,6 +3526,8 @@ function Inbox() {
       // Once the look landed nothing waits here any more (the thread closed and the list settled, say).
       if (looks && !canToggleRead(before, drawn)) return;
     }
+    // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first.
+    if (read && !(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) return;
     // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
     // bold, and moves to Quiet when the list next settles.
     const open = routeRef.current.thread;
@@ -4111,6 +4149,9 @@ function Inbox() {
     let incomplete: string | null = null;
     try {
       if (action === 'read') {
+        // The rows Mark all as read takes (single Mark read's rule; never a snoozed one): the warning asks first when it
+        // would close questions.
+        if (!(await warnSetAside(setAsideCount(before.filter((row) => offersRowMarkRead(row)), { skipSnoozed: true }), true))) return;
         const answer = await inboxApi.markProjectRead(projectId, newBatchId());
         const looked = answer.batch.looked ?? [];
         taken = [...answer.batch.read, ...looked];
@@ -4726,6 +4767,19 @@ function Inbox() {
     try {
       const saved = await inboxApi.saveFloatDrafts(next);
       setSettings((current) => (current ? { ...current, float_drafts: saved.float_drafts } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
+  // The Mark read warning (Settings, and the warning's "Don't show this again"): every other window hears `event: capabilities`.
+  const toggleMarkReadWarning = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, mark_read_warning: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveMarkReadWarning(next);
+      setSettings((current) => (current ? { ...current, mark_read_warning: saved.mark_read_warning } : current));
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
       void refreshSettings();
@@ -6597,6 +6651,7 @@ function Inbox() {
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleBro={(next) => void toggleBro(next)}
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
+        onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
@@ -7525,6 +7580,17 @@ function Inbox() {
           />
         ) : null;
       })()}
+      {readWarning && (
+        <MarkReadWarning
+          count={readWarning.count}
+          bulk={readWarning.bulk}
+          offerNever={settings?.guest !== true}
+          onAnswer={(answer) => {
+            setReadWarning(null);
+            readWarning.answer(answer);
+          }}
+        />
+      )}
       {updateDialog === 'update' && update && (
         <UpdateDialog
           details={updateDetails}
