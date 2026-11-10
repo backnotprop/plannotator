@@ -1,63 +1,67 @@
 /**
- * Show's light (showLight.ts): the rows Show brought in are lit for `SHOW_LIT_MS`. After a press on the list's
- * pill the list scrolls to them, perhaps from far, and the owner asked that the light be fresh when the reader
- * gets there ("if I hit the pill, then the timer should reset so I can still see the new one"). What is proved:
- * the light's time starts when the row the list scrolls to is in view, not at the press and not when the message
- * arrived, and lasts its whole length from there; a Show beside its rows lights them as before.
+ * Show's light (showLight.ts). Show never scrolls the list (the owner: "instead of scrolling me down all over the
+ * … place"), so the rows it brought in can be out of view. What is proved:
+ *  - a row is lit when it is in view in the list, for the light's whole time from that moment, however long after
+ *    Show that is (the owner: "the timer should reset so I can still see the new one");
+ *  - nothing here scrolls the list by itself;
+ *  - the rows not yet in view are reported with the edge each is past (the list's pill counts them);
+ *  - `go` scrolls to the nearest one past an edge, and holds the count back until the list is there;
+ *  - a row whose group is closed stops being waited for;
+ *  - without a list to measure in (a compose send's row), the rows are lit at once.
  *
- * happy-dom has no layout: a stand-in IntersectionObserver says when the row is in view; the clock is bun's fake one.
+ * happy-dom has no layout: each test gives the list and its rows their places; the clock is bun's fake one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { useShowLight } = await import('./showLight');
 const { SHOW_LIT_MS } = await import('./settle');
 
-class FakeObserver {
-  static live: FakeObserver | null = null;
-  target: Element | null = null;
-  constructor(readonly notify: (entries: IntersectionObserverEntry[]) => void) {
-    FakeObserver.live = this;
-  }
-  observe(target: Element) {
-    this.target = target;
-  }
-  unobserve() {}
-  disconnect() {
-    if (FakeObserver.live === this) FakeObserver.live = null;
-  }
-  takeRecords() {
-    return [];
-  }
-}
-/** The browser reports how much of the watched row shows in the list. */
-const rowShows = (ratio: number) => act(() => FakeObserver.live?.notify([{ target: FakeObserver.live.target, intersectionRatio: ratio } as unknown as IntersectionObserverEntry]));
-
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-let light: ReturnType<typeof useShowLight>['light'] = () => {};
-const realObserver = globalThis.IntersectionObserver;
+let show: ReturnType<typeof useShowLight>;
+let setGone: (ids: string[]) => void = () => {};
+const IDS = ['t_a', 't_b', 't_c'];
+/** Where each row's top is in the page; the list shows 0 to 600, a row is 50 tall. */
+let tops: Record<string, number> = {};
+const scrolled: { id: string; block?: string }[] = [];
 
-/** A list with two rows Show brought in, lit as the window's rows are (`data-lit`). */
 function List() {
-  const show = useShowLight();
-  light = show.light;
+  show = useShowLight();
+  const [gone, set] = useState<string[]>([]);
+  setGone = (ids) => act(() => set(ids));
   return (
     <div className="ib-lbody">
-      {['t_a', 't_b'].map((id) => (
+      {IDS.filter((id) => !gone.includes(id)).map((id) => (
         <button key={id} type="button" data-thread-id={id} data-lit={show.lit.has(id) ? '' : undefined} />
       ))}
     </div>
   );
 }
 
+const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON() {} }) as DOMRect;
+const realRect = hasDom ? HTMLElement.prototype.getBoundingClientRect : undefined;
+const realRects = hasDom ? HTMLElement.prototype.getClientRects : undefined;
+const realScroll = hasDom ? HTMLElement.prototype.scrollIntoView : undefined;
+
 beforeEach(() => {
   if (!hasDom) return;
-  globalThis.IntersectionObserver = FakeObserver as unknown as typeof IntersectionObserver;
+  tops = { t_a: 100, t_b: 900, t_c: 950 };
+  scrolled.length = 0;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const id = this.getAttribute('data-thread-id');
+    return id ? rect(tops[id]!, 50) : rect(0, 600);
+  };
+  HTMLElement.prototype.getClientRects = function (this: HTMLElement) {
+    return (this.isConnected ? [this.getBoundingClientRect()] : []) as unknown as DOMRectList;
+  };
+  HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: boolean | ScrollIntoViewOptions) {
+    scrolled.push({ id: this.getAttribute('data-thread-id')!, block: typeof options === 'object' ? options.block : undefined });
+  };
   jest.useFakeTimers();
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -69,62 +73,102 @@ afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
   jest.useRealTimers();
-  globalThis.IntersectionObserver = realObserver;
-  FakeObserver.live = null;
+  HTMLElement.prototype.getBoundingClientRect = realRect!;
+  HTMLElement.prototype.getClientRects = realRects!;
+  HTMLElement.prototype.scrollIntoView = realScroll!;
 });
 
-const row = (id: string) => host!.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
-const litRows = () => ['t_a', 't_b'].filter((id) => row(id).hasAttribute('data-lit'));
+const body = () => host!.querySelector<HTMLElement>('.ib-lbody')!;
+const litRows = () => IDS.filter((id) => host!.querySelector(`[data-thread-id="${id}"]`)?.hasAttribute('data-lit'));
 const pass = (ms: number) => act(() => void jest.advanceTimersByTime(ms));
-const BOTH = new Set(['t_a', 't_b']);
+/** The reader scrolls the list: every row moves up by `by`. */
+function scroll(by: number): void {
+  for (const id of IDS) tops[id]! -= by;
+  act(() => void body().dispatchEvent(new Event('scroll')));
+}
+const ALL = new Set(IDS);
 
-test.skipIf(!hasDom)('after the pill\'s press the light starts when the row is in view, and lasts its whole time from there', () => {
-  // The message arrived, and four seconds went by before the press: neither is the light's clock.
-  pass(4000);
-  act(() => light(BOTH, 0, row('t_a')));
-  expect(litRows()).toEqual([]);
-
-  // The list is still scrolling to the row: no light runs out of sight, however long the scroll takes.
-  rowShows(0);
-  pass(700);
-  rowShows(0.4);
-  pass(SHOW_LIT_MS);
-  expect(litRows()).toEqual([]);
-
-  // The row is in view: every row Show brought in is lit, for the light's whole time from this moment.
-  rowShows(1);
+test.skipIf(!hasDom)('each row is lit when it is in view, for its whole time from then; Show scrolls nothing', () => {
+  act(() => show.light(ALL, 0, body()));
   pass(1);
-  expect(litRows()).toEqual(['t_a', 't_b']);
-  pass(SHOW_LIT_MS - 2);
-  expect(litRows()).toEqual(['t_a', 't_b']);
+  // The row in view is lit; the two below are reported, past the bottom edge.
+  expect(litRows()).toEqual(['t_a']);
+  expect(show.unseen).toEqual([{ id: 't_b', edge: 'bottom' }, { id: 't_c', edge: 'bottom' }]);
+  expect(scrolled).toEqual([]);
+
+  // Much later than the light's own length, the reader scrolls down to them: their light is fresh.
+  pass(SHOW_LIT_MS * 3);
+  expect(litRows()).toEqual([]);
+  expect(show.unseen).toHaveLength(2);
+  scroll(500);
+  expect(litRows()).toEqual(['t_b', 't_c']);
+  expect(show.unseen).toEqual([]);
+  pass(SHOW_LIT_MS - 1);
+  expect(litRows()).toEqual(['t_b', 't_c']);
   pass(1);
+  expect(litRows()).toEqual([]);
+  // The first row is not lit a second time when it comes back into view.
+  scroll(-500);
   expect(litRows()).toEqual([]);
 });
 
-test.skipIf(!hasDom)('the rows\' slide into place still comes first when the row is in view at once', () => {
-  act(() => light(BOTH, 280, row('t_a')));
-  rowShows(1);
+test.skipIf(!hasDom)('a row scrolled past is reported at the top edge; one mostly out of view is not yet seen', () => {
+  tops = { t_a: -400, t_b: 580, t_c: 900 };
+  act(() => show.light(ALL, 0, body()));
+  pass(1);
+  // 20 of t_b's 50 px show: not in view yet.
+  expect(litRows()).toEqual([]);
+  expect(show.unseen).toEqual([{ id: 't_a', edge: 'top' }, { id: 't_b', edge: 'bottom' }, { id: 't_c', edge: 'bottom' }]);
+  scroll(20);
+  expect(litRows()).toEqual(['t_b']);
+});
+
+test.skipIf(!hasDom)('the light waits for the rows to slide into place', () => {
+  act(() => show.light(ALL, 280, body()));
   pass(279);
   expect(litRows()).toEqual([]);
-  pass(1);
-  expect(litRows()).toEqual(['t_a', 't_b']);
-  pass(SHOW_LIT_MS);
-  expect(litRows()).toEqual([]);
-});
-
-test.skipIf(!hasDom)('Show beside its rows lights them without waiting on the view, and a new light takes the last one\'s place', () => {
-  act(() => light(new Set(['t_a']), 0));
+  expect(show.unseen).toEqual([]);
   pass(1);
   expect(litRows()).toEqual(['t_a']);
-  expect(FakeObserver.live).toBeNull();
+  expect(show.unseen).toHaveLength(2);
+});
 
-  // Another Show while the first light is on: only its rows, for their own whole time.
+test.skipIf(!hasDom)('go scrolls to the nearest row past that edge, to the middle, and holds the count back until the list is there', () => {
+  act(() => show.light(ALL, 0, body()));
+  pass(1);
+  act(() => show.go('bottom'));
+  expect(scrolled).toEqual([{ id: 't_b', block: 'center' }]);
+  expect(document.activeElement?.getAttribute('data-thread-id')).toBe('t_b');
+  // On the way there the count does not change under the reader.
+  scroll(200);
+  expect(show.unseen).toHaveLength(2);
+  // There: both are in view and lit, and nothing is left.
+  scroll(400);
+  expect(litRows()).toEqual(['t_a', 't_b', 't_c']);
+  expect(show.unseen).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a row whose group is closed is no longer waited for', async () => {
+  act(() => show.light(ALL, 0, body()));
+  pass(1);
+  expect(show.unseen).toHaveLength(2);
+  // The list is drawn again without it: that redraw is measured, and the row is dropped.
+  setGone(['t_c']);
+  await act(async () => {});
+  expect(show.unseen).toEqual([{ id: 't_b', edge: 'bottom' }]);
+});
+
+test.skipIf(!hasDom)('with no list to measure in, the rows are lit at once; a new light takes the last one\'s place', () => {
+  act(() => show.light(new Set(['t_b']), 0));
+  pass(1);
+  expect(litRows()).toEqual(['t_b']);
+  expect(show.unseen).toEqual([]);
   pass(SHOW_LIT_MS - 501);
-  act(() => light(new Set(['t_b']), 0));
+  act(() => show.light(new Set(['t_c']), 0));
   pass(1);
-  expect(litRows()).toEqual(['t_b']);
+  expect(litRows()).toEqual(['t_c']);
   pass(SHOW_LIT_MS - 2);
-  expect(litRows()).toEqual(['t_b']);
-  pass(1);
+  expect(litRows()).toEqual(['t_c']);
+  pass(2);
   expect(litRows()).toEqual([]);
 });
