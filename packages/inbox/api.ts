@@ -1317,6 +1317,8 @@ export interface StartThreadInput {
   review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
+  /** Settings → Rows' ask box: the agent also receives how to change the rows. */
+  rows_ask?: true;
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */

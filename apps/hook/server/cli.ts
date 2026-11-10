@@ -1,3 +1,4 @@
+import { INBOX_ROWS_USAGE_LINE } from "@plannotator/core/inbox-rows-words";
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
@@ -560,6 +561,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
+  INBOX_ROWS_USAGE_LINE,
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
@@ -869,7 +871,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && args[1] === "projects") return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

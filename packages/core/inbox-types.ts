@@ -754,6 +754,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   decision_ask?: true;
+  /**
+   * On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent
+   * receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
+   */
+  rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**

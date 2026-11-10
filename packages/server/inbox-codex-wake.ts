@@ -61,6 +61,7 @@
  * mid-turn.
  */
 
+import { INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN } from "@plannotator/core/inbox-rows-words";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -312,7 +313,7 @@ export function codexQueueMessage(command: InboxReplyCommand): string {
   if (Buffer.byteLength(full) <= INBOX_CODEX_MESSAGE_MAX_BYTES) return full;
   // The Board request (compose's chip) or a Decision data Ask's instructions end the body: only the words before them
   // are cut, and they stay whole after the note.
-  const closing = whole.endsWith(INBOX_DECISION_ASK_CLOSE) ? INBOX_DECISION_ASK_OPEN : whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? INBOX_BOARD_REQUEST_OPEN : null;
+  const closing = whole.endsWith(INBOX_ROWS_ASK_CLOSE) ? INBOX_ROWS_ASK_OPEN : whole.endsWith(INBOX_DECISION_ASK_CLOSE) ? INBOX_DECISION_ASK_OPEN : whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? INBOX_BOARD_REQUEST_OPEN : null;
   const at = closing ? whole.lastIndexOf(`\n\n${closing}\n`) : -1;
   const tail = at >= 0 ? whole.slice(at) : "";
   const body = tail ? whole.slice(0, at) : whole;

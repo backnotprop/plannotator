@@ -34,6 +34,7 @@
  * auto-update back forever); its own registry is `inbox/inbox.json`.
  */
 
+import { runInboxRowsCommand } from "./inbox-rows-command";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
@@ -686,6 +687,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "projects") {
     process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "rows") {
+    const session = inboxHostSessionFromEnv(process.env);
+    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {
