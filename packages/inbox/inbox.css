@@ -9593,6 +9593,12 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-av > img[data-shown] { opacity: 1; }
 /* A PR whose author's account is gone: a grey person in the same tile. */
 .ib-pr-av.ib-pr-av-ghost { background: var(--muted); color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+/* A face by a person's name in a line (the owner, q-331c0466): 16px on the text, kept on one line with the name and
+   its "'s"; while it loads and when there is no picture, the initial in the Reviews row's lavender circle. */
+.ib-person { white-space: nowrap; }
+.ib-person > .ib-prd-face { vertical-align: -0.24em; margin-right: 0.3em; }
+.ib-person > .ib-prd-face .ib-prd-pic { background: color-mix(in oklch, var(--primary) 14%, var(--card)); color: var(--primary); font-weight: 650; letter-spacing: -0.02em; }
+.ib-person > .ib-prd-face .ib-prd-pic[data-initial]::before { content: attr(data-initial); }
 /* The agent that has a PR, on the row's third line: its mark, the scale's 16, before its name. Sat on the text's
    bottom, it is centred on the name and the line keeps the height of a row with no agent. */
 .ib-pr-magent > .ib-mk { display: inline-flex; vertical-align: text-bottom; margin-right: 4px; width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); }

@@ -4,7 +4,7 @@
  * review thread (the same thread the Inbox lists, never a copy) or a listed PR nobody has reviewed. The fold state
  * is remembered. No new keyboard shortcuts.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { inboxPullRepoKey, inboxReviewGroups, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { inboxApi } from '../api';
@@ -19,13 +19,12 @@ import { chainMarks } from './topology';
 import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 import { riskOrder, rowStack, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { RiskMark } from './RiskMark';
+import { Named, usePicture } from './Face';
+import { facesOnce } from './words';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
 const NO_FAILURES: RiskFailures = {};
-
-/** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
-const failedAvatars = new Set<string>();
 
 /**
  * A PR row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
@@ -36,12 +35,8 @@ function AuthorLead({ stack }: { stack: InboxPullStack }) {
   const bottom = stack.layers[0]!;
   const author = bottom.author;
   const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(() => (src ? failedAvatars.has(src) : false));
-  useEffect(() => {
-    setShown(false);
-    setFailed(src ? failedAvatars.has(src) : false);
-  }, [src]);
+  // The same picture state as every face (`Face.tsx`), so a picture that failed in one is never asked again here.
+  const { shown, failed, state, onLoad, onError } = usePicture(src);
   if (!author || !src) {
     return (
       <Tip content="A deleted account">
@@ -51,13 +46,9 @@ function AuthorLead({ stack }: { stack: InboxPullStack }) {
       </Tip>
     );
   }
-  const fail = () => {
-    failedAvatars.add(src);
-    setFailed(true);
-  };
   return (
     <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-bot={author.endsWith('[bot]') ? '' : undefined} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
+      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-bot={author.endsWith('[bot]') ? '' : undefined} data-pulls-avatar={state}>
         {!shown && <span aria-hidden="true">{initials(author)}</span>}
         {!failed && (
           <img
@@ -68,12 +59,8 @@ function AuthorLead({ stack }: { stack: InboxPullStack }) {
             referrerPolicy="no-referrer"
             draggable={false}
             data-shown={shown ? '' : undefined}
-            onLoad={(event) => {
-              const img = event.currentTarget;
-              if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
-              else fail();
-            }}
-            onError={fail}
+            onLoad={onLoad}
+            onError={onError}
           />
         )}
       </span>
@@ -196,7 +183,8 @@ function ReviewRowItem({
           )}
           {line.status && (
             <span className="ib-pr-mstatus" data-tone={line.tone ?? undefined} data-reviews-status="">
-              {line.status}
+              {/* A face by each name, but not twice: the person the row's left circle shows keeps only their name. */}
+              <Named words={facesOnce(line.parts, stack ? [stack.layers[0]!.author] : [])} host={stack?.layers[0]!.host ?? null} />
             </span>
           )}
         </span>
