@@ -384,7 +384,8 @@ type Side = 'right' | 'left' | 'below' | 'above' | 'corner';
 /** Targets whose controls are at the foot of a phone's screen: the sheet sits at the top for them. */
 /** Targets whose own controls sit at the top of what they point at (a question card's prompt, picture labels and magnifiers): the sheet goes to the foot, the card is scrolled above it. */
 const PHONE_SHEET_BOTTOM = new Set<TourTarget>(['choices', 'warm-choices']);
-const PHONE_SHEET_TOP = new Set<TourTarget>(['warm-send', 'film-rail', 'film-composer', 'film-send', 'image-foot', 'markup', 'reply', 'reply-box', 'composer']);
+// New message's To and Send are in its foot's row on a phone.
+const PHONE_SHEET_TOP = new Set<TourTarget>(['warm-send', 'film-rail', 'film-composer', 'film-send', 'image-foot', 'markup', 'reply', 'reply-box', 'composer', 'compose-to', 'compose-send']);
 
 /** Targets the card never scrolls to: a comment box, a drawing's row, the open file (a scroll would close or move them). */
 const NO_SCROLL = new Set<TourTarget>(['file', 'art-grid', 'composer', 'eval-line', 'markup', 'image-foot', 'film-rail', 'film-composer', 'compose-to', 'compose-send']);

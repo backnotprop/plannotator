@@ -66,8 +66,8 @@ export interface ProjectRowProps {
  * Home/End, type-ahead, Escape and Tab close, focus back to ⋯). No new
  * shortcut: the platform's context-menu key reaches the row by itself.
  *
- * "+" (`newSession`) sits beside ⋯ and shows with it (hover, keyboard focus, the menu open; always on a phone, each a
- * 44 px target): a new session in this project, with no new key (Tab reaches it, Enter or Space presses it).
+ * "+" (`newSession`) sits beside ⋯ and shows with it (hover, keyboard focus, the menu open; a phone draws no "+",
+ * only ⋯): a new session in this project, with no new key (Tab reaches it, Enter or Space presses it).
  *
  * Rename… (after a separator) turns the row into a field holding its name:
  * Enter saves, Escape or leaving the field cancels, and an empty name is not
@@ -93,6 +93,8 @@ export function ProjectRow(props: ProjectRowProps) {
     more.current?.focus();
   }, [renaming]);
   const { project } = props;
+  // A computer only: a phone's rows show ⋯ alone (the owner, 2026-11-10: "not necessary right now").
+  const newSession = props.phone ? undefined : props.newSession;
   const onRename = props.onRename;
   // Letter marks (letterMarks.tsx): the project's mark before its name, while Settings → Rows shows project marks.
   const { marks } = useRowMarks();
@@ -102,7 +104,7 @@ export function ProjectRow(props: ProjectRowProps) {
     <div
       className="ib-projrow"
       data-project={project.id}
-      data-plus={props.newSession ? '' : undefined}
+      data-plus={newSession ? '' : undefined}
       data-menu={menuOpen || contextOpen ? '' : undefined}
       data-held={props.held ? '' : undefined}
       data-renaming={renaming ? '' : undefined}
@@ -193,9 +195,9 @@ export function ProjectRow(props: ProjectRowProps) {
           {props.count > 0 && <span className="ib-n">{formatCount(props.count)}</span>}
         </button>
       </ProjectTip>
-      {props.newSession && (
-        <Tip content={props.newSession.tip}>
-          <button type="button" className="ib-pplus" aria-label={props.newSession.tip} onClick={props.newSession.onPress} data-pplus={project.id}>
+      {newSession && (
+        <Tip content={newSession.tip}>
+          <button type="button" className="ib-pplus" aria-label={newSession.tip} onClick={newSession.onPress} data-pplus={project.id}>
             <Icon name="plus" size={16} />
           </button>
         </Tip>

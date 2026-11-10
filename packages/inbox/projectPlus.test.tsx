@@ -138,6 +138,13 @@ test.skipIf(!hasDom)('F1, F2: "+" is its own button beside ⋯, named by its tip
   expect(document.querySelector('[data-pplus]')).toBeNull();
 });
 
+test.skipIf(!hasDom)('a phone: no "+" on a project row, with Launch on; ⋯ stays', () => {
+  mount(<ProjectRow project={SITE} count={2} on={false} held={false} readable phone onOpen={() => {}} onAction={() => {}} newSession={{ tip: 'New session in billing-svc', onPress: () => {} }} />);
+  expect(document.querySelector('[data-pplus]')).toBeNull();
+  expect(document.querySelector('.ib-projrow')!.hasAttribute('data-plus')).toBe(false);
+  expect(document.querySelector('.ib-pmore')).not.toBeNull();
+});
+
 const open = (start: { projectId: string; machine: string | null; agent: string | null }) =>
   mount(<ComposeDialog request={{ start }} phone={false} current={null} lastSent={null} home="/Users/me" onSent={() => {}} onHeld={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
 const inDialog = (selector: string) => document.querySelector('dialog[data-compose]')?.querySelector<HTMLElement>(selector) ?? null;

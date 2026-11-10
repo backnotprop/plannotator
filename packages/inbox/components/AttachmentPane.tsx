@@ -1799,9 +1799,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     gatheredFrom.current = 'composer';
     barRef.current?.hide();
   }, []);
+  // The file the card was dragged on (composerDrag.ts): this file's draft key, as `draftKey` below.
+  const composerFileKey = fileDraftKey(attachment.id, effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current');
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer } : null),
-    [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer],
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer, fileKey: composerFileKey } : null),
+    [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer, composerFileKey],
   );
   /**
    * A phone's composer folded to its pill shares the toolbar's row (an HTML page opens that way): the bar draws

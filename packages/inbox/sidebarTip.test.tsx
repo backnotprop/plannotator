@@ -172,8 +172,14 @@ describe.skipIf(!hasDom)('the Sidebar tip', () => {
     expect(card()!.getAttribute('role')).toBe('group');
     expect(card()!.contains(document.activeElement)).toBe(false);
     expect(said).toEqual([tip.SIDEBAR_TIP_SAID]);
-    // Once it is up, the other one-time dialogs hold back for the rest of this load.
+    // Once it is up, the other one-time dialogs hold back for the gap, and no longer than that: a tab left open gets
+    // the next dialog once it is over (the stuck-tab bug: a hold "for the rest of the load" never ended).
     expect(reveal.oneTimeDialogShownThisLoad()).toBe(true);
+    const gap = reveal.REVEAL_TIMES.otherDialogMs;
+    reveal.REVEAL_TIMES.otherDialogMs = 60;
+    await wait(80);
+    expect(reveal.oneTimeDialogShownThisLoad()).toBe(false);
+    reveal.REVEAL_TIMES.otherDialogMs = gap;
     reply.focus();
     expect(document.activeElement).toBe(reply);
   });

@@ -321,7 +321,10 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const pane = page.locator('section.ib-pane');
     // A drag on what does not scroll would pan the page in Safari: refused.
     expect.soft(await dragRefused(pane.locator('.ib-phead')), 'a drag on the header').toBe(true);
-    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(true);
+    // A short draft has nothing to scroll, so a drag on it is refused; unless the foot itself has more than the 257 px
+    // leave it room for (the taller reply box under a Draft line), where the drag scrolls the foot, never the page.
+    const footScrolls = await pane.locator('.ib-pfoot').evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(!footScrolls);
     // What scrolls keeps its drag: the thread, a code line wider than the phone, an overflowing draft.
     expect.soft(await dragRefused(pane.locator('.ib-pbody').first()), 'a drag on the thread').toBe(false);
     // The innermost box a finger lands on: the code's text, inside the block that scrolls.

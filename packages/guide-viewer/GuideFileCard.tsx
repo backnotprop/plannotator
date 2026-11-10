@@ -229,6 +229,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 
   // The page holds the reader's place: a box wholly above the viewport that changes height moves the page by as much.
   // Browsers do not do this for us here (and Safari never does): `.ib-gbody` opts out so that nothing corrects twice.
+  // At the end of the page a box that shrinks is the exception: the browser has already brought the page up with it
+  // (it cannot stay past its end), so moving it again would leave the reader that far above the end.
   const boxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const box = boxRef.current;
@@ -239,7 +241,9 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       height = box.offsetHeight;
       if (height === before) return;
       const page = pageOf(box);
-      if (box.getBoundingClientRect().top + before <= pageTopOf(page)) page.scrollTop += height - before;
+      if (box.getBoundingClientRect().top + before > pageTopOf(page)) return;
+      if (height < before && page.scrollHeight - page.clientHeight - page.scrollTop < 1) return;
+      page.scrollTop += height - before;
     });
     observer.observe(box);
     return () => observer.disconnect();

@@ -1016,7 +1016,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
 .ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
-.ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
 /* Beside a thread, off phones, the column has the sidebar's resize edge
    (shell/ListColumnEdge.tsx sets its width): never narrower than 380px, and
@@ -3313,6 +3313,21 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
 }
+/* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
+   box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
+   past: the top one by its place in the flow, the bottom one from the column's foot (above "Reconnecting…" when
+   that line shows). It rises 6 px into place, or drops at the top. `data-fading` is its end: the fade of Show's
+   light (`ib-lit`: 1800 ms, ease-in-out). A pointer on it mid-fade brings it back at once. */
+.ib-lnew { flex: none; height: 0; }
+.pn-inbox .ib-lnew > .ib-npill { position: absolute; left: 50%; z-index: 30; margin-top: 12px; transform: translateX(-50%); white-space: nowrap; }
+.pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill { margin-top: 0; bottom: 12px; }
+.pn-inbox .ib-listcol:has(> .ib-relink) > .ib-lnew[data-edge="bottom"] > .ib-npill { bottom: 48px; }
+.pn-inbox .ib-lnew > .ib-npill[data-off] { transform: translate(-50%, -6px); }
+.pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill[data-off] { transform: translate(-50%, 6px); }
+.pn-inbox .ib-lnew > .ib-npill[data-fading] { opacity: 0; transition: opacity 1800ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-lnew > .ib-npill, .pn-inbox .ib-lnew > .ib-npill[data-off], .pn-inbox .ib-lnew > .ib-npill[data-fading] { transform: translateX(-50%); transition: none; }
+}
 /* A message that arrives while its thread is open (.product/approved/inbox-new-in-open-thread/, variant A):
    a short entrance so the eye catches what changed; none under reduced motion. */
 @keyframes ib-arrive { from { opacity: 0; transform: translateY(6px); } }
@@ -3573,6 +3588,11 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-sb-trigger { width: 44px; height: 44px; }
   .ib-sb-trigger-dot { top: 11px; right: 11px; }
   .ib-lbody { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+  /* The list's pill: under the group header stuck at the top, above the bottom safe area; 44 px to hit, 32 px to see. */
+  .pn-inbox .ib-lnew > .ib-npill { margin-top: 56px; }
+  .pn-inbox .ib-lnew > .ib-npill::after { content: ""; position: absolute; inset: -6px -4px; }
+  .pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill { margin-top: 0; bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-listcol:has(> .ib-relink) > .ib-lnew[data-edge="bottom"] > .ib-npill { bottom: calc(48px + env(safe-area-inset-bottom)); }
   .ib-lbody .ib-band { position: sticky; top: 0; z-index: 2; height: 34px; padding: 0 16px; border-radius: 0; font-size: var(--ib-fs-13, 13px); }
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
@@ -4273,8 +4293,27 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* What's new's Update on the narrowest phones: the button's name keeps the version. */
 @media (max-width: 379px) { .ib-wn-to { display: none; } }
 
-/* A tall screenshot in a message shows its top at its own width (images.ts markTallImage), as the gallery does. */
-.ib-body img[data-ib-tall]:not([data-question-picture]) { width: min(100%, var(--ib-nw, 100%)); max-height: min(480px, 60vh); object-fit: cover; object-position: top center; }
+/* A picture in a message is drawn whole (approval "inbox-inline-image-fit"; images.ts fitMessageImage): at most the
+   column wide, its own width and 70% of the window high (never under 320 px), its shape kept, left-aligned. Its box
+   comes from its recorded size (`--ib-nw`, `--ib-nh`), so it is held before the picture loads. `vh`, not the visual
+   viewport: a phone's keyboard does not resize it. A question card's pictures keep their own box. */
+.ib-body img[data-ib-fit]:not([data-question-picture]) { --ib-cap: max(320px, 70vh); width: min(100%, calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); height: auto; aspect-ratio: var(--ib-nw) / var(--ib-nh); }
+/* A table sizes its cells from what is in them: no share of the cell's width there. */
+.ib-body :is(td, th) img[data-ib-fit]:not([data-question-picture]) { width: min(calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); }
+/* The one shape that is cut: more than three times as tall as wide. It keeps the column's width and shows its top
+   down to the same cap; "Show all" (Thread.tsx) opens it in place. */
+.ib-body img[data-ib-fit="long"]:not([data-question-picture]) { width: min(100%, calc(var(--ib-nw) * 1px)); max-height: var(--ib-cap); object-fit: cover; object-position: top center; }
+.ib-body img[data-ib-fit="long"]:is([data-ib-cut], [data-ib-open]):not([data-question-picture]) { display: block; margin-bottom: 0; }
+.ib-body img[data-ib-fit="long"][data-ib-cut]:not([data-ib-open], [data-question-picture]) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); }
+.ib-body img[data-ib-fit="long"][data-ib-open]:not([data-question-picture]) { max-height: none; }
+/* "Show all" sits over the fade; once open, "Show less" stands under the picture. Its words are drawn from
+   `data-label`, so the body's text is what the agent wrote. */
+.ib-body .ib-imgmore { display: block; position: relative; height: 0; width: min(100%, calc(var(--ib-nw) * 1px)); margin: 0 0 8px; user-select: none; -webkit-user-select: none; }
+.ib-body .ib-imgmore > button { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-body .ib-imgmore > button::after { content: attr(data-label); }
+.ib-body .ib-imgmore > button::before { content: ""; position: absolute; inset: -8px; }
+.ib-body .ib-imgmore[data-open] { height: auto; margin-top: 6px; }
+.ib-body .ib-imgmore[data-open] > button { position: relative; left: auto; bottom: auto; transform: none; box-shadow: none; }
 
 /* The thread on a phone (PHONE_QUERY in phone.ts). */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -7507,6 +7546,84 @@ html:not(.light) .ib-tic { --tic-strip: color-mix(in oklch, black 34%, var(--pop
 .ib-cro-phone .ib-tic-big { width: 52px; height: 52px; }
 @media (prefers-reduced-motion: reduce) { .ib-tic-opt { transition: none; } }
 
+/* ---------- The one-time "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; components/ThemeChooser.tsx) ----------
+   A fan of three cards in one 3D context. Each card is one layer moved by one transform; its size comes from its depth, so
+   the depth order is the order on screen and no z-index changes between cards. Only transform and opacity animate. The
+   custom properties keep the `--thc-` prefix: short names such as --d and --e are registered elsewhere in this sheet, and a
+   registered property of another type computes the transition to `all 0s`. */
+.pn-inbox dialog.ib-dlg.ib-thc, dialog.ib-dlg.ib-thc { width: min(1180px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 24px); overflow: hidden; }
+dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+@keyframes ib-thc-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+.ib-thc > .ib-dlg-in { padding: 18px 20px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ib-thc-head { display: flex; align-items: flex-start; gap: 14px; }
+.ib-thc-head h2 { margin: 0; line-height: 0; }
+.ib-thc-head .ib-bsp { flex: 1; }
+.pn-inbox .ib-thc-x, .ib-thc-x { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border-radius: 8px; background: transparent; border: 0; color: var(--muted-foreground); cursor: pointer; }
+.ib-thc-x:hover { background: var(--ib-hover, var(--muted)); color: var(--foreground); }
+.ib-thc-x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* The title: "themes" as six letter tiles, each one a real theme (its background, its primary). Lowercase letters as drawn, not a transformed label. */
+.ib-thc-wm { display: inline-flex; gap: 4px; align-items: flex-end; line-height: 1; user-select: none; -webkit-user-select: none; }
+.ib-thc-t { width: 40px; height: 50px; border-radius: 8px; display: grid; place-items: center; background: var(--background); color: var(--primary); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 18%, transparent), 0 6px 12px -8px oklch(0 0 0 / 0.5); }
+/* The letter's size is the tile's (set with its face in ThemeChooser.tsx): lettering, not text, so it does not follow the text size. */
+.ib-thc-t > span { font-weight: 900; line-height: 1; letter-spacing: -0.01em; transform: translateY(-1px); }
+.ib-thc-t:nth-child(odd) { transform: rotate(-2.5deg); }
+.ib-thc-t:nth-child(even) { transform: rotate(2deg) translateY(-3px); }
+/* The fan. */
+.ib-thc-wrap { position: relative; height: calc(var(--thc-stage-h) * var(--thc-k, 1)); }
+.ib-thc-stage { position: absolute; left: 50%; top: 0; width: var(--thc-w); height: var(--thc-stage-h); margin-left: calc(var(--thc-w) / -2); transform: scale(var(--thc-k, 1)); transform-origin: 50% 0; perspective: 1900px; perspective-origin: 50% 46%; transform-style: preserve-3d; touch-action: pan-y; }
+.ib-thc-card { position: absolute; left: 50%; top: 10px; width: var(--thc-cw); margin: 0 0 0 calc(var(--thc-cw) / -2); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 18px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 30px 60px -30px oklch(0 0 0 / 0.5), 0 2px 8px -2px oklch(0 0 0 / 0.12); transform-origin: 50% 130%; backface-visibility: hidden; transition: transform var(--thc-d, 600ms) var(--thc-e, cubic-bezier(0.22, 0.61, 0.36, 1)) var(--thc-dl, 0ms); }
+.ib-thc-moving .ib-thc-card { will-change: transform; }
+.ib-thc-foot { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.ib-thc-name { display: flex; align-items: baseline; gap: 6px; font-size: var(--ib-fs-15, 15px); white-space: nowrap; }
+.ib-thc-name > span { color: var(--muted-foreground); }
+.ib-thc-name > b { font-weight: 600; }
+.ib-thc-card .ib-lvc-tag { white-space: nowrap; flex: none; }
+.ib-thc-line { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-thc-foot .ib-bsp { flex: 1; }
+.pn-inbox .ib-thc-card .ib-btn, .ib-thc-card .ib-btn { height: 34px; padding: 0 16px; flex: none; }
+/* A theme is two real screenshots, light and dark. The one in front is the mode it would show; the other sits behind it, out to
+   the top right, so its top edge and its right edge show. Pointing at that corner (or tapping it, or its button) shuffles them. */
+.ib-thc-pair, .ib-thc-own { position: relative; width: calc(var(--thc-sw) + var(--thc-px)); height: calc(var(--thc-sh) + var(--thc-py)); }
+.ib-thc-sheet { position: absolute; left: 0; top: 0; width: var(--thc-sw); height: var(--thc-sh); border-radius: 10px; overflow: hidden; background: var(--muted); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent), 0 16px 34px -18px oklch(0 0 0 / 0.6); }
+.ib-thc-sheet img { display: block; width: 100%; height: 100%; }
+.ib-thc-sheet[data-pos="front"] { transform: translate3d(0, var(--thc-py), 0); z-index: 2; }
+.ib-thc-sheet[data-pos="back"] { transform: translate3d(var(--thc-px), 0, 0) rotate(1.4deg); z-index: 1; }
+.ib-thc-shuffling .ib-thc-sheet, .ib-thc-shuffling .ib-thc-corner { will-change: transform, opacity; }
+/* The corner that says what is behind, and is the button for it. */
+.pn-inbox .ib-thc-corner, .ib-thc-corner { position: absolute; right: 7px; top: 6px; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 7px; border-radius: 999px; border: 0; font: 600 var(--ib-fs-12, 12px)/1 var(--font-sans, system-ui); cursor: pointer; transition: opacity 160ms ease; background: color-mix(in oklch, var(--popover) 88%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px var(--border), 0 4px 10px -4px oklch(0 0 0 / 0.4); }
+.ib-thc-corner svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ib-thc-sheet[data-pos="front"] .ib-thc-corner { opacity: 0; pointer-events: none; }
+.ib-thc-card:not([data-front]) .ib-thc-corner { pointer-events: none; }
+/* The two hit bands of the back sheet's visible edge (top and right). */
+.ib-thc-hit { position: absolute; z-index: 3; cursor: pointer; }
+.ib-thc-hit[data-band="top"] { left: var(--thc-px); top: 0; width: var(--thc-sw); height: var(--thc-py); }
+.ib-thc-hit[data-band="right"] { left: var(--thc-sw); top: 0; width: var(--thc-px); height: var(--thc-sh); }
+.ib-thc-card:not([data-front]) .ib-thc-hit, .ib-thc-moving .ib-thc-hit { pointer-events: none; }
+/* Choose your own: three more themes, also real screenshots, dealt in a cascade. */
+.ib-thc-own .ib-thc-sheet { width: calc(var(--thc-sw) * 0.62); height: calc(var(--thc-sh) * 0.62); }
+.ib-thc-own .ib-thc-sheet:nth-child(1) { transform: translate3d(0, calc((var(--thc-sh) + var(--thc-py)) * 0.38), 0) rotate(-2deg); z-index: 1; }
+.ib-thc-own .ib-thc-sheet:nth-child(2) { transform: translate3d(calc((var(--thc-sw) + var(--thc-px)) * 0.19), calc((var(--thc-sh) + var(--thc-py)) * 0.19), 0); z-index: 2; }
+.ib-thc-own .ib-thc-sheet:nth-child(3) { transform: translate3d(calc((var(--thc-sw) + var(--thc-px)) * 0.38), 0, 0) rotate(2deg); z-index: 3; }
+.ib-thc-own-name { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; font: 600 var(--ib-fs-12, 12px)/1.5 var(--font-sans, system-ui); background: color-mix(in oklch, var(--popover) 90%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); }
+.ib-thc-dots { display: none; justify-content: center; gap: 6px; padding: 2px 0; }
+.ib-thc-dots span { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in oklch, var(--foreground) 22%, transparent); }
+.ib-thc-dots span[data-on] { background: var(--foreground); }
+/* A phone (the deck, themeChooser.ts THEME_CHOOSER_DECK_MAX): a sheet from the bottom, the cards side by side, swiped. */
+@media (max-width: 520px) {
+  .pn-inbox dialog.ib-dlg.ib-thc, dialog.ib-dlg.ib-thc { margin: auto 6px 6px; width: calc(100vw - 12px); max-height: calc(100dvh - 12px); }
+  .ib-thc > .ib-dlg-in { padding: 12px 12px 10px; gap: 4px; }
+  .ib-thc-wm { transform: scale(0.8); transform-origin: 0 0; margin: 0 -54px -11px 0; }
+  .ib-thc-stage { width: 100%; left: 0; margin-left: 0; transform: none; }
+  .ib-thc-wrap { height: var(--thc-stage-h); margin: 0 -12px; }
+  .ib-thc-card { padding: 10px; gap: 10px; border-radius: 16px; }
+  .ib-thc-line { display: none; }
+  .ib-thc-foot { flex-wrap: wrap; gap: 6px 8px; }
+  .pn-inbox .ib-thc-card .ib-btn, .ib-thc-card .ib-btn { height: 40px; width: 100%; justify-content: center; }
+  .pn-inbox .ib-thc-corner, .ib-thc-corner { right: 5px; top: 4px; height: 20px; padding: 0 8px 0 6px; }
+  .ib-thc-dots { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) { dialog.ib-dlg.ib-thc[open] { animation: none; } .pn-inbox .ib-thc-corner, .ib-thc-corner { transition: none; } .ib-thc-card { transition: none; } }
+
 /* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
    ones (.ib-stp, .ib-st-btn). */
@@ -7948,6 +8065,55 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 }
 :root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 11%, transparent); --fc-tray: color-mix(in oklch, var(--foreground) 4.5%, var(--popover)); box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 12px 30px -14px rgb(20 20 30 / 0.22); }
 .pn-inbox .ib-fcomp :is(button, .ib-btn, .ib-fvb) { transition: none !important; }
+/* The card moves out of the way (composerDrag.ts): dragged by its tray, drawn as a transform from its home. No
+   transition while it is dragged; a short ease on the way home (a double click on the tray), none under reduced
+   motion. The cursor is the affordance. A phone's card is docked: none of this. */
+.ib-fcomp:not(.ib-phone) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
+.ib-fcomp:not(.ib-phone) [data-fcomp-drag] { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp[data-fcomp-dragging] { transition: none; }
+.ib-fcomp[data-fcomp-dragging] [data-fcomp-drag], .pn-inbox .ib-fcomp[data-fcomp-dragging] [data-fcomp-drag] * { cursor: grabbing; }
+.ib-fcomp[data-fcomp-homing] { transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .ib-fcomp[data-fcomp-homing] { transition: none; } }
+/* A size the person gave it (the corners, shown once the card is off its home): the card is a column, the field
+   takes what the height leaves and scrolls inside, the row of buttons stays at the foot. */
+/* The second selector outweighs the width the card has beside the open comments panel (`.ib-drawer`, below). */
+.ib-fcomp[data-fcomp-sized]:not(.ib-phone),
+.ib-view.ib-fullview:not(.ib-phone) .ib-fcomp[data-fcomp-sized]:not(.ib-phone) { display: flex; flex-direction: column; width: var(--ib-fcomp-rw); height: var(--ib-fcomp-rh); }
+/* Made narrow (under 480 px): the tabs read "Comment" and "Reply", as a phone's; their whole names stay for a screen
+   reader and as tooltips. The reply's chips keep their words rather than run under the link. */
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short] { font-size: 0; }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short]::after { content: attr(data-short); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabs { gap: 4px; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-chips { flex-wrap: nowrap; min-width: min-content; }
+.ib-fcomp[data-fcomp-sized] > * { flex: none; }
+/* The field's row never goes under the field's own least (one line): a card too low for its parts shows as the body
+   overflowing, which composerDrag.ts reads to grow it. */
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(min-content, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rmirror { max-height: none; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-ccard > .ib-ta { align-self: stretch; height: 100%; max-height: none; field-sizing: fixed; }
+/* The corners: 18 px to press (28 for a finger), 4 px out past the card's edge. No mark at rest (the owner's pick): the
+   cursor, and under the pointer a 2 px arc 3 px inside the card's own corner, in the muted text colour. */
+.ib-fcomp-corner { position: absolute; z-index: 3; width: 18px; height: 18px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp-corner[data-fcomp-resize^="n"] { top: -4px; }
+.ib-fcomp-corner[data-fcomp-resize^="s"] { bottom: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="w"] { left: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="e"] { right: -4px; }
+.ib-fcomp-corner:is([data-fcomp-resize="nw"], [data-fcomp-resize="se"]) { cursor: nwse-resize; }
+.ib-fcomp-corner:is([data-fcomp-resize="ne"], [data-fcomp-resize="sw"]) { cursor: nesw-resize; }
+.ib-fcomp-corner::after { content: ''; position: absolute; box-sizing: border-box; width: 10px; height: 10px; border: 0 solid color-mix(in oklch, var(--muted-foreground) 85%, transparent); opacity: 0; }
+.ib-fcomp-corner[data-fcomp-resize="nw"]::after { left: 7px; top: 7px; border-width: 2px 0 0 2px; border-top-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="ne"]::after { right: 7px; top: 7px; border-width: 2px 2px 0 0; border-top-right-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="sw"]::after { left: 7px; bottom: 7px; border-width: 0 0 2px 2px; border-bottom-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="se"]::after { right: 7px; bottom: 7px; border-width: 0 2px 2px 0; border-bottom-right-radius: 11px; }
+.ib-fcomp-corner:hover::after,
+.ib-fcomp[data-fcomp-resizing="nw"] .ib-fcomp-corner[data-fcomp-resize="nw"]::after,
+.ib-fcomp[data-fcomp-resizing="ne"] .ib-fcomp-corner[data-fcomp-resize="ne"]::after,
+.ib-fcomp[data-fcomp-resizing="sw"] .ib-fcomp-corner[data-fcomp-resize="sw"]::after,
+.ib-fcomp[data-fcomp-resizing="se"] .ib-fcomp-corner[data-fcomp-resize="se"]::after { opacity: 1; }
+@media (pointer: coarse) { .ib-fcomp-corner { width: 28px; height: 28px; } }
 
 /* The tray and its tabs (one radio group), the chevron at its end. */
 .ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }
@@ -8104,13 +8270,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
 .ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transition: var(--ib-gather-back); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px) + var(--ib-gx, 0px)), calc(var(--ib-fcomp-dy, 0px) + var(--ib-gy, 0px))) scale(var(--ib-gs, 0.92)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transform: none; }
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
 }
 
 /* Phone: the card spans the width above the home bar and the toolbar sits above it (the pane measures the card as the
@@ -8916,7 +9082,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat-in { position: relative; }
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
-.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); width: min(540px, calc(100% - 32px)); }
 /* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card
    (the card's own centre, --ib-fcomp-c). */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-fcomp-c); width: min(540px, var(--ib-foot-w)); }
