@@ -305,6 +305,7 @@ packages/ui/hooks/useAnnotationHighlighter.reselectOverlap.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.selectionEdges.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.releaseOutside.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.wobbleClick.test.tsx
 packages/ui/components/AnnotationToolbar.scrollOut.test.tsx
 packages/ui/hooks/useClickWord.test.tsx
 packages/ui/components/AnnotationToolstrip.wordMethod.test.tsx

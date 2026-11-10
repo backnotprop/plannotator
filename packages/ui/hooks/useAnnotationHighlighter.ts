@@ -1985,6 +1985,8 @@ export function useAnnotationHighlighter({
     // inside and has not suddenly grown many times over, and otherwise the
     // last one remembered. With none remembered, nothing is made and the
     // selection is left as it is.
+    // The press itself: where it started and whether the pointer ever went a drag's distance from there.
+    let pressed: { x: number; y: number; moved: boolean; plain: boolean } | null = null;
     let seenInside: { anchorNode: Node; anchorOffset: number; focusNode: Node; focusOffset: number; length: number } | null = null;
     const noteSelectionInside = () => {
       const selection = window.getSelection();
@@ -2074,6 +2076,7 @@ export function useAnnotationHighlighter({
     const endPress = () => {
       caretDrag = null;
       seenInside = null;
+      pressed = null;
       document.removeEventListener('mouseup', handlePressRelease, true);
       document.removeEventListener('mousemove', handlePressMove, true);
       document.removeEventListener('selectionchange', noteSelectionInside);
@@ -2084,7 +2087,18 @@ export function useAnnotationHighlighter({
       if (caretDrag?.driving && listening) driveCaretDrag(event.clientX, event.clientY);
       noteSelectionInside();
       const seen = seenInside;
+      const press = pressed;
       endPress();
+      // A click with a wobble is not a drag: the pointer never went a drag's
+      // distance from the press, and the browser selected a letter or two.
+      // Collapsed here, before the library's handler reads it, it makes
+      // nothing (it used to make a one-letter highlight, often with no toolbar).
+      const selection = window.getSelection();
+      if (press?.plain && !press.moved && selection && !selection.isCollapsed && selection.toString().length <= 2
+        && container.contains(selection.anchorNode) && container.contains(selection.focusNode)) {
+        selection.removeAllRanges();
+        return;
+      }
       if (event.target instanceof Node && container.contains(event.target)) return;
       // After every other listener of this release, like the library's own
       // handler for a release inside: as the event ends its way up, or on the
@@ -2103,6 +2117,7 @@ export function useAnnotationHighlighter({
     // button up ends the drag.
     const handlePressMove = (event: MouseEvent) => {
       if (event.buttons & 1) {
+        if (pressed && !pressed.moved && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= DRAG_SLOP_PX) pressed.moved = true;
         noteSelectionInside();
         followCaretDrag(event);
         return;
@@ -2119,6 +2134,8 @@ export function useAnnotationHighlighter({
       document.addEventListener('mouseup', handlePressRelease, true);
       document.addEventListener('mousemove', handlePressMove, true);
       document.addEventListener('selectionchange', noteSelectionInside);
+      // Multi-clicks and Shift+click select without moving: only a single plain press can be a wobbling click.
+      pressed = { x: event.clientX, y: event.clientY, moved: false, plain: event.detail <= 1 && !event.shiftKey };
       // A single plain press on text: multi-clicks, modified presses, controls,
       // links and scrollbars keep the browser's own handling.
       const target = event.target instanceof Element ? event.target : null;
