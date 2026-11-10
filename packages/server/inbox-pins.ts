@@ -20,7 +20,11 @@
  * `event: drafts` does). Pins live in `inbox/pins.json`, outside the event
  * log (shared/inbox/pins.ts): agents, the MCP, search and the phone's event
  * stream never see them. The phone's door forwards `GET threads`, so a phone
- * reads `pins` with the list; it has no write row in v1.
+ * reads `pins` with the list, and carries both writes (`POST threads/:id/pin`
+ * and `POST pins`, each under an `idempotency_key`: inbox-devices.ts, contract
+ * 7.65, approval "inbox-starred-pills"), which tell the windows as a window's
+ * own write does. A linked machine's forward never carries them (`local` in
+ * inbox-outbox.ts): a star stays on the computer that holds it.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
