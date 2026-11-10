@@ -173,11 +173,22 @@
 /* The popup's own fade (Base UI waits for it) comes last, once the plate and the choices are gone. */
 .am-fan[data-glass][data-ending-style] { transition: opacity 30ms linear 150ms; }
 /* Each choice set into the glass; the face shown raised and lit (a fill and a lift, no outline). */
-.am-fan[data-glass] .am-fan-i { background: color-mix(in oklch, var(--foreground) 4%, transparent); box-shadow: inset 0 1px 2px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); transition: transform 160ms cubic-bezier(0.3, 1.4, 0.6, 1) var(--d), opacity 100ms linear var(--d), background-color 120ms, box-shadow 120ms; }
-.am-fan[data-glass="2"] .am-fan-i { background: color-mix(in oklch, var(--foreground) 6%, transparent); box-shadow: inset 0 1.5px 3.5px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); }
-.am-fan[data-glass] .am-fan-i:hover { background: color-mix(in oklch, var(--foreground) 10%, transparent); }
-.am-fan[data-glass] .am-fan-i[aria-checked="true"] { background: var(--gl-up); box-shadow: 0 1px 2px color-mix(in oklch, #000 28%, transparent), 0 5px 12px -3px color-mix(in oklch, #000 32%, transparent), inset 0 1px 0 color-mix(in oklch, #fff 40%, transparent); }
-.am-fan[data-glass][data-ending-style] .am-fan-i { transition: transform 140ms cubic-bezier(0.4, 0, 1, 1) var(--dr), opacity 120ms linear var(--dr); }
+.am-fan[data-sit="in"] .am-fan-i { background: color-mix(in oklch, var(--foreground) 4%, transparent); box-shadow: inset 0 1px 2px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); transition: transform 160ms cubic-bezier(0.3, 1.4, 0.6, 1) var(--d), opacity 100ms linear var(--d), background-color 120ms, box-shadow 120ms; }
+.am-fan[data-sit="in"][data-glass="2"] .am-fan-i { background: color-mix(in oklch, var(--foreground) 6%, transparent); box-shadow: inset 0 1.5px 3.5px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); }
+.am-fan[data-sit="in"] .am-fan-i:hover { background: color-mix(in oklch, var(--foreground) 10%, transparent); }
+.am-fan[data-sit="in"] .am-fan-i[aria-checked="true"] { background: var(--gl-up); box-shadow: 0 1px 2px color-mix(in oklch, #000 28%, transparent), 0 5px 12px -3px color-mix(in oklch, #000 32%, transparent), inset 0 1px 0 color-mix(in oklch, #fff 40%, transparent); }
+.am-fan[data-sit="in"][data-ending-style] .am-fan-i { transition: transform 140ms cubic-bezier(0.4, 0, 1, 1) var(--dr), opacity 120ms linear var(--dr); }
+/* On the glass (3 and 4, the default): the faces alone, resting on the plate with the faintest contact shadow, no well
+   behind them; a hover lifts one (the grow, a longer shadow). The face shown: a dot under it, or lifted and lit. */
+.am-fan[data-sit="on"] { --gl-glow: color-mix(in oklch, var(--foreground) 38%, transparent); }
+:root.light .am-fan[data-sit="on"] { --gl-glow: color-mix(in oklch, #000 30%, transparent); }
+.am-fan[data-sit="on"] .am-fan-i, .am-fan[data-sit="on"] .am-fan-i:hover, .am-fan[data-sit="on"] .am-fan-i[aria-checked="true"] { background: none; }
+.am-fan[data-sit="on"] .am-fan-f { filter: drop-shadow(0 1px 1px color-mix(in oklch, #000 24%, transparent)); transition: filter 140ms; }
+.am-fan[data-sit="on"] .am-fan-i:hover .am-fan-f { filter: drop-shadow(0 3px 4px color-mix(in oklch, #000 28%, transparent)); }
+.am-fan[data-sit="on"][data-mark="dot"] .am-fan-i[aria-checked="true"]::after { content: ""; position: absolute; left: calc(50% - 2px); bottom: -1.5px; width: 4px; height: 4px; border-radius: 50%; background: color-mix(in oklch, var(--foreground) 72%, transparent); }
+.am-fan[data-sit="on"][data-mark="dot"][data-touch] .am-fan-i[aria-checked="true"]::after { bottom: 0; }
+.am-fan[data-sit="on"][data-mark="lift"]:not([data-starting-style], [data-ending-style]) .am-fan-i[aria-checked="true"] { transform: translate(var(--x), var(--y)) scale(1.1); }
+.am-fan[data-sit="on"][data-mark="lift"] .am-fan-i[aria-checked="true"] .am-fan-f { filter: drop-shadow(0 3px 5px var(--gl-glow)); }
 /* No blur to be had (an engine without backdrop-filter, or reduced transparency asked for): the solid surface. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root .am-fan[data-glass] { --gl-tint: 100%; }
