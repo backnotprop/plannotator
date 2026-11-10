@@ -28,7 +28,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { Sidebar } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { movePin } = await import('./pins');
-const { STARRED_ABOVE_COOKIE, STARRED_ABOVE_LABEL, fitPills, resetStarredAboveForTests } = await import('./starredPills');
+const { STARRED_ABOVE_COOKIE, STARRED_ABOVE_LABEL, fitPills, pillName, resetStarredAboveForTests } = await import('./starredPills');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -308,6 +308,17 @@ describe('a pill', () => {
     expect(pills(el).map((p) => p.getAttribute('aria-current'))).toEqual([null, 'true', null, null]);
     // No agent mark on a pill: the star takes its place.
     expect(el.querySelector('[data-starred-pills] li[data-pill-item] .ib-mk')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('one open question reads "1 question", and a state with no words leaves no empty part in the name', () => {
+    // The list's own count is empty for exactly one question (a row shows its glyph alone).
+    const one = row('msg_one', 'Diff style', 'waiting', { questions: { open: 1, picked: 0, stopped: false, holds_up: [] } });
+    const { el } = draw({ start: [one, ...STARS] });
+    expect(pill(el, 'msg_one').getAttribute('aria-label')).toBe('Diff style, billing-svc, 1 question, starred');
+    for (const p of pills(el)) expect(p.getAttribute('aria-label')).not.toMatch(/, ,|,\s*,/);
+    const quiet = { kind: 'quiet', words: '', n: 0, calm: true } as const;
+    expect(pillName({ row: one, label: 'Diff style', project: 'billing-svc', twin: false, state: quiet })).toBe('Diff style, billing-svc, starred');
+    expect(pillName({ row: one, label: 'Diff style', project: '', twin: false, state: quiet })).toBe('Diff style, starred');
   });
 
   test.skipIf(!hasDom)('a click on the pill opens its thread and unstars nothing', () => {

@@ -1463,6 +1463,20 @@ export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 export const INBOX_HELD_POLL_FIELD = 'held'
 
 /**
+ * The poll field by which a connection says which session ids its
+ * conversation continues, nearest first (a string, or a list of at most 8):
+ * the host gave the conversation a new session id (Claude Code's branch of a
+ * conversation, whose transcript names the session it came from, and its
+ * hand-over to a new session, which the old transcript records). Set by the
+ * host from its own records, never by the model: it is no tool argument.
+ * While a session it names is not live, the Inbox hands this session what
+ * waits for that one (packages/server/inbox-continuations.ts); a session that
+ * still polls keeps its own. An older Inbox ignores it; an older connection
+ * never sends it.
+ */
+export const INBOX_CONTINUES_POLL_FIELD = 'continues'
+
+/**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
  * An older Inbox ignores it.

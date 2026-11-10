@@ -108,9 +108,20 @@ export function starredPills(rows: readonly InboxListRow[], labelOf: (row: Inbox
   }));
 }
 
-/** A pill's accessible name: "label, project, state, starred" ("Invoice retries, billing-svc, 1 question, starred"). */
+/**
+ * A pill's state in words. The list's count says nothing for exactly one open question (`waitCount`: a row shows
+ * its glyph alone), so a pill that waits says "1 question", as the sidebar's starred row does.
+ */
+export function pillStateWords(state: PinnedState): string {
+  return state.words || (state.kind === 'wait' ? '1 question' : '');
+}
+
+/**
+ * A pill's accessible name: "label, project, state, starred" ("Invoice retries, billing-svc, 1 question, starred"),
+ * built from the parts that say something, so a state with no words never leaves an empty ", ," in it.
+ */
 export function pillName(pill: StarredPill): string {
-  return `${pill.label}, ${pill.project}, ${pill.state.words}, starred`;
+  return [pill.label, pill.project, pillStateWords(pill.state), 'starred'].filter((part) => part.trim() !== '').join(', ');
 }
 
 /** The "+N" pill's accessible name: "22 more starred", and ", 1 waiting on you" when a hidden one waits. */
