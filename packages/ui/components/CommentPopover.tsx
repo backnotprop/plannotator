@@ -402,7 +402,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const hasUnsavedContent = hasUnsavedCommentContent(text, allowImages ? images : []);
   const hasUnsavedContentRef = useRef(hasUnsavedContent);
   hasUnsavedContentRef.current = hasUnsavedContent;
-  const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
+  // The card (below) keeps the whole box inside the window; the popover keeps its own rule.
+  const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef, { keepInside: card });
   const openingFocusRef = useRef<HTMLElement | null>(
     typeof document !== 'undefined'
       && document.activeElement instanceof HTMLElement
@@ -487,6 +488,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   // Reset drag when anchor changes (new annotation) or mode switches
   useEffect(() => { resetDrag(); }, [anchorEl, anchorRect, resetDrag]);
   useEffect(() => { if (mode === 'popover') resetDrag(); }, [mode, resetDrag]);
+  // The card opened to full docks at the foot again, wherever it was dragged.
+  useEffect(() => { if (cardExpanded) resetDrag(); }, [cardExpanded, resetDrag]);
 
   // Track anchor position on scroll and observed viewport changes (popover
   // mode only, not after user drag).
@@ -904,6 +907,13 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     if (!cardGeo) return null;
     const quote = headerText ?? (isGlobal ? null : contextText.replace(/\s+/g, ' ').trim());
     const on = headerText ?? (quote ? `“${quote.length > 80 ? `${quote.slice(0, 80)}…` : quote}”` : null);
+    // Dragged by its words (not on a phone, not opened to full: those dock at the foot): it stays where it was put,
+    // whole inside the window, until other words are picked.
+    const cardDraggable = !cardPhone && !cardExpanded;
+    const cardDragged = cardDraggable && dragPosition !== null;
+    const cardDragStyle: React.CSSProperties = cardDraggable && dragPosition
+      ? { left: dragPosition.left, top: dragPosition.top, width: cardGeo.style.width, maxHeight: Math.max(CARD_NEED, window.innerHeight - dragPosition.top) }
+      : {};
     const discard = () => {
       if (draftKey) draftStore.delete(draftKey);
       setText('');
@@ -939,7 +949,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           aria-label={isGlobal ? 'Global comment' : on ? `Comment on ${on}` : 'Comment'}
           tabIndex={-1}
           className={`pn-cbox${yieldClass}`}
-          style={{ ...cardGeo.style, ...(zIndex !== undefined ? { zIndex } : {}), ...(showsSkillMenu ? { overflow: 'visible' } : {}) }}
+          data-dragged={cardDragged ? '' : undefined}
+          style={{ ...(cardDragged ? cardDragStyle : cardGeo.style), ...(zIndex !== undefined ? { zIndex } : {}), ...(showsSkillMenu ? { overflow: 'visible' } : {}) }}
           onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -960,13 +971,29 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           >
             <Icon name="chevD" size={16} />
           </button>
-          <div className="pn-cbox-quote" title={quote ?? undefined}>{isGlobal ? 'Global comment' : on ?? 'Comment'}</div>
+          {/* The skill list hangs off the card itself, never off the field: the field scrolls, and would clip it. */}
+          {skillAc.menu && (
+            <SkillReferenceMenu
+              id={skillListboxId}
+              items={skillAc.menu.items}
+              activeIndex={skillAc.menu.activeIndex}
+              onSelect={skillAc.select}
+              // On the side away from the words the comment is about, so the list never covers them.
+              prefer={cardGeo.above || cardGeo.docked ? 'above' : 'below'}
+            />
+          )}
+          {/* The words are the handle the card is dragged by (as the popover's header is). The press keeps the caret
+              in the field and starts no selection of the page's text, which would close the card as a draft. */}
+          <div
+            className="pn-cbox-quote"
+            title={quote ?? undefined}
+            {...(cardDraggable ? { ...dragHandleProps, 'data-comment-card-handle': '', onMouseDown: (e: React.MouseEvent) => e.preventDefault() } : {})}
+          >
+            {isGlobal ? 'Global comment' : on ?? 'Comment'}
+          </div>
           {errorRow}
           {chipsRow}
           <div className="pn-cbox-field">
-            {skillAc.menu && (
-              <SkillReferenceMenu id={skillListboxId} items={skillAc.menu.items} activeIndex={skillAc.menu.activeIndex} onSelect={skillAc.select} />
-            )}
             <ComposerTokenTextarea
               textareaRef={focusOnMountRef}
               value={text}

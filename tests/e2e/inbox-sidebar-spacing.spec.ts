@@ -133,14 +133,16 @@ test.afterAll(async () => {
 // Agents is a section like the others, straight on the sidebar's ground (the owner, 2026-11-09: no panel behind it):
 // its header keeps the sections' gaps, and its rows sit 2 px under it. No agent runs here, so its one row is its
 // empty line (a machine with no agent shows nothing).
-for (const [device, phone, set] of [['desktop', false, 12], ['phone', true, 8]] as const) {
+// A phone's sheet (approval "inbox-phone-sidebar-sheet"): every heading sits 8 px under what is above it, closed or open
+// (a 44 px heading every 52 px), since each heading is a sticky row of its own there.
+for (const [device, phone, set, shut] of [['desktop', false, 12, 2], ['phone', true, 8, 8]] as const) {
   test(`${device}: closed headers sit evenly, and rows stay with their header and set off the next`, async () => {
     const { page } = world;
-    expect(await layout(page, await open(['pinned', 'agents'], phone))).toBe('Pin -2- Ag -2- Proj -0- rows');
-    expect(await layout(page, await open(['pinned', 'agents', 'projects'], phone))).toBe('Pin -2- Ag -2- Proj');
+    expect(await layout(page, await open(['pinned', 'agents'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned', 'agents', 'projects'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj`);
     expect(await layout(page, await open([], phone))).toBe(`Pin -0- rows -${set}- Ag -2- rows -${set}- Proj -0- rows`);
-    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -2- Ag -2- rows -${set}- Proj -0- rows`);
-    expect(await layout(page, await open(['agents'], phone))).toBe(`Pin -0- rows -${set}- Ag -2- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -${shut}- Ag -2- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open(['agents'], phone))).toBe(`Pin -0- rows -${set}- Ag -${shut}- Proj -0- rows`);
   });
 }
 
