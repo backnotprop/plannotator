@@ -118,7 +118,7 @@ import { ReaskNote } from './ReaskNote';
 import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
-import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
+import { InboxComposerField, type ComposerCommand, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
@@ -1341,6 +1341,11 @@ export interface ThreadPaneProps {
    * Absent while this thread cannot ask: no Side. The top bar has no Ask icon (the owner, 2026-11-09): Side starts a chat.
    */
   onSide?: (selected: string, source?: string) => void;
+  /**
+   * The reply box's `/side` (ask/useInboxAsk.tsx `sideWords`): the reply's words go to the thread's side chat, and
+   * `taken` is called once its box has them. Absent while this thread cannot ask: `/side` is not listed.
+   */
+  onSideWords?: (words: string, taken?: () => void) => void;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
@@ -1492,6 +1497,9 @@ const SHOW_NEW_MESSAGE_BUTTON = false;
 
 /** From this many files the box's row says "7 files" (approval "inbox-reply-box", decision D2: no cap on files). */
 const REPLY_FILES_SUMMARY_FROM = 7;
+/** `/side`, the reply box's built-in command for the side chat: its name in the "/" list and the list's one line. */
+export const SIDE_COMMAND_NAME = 'side';
+export const SIDE_COMMAND_DESCRIPTION = 'Start a side conversation with your agent';
 /** How long "No skills are installed" stays in the reply box's row after a press on Skills with none to pick. */
 const NO_SKILLS_HINT_MS = 2000;
 
@@ -1681,7 +1689,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -5614,7 +5622,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (noSkillsTimer.current) clearTimeout(noSkillsTimer.current);
       noSkillsTimer.current = setTimeout(() => setNoSkillsHint(false), NO_SKILLS_HINT_MS);
     };
-    if (getCachedSkillCatalog().some(skillFilter)) return slash();
+    // A command of the Inbox's own (`/side`) is something to pick even with no skill installed.
+    if (replyCommands || getCachedSkillCatalog().some(skillFilter)) return slash();
     void fetchSkillCatalog().then((catalog) => (catalog.some(skillFilter) ? slash() : none()));
   };
   // On a phone the Draft line is above the box. Where the foot scrolls in its own box (the keyboard up, the phone
@@ -5804,6 +5813,27 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Discard or another thread ends it.
   const changeReplyLive = useRef(changeReply);
   changeReplyLive.current = changeReply;
+  // `/side` in the reply box's "/" list, only where the thread can ask: the words go to the side chat, and the reply
+  // lets go of them only once the chat's box has them (and only if they are still what the reply holds). The files
+  // beside the words stay in the reply: Ask takes none.
+  const replyCommands = useMemo<readonly ComposerCommand[] | undefined>(
+    () =>
+      onSideWords
+        ? [
+            {
+              name: SIDE_COMMAND_NAME,
+              description: SIDE_COMMAND_DESCRIPTION,
+              run: (left) => {
+                const words = left.trim();
+                onSideWords(words, () => {
+                  if (words && replyText.get().trim() === words) changeReplyLive.current('');
+                });
+              },
+            },
+          ]
+        : undefined,
+    [onSideWords, replyText],
+  );
   useEffect(() => {
     if (!replyPart || sending) return;
     onReplyPartTaken?.();
@@ -7187,6 +7217,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   placeholder="Write a reply. Type / for a skill"
                   destination="your reply"
                   skillFilter={skillFilter}
+                  commands={replyCommands}
                   tags={composerTags}
                   onChange={(text) => changeReply(text)}
                   onKeyDown={(event) => {

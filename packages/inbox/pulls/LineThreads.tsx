@@ -15,7 +15,8 @@ import type { InboxPull, InboxPullDetailComment, InboxPullThread } from '@planno
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
-import { DELETED, Face, shortName } from './PullDetails';
+import { DELETED, shortName } from './PullDetails';
+import { Face } from './Face';
 import { ForgeMarkdown } from './PullDescription';
 import { foldedWhy, shownComments, type PlacedThread } from './threadPlaces';
 

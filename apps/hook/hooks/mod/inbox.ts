@@ -62,6 +62,7 @@ import { shellArgv } from './shell'
 import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
+  INBOX_CONTINUES_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -509,6 +510,187 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
   return { title, next: start + length - cut }
 }
 
+/**
+ * The session this conversation was branched from, as Claude Code records it:
+ * a branch (`/branch`; the new conversation gets a new session id) copies the
+ * conversation's rows into the new transcript, each with
+ * `"forkedFrom":{"sessionId":"<the session it came from>","messageUuid":…}`
+ * (read in the 2.1.321 binary). The Inbox routes a person's reply by session
+ * id, so the branch says which id it continues on every poll
+ * (INBOX_CONTINUES_POLL_FIELD) and is handed what waits for that id once it no
+ * longer polls. A transcript without such a row (a conversation that started
+ * here, a `--resume` or `--continue` that kept its id) names nothing.
+ *
+ * `$1` the file, `$2` how many of its first bytes to look in: the copied rows
+ * open a branch's transcript. Bare quotes are structure only, as for the
+ * title: inside a message's text they are escaped.
+ */
+export const TRANSCRIPT_FORKED_FROM_READ_BYTES = 8 * 1024 * 1024
+export const TRANSCRIPT_FORKED_FROM_SCRIPT = `head -c "$2" -- "$1" 2>/dev/null | LC_ALL=C grep -a -o -m 1 '"forkedFrom":{"sessionId":"[A-Za-z0-9._-]*"' | head -n 1; exit 0`
+/** While the transcript is not there yet (or a read failed), the first wait before the next look; it doubles up to the most. */
+export const TRANSCRIPT_FORKED_FROM_RETRY_MS = 2_000
+export const TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS = 60_000
+/** Failed reads before the transcript is taken to name nothing. */
+export const TRANSCRIPT_FORKED_FROM_FAILURES_MAX = 3
+
+/** The session id in TRANSCRIPT_FORKED_FROM_SCRIPT's output, or null: none, not an id, or `sessionId` itself. */
+export function transcriptForkedFromOf(output: string, sessionId: string): string | null {
+  const id = /^"forkedFrom":\{"sessionId":"([A-Za-z0-9][A-Za-z0-9._-]{0,127})"$/m.exec(output)?.[1] ?? null
+  return id !== null && id !== sessionId ? id : null
+}
+
+/** Reads, once per session in this process, which session its transcript says it was branched from. */
+export class TranscriptForkedFrom {
+  private settled: string[] | null = null
+  private retryAt = Number.NEGATIVE_INFINITY
+  private looks = 0
+  private failures = 0
+
+  constructor(
+    private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where the transcript may be (`claudeTranscriptPaths`). */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The session ids this conversation continues (INBOX_CONTINUES_POLL_FIELD): one, or none while unknown and when there is none. */
+  async read(): Promise<string[]> {
+    if (this.settled) return this.settled
+    const now = await this.host.now()
+    if (now < this.retryAt) return []
+    this.looks += 1
+    this.retryAt = now + Math.min(TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS, TRANSCRIPT_FORKED_FROM_RETRY_MS * 2 ** Math.min(30, this.looks - 1))
+    for (const path of await this.candidates().catch(() => [] as readonly string[])) {
+      const size = await this.host.fileSize(path).catch(() => null)
+      if (size === null || size === 0) continue
+      const result = await this.host
+        .run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [path, String(TRANSCRIPT_FORKED_FROM_READ_BYTES)]), { timeoutMs: 5_000 })
+        .catch(() => null)
+      if (!result || result.exitCode !== 0) {
+        this.failures += 1
+        if (this.failures >= TRANSCRIPT_FORKED_FROM_FAILURES_MAX) this.settled = []
+        return []
+      }
+      const from = transcriptForkedFromOf(result.stdout, this.sessionId)
+      this.settled = from ? [from] : []
+      return this.settled
+    }
+    return []
+  }
+}
+
+/**
+ * The sessions this conversation was handed over from, as Claude Code records
+ * it: when a conversation moves to a new session that goes on without the old
+ * one (read in the 2.1.321 binary: its hand-off to a background session, which
+ * starts the new session from the old transcript in another process), it
+ * appends `{"type":"continued-in","timestamp":…,"sessionId":"<the old
+ * session>","continuedInSessionId":"<the new one>"}` to the OLD transcript.
+ * The new transcript names nothing (no `forkedFrom`), so the new session looks
+ * for the transcript that names it, in the project folders its own transcript
+ * may be in.
+ *
+ * As Claude Code itself reads the record: it counts while no real turn (a
+ * `user` or `assistant` row) follows it, so a session the person went back to
+ * hands nothing over; bookkeeping rows after it (a title written again on
+ * exit) change nothing.
+ *
+ * `$1` the folder, `$2` how many of each transcript's last bytes to look in.
+ * One `tail` over the folder's transcripts (`/dev/null` beside them, so every
+ * file gets its `==> name <==` header), and `awk` hands back only each
+ * file's standing record, cut to 1,024 characters: no transcript is copied
+ * into the module. Bare quotes are structure only, as for the title.
+ */
+export const TRANSCRIPT_CONTINUED_IN_READ_BYTES = 8 * 1024
+export const TRANSCRIPT_CONTINUED_IN_SCRIPT = `cd -- "$1" 2>/dev/null || exit 0; ls 2>/dev/null | LC_ALL=C grep '^[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$' | xargs tail -c "$2" /dev/null 2>/dev/null | LC_ALL=C awk 'function emit() { if (found != "") print substr(found, 1, 1024); found = "" } /^==> .* <==$/ { emit(); next } index($0, "\\"type\\":\\"continued-in\\"") { found = $0; next } index($0, "\\"type\\":\\"user\\"") || index($0, "\\"type\\":\\"assistant\\"") { found = "" } END { emit() }' | tail -n 200; exit 0`
+/** The waits between looks, doubling: the record is written just after the new session starts, so the first look may be too early. */
+export const TRANSCRIPT_CONTINUED_IN_RETRY_MS = 2_000
+/** Looks before the session is taken to continue nothing (about a minute in all). */
+export const TRANSCRIPT_CONTINUED_IN_LOOKS_MAX = 6
+/** The longest line of sessions followed back (the poll's `continues` takes as many). */
+export const TRANSCRIPT_CONTINUED_IN_CHAIN_MAX = 8
+
+/** The hand-overs in TRANSCRIPT_CONTINUED_IN_SCRIPT's output: each whole record that names two different session ids. */
+export function transcriptHandoversOf(output: string): { from: string; to: string }[] {
+  const id = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+  const out: { from: string; to: string }[] = []
+  for (const line of output.split('\n')) {
+    let record: { type?: unknown; sessionId?: unknown; continuedInSessionId?: unknown } | null = null
+    try {
+      const parsed = JSON.parse(line)
+      record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    } catch {
+      // Cut short or garbled: never a hand-over.
+      continue
+    }
+    if (record?.type !== 'continued-in') continue
+    const { sessionId: from, continuedInSessionId: to } = record
+    if (typeof from !== 'string' || typeof to !== 'string' || !id.test(from) || !id.test(to) || from === to) continue
+    out.push({ from, to })
+  }
+  return out
+}
+
+/**
+ * The sessions `sessionId` continues through `handovers`, nearest first: the
+ * one handed over to it, the one handed over to that, and so on. A session is
+ * named once and never `sessionId` itself, so records that point at each other
+ * end the line instead of going round.
+ */
+export function transcriptContinuedLineOf(handovers: readonly { from: string; to: string }[], sessionId: string): string[] {
+  const out: string[] = []
+  let heads = [sessionId]
+  while (heads.length > 0 && out.length < TRANSCRIPT_CONTINUED_IN_CHAIN_MAX) {
+    const next: string[] = []
+    for (const { from, to } of handovers) {
+      if (!heads.includes(to) || from === sessionId || out.includes(from)) continue
+      if (out.length >= TRANSCRIPT_CONTINUED_IN_CHAIN_MAX) break
+      out.push(from)
+      next.push(from)
+    }
+    heads = next
+  }
+  return out
+}
+
+/** Finds, once per session in this process, the sessions whose transcripts say they were continued in this one. */
+export class TranscriptContinuedIn {
+  private settled: string[] | null = null
+  private retryAt = Number.NEGATIVE_INFINITY
+  private looks = 0
+
+  constructor(
+    private readonly host: Pick<Host, 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where this session's transcript may be (`claudeTranscriptPaths`): their folders are looked in. */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The session ids this conversation continues (INBOX_CONTINUES_POLL_FIELD), nearest first: none while unknown and when there is none. */
+  async read(): Promise<string[]> {
+    if (this.settled) return this.settled
+    const now = await this.host.now()
+    if (now < this.retryAt) return []
+    this.looks += 1
+    this.retryAt = now + TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** Math.min(30, this.looks - 1)
+    const folders: string[] = []
+    for (const path of await this.candidates().catch(() => [] as readonly string[])) {
+      const folder = path.replace(/[\\/][^\\/]*$/, '')
+      if (folder && folder !== path && !folders.includes(folder)) folders.push(folder)
+    }
+    const handovers: { from: string; to: string }[] = []
+    for (const folder of folders) {
+      const result = await this.host
+        .run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [folder, String(TRANSCRIPT_CONTINUED_IN_READ_BYTES)]), { timeoutMs: 5_000 })
+        .catch(() => null)
+      if (result && result.exitCode === 0) handovers.push(...transcriptHandoversOf(result.stdout))
+    }
+    const line = transcriptContinuedLineOf(handovers, this.sessionId)
+    if (line.length > 0 || this.looks >= TRANSCRIPT_CONTINUED_IN_LOOKS_MAX) this.settled = line
+    return line
+  }
+}
+
 export class TranscriptTitle {
   private path: string | null = null
   private lookedAt = Number.NEGATIVE_INFINITY
@@ -775,6 +957,12 @@ export interface InboxLinkOptions {
    * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
   label?: () => string | Promise<string>
+  /**
+   * The session ids this conversation continues (`TranscriptForkedFrom`), read
+   * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
+   * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
+   */
+  continues?: () => Promise<readonly string[]>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
@@ -1264,8 +1452,11 @@ export class InboxLink {
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
     const label = await this.labelNow()
+    const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
+      // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
+      ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),

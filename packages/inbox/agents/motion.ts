@@ -1,31 +1,41 @@
 /**
- * Animated agent marks (approval "inbox-agent-icon-motion"; ported from the icon-motion round 4 library). Each mark is
- * a little character: a rig of its own parts (rigs.ts), every part moving on its own.
+ * Animated agent marks (approval "inbox-agent-icon-motion"). Each mark is a little character: a rig of its own parts
+ * (rigs.ts), every part moving on its own. They are always alive and never show the agent's state (the owner,
+ * 2026-11-09: "I'd rather just be animated. They always move around. … they can follow my mouse … but only subtly.
+ * Otherwise it should seem like they have their own autonomy").
  *
  * How it moves
- * - Every part has two layers: `.am-p` plays the mood loop, `.am-x` inside it plays one-off gestures (fidgets, the
- *   needs-you cue). Both animate only transform and opacity, through the Web Animations API, so the compositor runs them.
- * - A loop is a function of time, sampled into keyframes. A change of state never restarts or snaps a part: the part
- *   blends from the pose it is in to the new loop, on a spring, while the new loop already runs.
- * - Moods: idle is calm with an occasional fidget; working is busy; waiting perks up; ended falls asleep.
- * - Claude spins on its own layer; a state changes only the speed, never the angle, so the star never jumps.
+ * - Every part has two layers: `.am-p` plays the part's life (a long calm loop), `.am-x` inside it plays one-off
+ *   gestures. Both animate only transform and opacity, through the Web Animations API, so the compositor runs them.
+ * - Its own life: each icon has a seed (the agent's id), and from it its own tempo, loop lengths (a different one for
+ *   every part, so the whole never lines up again), phases and choice of gestures. A gesture comes after a gap that
+ *   is never the same twice, now and then a longer rest or a quick second one, and never the same gesture twice
+ *   running. Gestures start one at a time across the page, so a list never moves in chorus.
+ * - Claude turns on its own layer; a gesture changes only the speed (it slows, turns back a touch, whirls), never the
+ *   angle, so the star never jumps.
+ * - Attention: while the pointer is in the sidebar the section is in, each icon leans a little toward it (the `.am-look`
+ *   layer: at most AGENT_LOOK.shift px and AGENT_LOOK.turn degrees) and a rig's eyes (the `.am-e` layer: Codex's
+ *   prompt, OpenCode's square, Pi's top block) look that way too. Each icon follows on its own critically damped
+ *   spring, so they never snap together, and the lean is added to its own life, never in place of it. The pointer gone,
+ *   or still for AGENT_LOOK.stillMs, they drift back. Touch never counts as a pointer.
  *
- * Its cost rules (the round 4 bench):
- * - Off screen (an IntersectionObserver, one for the page): every animation of the icon pauses and no fidget is
- *   scheduled; back on screen they play again.
- * - Reduced motion (or no Web Animations): no loops, no spin, no fidgets; each state holds a still pose. A swap of
- *   faces is a 160 ms fade.
- * - One fidget at a time across the page, so a list never fidgets in chorus; one fidget's gestures end on one frame.
- * - A face that is hidden stops (its spin is cancelled, not paused: a paused animation inside a `display: none` face
+ * Its cost rules
+ * - Off screen (an IntersectionObserver, one for the page): every animation of the icon pauses, no gesture is
+ *   scheduled and it does not follow the pointer; back on screen they play again.
+ * - Reduced motion (or no Web Animations): no loops, no turn, no gestures, no following; each part holds its rest
+ *   pose. A swap of faces is a 160 ms fade.
+ * - The pointer: one passive `pointermove` listener for the page while any icon shows, handled once a frame. A frame
+ *   reads no layout: the icons' centres are measured once and again only after a resize, a scroll or a change of the
+ *   list. The frames stop when every icon has settled.
+ * - A face that is hidden stops (its turn is cancelled, not paused: a paused animation inside a `display: none` face
  *   still cost a layout every frame).
  * - `unmountAgentMark` cancels everything an icon runs: an animation left on a removed element keeps ticking.
  *
  * The click cycle: the agent's mark, then Glass, Yellow, Transparent and Face, then the agent again. Our faces are
- * the favicon art (faceArt.ts, loaded on the first click) and move as a whole.
+ * the favicon art (faceArt.ts, loaded on the first click) and move as a whole; so does a host with no rig of its own.
  */
 import { AGENT_RIGS, CLAUDE_RAY_ANGLES, type AgentRigKind } from './rigs';
 
-export type AgentMood = 'idle' | 'working' | 'waiting' | 'ended';
 export type AgentFace = 'agent' | 'glass' | 'yellow' | 'transparent' | 'totman';
 
 /** The click cycle, in order (the owner, 2026-11-09): each stays until the next click. */
@@ -36,7 +46,7 @@ export function nextAgentFace(face: AgentFace): AgentFace {
   return AGENT_FACES[(AGENT_FACES.indexOf(face) + 1) % AGENT_FACES.length]!;
 }
 
-/** The rig an agent host's mark has; null for a host drawn still (its plain mark). */
+/** The rig an agent host's mark has; null for a host with none (its plain mark, moved as a whole). */
 export function agentRigOf(host: string | null | undefined): AgentRigKind | null {
   if (host === 'claude-code' || host === 'claude' || host === 'claude-app') return 'claude';
   if (host === 'codex' || host === 'pi' || host === 'opencode') return host;
@@ -44,15 +54,42 @@ export function agentRigOf(host: string | null | undefined): AgentRigKind | null
 }
 
 /**
- * Timers run at `clock` times their rate (a recorder that slows the page sets it); `fidgets` off: loops only;
- * `simulatedDom`: move in a simulated DOM too (the marks' own tests, which stand in for Web Animations).
+ * Timers and the pointer's spring run at `clock` times their rate (a recorder that slows the page sets it; the tests
+ * speed it up); `fidgets` off: no gestures; `simulatedDom`: move in a simulated DOM too (the marks' own tests, which
+ * stand in for Web Animations).
  */
 export const agentMotionOptions = { clock: 1, fidgets: true, simulatedDom: false };
 
+/**
+ * How far an icon follows the pointer: `shift` px of lean and `turn` degrees at most, its eyes `eyes` px more; the
+ * lean is full from `reach` px away and less the nearer the pointer is; `stillMs` without a move and it lets go.
+ */
+export const AGENT_LOOK = { shift: 1.5, turn: 4, eyes: 1.6, reach: 56, stillMs: 3000 } as const;
+
 type Pose = { x: number; y: number; r: number; sx: number; sy: number; k: number; o: number };
 type PoseIn = Partial<Pose>;
-type Clip = { D: number; loop: boolean; f: (t: number) => PoseIn };
+/** `step`: ms between sampled keyframes (a slow smooth loop needs few). */
+type Clip = { D: number; loop: boolean; f: (t: number) => PoseIn; step?: number };
 type Frame = { transform: string; opacity: number };
+type Rand = () => number;
+
+/** A seed from text (FNV-1a), and a small seeded generator (mulberry32). */
+function seedOf(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function seeded(seed: number): Rand {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** Mixed into every seed, so a reload never replays the last one's show. */
+const LOAD_SALT = Math.floor(Math.random() * 0xffffffff);
 
 const TAU = Math.PI * 2;
 const S = (t: number) => Math.sin(TAU * t);
@@ -79,6 +116,8 @@ function ring(t: number, zeta: number, omega: number): number {
 const pull = (t: number, tIn: number, zeta: number, omega: number) => (t < tIn ? -smooth(t / tIn) : -ring(t - tIn, zeta, omega));
 /** A soft square wave in -1..1: holds at each end, turns over quickly. */
 const sq = (t: number, k = 3) => Math.tanh(k * S(t)) / Math.tanh(k);
+/** A smooth bump: 0, up to 1 at the middle of `w` ms, 0 again; 0 outside. */
+const bell = (t: number, w: number) => (t <= 0 || t >= w ? 0 : Math.sin((Math.PI * t) / w) ** 2);
 /** A hop of height H with squash and stretch, for a part standing on its base. t and D in ms; it rests after `use` of D. */
 function hop(t: number, D: number, H: number, Q: number, use = 1): PoseIn {
   const T = D * use;
@@ -112,7 +151,7 @@ function tf(p: Pose, a: number, k = 1): string {
   return `${t} rotate(${a}deg) ${s} rotate(${-a}deg) skewX(${f3(p.k)}deg)`;
 }
 const frame = (p: Pose, a: number, k: number): Frame => ({ transform: tf(p, a, k), opacity: f3(clamp(p.o, 0, 1)) });
-const loop = (D: number, f: (t: number) => PoseIn): Clip => ({ D, loop: true, f });
+const loop = (D: number, f: (t: number) => PoseIn, step?: number): Clip => ({ D, loop: true, f, step });
 const once = (D: number, f: (t: number) => PoseIn): Clip => ({ D, loop: false, f });
 const same = (a: PoseIn, b: PoseIn) => KEYS.every((key) => full(a)[key] === full(b)[key]);
 
@@ -120,7 +159,7 @@ const same = (a: PoseIn, b: PoseIn) => KEYS.every((key) => full(a)[key] === full
 // still there, so the window's other tests never pay for them. The marks' own tests turn motion on (`simulatedDom`).
 const simulated = typeof navigator !== 'undefined' && /HappyDOM\//.test(navigator.userAgent ?? '');
 const reduceQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
-/** Reduced motion, or a page that cannot animate (no Web Animations): every icon holds still poses. */
+/** Reduced motion, or a page that cannot animate (no Web Animations): every icon holds still, and follows nothing. */
 export function agentMotionStill(): boolean {
   return (reduceQuery?.matches ?? false) || typeof Element === 'undefined' || typeof Element.prototype.animate !== 'function' || (simulated && !agentMotionOptions.simulatedDom);
 }
@@ -130,7 +169,7 @@ interface Icon {
   el: HTMLElement;
   rig: AgentRigKind | null;
   size: number;
-  state: AgentMood;
+  seed: number;
   face: AgentFace;
   off: boolean;
   card: HTMLElement;
@@ -138,8 +177,8 @@ interface Icon {
   inst: Map<AgentFace, Instance>;
   swap: Animation[];
   anims: Set<Animation>;
-  /** Animations kept paused whatever the screen says (a spin at speed 0). */
-  held: WeakSet<Animation>;
+  /** Its attention: where it leans (x and y in -1..1, on a spring), its centre and the zone it attends to (measured). */
+  look: { layer: HTMLElement; x: number; y: number; vx: number; vy: number; omega: number; cx: number; cy: number; zone: Box | null; shown: boolean };
 }
 
 function animate(icon: Icon, node: Element, frames: Keyframe[], options: KeyframeAnimationOptions): Animation {
@@ -191,7 +230,7 @@ class Track {
     const Bs = Math.max(blend, 1);
     const sB = rise(Bs, zeta, omega) || 1;
     this.w = (u) => rise(u * Bs, zeta, omega) / sB;
-    const N = (D: number) => clamp(Math.round(D / 30), 16, 140);
+    const N = (D: number) => clamp(Math.round(D / (clip.step ?? 30)), 16, 140);
     const at = (t: number) => full(clip.f(clip.loop ? ((t % clip.D) + clip.D) % clip.D : Math.min(t, clip.D)));
     const sample = (t0: number, D: number, n: number, wfn?: (u: number) => number) => {
       const out: Frame[] = [];
@@ -279,309 +318,303 @@ class Track {
   }
 }
 
-/* ---------- the rigs: what each part does in each mood ---------- */
+/* ---------- the rigs: each part's own life, and the little things the character does now and then ---------- */
 interface Gestures {
   x: (part: string, clip: Clip) => void;
-  spinKick: (peak: number, up: number, down: number) => void;
+  /** The turn's speed (Claude), degrees a second: ramp to `to` over `ms`, hold `hold` ms, the next step; then back to its cruise. */
+  turn: (steps: { to: number; ms: number; hold?: number }[]) => void;
+  /** A new cruising speed for the turn. */
+  cruise: (dps: number) => void;
 }
 interface Rig {
-  parts: Record<string, { sel: string; a?: number; vb?: number; all?: boolean }>;
-  moods: Record<AgentMood, (part: string, index: number) => Clip | undefined>;
-  blend: (state: AgentMood, part: string) => number;
-  spin?: Record<AgentMood, number>;
-  cue?: (state: AgentMood, I: Gestures) => void;
-  fidget: (state: AgentMood, I: Gestures) => void;
-  gap: Record<AgentMood, [number, number]>;
+  parts: Record<string, { sel: string; a?: number; vb?: number }>;
+  /** A part's life: a calm loop, as long as it likes. None: the part rests. */
+  life: (part: string, index: number) => Clip | undefined;
+  /** The repertoire: [how often, the gesture]. */
+  acts: [number, (I: Gestures) => void][];
+  /** A turning rig's cruising speed, degrees a second. */
+  spin?: number;
+  /** The part whose inside looks toward the pointer. */
+  eyes?: string;
+  /** How much of AGENT_LOOK.turn the body leans (a star that turns anyway: none). */
+  lean: number;
 }
 
-/* Claude (round 4): a star that spins. The rays only breathe and twinkle a little. Speeds in degrees per second. */
-const claudeRig = (): Rig => {
+/** A rig speaks in its svg's units; `px(vb)` is one screen pixel of a 24 px icon in them. Nothing under 1 px reads as motion. */
+const px = (vb: number) => vb / 24;
+/** Go there, stay, come back: 0 to 1 on a spring, held until `stay` ms, then released. */
+const visit = (t: number, stay: number, zeta: number, omega: number) => (t < stay ? rise(t, zeta, omega) : ring(t - stay, Math.max(zeta, 0.7), omega));
+
+/* Claude: a star that turns ("it's circular"). It slows, turns back a touch, whirls; its rays ripple. */
+const claudeRig = (R: Rand): Rig => {
   const n = CLAUDE_RAY_ANGLES.length;
   const parts: Rig['parts'] = { body: { sel: '[data-p="body"]' } };
   CLAUDE_RAY_ANGLES.forEach((a, i) => (parts[`r${i}`] = { sel: `[data-p="r${i}"]`, a }));
-  const STEP = 30;
-  const WORK = 150; // working: 150°/s with a slight ratchet at every ray (30°)
-  const ratchetT = (STEP / WORK) * 1000;
-  const easeIO = (f: number) => (f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2);
-  const twinkle = (I: Gestures, k = 0.16) => {
-    for (let i = 0; i < n; i++) I.x(`r${i}`, once(900, (t) => ({ sx: 1 + k * pull(t - i * 22, 100, 0.35, 26) })));
-  };
-  const jump = (I: Gestures, H = 3.2) =>
-    I.x(
-      'body',
-      once(760, (t) => {
-        const h = t < 90 ? -0.3 * smooth(t / 90) : Math.max(0, Math.sin(Math.PI * clamp((t - 90) / 300, 0, 1))) * H;
-        const q = t < 90 ? -0.05 * smooth(t / 90) : 0.06 * ring(t - 90, 0.4, 20);
-        return { y: -h, sx: 1 + q, sy: 1 + q };
-      }),
-    );
-  return {
-    parts,
-    moods: {
-      idle: (p, i) =>
-        p === 'body' ? loop(5200, (t) => ({ sx: 1 + 0.015 * S(t / 5200), sy: 1 + 0.015 * S(t / 5200) })) : loop(5200, (t) => ({ sx: 1 + 0.04 * S(t / 5200 + i / n) })),
-      working: (p, i) =>
-        p === 'body'
-          ? loop(ratchetT, (t) => {
-              const f = t / ratchetT;
-              return { r: 0.45 * STEP * (easeIO(f) - f) };
-            })
-          : loop(1200, (t) => ({ sx: 1 + 0.07 * sq(t / 1200 + (i % 2) * 0.5, 2), sy: 1 - 0.03 * sq(t / 1200 + (i % 2) * 0.5, 2) })),
-      waiting: (p, i) => (p === 'body' ? loop(2200, (t) => ({ y: -1.1 + 0.35 * S(t / 2200), sx: 1.05, sy: 1.05 })) : loop(2200, (t) => ({ sx: 1.05 + 0.03 * S(t / 2200 + i / n) }))),
-      ended: (p) =>
-        p === 'body' ? loop(6000, (t) => ({ sx: 0.88 + 0.012 * S(t / 6000), sy: 0.88 + 0.012 * S(t / 6000), o: 0.55 })) : loop(6000, () => ({ sx: 0.86 })),
-    },
-    blend: (st, p) => (st === 'ended' ? (p === 'body' ? 1300 : 1500) : p === 'body' ? 360 : 460),
-    spin: { idle: 24, working: WORK, waiting: 60, ended: 0 },
-    cue: (st, I) => {
-      if (st === 'waiting') {
-        I.spinKick(720, 120, 900);
-        jump(I);
-      }
-    },
-    fidget: (st, I) => {
-      if (st === 'idle') {
-        if (Math.random() < 0.5) twinkle(I);
-        else I.spinKick(150, 250, 900);
-      }
-      if (st === 'working') twinkle(I, 0.1);
-      if (st === 'waiting') {
-        I.spinKick(400, 100, 700);
-        jump(I, 2.2);
-      }
-    },
-    gap: { idle: [3200, 6500], working: [2600, 4600], waiting: [3400, 5000], ended: [1e9, 1e9] },
-  };
-};
-
-/* Codex (round 4: snappier): the cloud bobs crisply with a little squash; the prompt is its face (> an eye, _ the cursor). */
-const codexRig = (): Rig => {
-  const table: Record<AgentMood, Record<string, Clip>> = {
-    idle: {
-      body: loop(3000, (t) => ({ sy: 1 + 0.018 * S(t / 3000), sx: 1 - 0.012 * S(t / 3000) })),
-      face: loop(3000, (t) => ({ y: -1.5 * S(t / 3000 - 0.06) })),
-      chev: loop(3000, () => ({})),
-      und: loop(3000, () => ({})),
-    },
-    working: {
-      body: loop(600, (t) => hop(t, 600, 7, 0.05, 0.8)),
-      face: loop(600, (t) => ({ y: 2 * S(t / 600 - 0.12) })),
-      chev: loop(1000, (t) => {
-        const e = Math.max(0, S(t / 1000));
-        return { x: 6 * e * e };
-      }),
-      und: loop(800, (t) => ({ o: t / 800 < 0.5 ? 1 : 0.15, sx: 1 + 0.15 * S((t / 800) * 2) })),
-    },
-    waiting: {
-      body: loop(1800, (t) => ({ sy: 1.05 + 0.012 * S(t / 1800), sx: 0.97, r: 2 * S(t / 1800) })),
-      face: loop(1800, (t) => ({ y: -10 + 1 * S(t / 1800), x: 2 * S(t / 1800) })),
-      chev: loop(1800, () => ({ r: -8, sy: 1.08 })),
-      und: loop(1800, () => ({ sx: 0.85 })),
-    },
-    ended: {
-      body: loop(5000, (t) => ({ sy: 0.94 + 0.012 * S(t / 5000), sx: 1.03 - 0.008 * S(t / 5000), o: 0.55 })),
-      face: loop(5000, (t) => ({ y: 6 + 1 * S(t / 5000 - 0.1) })),
-      chev: loop(5000, () => ({ sy: 0.22, r: 8 })),
-      und: loop(5000, () => ({ o: 0.45, sx: 0.85 })),
-    },
-  };
-  const blink = (I: Gestures, d = 0) =>
-    I.x(
-      'chev',
-      once(140 + d, (t) => ({ sy: 1 - 0.9 * Math.sin(Math.PI * clamp((t - d) / 130, 0, 1)) })),
-    );
-  const glance = (I: Gestures) => {
-    const s = Math.random() < 0.5 ? -1 : 1;
-    I.x('face', once(950, (t) => ({ x: 8 * s * (t < 650 ? rise(t, 0.75, 30) : ring(t - 650, 0.75, 30)) })));
-  };
-  const bob = (I: Gestures, H = 12) => I.x('body', once(650, (t) => hop(t, 650, H, 0.07, 0.85)));
-  const pick = (st: AgentMood) => (p: string) => table[st][p];
-  return {
-    parts: { body: { sel: '[data-p="body"]' }, face: { sel: '[data-p="face"]' }, chev: { sel: '[data-p="chev"]' }, und: { sel: '[data-p="und"]' } },
-    moods: { idle: pick('idle'), working: pick('working'), waiting: pick('waiting'), ended: pick('ended') },
-    blend: (st, p) => (st === 'ended' ? { body: 800, face: 1000, chev: 1200, und: 900 } : { body: 240, face: 300, chev: 320, und: 280 })[p] ?? 300,
-    cue: (st, I) => {
-      if (st === 'waiting') {
-        bob(I, 18);
-        blink(I, 340);
-        blink(I, 510);
-      }
-    },
-    fidget: (st, I) => {
-      const r = Math.random();
-      if (st === 'idle') {
-        if (r < 0.4) blink(I);
-        else if (r < 0.55) {
-          blink(I);
-          blink(I, 170);
-        } else if (r < 0.8) glance(I);
-        else bob(I);
-      }
-      if (st === 'working') blink(I);
-      if (st === 'waiting') {
-        if (r < 0.5) {
-          blink(I);
-          blink(I, 170);
-        } else bob(I, 12);
-      }
-      if (st === 'ended') I.x('body', once(1600, (t) => ({ sy: 1 + 0.03 * Math.sin(Math.PI * clamp(t / 1600, 0, 1)), sx: 1 - 0.015 * Math.sin(Math.PI * clamp(t / 1600, 0, 1)) })));
-    },
-    gap: { idle: [2200, 4800], working: [2200, 3800], waiting: [2600, 4000], ended: [9000, 15000] },
-  };
-};
-
-/* Pi: three blocks that hop and settle, each standing on its own base. */
-const piRig = (): Rig => {
-  const B = ['blue', 'coral', 'yellow'];
-  const idx = (p: string) => B.indexOf(p);
-  const jump = (I: Gestures, b: string, H = 80) => {
-    I.x(b, once(1100, (t) => hop(t, 1100, H, 0.2, 0.6)));
-    for (const o of B) {
-      if (o === b) continue;
-      I.x(
-        o,
-        once(1100, (t) => {
-          const land = 1100 * 0.6 * 0.65;
-          const r = t > land ? ring(t - land, 0.35, 30) * smooth((t - land) / 30) : 0;
-          return { sy: 1 - 0.06 * r, sx: 1 + 0.03 * r };
-        }),
-      );
+  const D = 4200 + 2600 * R();
+  const way = R() < 0.5 ? 1 : -1;
+  const speed = () => 17 + 15 * R();
+  const ripple = (I: Gestures, k = 0.15) => {
+    const from = Math.floor(R() * n);
+    const w = R() < 0.5 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const at = ((((w * (i - from)) % n) + n) % n) * 42;
+      I.x(`r${i}`, once(1000, (t) => ({ sx: 1 + k * bell(t - at, 440) })));
     }
   };
   return {
-    parts: { body: { sel: '[data-p="body"]' }, blue: { sel: '[data-p="blue"]' }, coral: { sel: '[data-p="coral"]' }, yellow: { sel: '[data-p="yellow"]' } },
-    moods: {
-      idle: (p) => (p === 'body' ? loop(4800, () => ({})) : loop(4800, (t) => ({ y: -7 * S(t / 4800 + idx(p) / 3), sy: 1 + 0.012 * S(t / 4800 + idx(p) / 3 + 0.25) }))),
-      // busy: the blocks hop in turn, a third of a beat apart
-      working: (p) => (p === 'body' ? loop(1350, (t) => ({ r: 2 * S(t / 1350) })) : loop(1350, (t) => hop((((t - (idx(p) * 1350) / 3) % 1350) + 1350) % 1350, 1350, 95, 0.2, 0.62))),
-      // perks up: stands tall, the top block lifts and looks from side to side
-      waiting: (p) =>
-        p === 'body'
-          ? loop(2600, () => ({}))
-          : p === 'coral'
-            ? loop(2600, (t) => ({ y: -26, r: 7 * sq(t / 2600, 2), sy: 1.06 }))
-            : loop(2600, (t) => ({ sy: 1.1 + 0.02 * S(t / 2600 + idx(p) / 3), sx: 0.96 })),
-      // asleep: flattened, the top block drooping, the yellow one leaning in
-      ended: (p) =>
-        p === 'body'
-          ? loop(6400, () => ({ o: 0.55 }))
-          : loop(6400, (t) => {
-              const u = t / 6400 + idx(p) / 5;
-              if (p === 'blue') return { sy: 0.88 + 0.02 * S(u), sx: 1.03 };
-              if (p === 'coral') return { y: 16, r: -4, sy: 0.86 + 0.02 * S(u), sx: 1.03 };
-              return { r: -10, sy: 0.9 + 0.02 * S(u) };
-            }),
-    },
-    blend: (st, p) => (st === 'ended' ? 1100 : 420) + Math.max(0, idx(p)) * 90,
-    cue: (st, I) => {
-      if (st === 'waiting') I.x('body', once(1100, (t) => hop(t, 1100, 70, 0.16, 0.8)));
-    },
-    fidget: (st, I) => {
-      if (st === 'idle') jump(I, B[Math.floor(Math.random() * 3)]!, 70 + Math.random() * 30);
-      if (st === 'waiting') I.x('body', once(1000, (t) => hop(t, 1000, 50, 0.14, 0.8)));
-      if (st === 'ended') I.x('yellow', once(1600, (t) => ({ r: -5 * Math.sin(Math.PI * clamp(t / 1600, 0, 1)) })));
-    },
-    gap: { idle: [2400, 5200], working: [99999, 99999], waiting: [3000, 4600], ended: [10000, 16000] },
+    parts,
+    // The rays breathe in a wave that travels round the star.
+    life: (p, i) => (p === 'body' ? undefined : loop(D, (t) => ({ sx: 1 + 0.07 * S(t / D + (way * i) / n) }), 70)),
+    spin: speed(),
+    lean: 0,
+    acts: [
+      [3, (I) => ripple(I)],
+      [2, (I) => I.turn([{ to: 3, ms: 900, hold: 700 + 900 * R() }])],
+      [1.6, (I) => I.turn([{ to: 2, ms: 500 }, { to: -(12 + 8 * R()), ms: 450, hold: 350 + 300 * R() }])],
+      [1.4, (I) => I.turn([{ to: 95 + 40 * R(), ms: 260, hold: 120 }])],
+      [1.6, (I) => I.cruise(speed())],
+      [
+        1.4,
+        (I) => {
+          I.x('body', once(560, (t) => ({ sx: 1 + 0.1 * bell(t, 560), sy: 1 + 0.1 * bell(t, 560) })));
+          ripple(I, 0.09);
+        },
+      ],
+    ],
   };
 };
 
-/* OpenCode: the frame breathes and leans; the square inside rides along a beat late. */
-const opencodeRig = (): Rig => {
-  const lean = (I: Gestures) => {
-    const s = Math.random() < 0.5 ? -1 : 1;
-    I.x('body', once(1300, (t) => ({ k: 14 * s * pull(t, 160, 0.33, 14) })));
-    I.x('inner', once(1400, (t) => ({ x: -2.2 * s * pull(t - 90, 160, 0.33, 14) })));
+/* Codex: the cloud bobs crisply, never stretching; the prompt is its face (> an eye, _ the cursor), and it looks about. */
+const codexRig = (R: Rand): Rig => {
+  const u = px(128);
+  const Db = 3300 + 1500 * R();
+  const Df = 6100 + 2900 * R();
+  const Dc = 1040 + 280 * R();
+  const p1 = R();
+  const p2 = R();
+  const side = () => (R() < 0.5 ? -1 : 1);
+  const blink = (I: Gestures, twice = false) => I.x('chev', once(twice ? 360 : 140, (t) => ({ sy: 1 - 0.9 * (bell(t, 140) + (twice ? bell(t - 220, 140) : 0)) })));
+  return {
+    parts: { body: { sel: '[data-p="body"]' }, face: { sel: '[data-p="face"]' }, chev: { sel: '[data-p="chev"]' }, und: { sel: '[data-p="und"]' } },
+    life: (p) =>
+      p === 'body'
+        ? loop(Db, (t) => ({ y: -0.65 * u * (1 + sq(t / Db + p1, 1.6)) }), 50)
+        : p === 'face'
+          ? loop(Df, (t) => ({ x: u * (0.85 * S(t / Df + p2) + 0.3 * S((3 * t) / Df + p1)) }), 70)
+          : p === 'und'
+            ? loop(Dc, (t) => ({ o: t / Dc < 0.56 ? 1 : 0.2 }))
+            : undefined,
+    eyes: 'face',
+    lean: 1,
+    acts: [
+      [3, (I) => blink(I)],
+      [1.5, (I) => blink(I, true)],
+      [
+        2.5,
+        (I) => {
+          const s = side();
+          I.x('face', once(1100, (t) => ({ x: 1.9 * u * s * visit(t, 700, 0.8, 26) })));
+        },
+      ],
+      [2, (I) => I.x('body', once(600, (t) => hop(t, 600, 2.3 * u, 0.06, 0.85)))],
+      [1, (I) => I.x('face', once(460, (t) => ({ y: 1.4 * u * bell(t, 460) })))],
+      [1.2, (I) => I.x('face', once(1300, (t) => ({ y: -1.3 * u * visit(t, 850, 0.8, 22) })))],
+      [
+        1.5,
+        (I) => {
+          I.x('chev', once(700, (t) => ({ x: t < 690 ? 1.2 * u * bell(t % 230, 230) : 0 })));
+          I.x('und', once(700, (t) => ({ sx: t < 690 ? 1 + 0.25 * bell(t % 230, 230) : 1 })));
+        },
+      ],
+    ],
   };
-  const peek = (I: Gestures) => I.x('inner', once(1300, (t) => ({ y: -5.6 * (t < 900 ? rise(t, 0.5, 16) : ring(t - 900, 0.4, 18)) })));
+};
+
+/* Pi: three blocks, each standing on its own base. They ride a slow wave, shuffle and hop. */
+const piRig = (R: Rand): Rig => {
+  const u = px(540);
+  const B = ['blue', 'coral', 'yellow'];
+  const idx = (p: string) => B.indexOf(p);
+  const Dw = 3000 + 1400 * R();
+  const Ds = 7000 + 3000 * R();
+  const p1 = R();
+  const side = () => (R() < 0.5 ? -1 : 1);
+  return {
+    parts: { body: { sel: '[data-p="body"]' }, blue: { sel: '[data-p="blue"]' }, coral: { sel: '[data-p="coral"]' }, yellow: { sel: '[data-p="yellow"]' } },
+    life: (p) => (p === 'body' ? loop(Ds, (t) => ({ r: 3 * S(t / Ds + p1) }), 80) : loop(Dw, (t) => ({ y: -0.75 * u * (1 + S(t / Dw + idx(p) / 3 + p1)) }), 50)),
+    eyes: 'coral',
+    lean: 1,
+    acts: [
+      [
+        3,
+        (I) => {
+          const b = B[Math.floor(R() * 3)]!;
+          const H = (2.8 + 1.4 * R()) * u;
+          I.x(b, once(1000, (t) => hop(t, 1000, H, 0.18, 0.6)));
+          const land = 1000 * 0.6 * 0.65;
+          for (const o of B) {
+            if (o === b) continue;
+            I.x(
+              o,
+              once(1000, (t) => {
+                const r = t > land ? ring(t - land, 0.45, 30) * smooth((t - land) / 30) : 0;
+                return { sy: 1 - 0.06 * r, sx: 1 + 0.03 * r };
+              }),
+            );
+          }
+        },
+      ],
+      // one after another, a little hop each
+      [
+        2,
+        (I) => {
+          const w = side();
+          for (const b of B) {
+            const at = (w > 0 ? idx(b) : 2 - idx(b)) * 190;
+            I.x(b, once(1000, (t) => (t < at || t > at + 620 ? {} : hop(t - at, 620, 1.9 * u, 0.14, 0.9))));
+          }
+        },
+      ],
+      // a shuffle: the two standing blocks shift from side to side while the top one lifts
+      [
+        2,
+        (I) => {
+          const s = side();
+          const sway = (t: number) => Math.sin((TAU * t) / 560) * Math.sin((Math.PI * t) / 1120);
+          I.x('blue', once(1120, (t) => ({ x: 1.4 * u * s * sway(t) })));
+          I.x('yellow', once(1120, (t) => ({ x: 1.4 * u * s * sway(Math.max(0, t - 70)) })));
+          I.x('coral', once(1120, (t) => ({ y: -1 * u * bell(t, 1000) })));
+        },
+      ],
+      [1.6, (I) => I.x('body', once(1150, (t) => ({ r: 6 * Math.sin((TAU * t) / 460) * Math.sin((Math.PI * t) / 1150) })))],
+      [
+        1.6,
+        (I) => {
+          const s = side();
+          I.x('coral', once(1500, (t) => ({ y: -1.9 * u * visit(t, 1000, 0.7, 20), r: 9 * s * visit(t, 1000, 0.7, 20) })));
+        },
+      ],
+    ],
+  };
+};
+
+/* OpenCode: the frame sways and leans; the square inside is its eye: it drifts, peeks, glances and blinks. */
+const opencodeRig = (R: Rand): Rig => {
+  const u = px(32);
+  const Db = 5200 + 2400 * R();
+  const Di = 3800 + 1500 * R();
+  const p1 = R();
+  const p2 = R();
+  const side = () => (R() < 0.5 ? -1 : 1);
   return {
     parts: { body: { sel: '[data-p="body"]' }, inner: { sel: '[data-p="inner"]' } },
-    moods: {
-      idle: (p) =>
-        p === 'body' ? loop(5000, (t) => ({ sy: 1 + 0.035 * S(t / 5000), sx: 1 - 0.025 * S(t / 5000), k: 3 * S(t / 5000 + 0.25) })) : loop(5000, (t) => ({ y: -1.4 * S(t / 5000 - 0.12) })),
-      working: (p) =>
-        p === 'body'
-          ? loop(1000, (t) => ({ sy: 1 + 0.07 * S((2 * t) / 1000), sx: 1 - 0.05 * S((2 * t) / 1000), k: 10 * S(t / 1000) }))
-          : loop(1000, (t) => {
-              const h = hop(t % 500, 500, 5.5, 0.16, 0.95);
-              return { y: h.y, sx: h.sx, sy: h.sy, x: -1.5 * S(t / 1000 - 0.15) };
-            }),
-      waiting: (p) => (p === 'body' ? loop(2400, (t) => ({ sy: 1.1 + 0.02 * S(t / 2400), sx: 0.95, k: -5 + 1.5 * S(t / 2400) })) : loop(2400, (t) => ({ y: -5.6 + 0.6 * S(t / 2400) }))),
-      ended: (p) => (p === 'body' ? loop(6000, (t) => ({ sy: 0.9 + 0.02 * S(t / 6000), sx: 1.05, k: 7, o: 0.55 })) : loop(6000, () => ({ y: 0.6, o: 0.4 }))),
-    },
-    blend: (st, p) => (st === 'ended' ? 1100 : 420) + (p === 'inner' ? 180 : 0),
-    cue: (st, I) => {
-      if (st === 'waiting') I.x('body', once(1000, (t) => hop(t, 1000, 5, 0.16, 0.8)));
-    },
-    fidget: (st, I) => {
-      if (st === 'idle') (Math.random() < 0.55 ? lean : peek)(I);
-      if (st === 'working') lean(I);
-      if (st === 'waiting') I.x('body', once(900, (t) => hop(t, 900, 3.5, 0.12, 0.8)));
-      if (st === 'ended') I.x('body', once(1800, (t) => ({ sy: 1 + 0.05 * Math.sin(Math.PI * clamp(t / 1800, 0, 1)) })));
-    },
-    gap: { idle: [2800, 5800], working: [2800, 4600], waiting: [3200, 4800], ended: [10000, 16000] },
+    life: (p) =>
+      p === 'body'
+        ? loop(Db, (t) => ({ k: 3.4 * S(t / Db + p1) + 1.2 * S((2 * t) / Db + p2) }), 70)
+        : loop(Di, (t) => ({ y: -0.85 * u * S(t / Di + p2), x: 0.5 * u * S((2 * t) / Di + p1) }), 60),
+    eyes: 'inner',
+    lean: 1,
+    acts: [
+      [
+        2.5,
+        (I) => {
+          const s = side();
+          I.x('body', once(1300, (t) => ({ k: 11 * s * pull(t, 180, 0.5, 13) })));
+          I.x('inner', once(1300, (t) => ({ x: -1.6 * u * s * pull(t - 90, 180, 0.5, 13) })));
+        },
+      ],
+      [2.5, (I) => I.x('inner', once(1350, (t) => ({ y: -2.6 * u * visit(t, 850, 0.6, 18) })))],
+      [
+        2,
+        (I) => {
+          const s = side();
+          I.x('inner', once(1150, (t) => ({ x: 1.8 * u * s * visit(t, 720, 0.75, 24) })));
+        },
+      ],
+      [1.5, (I) => I.x('body', once(720, (t) => hop(t, 720, 2.1 * u, 0.1, 0.85)))],
+      [
+        1.8,
+        (I) => {
+          const twice = R() < 0.4;
+          I.x('inner', once(twice ? 400 : 170, (t) => ({ sy: 1 - 0.85 * (bell(t, 170) + (twice ? bell(t - 230, 170) : 0)) })));
+        },
+      ],
+    ],
   };
 };
 
-/* Our faces (the favicon art): the whole face bounces and tilts, in a 64-unit grid. */
-const faceRig = (): Rig => {
-  const tilt = (I: Gestures) => {
-    const s = Math.random() < 0.5 ? -1 : 1;
-    I.x('body', once(1600, (t) => ({ r: 10 * s * (t < 900 ? rise(t, 0.45, 13) : ring(t - 900, 0.45, 13)) })));
-  };
-  const bounce = (I: Gestures, H = 6) => I.x('body', once(1000, (t) => hop(t, 1000, H, 0.14, 0.85)));
+/* Our faces (the favicon art) and a host with no rig: the whole mark sways, tilts, bounces and nods, in a 64-unit grid. */
+const faceRig = (R: Rand): Rig => {
+  const u = px(64);
+  const D = 5200 + 2600 * R();
+  const p1 = R();
+  const p2 = R();
+  const side = () => (R() < 0.5 ? -1 : 1);
   return {
     parts: { body: { sel: '[data-p="body"]', vb: 64 } },
-    moods: {
-      idle: () => loop(4000, (t) => ({ y: -0.6 * S(t / 4000), sy: 1 + 0.012 * S(t / 4000), sx: 1 - 0.008 * S(t / 4000) })),
-      working: () =>
-        loop(760, (t) => {
-          const h = hop(t, 760, 3, 0.07, 0.92);
-          return { y: h.y, sx: h.sx, sy: h.sy, r: 3 * S(t / 1520) };
-        }),
-      waiting: () => loop(2400, (t) => ({ y: -1.2 + 0.3 * S(t / 2400), sy: 1.04, sx: 0.98, r: -3 + 2 * S(t / 2400) })),
-      ended: () => loop(6000, (t) => ({ y: 1.4, sy: 0.95 + 0.015 * S(t / 6000), sx: 1.02, r: 7, o: 0.6 })),
-    },
-    blend: (st) => (st === 'ended' ? 1000 : 380),
-    cue: (st, I) => {
-      if (st === 'waiting') bounce(I, 7);
-    },
-    fidget: (st, I) => {
-      if (st === 'idle') (Math.random() < 0.5 ? tilt : bounce)(I);
-      if (st === 'waiting') bounce(I, 4);
-      if (st === 'ended') I.x('body', once(2000, (t) => ({ sy: 1 + 0.04 * Math.sin(Math.PI * clamp(t / 2000, 0, 1)) })));
-    },
-    gap: { idle: [2200, 5000], working: [99999, 99999], waiting: [2600, 4200], ended: [10000, 16000] },
+    life: () => loop(D, (t) => ({ r: 3 * S(t / D + p1) + 1.1 * S((3 * t) / D + p2), y: -0.5 * u * (1 + S((2 * t) / D + p2)) }), 60),
+    lean: 1,
+    acts: [
+      [
+        2.5,
+        (I) => {
+          const s = side();
+          I.x('body', once(1600, (t) => ({ r: 9 * s * visit(t, 900, 0.55, 13) })));
+        },
+      ],
+      [2, (I) => I.x('body', once(900, (t) => hop(t, 900, 2.4 * u, 0.12, 0.85)))],
+      [1.5, (I) => I.x('body', once(420, (t) => ({ sy: 1 - 0.08 * bell(t, 420), sx: 1 + 0.04 * bell(t, 420) })))],
+      [1.5, (I) => I.x('body', once(1050, (t) => ({ x: 1.3 * u * Math.sin((TAU * t) / 420) * Math.sin((Math.PI * t) / 1050) })))],
+      [1.2, (I) => I.x('body', once(1300, (t) => ({ y: -1.7 * u * visit(t, 800, 0.7, 18) })))],
+    ],
   };
 };
 
-const RIGS: Record<AgentRigKind | 'face', Rig> = { claude: claudeRig(), codex: codexRig(), pi: piRig(), opencode: opencodeRig(), face: faceRig() };
+const RIGS: Record<AgentRigKind | 'face', (R: Rand) => Rig> = { claude: claudeRig, codex: codexRig, pi: piRig, opencode: opencodeRig, face: faceRig };
 
-/** One fidget at a time across the page: when the last one started. */
-let lastFidget = -1e9;
+/** One gesture at a time across the page: when the last one started. */
+let lastGesture = -1e9;
 
-/* ---------- an instance: one rig mounted in one face element ---------- */
+/* ---------- an instance: one rig mounted in one face element, living its own life ---------- */
 interface Instance {
-  setMood: (state: AgentMood, options?: { blend?: boolean }) => void;
-  /** Off screen: no fidget is scheduled; back on screen the schedule starts again. */
+  /** Start its life (or, under reduced motion, hold its rest pose). */
+  start: () => void;
+  /** Back on screen: gestures are scheduled again. */
   resume: () => void;
   stop: () => void;
+  /** The layers that look toward the pointer, and how much the body leans. */
+  eyes: HTMLElement[];
+  lean: number;
 }
 
-function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement): Instance {
-  const rig = RIGS[kind];
+function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement, R: Rand): Instance {
+  const rig = RIGS[kind](R);
   const T: Record<string, Track> = {};
   const X: Record<string, Track> = {};
   const glyph = root.querySelector<HTMLElement>('.am-rig');
   const vb = Number(glyph?.dataset.vb) || icon.size;
   for (const [name, def] of Object.entries(rig.parts)) {
-    const nodes = def.all ? [...root.querySelectorAll<HTMLElement>(def.sel)] : [root.querySelector<HTMLElement>(def.sel)].filter((n): n is HTMLElement => n !== null);
-    if (!nodes.length) continue;
+    const node = root.querySelector<HTMLElement>(def.sel);
+    if (!node) continue;
     // An HTML part moves in px; the rig speaks in its svg's units.
     const k = def.vb ? icon.size / def.vb : icon.size / vb;
-    T[name] = new Track(icon, nodes, def.a ?? 0, k);
-    X[name] = new Track(icon, nodes.map((n) => n.firstElementChild as HTMLElement).filter(Boolean), def.a ?? 0, k);
+    T[name] = new Track(icon, [node], def.a ?? 0, k);
+    X[name] = new Track(icon, [node.firstElementChild as HTMLElement].filter(Boolean), def.a ?? 0, k);
   }
-  // One fidget's gestures are padded to one length, so they all end on the same frame (one style pass, not ten).
+  // The eyes: one more layer inside the part's gesture layer, moved only by the pointer (made once, kept).
+  const eyes: HTMLElement[] = [];
+  const inside = rig.eyes ? root.querySelector<HTMLElement>(rig.parts[rig.eyes]!.sel)?.firstElementChild : null;
+  if (inside) {
+    let eye = inside.firstElementChild as HTMLElement | null;
+    if (!eye?.classList.contains('am-e')) {
+      eye = document.createElement('span');
+      eye.className = 'am-e';
+      eye.append(...inside.childNodes);
+      inside.append(eye);
+    }
+    eyes.push(eye);
+  }
+  // One gesture's clips are padded to one length, so they all end on the same frame (one style pass, not ten).
   let batch: [string, Clip][] | null = null;
   const go1 = (name: string, clip: Clip) => {
     const tr = X[name] ?? T[name];
@@ -595,139 +628,132 @@ function instance(icon: Icon, kind: AgentRigKind | 'face', root: HTMLElement): I
       const b = batch;
       batch = null;
       const D = Math.max(0, ...b.map(([, c]) => c.D));
-      for (const [n, c] of b) go1(n, c.D === D ? c : once(D, (t) => c.f(Math.min(t, c.D))));
+      for (const [n, c] of b) go1(n, c.D === D ? c : once(D, (t) => (t < c.D ? c.f(t) : {})));
     }
   };
-  let mood: AgentMood | null = null;
+  let alive = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rampT: ReturnType<typeof setTimeout> | undefined;
-  const phase = Math.random();
-  // A spinning rig (Claude): one endless turn on its own layer. A state changes only its speed, in small steps, so the
-  // angle never jumps; at speed 0 it is paused. Made on the first mood and cancelled on stop.
+  const phase = R();
+  // Its temperament: how long it waits between gestures.
+  const tempo = 0.85 + 0.45 * R();
+  let last = -1;
+  // A turning rig (Claude): one endless turn on its own layer. A gesture changes only its speed, in small steps, so
+  // the angle never jumps. It starts far into its run, so a turn back never reaches its start. Cancelled on stop.
   const spinEl = rig.spin ? root.querySelector<HTMLElement>('.am-spin') : null;
   let spin: Animation | null = null;
-  const holdSpin = (on: boolean) => {
-    if (!spin) return;
-    if (on) {
-      spin.pause();
-      icon.held.add(spin);
-    } else icon.held.delete(spin);
-  };
-  const mkSpin = () => {
-    if (!spinEl) return;
-    spin = animate(icon, spinEl, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 1000, iterations: Infinity });
-    spin.currentTime = phase * 1000;
-    holdSpin(true);
-  };
-  const playSpin = (rate: number) => {
-    if (!spin) return;
-    holdSpin(false);
-    spin.playbackRate = rate;
-    if (!icon.off) spin.play();
-  };
-  const rampTo = (dps: number, ms: number, shape: (k: number) => number = smooth, then?: () => void) => {
+  let cruise = rig.spin ?? 0;
+  const rampTo = (dps: number, ms: number, then?: () => void) => {
     if (!spin) return;
     clearTimeout(rampT);
-    const from = icon.held.has(spin) ? 0 : spin.playbackRate;
+    const from = spin.playbackRate;
     const to = dps / 360;
-    if (to > 0 && icon.held.has(spin)) playSpin(Math.max(from, 1e-4));
     const t0 = performance.now();
     const tick = () => {
       if (!spin) return;
       const k = Math.min(1, ((performance.now() - t0) * agentMotionOptions.clock) / Math.max(ms, 1));
-      spin.playbackRate = from + (to - from) * shape(k);
+      spin.playbackRate = from + (to - from) * smooth(k);
       if (k < 1) rampT = setTimeout(tick, 40 / agentMotionOptions.clock);
-      else {
-        if (to === 0) holdSpin(true);
-        then?.();
-      }
+      else then?.();
     };
     tick();
   };
   const I: Gestures = {
     x: (name, clip) => (batch ? batch.push([name, clip]) : go1(name, clip)),
-    spinKick: (peak, up, down) => {
-      if (!spin || agentMotionStill() || !rig.spin || !mood) return;
-      const back = rig.spin[mood];
-      rampTo(peak, up, (k) => 1 - (1 - k) * (1 - k), () => rampTo(back, down, smooth));
+    turn: (steps) => {
+      const go = (i: number) => {
+        const step = steps[i];
+        if (!step) return rampTo(cruise, 1200);
+        rampTo(step.to, step.ms, () => {
+          rampT = setTimeout(() => go(i + 1), (step.hold ?? 0) / agentMotionOptions.clock);
+        });
+      };
+      go(0);
+    },
+    cruise: (dps) => {
+      cruise = dps;
+      rampTo(dps, 1500);
     },
   };
-  function schedule() {
+  const total = rig.acts.reduce((sum, [w]) => sum + w, 0);
+  /** A gesture by its weight, never the one before. */
+  const choose = (): number => {
+    for (let tries = 0; tries < 6; tries++) {
+      let at = R() * total;
+      const i = rig.acts.findIndex(([w]) => (at -= w) < 0);
+      if (i >= 0 && i !== last) return i;
+    }
+    return (last + 1) % rig.acts.length;
+  };
+  /** The wait before the next gesture: mostly a few seconds, now and then a quick second thing or a longer rest. */
+  const gap = (first = false): number => {
+    if (first) return 400 + 3600 * R();
+    const r = R();
+    if (r < 0.18) return 900 + 600 * R();
+    const base = 2200 + 5200 * R() * R();
+    return (r > 0.84 ? base + 2500 + 3500 * R() : base) * tempo;
+  };
+  function schedule(first = false) {
     clearTimeout(timer);
     timer = undefined;
-    if (agentMotionStill() || !mood || icon.off) return;
-    const [lo, hi] = rig.gap[mood];
-    if (lo > 60000) return;
+    if (agentMotionStill() || !alive || icon.off) return;
     timer = setTimeout(
       () => {
         const live = !icon.off && !(typeof document !== 'undefined' && document.hidden);
-        if (live && agentMotionOptions.fidgets && mood) {
+        if (live && agentMotionOptions.fidgets && alive) {
           const now = performance.now();
-          if (now - lastFidget < 380 / agentMotionOptions.clock) {
-            timer = setTimeout(schedule, (300 + Math.random() * 900) / agentMotionOptions.clock);
+          if (now - lastGesture < 380 / agentMotionOptions.clock) {
+            timer = setTimeout(schedule, (300 + R() * 900) / agentMotionOptions.clock);
             return;
           }
-          lastFidget = now;
-          const m = mood;
-          run(() => rig.fidget(m, I));
+          lastGesture = now;
+          last = choose();
+          const act = rig.acts[last]![1];
+          run(() => act(I));
         }
         schedule();
       },
-      (lo + Math.random() * (hi - lo)) / agentMotionOptions.clock,
+      gap(first) / agentMotionOptions.clock,
     );
   }
   return {
-    setMood(state, { blend = true } = {}) {
-      const first = mood === null;
-      mood = state;
+    eyes,
+    lean: rig.lean,
+    start() {
+      const first = !alive;
+      alive = true;
       clearTimeout(timer);
-      const still = agentMotionStill();
-      if (still) {
-        clearTimeout(rampT);
+      clearTimeout(rampT);
+      for (const t of Object.values(X)) t.stop();
+      if (agentMotionStill()) {
         spin?.cancel();
         spin = null;
-        for (const [name, tr] of Object.entries(T)) {
-          const c = rig.moods[state](name, name[0] === 'r' ? Number(name.slice(1)) : 0);
-          tr.hold(c ? c.f(0) : {});
-        }
+        for (const tr of Object.values(T)) tr.hold({});
         return;
       }
-      if (spinEl && !spin) mkSpin();
-      if (spin && rig.spin) {
-        const v = rig.spin[state];
-        if (first || !blend) {
-          clearTimeout(rampT);
-          if (v > 0) playSpin(v / 360);
-          else holdSpin(true);
-        } else rampTo(v, state === 'ended' ? 2200 : 520, state === 'ended' ? (k) => k : smooth);
+      if (spinEl && !spin) {
+        spin = animate(icon, spinEl, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 1000, iterations: Infinity });
+        spin.currentTime = 1e7 + phase * 1000;
+        spin.playbackRate = cruise / 360;
       }
       for (const [name, tr] of Object.entries(T)) {
-        const c = rig.moods[state](name, kind === 'claude' && name[0] === 'r' ? Number(name.slice(1)) : 0);
-        if (!c) {
-          tr.stop();
-          continue;
-        }
-        const ph = (phase * c.D) % c.D;
-        tr.play(c, first || !blend ? { phase: ph } : { phase: ph, blend: rig.blend(state, name), zeta: state === 'ended' ? 0.95 : 0.62, omega: state === 'ended' ? 7 : 12 });
+        const c = rig.life(name, kind === 'claude' && name[0] === 'r' ? Number(name.slice(1)) : 0);
+        if (c) tr.play(c, { phase: phase * c.D });
+        else tr.stop();
       }
-      if (!first && blend && rig.cue) {
-        const cue = rig.cue;
-        run(() => cue(state, I));
-      }
-      schedule();
+      schedule(first);
     },
-    resume: schedule,
+    resume: () => schedule(),
     stop() {
+      alive = false;
       clearTimeout(timer);
       clearTimeout(rampT);
       timer = undefined;
-      if (spin) {
-        icon.held.delete(spin);
-        spin.cancel();
-        spin = null;
-      }
+      spin?.cancel();
+      spin = null;
       for (const t of Object.values(T)) t.stop();
       for (const t of Object.values(X)) t.stop();
+      for (const eye of eyes) eye.style.transform = '';
     },
   };
 }
@@ -741,9 +767,10 @@ function setOff(icon: Icon, off: boolean): void {
   icon.el.toggleAttribute('data-off', off);
   for (const an of icon.anims) {
     if (off) an.pause();
-    else if (!icon.held.has(an)) an.play();
+    else an.play();
   }
   if (!off) for (const inst of icon.inst.values()) inst.resume();
+  wake();
 }
 
 let observer: IntersectionObserver | null | undefined;
@@ -761,10 +788,174 @@ function screenWatch(): IntersectionObserver | null {
   return observer;
 }
 
-// Reduced motion turned on or off while icons show: each takes its new kind of pose.
+// Reduced motion turned on or off while icons show: each takes its new kind of pose, and lets go of the pointer.
 reduceQuery?.addEventListener?.('change', () => {
-  for (const icon of icons.values()) icon.inst.get(icon.face)?.setMood(icon.state, { blend: false });
+  for (const icon of icons.values()) icon.inst.get(icon.face)?.start();
+  watchPointer();
+  wake();
 });
+
+/* ---------- attention: every icon leans a little toward the pointer ---------- */
+type Box = { left: number; top: number; right: number; bottom: number };
+const pointer = { x: 0, y: 0, at: -1e9, here: false };
+let watching = false;
+let due: number | ReturnType<typeof setTimeout> = 0;
+let lastTick = 0;
+let stale = true;
+/** Some icon is looking at the pointer, or on its way back. */
+let attending = false;
+let stillTimer: ReturnType<typeof setTimeout> | undefined;
+let sizeWatch: ResizeObserver | null = null;
+const hasFrames = typeof requestAnimationFrame === 'function';
+
+function wake(): void {
+  if (due || !icons.size) return;
+  due = hasFrames ? requestAnimationFrame(tick) : setTimeout(() => tick(performance.now()), 16);
+}
+function sleep(): void {
+  if (due) {
+    if (hasFrames) cancelAnimationFrame(due as number);
+    else clearTimeout(due as ReturnType<typeof setTimeout>);
+  }
+  due = 0;
+  lastTick = 0;
+}
+function onPointerMove(event: PointerEvent): void {
+  if (event.pointerType === 'touch') return;
+  pointer.x = event.clientX;
+  pointer.y = event.clientY;
+  pointer.at = performance.now();
+  pointer.here = true;
+  // Still for long enough: one more frame then, which lets go.
+  clearTimeout(stillTimer);
+  stillTimer = setTimeout(wake, AGENT_LOOK.stillMs / agentMotionOptions.clock + 30);
+  wake();
+}
+function onPointerGone(): void {
+  if (!pointer.here) return;
+  pointer.here = false;
+  wake();
+}
+/** The page moved under the icons (a resize, a scroll, a change of the list): measure again before the next look. */
+function onMoved(): void {
+  stale = true;
+  // Only an icon that is looking has to know now; the rest learn at the pointer's next move.
+  if (attending) wake();
+}
+/** Listen while any icon shows and may move; stop when none does. */
+function watchPointer(): void {
+  const want = icons.size > 0 && !agentMotionStill() && typeof document !== 'undefined';
+  if (want === watching) return;
+  watching = want;
+  if (want) {
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    document.documentElement.addEventListener('pointerleave', onPointerGone, { passive: true });
+    document.addEventListener('scroll', onMoved, { passive: true, capture: true });
+    window.addEventListener('resize', onMoved, { passive: true });
+    if (typeof ResizeObserver === 'function') sizeWatch = new ResizeObserver(onMoved);
+    stale = true;
+  } else {
+    document.removeEventListener('pointermove', onPointerMove);
+    document.documentElement.removeEventListener('pointerleave', onPointerGone);
+    document.removeEventListener('scroll', onMoved, { capture: true });
+    window.removeEventListener('resize', onMoved);
+    sizeWatch?.disconnect();
+    sizeWatch = null;
+    clearTimeout(stillTimer);
+    pointer.here = false;
+    attending = false;
+    if (!icons.size) sleep();
+  }
+}
+
+/** Where each icon is, and the part of the page it attends to: its sidebar, or around its own section. One pass of layout reads. */
+function measure(): void {
+  stale = false;
+  const zones = new Map<Element, Box>();
+  for (const icon of icons.values()) {
+    const look = icon.look;
+    const box = icon.el.getBoundingClientRect();
+    look.cx = box.left + box.width / 2;
+    look.cy = box.top + box.height / 2;
+    look.zone = null;
+    // A closed section's one row left on show minds its own business.
+    if (icon.el.closest('[data-agents-section]')?.hasAttribute('data-closed')) continue;
+    const side = icon.el.closest('.ib-side');
+    const home = side ?? icon.el.closest('[data-agents-surface]') ?? icon.el.parentElement;
+    if (!home) continue;
+    let zone = zones.get(home);
+    if (!zone) {
+      const r = home.getBoundingClientRect();
+      const near = side ? 0 : 64;
+      zone = { left: r.left - near, top: r.top - near, right: r.right + near, bottom: r.bottom + near };
+      zones.set(home, zone);
+      sizeWatch?.observe(home);
+    }
+    look.zone = zone;
+  }
+}
+
+const lookTransform = (x: number, y: number, turn: number) => `translate(${f3(x)}px,${f3(y)}px) rotate(${f3(turn)}deg)`;
+
+/** One frame of attention: every icon's spring a step toward where it should look. No layout is read (but after `stale`). */
+function tick(now: number): void {
+  due = 0;
+  const still = agentMotionStill();
+  if (stale && !still && pointer.here) measure();
+  const h = ((lastTick ? Math.min(now - lastTick, 34) : 16) / 1000) * agentMotionOptions.clock;
+  lastTick = now;
+  const live = !still && pointer.here && (now - pointer.at) * agentMotionOptions.clock < AGENT_LOOK.stillMs;
+  let moving = false;
+  attending = false;
+  for (const icon of icons.values()) {
+    const look = icon.look;
+    let tx = 0;
+    let ty = 0;
+    const zone = look.zone;
+    if (live && !icon.off && zone && pointer.x >= zone.left && pointer.x <= zone.right && pointer.y >= zone.top && pointer.y <= zone.bottom) {
+      const dx = pointer.x - look.cx;
+      const dy = pointer.y - look.cy;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.5) {
+        // Full from `reach` px away; right over the icon it looks straight at you.
+        const g = smooth(d / AGENT_LOOK.reach) / d;
+        tx = dx * g;
+        ty = dy * g;
+      }
+    }
+    if (still || icon.off) {
+      look.x = look.y = look.vx = look.vy = 0;
+    } else {
+      // A critically damped spring, stepped exactly: it never overshoots and never rings.
+      const decay = Math.exp(-look.omega * h);
+      const ex = look.x - tx;
+      const nx = look.vx + look.omega * ex;
+      look.x = tx + (ex + nx * h) * decay;
+      look.vx = (look.vx - look.omega * nx * h) * decay;
+      const ey = look.y - ty;
+      const ny = look.vy + look.omega * ey;
+      look.y = ty + (ey + ny * h) * decay;
+      look.vy = (look.vy - look.omega * ny * h) * decay;
+      if (Math.abs(look.x - tx) + Math.abs(look.y - ty) < 0.004 && Math.abs(look.vx) + Math.abs(look.vy) < 0.02) {
+        look.x = tx;
+        look.y = ty;
+        look.vx = look.vy = 0;
+      } else moving = true;
+    }
+    const x = clamp(look.x, -1, 1);
+    const y = clamp(look.y, -1, 1);
+    const inst = icon.inst.get(icon.face);
+    const rest = x === 0 && y === 0;
+    if (tx !== 0 || ty !== 0) attending = true;
+    if (rest && !look.shown) continue;
+    look.shown = !rest;
+    if (!rest) attending = true;
+    look.layer.style.transform = rest ? '' : lookTransform(x * AGENT_LOOK.shift, y * AGENT_LOOK.shift, x * AGENT_LOOK.turn * (inst?.lean ?? 1));
+    for (const eye of inst?.eyes ?? []) eye.style.transform = rest ? '' : `translate(${f3(x * AGENT_LOOK.eyes)}px,${f3(y * AGENT_LOOK.eyes)}px)`;
+  }
+  if (moving) wake();
+  else lastTick = 0;
+}
 
 /** Our faces' art (faceArt.ts), set once it is loaded. Until then a swap waits for it. */
 let faceArt: Readonly<Record<Exclude<AgentFace, 'agent'>, string>> | null = null;
@@ -790,11 +981,11 @@ function faceEl(icon: Icon, face: AgentFace): HTMLElement {
 
 function startFace(icon: Icon, face: AgentFace): void {
   if (icon.inst.has(face)) return;
-  const kind = face === 'agent' ? icon.rig : 'face';
-  if (!kind) return;
-  const inst = instance(icon, kind, faceEl(icon, face));
+  const kind = face === 'agent' ? (icon.rig ?? 'face') : 'face';
+  // Each face of each icon has its own run of chances.
+  const inst = instance(icon, kind, faceEl(icon, face), seeded(icon.seed ^ seedOf(face)));
   icon.inst.set(face, inst);
-  inst.setMood(icon.state, { blend: false });
+  inst.start();
 }
 
 function stopFace(icon: Icon, face: AgentFace): void {
@@ -802,21 +993,28 @@ function stopFace(icon: Icon, face: AgentFace): void {
   icon.inst.delete(face);
 }
 
+/** Where the caller draws a plain mark: only a host with no rig has one. */
+const plainOf = (icon: Icon): HTMLElement | null => (icon.rig ? null : icon.faces.get('agent')!.querySelector<HTMLElement>('.am-plain'));
+
 /**
  * Draws a mark in `el` (an empty `.am` box React owns no children of): the agent's rig when its host has one, then
- * `face` when it is one of ours. Returns the agent face's tile: empty for a host with no rig, where the caller draws
- * its plain mark (a portal), which never moves.
+ * `face` when it is one of ours. `seed` (the agent's id) gives the icon its own life. Returns null for a rig; for a
+ * host with none, the element the caller draws its plain mark in (a portal), which moves as a whole.
  */
-export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | null; state: AgentMood; face: AgentFace; size: number }): HTMLElement {
+export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | null; face: AgentFace; size: number; seed: string }): HTMLElement | null {
   const known = icons.get(el);
-  if (known) return known.faces.get('agent')!.firstElementChild as HTMLElement;
-  el.innerHTML = `<span class="am-card"><span class="am-face am-f-agent"><span class="am-tile">${options.rig ? AGENT_RIGS[options.rig] : ''}</span></span></span>`;
-  const card = el.firstElementChild as HTMLElement;
+  if (known) return plainOf(known);
+  const tile = options.rig ? AGENT_RIGS[options.rig] : '<span class="am-p am-fb" data-p="body"><span class="am-x am-fb am-plain"></span></span>';
+  el.innerHTML = `<span class="am-look"><span class="am-card"><span class="am-face am-f-agent"><span class="am-tile">${tile}</span></span></span></span>`;
+  const layer = el.firstElementChild as HTMLElement;
+  const card = layer.firstElementChild as HTMLElement;
+  const seed = (seedOf(options.seed) ^ LOAD_SALT) >>> 0;
+  const R = seeded(seed ^ 0x9e3779b9);
   const icon: Icon = {
     el,
     rig: options.rig,
     size: options.size,
-    state: options.state,
+    seed,
     face: 'agent',
     off: false,
     card,
@@ -824,24 +1022,17 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
     inst: new Map(),
     swap: [],
     anims: new Set(),
-    held: new WeakSet(),
+    // Each follows at its own pace (about 0.5 to 1 s to arrive), so a list never turns as one.
+    look: { layer, x: 0, y: 0, vx: 0, vy: 0, omega: 5 + 5 * R(), cx: 0, cy: 0, zone: null, shown: false },
   };
   icons.set(el, icon);
-  el.dataset.state = options.state;
   el.dataset.face = 'agent';
   startFace(icon, 'agent');
   screenWatch()?.observe(el);
+  watchPointer();
+  onMoved();
   if (options.face !== 'agent' && faceArt) showFace(icon, options.face, false);
-  return icon.faces.get('agent')!.firstElementChild as HTMLElement;
-}
-
-/** The agent's state changed: each part blends into the new mood, and a waiting agent gets its cue. */
-export function setAgentMarkState(el: HTMLElement, state: AgentMood): void {
-  const icon = icons.get(el);
-  if (!icon || icon.state === state) return;
-  icon.state = state;
-  el.dataset.state = state;
-  icon.inst.get(icon.face)?.setMood(state);
+  return plainOf(icon);
 }
 
 /** Show a face (the click cycle, or the face kept for this agent). `animate`: the swap's little show. */
@@ -934,7 +1125,7 @@ function showFace(icon: Icon, to: AgentFace, withMotion: boolean): void {
   }
 }
 
-/** Call before the icon leaves the page: every animation and timer it runs stops. */
+/** Call before the icon leaves the page: every animation and timer it runs stops, and the last one stops the listening. */
 export function unmountAgentMark(el: HTMLElement): void {
   const icon = icons.get(el);
   if (!icon) return;
@@ -945,6 +1136,8 @@ export function unmountAgentMark(el: HTMLElement): void {
   observer?.unobserve(el);
   icons.delete(el);
   el.innerHTML = '';
+  watchPointer();
+  onMoved();
 }
 
 /** What an icon runs now (tests, the perf guards): live animations, and how many of them play. */
@@ -953,4 +1146,9 @@ export function agentMarkActivity(el: HTMLElement): { animations: number; playin
   if (!icon) return null;
   const all = [...icon.anims];
   return { animations: all.length, playing: all.filter((an) => an.playState === 'running').length, off: icon.off };
+}
+
+/** Whether the page listens for the pointer, and whether a frame is due (tests: nothing is left behind). */
+export function agentPointerActivity(): { listening: boolean; frame: boolean } {
+  return { listening: watching, frame: !!due };
 }
