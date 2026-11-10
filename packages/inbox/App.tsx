@@ -193,7 +193,7 @@ import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadge
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
-import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
@@ -3018,6 +3018,15 @@ function Inbox() {
       },
       7000,
     );
+  };
+  /** "Send to that thread": compose's message went into the open thread that had the typed name; that thread opens. */
+  const composeJoined = (joined: ComposeJoined) => {
+    if (joined.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== joined.draftId));
+    closeCompose(joined.draftId ? draftNeighbour(joined.draftId) : null);
+    void refreshList(false);
+    if (joined.draftId) void refreshDrafts();
+    go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: joined.threadId });
+    showToast({ icon: 'check', lead: `Sent to ${joined.agent}`, detail: `in ${joined.threadName}`, speech: `Sent to ${joined.agent} in the thread ${joined.threadName}.` }, 5000);
   };
   /**
    * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
@@ -7743,6 +7752,7 @@ function Inbox() {
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           launchTip={!tourOn && !launchTipSpent.current && launchTipDue(settings) ? launchTip : null}
+          onJoined={composeJoined}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);

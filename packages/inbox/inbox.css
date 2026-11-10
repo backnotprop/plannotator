@@ -4764,6 +4764,34 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-tname-auto { flex: none; margin-left: 6px; padding: 0 4px; border-radius: 3px; font-family: var(--font-sans, inherit); font-size: var(--ib-fs-10, 10px); font-style: normal; line-height: 15px; letter-spacing: 0.02em; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 80%, transparent); }
 .ib-cp-tname-note { font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; padding-top: 4px; color: var(--muted-foreground); min-width: 0; flex: 1 1 200px; }
 .ib-cp-tname-err { font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; padding-top: 4px; color: var(--destructive); min-width: 0; flex: 1 1 200px; }
+/* A taken name's way through: under the notice, the thread it would go to as a pill, then "Send to that thread".
+   With it the notice is an offer: muted words, and the chip marked in the focus ring's colour, not the error's. */
+.ib-cp-tname-err[data-offer] { color: var(--muted-foreground); display: flex; flex-direction: column; gap: 7px; padding-bottom: 2px; flex-basis: 400px; }
+.ib-key.ib-cp-tname[data-offer] { border-color: var(--ring); border-style: solid; }
+/* One line while both fit; else the action goes under the pill, so the pill's name is cut only when the pill alone is wider than the row. */
+.ib-cp-tname-to { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; max-width: 100%; }
+.pn-inbox .ib-cp-tname-go { flex: none; margin-top: 0; font-size: inherit; white-space: nowrap; }
+.pn-inbox .ib-cp-tname-go:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+.pn-inbox .ib-cp-tname-go:disabled { opacity: 0.55; cursor: default; }
+/* The thread pill (compose/ThreadPill.tsx): the starred pills' raised pill (approval "inbox-starred-pills", PR #3038),
+   an agent's mark where their star is. The three --ib-pill-* tokens below are that PR's, same names and values, so
+   this block of tokens goes once it merges and both read one set. Never wraps: the name is cut. */
+.pn-inbox {
+  --ib-pill-top: var(--card);
+  --ib-pill-bot: color-mix(in oklch, var(--card) 93%, var(--muted));
+  --ib-pill-shadow: inset 0 1px 0 var(--card), 0 0 0 0.5px color-mix(in oklch, var(--foreground) 13%, transparent), 0 1px 1px color-mix(in oklch, var(--ib-shadow-ink) 9%, transparent), 0 2px 4px -2px color-mix(in oklch, var(--ib-shadow-ink) 16%, transparent);
+}
+:root:not(.light) .pn-inbox {
+  --ib-pill-top: color-mix(in oklch, var(--card) 86%, var(--foreground));
+  --ib-pill-bot: color-mix(in oklch, var(--card) 92%, var(--foreground));
+  --ib-pill-shadow: inset 0 1px 0 color-mix(in oklch, var(--foreground) 13%, transparent), 0 0 0 0.5px color-mix(in oklch, var(--ib-shadow-ink) 90%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink) 85%, transparent), 0 2px 5px -2px color-mix(in oklch, var(--ib-shadow-ink) 80%, transparent);
+}
+.ib-tpill { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 26px; padding: 0 10px 0 7px; border-radius: 999px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; white-space: nowrap; color: var(--foreground); background: linear-gradient(to bottom, var(--ib-pill-top), var(--ib-pill-bot)); box-shadow: var(--ib-pill-shadow); cursor: default; user-select: none; }
+.ib-tpill > .ib-mk { flex: none; }
+.ib-tpill-n { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+.ib-tpill > .ib-spill { margin-left: 0; height: 17px; padding: 0 5px; }
+.ib-tpill-q { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 17px; padding: 0 5px 0 4px; border-radius: 999px; background: var(--ib-wait-bg); color: var(--ib-wait-fg); font-size: var(--ib-fs-11-5, 11.5px); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-tpill-q svg.ib-ic { width: 12px; height: 12px; stroke-width: 2; }
 .ib-cp-error { padding: 0 16px 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); flex: none; }
 .ib-cp-conflict { display: inline-flex; gap: 12px; margin-left: 10px; }
 .pn-inbox .ib-cp-conflict .ib-lnk { margin-top: 0; }
@@ -4871,6 +4899,9 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   .ib-cp-thread .ib-cp-tol { line-height: 34px; }
   .pn-inbox .ib-cp-board { margin-top: 4px; }
   .ib-cp-tname-err, .ib-cp-tname-note { padding-top: 0; flex-basis: 100%; }
+  /* 44 px to touch, the words where they were. */
+  .pn-inbox .ib-cp-tname-go { position: relative; min-height: 32px; }
+  .pn-inbox .ib-cp-tname-go::after { content: ''; position: absolute; inset: -6px -8px; }
   .ib-cp-tname-auto { font-size: var(--ib-fs-11, 11px); line-height: 17px; }
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }
   .ib-key.ib-cp-tname::after { content: ''; position: absolute; inset: -5px -2px; }
