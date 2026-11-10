@@ -296,7 +296,9 @@ configurePlannotatorUI({
   // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
-  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
+  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts), and
+  // Bitbucket Cloud pull requests with the review app's Bitbucket token.
+  refCardBitbucket: true,
   refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,

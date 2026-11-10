@@ -447,7 +447,7 @@ export function inboxStepsWakeLine(steps: { done: number; total: number; doing: 
  * MCP server's field, every connection's `plannotator_inbox` tool carries it.
  */
 export const INBOX_PULLS_FIELD_DESCRIPTION =
-  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123`, `group/sub/project!45`, or the URL. Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab), or the URL (Bitbucket: the URL only). Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
 
 /** The `thread_pulls` tool's description (approved text). The agent tool lists the name only (INBOX_AGENT_ACTIONS_NO_LINE). */
 export const INBOX_THREAD_PULLS_DESCRIPTION =

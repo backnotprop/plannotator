@@ -29,6 +29,7 @@ import type {
   PRTreeResult,
 } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
+import { FORGE_REF_BODY_MAX, type ForgeRefCardData, type ForgeRefChecks } from "@plannotator/core/forge-ref-card";
 import {
   loadConfig,
   resolveBitbucketApiUrl,
@@ -332,6 +333,9 @@ interface BbPullRequest {
     participated_on?: string | null;
   }>;
   links?: { html?: { href?: string } };
+  created_on?: string;
+  updated_on?: string;
+  comment_count?: number;
 }
 
 interface BbComment {
@@ -356,6 +360,8 @@ interface BbComment {
 
 interface BbDiffstat {
   status?: string;
+  lines_added?: number;
+  lines_removed?: number;
   old?: { path?: string } | null;
   new?: { path?: string } | null;
 }
@@ -957,3 +963,76 @@ export async function fetchBbPRList(runtime: PRRuntime, ref: BitbucketPRRef): Pr
   }
 }
 
+// --- Hover card ---
+
+/**
+ * One pull request as a hover card shows it (`ref-cards.ts`), in three reads:
+ * the PR, its head's build statuses and its diffstat (the last two best effort).
+ * Throws `BitbucketApiError` (404: no such PR, or the token can't see it).
+ */
+export async function fetchBbPRCard(runtime: PRRuntime, ref: BitbucketPRRef): Promise<ForgeRefCardData> {
+  const ctx = await context(runtime);
+  const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
+  const [pr, statuses, diffstat] = await Promise.all([
+    bbJson<BbPullRequest>(ctx, prPath, "fetch the pull request"),
+    bbPaginate<{ state?: string }>(ctx, `${prPath}/statuses?pagelen=100`, "fetch PR statuses", 2).catch(() => null),
+    bbPaginate<BbDiffstat>(ctx, `${prPath}/diffstat?pagelen=500`, "fetch the PR diffstat", 2).catch(() => null),
+  ]);
+  const raw = (pr.state ?? "").toUpperCase();
+  const state: ForgeRefCardData["state"] = raw === "MERGED" ? "merged" : raw === "OPEN" ? (pr.draft === true ? "draft" : "open") : "closed";
+  const body = pr.description ?? pr.summary?.raw ?? "";
+  let approved = false;
+  let changesRequested = false;
+  let reviewerPending = false;
+  for (const p of pr.participants ?? []) {
+    if (p.state === "changes_requested") changesRequested = true;
+    else if (p.state === "approved" || p.approved === true) approved = true;
+    else if (p.role === "REVIEWER") reviewerPending = true;
+  }
+  let checks: ForgeRefChecks | null = null;
+  if (statuses && statuses.length > 0) {
+    let passed = 0;
+    let failed = 0;
+    let pending = 0;
+    for (const status of statuses) {
+      const s = (status.state ?? "").toUpperCase();
+      if (s === "SUCCESSFUL") passed++;
+      else if (s === "FAILED" || s === "STOPPED") failed++;
+      else if (s === "INPROGRESS") pending++;
+    }
+    // A state this code does not know counts for nothing, so it never reads as passed.
+    const total = passed + failed + pending;
+    if (total > 0) checks = { state: failed > 0 ? "failure" : pending > 0 ? "pending" : "success", passed, failed, pending, total };
+  }
+  const authorAvatar = avatarOf(pr.author);
+  return {
+    platform: "bitbucket",
+    kind: "pull",
+    repo: `${ref.workspace}/${ref.repo}`,
+    number: ref.number,
+    url: pr.links?.html?.href || webUrl(ref),
+    title: pr.title ?? "",
+    state,
+    author: pr.author ? { login: accountName(pr.author), avatarUrl: authorAvatar ?? null } : null,
+    createdAt: pr.created_on ?? "",
+    updatedAt: pr.updated_on ?? "",
+    // Bitbucket's PR has no closed date: its last update is the nearest, and a later comment moves it.
+    closedAt: state === "merged" || state === "closed" ? (pr.updated_on ?? null) : null,
+    labels: [],
+    assignees: [],
+    comments: typeof pr.comment_count === "number" ? pr.comment_count : 0,
+    body: body.slice(0, FORGE_REF_BODY_MAX),
+    bodyCut: body.length > FORGE_REF_BODY_MAX,
+    lastComment: null,
+    linked: [],
+    pull: {
+      base: pr.destination?.branch?.name ?? "",
+      head: pr.source?.branch?.name ?? "",
+      additions: diffstat ? diffstat.reduce((n, d) => n + (d.lines_added ?? 0), 0) : 0,
+      deletions: diffstat ? diffstat.reduce((n, d) => n + (d.lines_removed ?? 0), 0) : 0,
+      files: diffstat ? diffstat.length : 0,
+      review: changesRequested ? "changes_requested" : approved ? "approved" : reviewerPending ? "review_required" : null,
+      checks,
+    },
+  };
+}

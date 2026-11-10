@@ -16,6 +16,7 @@ import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createRefCards, type BitbucketRefReader } from "./ref-cards";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -42,7 +43,7 @@ function fakeGh(states: Record<number, { state: string; isDraft?: boolean; base?
   return { run, calls };
 }
 
-function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnType<typeof fakeGh> } = {}) {
+function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnType<typeof fakeGh>; bitbucket?: BitbucketRefReader } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
   roots.push(dir);
   let now = Date.parse("2026-11-08T10:00:00.000Z");
@@ -50,7 +51,8 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnT
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const states = createThreadPullStates({ store, run: gh.run as never, now: () => now, fixture: options.fixture ?? null });
+  const refCards = options.bitbucket ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -149,6 +151,29 @@ describe("the state reader", () => {
     expect(gh.calls).toHaveLength(2);
     expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
+  });
+
+  test("a Bitbucket Cloud PR's state, checks and review come through its API reader; no CLI runs", async () => {
+    const gh = fakeGh({});
+    const reads: unknown[] = [];
+    const w = world({
+      gh,
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return {
+          platform: "bitbucket", kind: "pull", repo: "acme/billing", number: 7, url: "https://bitbucket.org/acme/billing/pull-requests/7",
+          title: "Retry invoices", state: "open", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+          comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+          pull: { base: "main", head: "retries", additions: 0, deletions: 0, files: 0, review: "approved", checks: { state: "failure", passed: 1, failed: 1, pending: 0, total: 2 } },
+        };
+      },
+    });
+    w.agentAdd(w.thread, "https://bitbucket.org/acme/billing/pull-requests/7");
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(gh.calls).toEqual([]);
+    expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
+    expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
   });
 
   test("a tailnet guest's read runs no gh: it gets the stored state", async () => {

@@ -10,9 +10,12 @@ import {
   handleRefCardRoute,
   REF_CARD_ROUTE,
   REF_TIMEOUT_MS,
+  type BitbucketRefReader,
   type RefCards,
   type RefRunner,
 } from "@plannotator/shared/ref-cards";
+import { fetchBbPRCard } from "@plannotator/shared/pr-provider";
+import { prCommandRuntime } from "./pr";
 
 import { childEnv } from "@plannotator/shared/child-env";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
@@ -44,6 +47,9 @@ export const refCliRunner: RefRunner = async (cli, args, env) => {
     clearTimeout(timer);
   }
 };
+
+/** Bitbucket Cloud pull requests through the review app's provider and credentials (the Inbox passes it). */
+export const bitbucketRefReader: BitbucketRefReader = (ref) => fetchBbPRCard(prCommandRuntime, { platform: "bitbucket", host: "bitbucket.org", ...ref });
 
 /** `createRefCards` with the Bun runner by default (tests pass their own). */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {

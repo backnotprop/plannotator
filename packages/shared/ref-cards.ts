@@ -16,6 +16,10 @@
  *   it (memory only; a token is never logged).
  * - GitLab: the `issue` or `mergeRequest` of a project (GitLab numbers them
  *   apart, so the link's kind decides). glab holds one login per host.
+ * - Bitbucket Cloud: pull requests only, through the REST API with the
+ *   review app's credentials (`fetchBbPRCard` in pr-bitbucket.ts), when the
+ *   host passes a `bitbucket` reader. Without one, or for an issue, the
+ *   answer is `unsupported` and nothing runs.
  * - Hosts: github.com and gitlab.com, plus the hosts this computer's own gh
  *   or glab is signed in to (`gh auth status`, `glab auth status`, read once
  *   per `REF_AUTH_HOSTS_MS`): GitHub Enterprise and self-managed GitLab. Any
@@ -434,9 +438,23 @@ export interface RefCardsSizes {
 /** Thrown by a full queue: answered `unavailable`, never cached. */
 const QUEUE_FULL = Symbol("ref-cards queue full");
 
+/** Reads one Bitbucket Cloud pull request's card; a thrown error's numeric `status` is the HTTP status. */
+export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }) => Promise<ForgeRefCardData>;
+
+/** A Bitbucket reader's failure as a card error. */
+export function bitbucketRefErrorOf(error: unknown): ForgeRefCardError {
+  const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : 0;
+  if (status === 401) return "signed_out";
+  if (status === 403 || status === 404) return "not_found";
+  if (status === 429) return "rate_limited";
+  return "unavailable";
+}
+
 export function createRefCards(options: {
   /** How `gh` / `glab` run (Bun: `refCliRunner` in packages/server; Node: `nodeRefCliRunner`). */
   run: RefRunner;
+  /** Bitbucket Cloud pull requests (absent: they answer `unsupported`). */
+  bitbucket?: BitbucketRefReader;
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
@@ -536,16 +554,33 @@ export function createRefCards(options: {
     });
     return hosts;
   };
-  /** github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it. */
+  /**
+   * github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it.
+   * Bitbucket Cloud pull requests when the host passed a reader.
+   */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
+    if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
     if (ref.host === (ref.platform === "github" ? "github.com" : "gitlab.com")) return true;
     return (await signedInHosts(ref.platform === "github" ? "gh" : "glab")).has(ref.host);
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
 
+  const fetchBitbucket = async (ref: ForgeRef, read: BitbucketRefReader): Promise<ForgeRefCardResult> => {
+    try {
+      const data = await read({ workspace: ref.owner, repo: ref.repo, number: ref.number });
+      await inlineAvatars(data);
+      return { ok: true, data, fetchedAt: now() };
+    } catch (error) {
+      const code = bitbucketRefErrorOf(error);
+      if (code === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
+      return fail(code);
+    }
+  };
+
   const fetchOnce = async (ref: ForgeRef): Promise<ForgeRefCardResult> => {
     if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) return fail("rate_limited");
+    if (ref.platform === "bitbucket") return options.bitbucket ? fetchBitbucket(ref, options.bitbucket) : fail("unsupported");
     const { cli, args } = queryArgs(ref);
     const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
     const known = accountFor.get(repoKey);

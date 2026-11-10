@@ -29,6 +29,7 @@ export * from "./pr-types";
 // GitLab's JSON diff entries as one unified patch (the Inbox's stack diff reads a compare through it).
 export { entryMissingContent as glEntryMissingContent, parsePaginatedArray, reconstructPatch as reconstructGitlabPatch, type GitLabDiffEntry } from "./pr-gitlab";
 export { entryMissingContent as ghEntryMissingContent, reconstructGhPatch, type GitHubFileEntry } from "./pr-github";
+export { fetchBbPRCard } from "./pr-bitbucket";
 
 // --- Provider contract ---
 

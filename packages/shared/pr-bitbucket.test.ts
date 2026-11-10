@@ -18,6 +18,7 @@ import {
   fetchBbFileBytes,
   fetchBbFileContent,
   fetchBbPR,
+  fetchBbPRCard,
   fetchBbPRContext,
   fetchBbPRList,
   forgetBitbucketCommandTokens,
@@ -425,3 +426,51 @@ describe("token command", () => {
   });
 });
 
+describe("fetchBbPRCard", () => {
+  test("maps the PR, its build statuses, its review and its diffstat", async () => {
+    useFake();
+    const card = await fetchBbPRCard(runtime, REF);
+    expect(card).toMatchObject({
+      platform: "bitbucket",
+      kind: "pull",
+      repo: "ws/repo",
+      number: 1,
+      title: "Add mul and greet",
+      state: "open",
+      author: { login: "Ada Reviewer" },
+      comments: 8,
+      body: "Smoke-test PR for **Plannotator** Bitbucket review.",
+      bodyCut: false,
+      closedAt: null,
+      pull: {
+        base: "main",
+        head: "feature/smoke",
+        additions: 7,
+        deletions: 1,
+        files: 4,
+        review: "changes_requested",
+        checks: { state: "pending", passed: 1, failed: 0, pending: 1, total: 2 },
+      },
+    });
+  });
+
+  test("statuses in a state it does not know never read as passed", async () => {
+    useFake();
+    const unknownStatuses: PRRuntime = {
+      ...runtime,
+      fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+        String(input).includes("/statuses")
+          ? Response.json({ values: [{ state: "SOMETHING_NEW" }] })
+          : fetch(input, init)) as typeof fetch,
+    };
+    const card = await fetchBbPRCard(unknownStatuses, REF);
+    expect(card.title).toBe("Add mul and greet");
+    expect(card.pull?.checks).toBeNull();
+  });
+
+  test("an unknown PR throws a 404", async () => {
+    useFake();
+    const error = await fetchBbPRCard(runtime, { ...REF, number: 999 }).catch((e: { status?: number }) => e);
+    expect((error as { status?: number }).status).toBe(404);
+  });
+});

@@ -51,6 +51,7 @@ test("a PR's URL or a GitLab short ref in the agent's words is read; code, quote
   expect(keys(["```sh", `gh pr view ${PR}`, "```", `and \`${PR}\``].join("\n"))).toEqual([]);
   expect(keys(`> you said ${PR}\nYes.`)).toEqual([]);
   expect(keys("Tracked in https://github.com/acme/api/issues/12.")).toEqual([]);
+  expect(keys("Opened https://bitbucket.org/acme/api/pull-requests/3/diff and https://bitbucket.org/acme/api/issues/4.")).toEqual(["bitbucket.org/acme/api#3:pull"]);
   // `owner/repo#12` and a bare `#12` may each be an issue.
   expect(keys("Follows acme/api#12 and #13. Done!")).toEqual([]);
 });

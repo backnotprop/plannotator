@@ -14,9 +14,9 @@
  *   it (#2187's rule), so a link cannot send a token anywhere else. The query
  *   is a `query` (refused to load otherwise) and the numbers in it are whole
  *   numbers the URL parser read.
- * - GitLab: #2187's hover-card lookup (`RefCards`), with its own concurrency
- *   cap, rate-limit hold and cache. Bitbucket and any other source: no reader
- *   yet, `unknown`.
+ * - GitLab, and Bitbucket Cloud pull requests: #2187's hover-card lookup
+ *   (`RefCards`), with its own concurrency cap, rate-limit hold and cache.
+ *   Bitbucket issues and any other source: no reader yet, `unknown`.
  * - Cache, per link: an answer is fresh for `CARD_MARK_FRESH_MS`, a failure
  *   for `CARD_MARK_FAILURE_MS`; a request with `refresh` (the window got its
  *   focus back) reads again what is older than `CARD_MARK_REFRESH_MS`. One
@@ -191,7 +191,7 @@ export function createCardMarks(options: { run?: RefRunner; now?: () => number; 
           const batch = githubBatches.get(repoKey) ?? { host: forge.host, owner: forge.owner, repo: forge.repo, items: [] };
           batch.items.push({ key, number: forge.number });
           githubBatches.set(repoKey, batch);
-        } else if (forge?.platform === "gitlab") {
+        } else if (forge?.platform === "gitlab" || (forge?.platform === "bitbucket" && forge.kind === "pull")) {
           others.push(readOther(key, ref));
         } else {
           cache.set(key, { state: "unknown", title: null, at: now() });

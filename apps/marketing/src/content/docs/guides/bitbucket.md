@@ -89,6 +89,10 @@ A credential added with `cmdkey` or in the Credential Manager window is a differ
 
 If the token is missing, rejected, or lacks a scope, `plannotator review` stops with a message that names the variables and the scopes to fix.
 
+## Pull requests in the Inbox
+
+With the same token, the [Plannotator Inbox](/docs/reference/inbox/) reads Bitbucket Cloud pull requests too. An agent, or you, can add a pull request's link to a thread, and the thread's row shows its state, checks and review. A Bitbucket pull request link in a message shows a card when you rest the pointer on it. Bitbucket has no short form like GitHub's `owner/repo#123`, so use the pull request's link.
+
 ## Local checkout
 
 By default (`--local`), Plannotator also prepares a local checkout of the pull request in the background, so review agents, Guided Review and the full-stack diff have the real files. This step uses plain `git`, not the API token:
