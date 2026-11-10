@@ -2387,6 +2387,14 @@ function Inbox() {
         onPins: () => listAfterEvents(60),
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
         onArtifactPins: () => void readArtifactPins(),
+        // `plannotator inbox --open <thread>` (a tool on this computer): the window the person used last shows the
+        // thread as a row click would. A new history entry, so Back returns; the reply being typed is kept as its draft.
+        onShow: (threadId, target) => {
+          if (target !== windowReport().id) return;
+          const now = routeRef.current;
+          if (now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide) return;
+          writeRoute({ page: 'inbox', project: now.page === 'inbox' && !now.machine ? now.project : null, thread: threadId });
+        },
         // A snooze changed (another window, a phone, a linked machine) or ran out: read the list. It is the person's
         // own act, so with no thread open the row goes to its place, as it does in the window they did it in; a return
         // waits behind "N new" (held.ts). A return may ask something: notifications read this list too.
