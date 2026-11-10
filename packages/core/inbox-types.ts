@@ -53,6 +53,8 @@ export * from "./inbox-pull-risk";
 export * from "./inbox-reviews";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
+// Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
+export * from "./inbox-rows-words";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -754,6 +756,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   decision_ask?: true;
+  /**
+   * On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent
+   * receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
+   */
+  rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**
@@ -1041,11 +1048,33 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox).
+ * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
+ * (`codex app-server`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
   | "claude-code"
-  | "pi";
+  | "pi"
+  | "codex";
+
+/** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
+export interface InboxCodexLimit {
+  used_percent: number;
+  /** 300 is the 5-hour window, 10080 the weekly one; null when Codex does not say. */
+  window_mins: number | null;
+  /** ISO time, or null. */
+  resets_at: string | null;
+}
+
+/**
+ * Settings → Agents' Codex account line (`GET /api/inbox/codex/account`), read from Codex itself: signed in (with
+ * ChatGPT, its plan as the person reads it and its limits when Codex gave them; an API key; or another provider),
+ * signed out, no `codex` found, or not readable now. Never an email or an id.
+ */
+export type InboxCodexAccount =
+  | { state: "signed_in"; kind: "chatgpt" | "api_key" | "other"; plan: string | null; limits: InboxCodexLimit[] | null }
+  | { state: "signed_out" }
+  | { state: "missing" }
+  | { state: "unknown" };
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -1299,6 +1328,25 @@ export interface InboxPicker {
 }
 
 /**
+ * Where a question inside an attached Markdown file sits (issue #2828): the
+ * file the message attaches, and the question's key as that file's own cards
+ * compute it (`findQuestionBlocks` over the sent text). The record's `key`
+ * is unique among the message's questions (a body question keeps its key; a
+ * file's question takes the next free `-N` when a body question or an
+ * earlier file has it), and is the one a pick, a supersede and a reply name.
+ * The record's `position` is its place among that file's questions (Q1 is
+ * the file's first card), and `parsed.line` its prompt's line in the file.
+ */
+export interface InboxQuestionAttachment {
+  /** The attachment's `att_` id on the same message. */
+  id: string;
+  /** The file's name, as the message's attachment record names it. */
+  name: string;
+  /** The question's key inside the file (what its card computes). */
+  key: string;
+}
+
+/**
  * The stored question: one per question block of an agent's message.
  * Records written before Decisions were removed (2026-10) also carry
  * `decision_on_answer`, `decision_id`, `decision_recording` and
@@ -1363,6 +1411,12 @@ export interface InboxQuestionRecord {
    * item is open, and after it is taken back.
    */
   action_result?: InboxActionResult | null;
+  /**
+   * A question asked inside a Markdown file the message attaches, not in its
+   * body (issue #2828). Absent or null: a question of the body (every record
+   * written before this field).
+   */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1507,6 +1561,8 @@ export interface InboxQuestion extends InboxQuestionContract {
   action?: InboxActionFacts | null;
   /** On an action item: what came of it, or null while open. Absent on a question and from an older Inbox. */
   action_result?: InboxActionResult | null;
+  /** A question inside an attached Markdown file (`InboxQuestionRecord.attachment`). Absent: a question of the body, or an older Inbox. */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1972,6 +2028,8 @@ export interface InboxHealth {
   peek?: true;
   /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
   inbox_id?: string;
+  /** The earlier runs of this Inbox's data folder, newest first (additive; packages/shared/inbox/registry.ts `inboxSessionLineage`). */
+  follows?: string[];
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
   /** Additive: this Inbox's door takes `update`, so a linked machine can update it. */
@@ -2274,6 +2332,10 @@ export const INBOX_ROWS_OPTIONS = [
   // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
   // every thread name in bold, read or not.
   "boldNames",
+  // Pull requests off (approval "inbox-rows-settings-page", 2026-11-10; the owner: "some people might wanna hide the
+  // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
+  // own PR button stays. No rival.
+  "hidePulls",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
@@ -3163,6 +3225,61 @@ export interface InboxComposeProject {
   sessions: InboxComposeSession[];
 }
 
+/**
+ * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
+ * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
+ * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ */
+export interface InboxAgent {
+  /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
+  id: string;
+  /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
+  session: string;
+  /**
+   * The session ids its conversation had before (a poll's `continues`, nearest first; additive, absent when none):
+   * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
+   */
+  continues?: string[];
+  /** Set when the Inbox launched it: the launch's id and its thread. */
+  launch?: { id: string; thread_id: string };
+  /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
+  host: string | null;
+  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  label?: string;
+  /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
+  project: { id: string | null; name: string } | null;
+  /**
+   * `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does);
+   * else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
+   */
+  state: "waiting" | "working" | "idle" | "ended";
+  /** How many of its threads wait on the person (0 when none). */
+  waiting: number;
+  /** Its session is live now (polls, or a launch that a reply starts again); false for an ended one. */
+  live: boolean;
+  /** When it started; null when this Inbox never heard it start (it only owns a waiting thread). */
+  started_at: string | null;
+  /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
+  last_seen_at: string | null;
+}
+
+/** The most agents a list names per machine; `total` says how many there are past that. */
+export const INBOX_AGENTS_LISTED_MAX = 40;
+
+/**
+ * One machine's agents on the list model (`agents`, one group per machine): waiting first (most waiting first),
+ * then working, idle and ended, each the most recently heard first, at most `INBOX_AGENTS_LISTED_MAX`.
+ */
+export interface InboxAgentsGroup {
+  /** The machine (its `ibx_` id), on the merged view (`machines=1`) only. */
+  machine?: string;
+  agents: InboxAgent[];
+  /** Every agent of the machine, those past the cap included. */
+  total: number;
+  /** How many of `total` ended today (each `ended`). */
+  ended_today: number;
+}
+
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
 export interface InboxLaunchTrust {
   /** The folder the trust lands on. */
@@ -3202,7 +3319,8 @@ export interface InboxComposeLaunch {
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
-  projects: { id: string; name: string; root: string; exists: boolean }[];
+  /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
+  projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
    * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
    * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
@@ -3216,6 +3334,13 @@ export interface InboxComposeLaunch {
    * (its real path): the folder last cloned into here, else where most of its projects live, else home. Absent from an older Inbox.
    */
   clone?: { into: string };
+  /**
+   * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
+   * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
+   */
+  drives?: { path: string; name: string; network?: true }[];
+  /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
+  finder?: true;
 }
 
 /**
@@ -3425,3 +3550,72 @@ export interface InboxActivityModel {
 
 /** The longest span `GET /api/inbox/activity` answers. */
 export const INBOX_ACTIVITY_MAX_DAYS = 400;
+
+/* ---------- Agent faces ---------- */
+
+/**
+ * The face each agent's icon shows (the sidebar's Agents picker, approval "inbox-agent-icon-motion"), saved by the
+ * Inbox so every window, the phone's and the iPad's too, draws the same face for the same agent everywhere. An entry
+ * is keyed by the agent's id as the list names it (`InboxAgent.id`) and says every session id that agent was or is
+ * (`sessions`), so a row, which knows only the sessions that wrote in it, finds the face by any of them. Kept in
+ * `inbox/agent-faces.json` (packages/shared/inbox/agent-faces.ts), outside the event log and config.json. Here and
+ * not in a core file of its own: a new core export waits for a core release (packages/ui's package smoke).
+ */
+
+/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
+export const INBOX_GLASS_FACES = ["glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice"] as const;
+export type InboxGlassFace = (typeof INBOX_GLASS_FACES)[number];
+/** `agent`: the agent's own mark (never stored); then the Glass colours, Transparent and Face (`totman`). */
+export type InboxAgentFace = "agent" | InboxGlassFace | "transparent" | "totman";
+
+/** Every face, in the picker's order. */
+export const INBOX_AGENT_FACES: readonly InboxAgentFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
+
+export const isInboxAgentFace = (value: unknown): value is InboxAgentFace => typeof value === "string" && (INBOX_AGENT_FACES as readonly string[]).includes(value);
+
+/** The most agents a person's faces are kept for: the latest choice last, the oldest forgotten past this. */
+export const INBOX_AGENT_FACES_KEPT = 200;
+/** The most session ids one agent's entry keeps (the newest linked last). */
+export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
+/** The longest agent or session id an entry takes. */
+export const INBOX_AGENT_FACE_ID_MAX = 200;
+
+/** One agent's face. */
+export interface InboxAgentFaceEntry {
+  face: Exclude<InboxAgentFace, "agent">;
+  /** Every session id this agent was or is (never its key itself), oldest first. */
+  sessions: string[];
+}
+
+/** `GET /api/inbox/agent-faces`, a write's answer and `event: agent-faces`. `rev` counts the saves. */
+export interface InboxAgentFacesWire {
+  faces: Record<string, InboxAgentFaceEntry>;
+  rev: number;
+}
+
+/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
+export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+
+const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
+
+/** A list of session ids as an entry keeps it: ids only, no repeat, never `key`, at most the newest MAX. */
+export function cleanInboxFaceSessions(value: unknown, key: string): string[] {
+  const out: string[] = [];
+  for (const item of Array.isArray(value) ? value : []) if (isId(item) && item !== key && !out.includes(item)) out.push(item);
+  return out.slice(-INBOX_AGENT_FACE_SESSIONS_MAX);
+}
+
+/** A faces map as read from a file, a write's answer or an event: entries that do not parse are dropped. */
+export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFaceEntry> {
+  const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const entry = raw as { face?: unknown; sessions?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+  }
+  return out;
+}
+
+/** Whether `id` is a key or session an agent face entry may name. */
+export const isInboxAgentFaceId = isId;

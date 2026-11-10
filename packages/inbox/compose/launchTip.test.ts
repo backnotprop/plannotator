@@ -62,10 +62,13 @@ describe('launchTipPlace (the tour rule for To: right, then below)', () => {
     expect(launchTipPlace({ phone: false, viewportWidth: edge, ...at(edge) }).side).toBe('right');
     expect(launchTipPlace({ phone: false, viewportWidth: edge - 2, ...at(edge - 2) }).side).toBe('below');
   });
-  test('a phone: always under To, its arrow at the chip, however wide', () => {
-    const row = { left: 0, right: 390, top: 52, bottom: 108, width: 390, height: 56 };
-    const to = { left: 62, right: 250, top: 58, bottom: 102, width: 188, height: 44 };
-    const place = launchTipPlace({ phone: true, viewportWidth: 2000, dialog: row, row, to });
-    expect(place).toEqual({ side: 'below', left: 12, top: 56 + 8, arrow: 62 - 12 + 22 });
+  test("a phone: always over the foot's row, where its To is, its arrow down at the pill, however wide", () => {
+    // The foot's row of the card (8 px in from the window's edges), To's pill after the paperclip and Skills.
+    const dialog = { left: 0, right: 390, top: 0, bottom: 844, width: 390, height: 844 };
+    const row = { left: 9, right: 381, top: 781, bottom: 835, width: 372, height: 54 };
+    const to = { left: 107, right: 240, top: 789, bottom: 825, width: 133, height: 36 };
+    const place = launchTipPlace({ phone: true, viewportWidth: 2000, dialog, row, to });
+    // `top` is the card's distance over the row's bottom edge: the row's height and 8 px.
+    expect(place).toEqual({ side: 'above', left: 12, top: 54 + 8, arrow: 107 - 9 - 12 + 22 });
   });
 });

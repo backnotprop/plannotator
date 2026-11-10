@@ -7,8 +7,9 @@
  * T6). The owner, of the stacked chips it replaces: "very bad looking on mobile. not good, not acceptable".
  *
  * - The row (T6, and the owner's note on it: "maybe we don't need delete icon. I like attachment on left"): the
- *   paperclip first, then Skills, the mic and Send at the right edge; no bin, and Discard stays on the Draft line
- *   above the box.
+ *   paperclip first, then Skills (and, in a thread with several agents, who gets the reply: approval
+ *   "inbox-phone-composer-picker"), the mic and Send (a round arrow, still named "Send") at the right edge; no bin,
+ *   and Discard stays on the Draft line above the box.
  * - Nothing waiting: no line, and no "2 picks" chip (the answers list above says it).
  * - Comments only: the line opens the comments list itself, and closing the list puts focus back on the line.
  * - Questions: the line opens a sheet; its "Skip them" skips them for this Send, and the line says so.
@@ -236,17 +237,22 @@ const buttonIn = (el: ParentNode | null, name: string) =>
 
 /** The row's controls in order, by what each is: what a press there does, not how it looks. */
 const rowOrder = (el: HTMLElement) =>
-  [...el.querySelectorAll<HTMLElement>('.ib-rbox [data-reply-row] :is([data-reply-attach], [data-reply-skills], [data-voice-mic], [data-reply-send], [data-reply-discard])')].map((c) =>
-    c.hasAttribute('data-reply-attach') ? 'attach' : c.hasAttribute('data-reply-skills') ? 'skills' : c.hasAttribute('data-voice-mic') ? 'mic' : c.hasAttribute('data-reply-send') ? 'send' : 'bin',
+  [...el.querySelectorAll<HTMLElement>('.ib-rbox [data-reply-row] :is([data-reply-attach], [data-reply-skills], [data-recipient], [data-voice-mic], [data-reply-send], [data-reply-discard])')].map((c) =>
+    c.hasAttribute('data-reply-attach') ? 'attach' : c.hasAttribute('data-reply-skills') ? 'skills' : c.hasAttribute('data-recipient') ? 'recipient' : c.hasAttribute('data-voice-mic') ? 'mic' : c.hasAttribute('data-reply-send') ? 'send' : 'bin',
   );
 
-test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
+test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send (an arrow named "Send") at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
   // The mic is in the row only with voice on.
   const { adoptVoiceSettings } = await import('./voice');
   adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
   try {
     const el = await open({ questions: false });
+    // One agent here: no recipient control, as on a computer (it comes only with several agents:
+    // replyRecipient.test.tsx). Send is the arrow; the word is still its name.
     expect(rowOrder(el)).toEqual(['attach', 'skills', 'mic', 'send']);
+    const send = el.querySelector('.ib-rbox [data-reply-send]')!;
+    expect(!!send.querySelector('svg.ib-rsend-i')).toBe(true);
+    expect(send.textContent?.trim()).toBe('Send');
     expect(!!el.querySelector('.ib-rbox [data-reply-discard]')).toBe(false);
     // The draft the box opened with is saved: the line above the box says so, with its Discard.
     expect(el.querySelector('[data-draft-above] [data-draft-stamp]')?.textContent).toContain('Saved');
@@ -271,6 +277,17 @@ test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic,
   } finally {
     adoptVoiceSettings(null);
   }
+});
+
+test.skipIf(!hasDom)('a computer: Send says Send and no more: no tooltip on hover and no keycap, the key named for a screen reader', async () => {
+  const { tooltipOf, unhover } = await import('./testing/tooltip');
+  const el = await open({ questions: false, phone: false });
+  const send = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')!;
+  // The owner: "Nobody needs to see command enter for send" (approval "inbox-send-no-shortcut-hint").
+  expect(await tooltipOf(send.closest('[data-tip-wrap]') ?? send)).toBeNull();
+  unhover(send.closest('[data-tip-wrap]') ?? send);
+  expect(!!send.querySelector('kbd, [data-shortcut-hint]')).toBe(false);
+  expect(send.getAttribute('aria-keyshortcuts') ?? '').toMatch(/^(Meta|Control)\+Enter$/);
 });
 
 /** Words typed into the box, as a person types them. */

@@ -95,7 +95,7 @@ function InstallBlock({ host, generation }: { host: PluginHost; generation?: '1'
     return (
       <div className="ib-cn-blk" data-install="claude-code">
         <CodeBox text={CLAUDE_PLUGIN_INSTALL} />
-        <p className="ib-cn-hint">Run it in a terminal, then restart Claude Code. Needs Claude Code 2.1.287 or newer, on macOS or Linux.</p>
+        <p className="ib-cn-hint">Run it in a terminal, then restart Claude Code. Needs Claude Code 2.1.287 or newer.</p>
       </div>
     );
   }

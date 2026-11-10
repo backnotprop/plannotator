@@ -12,8 +12,10 @@ import {
   FAVICON_PNG_DATA_URL,
   FAVICON_STYLE_CHOICES,
   FAVICON_SVG,
-  P_FAVICON_PNG_BYTES,
-  P_FAVICON_PNG_DATA_URL,
+  YELLOW_FAVICON_ICO_BYTES,
+  YELLOW_FAVICON_ICO_DATA_URL,
+  YELLOW_FAVICON_PNG_BYTES,
+  YELLOW_FAVICON_PNG_DATA_URL,
   faviconBody,
   faviconDataUrl,
   faviconIcoBody,
@@ -56,6 +58,25 @@ describe("production favicon", () => {
     expect(view.getUint8(25)).toBe(6);
   });
 
+  test("the Yellow icon is the yellow glass set's web/favicon.ico and pixel/fav-32.png, byte for byte", () => {
+    expect(createHash("sha256").update(YELLOW_FAVICON_ICO_BYTES).digest("hex")).toBe(
+      "2c5bbca9b41885f9d07b8b17b50b65e88e236760888ede779192ccb59ff1f8e4",
+    );
+    const ico = new DataView(YELLOW_FAVICON_ICO_BYTES.buffer, YELLOW_FAVICON_ICO_BYTES.byteOffset, YELLOW_FAVICON_ICO_BYTES.byteLength);
+    expect(ico.getUint16(2, true)).toBe(1);
+    const sizes = Array.from({ length: ico.getUint16(4, true) }, (_, i) => `${ico.getUint8(6 + 16 * i)}x${ico.getUint8(7 + 16 * i)}`);
+    expect(sizes).toEqual(["16x16", "32x32", "48x48"]);
+    expect(YELLOW_FAVICON_ICO_DATA_URL).toStartWith("data:image/x-icon;base64,");
+
+    expect(createHash("sha256").update(YELLOW_FAVICON_PNG_BYTES).digest("hex")).toBe(
+      "22f9b788ee9ce33caf76521b7c1e8962b82964805c54cbc139b072e7b2ba73db",
+    );
+    const png = new DataView(YELLOW_FAVICON_PNG_BYTES.buffer, YELLOW_FAVICON_PNG_BYTES.byteOffset, YELLOW_FAVICON_PNG_BYTES.byteLength);
+    expect(png.getUint32(16)).toBe(32);
+    expect(png.getUint32(20)).toBe(32);
+    expect(YELLOW_FAVICON_PNG_DATA_URL).toStartWith("data:image/png;base64,");
+  });
+
   test("keeps the SVG export as a wrapper around the canonical PNG", () => {
     expect(FAVICON_PNG_DATA_URL).toStartWith("data:image/png;base64,");
     expect(FAVICON_SVG).toContain(FAVICON_PNG_DATA_URL);
@@ -85,42 +106,36 @@ describe("favicon style switcher", () => {
     expect(view.getUint32(20)).toBe(64);
   });
 
-  test("the P icon is the studio's icon-192.png, byte for byte", () => {
-    expect(createHash("sha256").update(P_FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "f6bed7f06a78ae9d4de3d2019e7704ca447f9629c85d868ca77f5a25af82b4f8",
-    );
-    const view = new DataView(P_FAVICON_PNG_BYTES.buffer, P_FAVICON_PNG_BYTES.byteOffset, P_FAVICON_PNG_BYTES.byteLength);
-    expect(view.getUint32(16)).toBe(192);
-    expect(view.getUint32(20)).toBe(192);
-  });
-
-  test("each stored id draws its icon: glass Glass, totman Face, classic the P icon", () => {
+  test("each stored id draws its icon: glass Glass, yellow Yellow, totman Face; classic (the removed P) the default", () => {
     expect(faviconDataUrl("glass")).toBe(FAVICON_ICO_DATA_URL);
     expect(faviconDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
-    expect(faviconDataUrl("classic")).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(faviconDataUrl("yellow")).toBe(YELLOW_FAVICON_ICO_DATA_URL);
     expect(faviconBody("glass")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
-    expect(faviconBody("classic")).toEqual({ body: P_FAVICON_PNG_BYTES, contentType: "image/png" });
+    expect(faviconBody("yellow")).toEqual({ body: YELLOW_FAVICON_PNG_BYTES, contentType: "image/png" });
     // Nothing stored, or a value from somewhere else: the default, Glass.
     expect(faviconBody(undefined).body).toBe(FAVICON_PNG_BYTES);
     expect(faviconBody("navy").body).toBe(FAVICON_PNG_BYTES);
+    // 0.28.57's P, still in some config.json files: the default, Glass, on both URLs.
+    expect(faviconBody("classic")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
+    expect(faviconIcoBody("classic")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     expect(DEFAULT_FAVICON_STYLE).toBe("glass");
-    // /favicon.ico: Glass's .ico; Face and P have none, so their PNG.
+    // /favicon.ico: Glass's and Yellow's .ico; Face has none, so its PNG.
     expect(faviconIcoBody("glass")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     expect(faviconIcoBody(undefined).body).toBe(FAVICON_ICO_BYTES);
     expect(faviconIcoBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
-    expect(faviconIcoBody("classic")).toEqual({ body: P_FAVICON_PNG_BYTES, contentType: "image/png" });
+    expect(faviconIcoBody("yellow")).toEqual({ body: YELLOW_FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     // The badge base is each style's one PNG.
     expect(faviconPngDataUrl("glass")).toBe(FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
-    expect(faviconPngDataUrl("classic")).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(faviconPngDataUrl("yellow")).toBe(YELLOW_FAVICON_PNG_DATA_URL);
     expect(faviconLinkType("glass")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
     expect(faviconLinkType("totman")).toEqual({ type: "image/png", sizes: "64x64" });
-    expect(faviconLinkType("classic")).toEqual({ type: "image/png", sizes: "192x192" });
+    expect(faviconLinkType("yellow")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
   });
 
-  test("the picker offers Glass, Face and P, in that order", () => {
-    expect(FAVICON_STYLE_CHOICES.map(({ id, label }) => `${id}:${label}`)).toEqual(["glass:Glass", "totman:Face", "classic:P"]);
+  test("the picker offers Glass, Yellow and Face, in that order; P is gone", () => {
+    expect(FAVICON_STYLE_CHOICES.map(({ id, label }) => `${id}:${label}`)).toEqual(["glass:Glass", "yellow:Yellow", "totman:Face"]);
     expect(FAVICON_STYLE_CHOICES.map(({ label }) => label).join(" ")).not.toContain("Totman");
   });
 
@@ -131,7 +146,9 @@ describe("favicon style switcher", () => {
   test("isFaviconStyle validates only known styles", () => {
     expect(isFaviconStyle("glass")).toBe(true);
     expect(isFaviconStyle("totman")).toBe(true);
-    expect(isFaviconStyle("classic")).toBe(true);
+    expect(isFaviconStyle("yellow")).toBe(true);
+    // The P icon was removed after 0.28.57: a stored 'classic' reads as nothing stored.
+    expect(isFaviconStyle("classic")).toBe(false);
     expect(isFaviconStyle("")).toBe(false);
     expect(isFaviconStyle("unknown")).toBe(false);
     expect(isFaviconStyle(null)).toBe(false);

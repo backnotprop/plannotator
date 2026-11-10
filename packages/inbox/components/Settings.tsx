@@ -28,7 +28,7 @@ import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
-import { RowsSection, rowsSummary } from './RowsSettings';
+import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -90,6 +90,8 @@ export interface SettingsPageProps {
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
   systemProjects?: SystemProjectRow[] | null;
+  /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
+  onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
@@ -138,6 +140,8 @@ export interface SettingsPageProps {
   activity?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
+  /** Settings → Rows' "Your list": the person's newest rows, with the names and away machines the list draws them by. Absent: examples. */
+  rowsPreview?: Pick<RowsSectionProps, 'rows' | 'projectNames' | 'awayMachines'>;
   /** The section on screen (`#settings/<section>`); null is `#settings` alone: General, or the list of sections on a phone. */
   section?: SettingsSection | null;
   /** `#settings/devices/pair`: Pair a phone is open. */
@@ -555,6 +559,8 @@ function CapabilitiesSection({
   system,
   onToggleSystem,
   systemProjects,
+  chapterDiagrams,
+  onToggleChapterDiagrams,
   bro,
   onToggleBro,
   floatDrafts,
@@ -578,6 +584,9 @@ function CapabilitiesSection({
   system: { on: boolean } | null;
   onToggleSystem?: (next: boolean) => void;
   systemProjects?: SystemProjectRow[] | null;
+  /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
+  chapterDiagrams: { on: boolean } | null;
+  onToggleChapterDiagrams?: (next: boolean) => void;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
   onToggleBro?: (next: boolean) => void;
@@ -598,6 +607,8 @@ function CapabilitiesSection({
   const [systemRowSeen, setSystemRowSeen] = useState(false);
   if (system?.on === true && codeReview?.on === true && !systemRowSeen) setSystemRowSeen(true);
   const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
+  // Chapter diagrams sits under Code review, as System does, and shows only while Code review is on.
+  const chapterDiagramsRow = chapterDiagrams && onToggleChapterDiagrams && codeReview?.on === true;
   // Bro mode sits in the Experimental group (the owner, 2026-11-08), so the group shows for it alone too.
   const broRow = bro && onToggleBro;
   // Floating reply drafts (the owner, 2026-11-08): off by default, so its switch sits with the features still being tried.
@@ -650,6 +661,19 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
+                </span>
+              </div>
+            )}
+            {chapterDiagramsRow && (
+              <div className="ib-prow" data-settings-chapter-diagrams="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-chapter-diagrams-label">
+                    Chapter diagrams
+                  </span>
+                  <span className="ib-desc">Agents may add a diagram above a chapter's code.</span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={chapterDiagrams.on} labelledBy="ib-chapter-diagrams-label" onClick={() => onToggleChapterDiagrams(!chapterDiagrams.on)} />
                 </span>
               </div>
             )}
@@ -940,7 +964,7 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
-  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
+  // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   accounts: '',
@@ -1069,6 +1093,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
+  const chapterDiagrams = settings?.chapter_diagrams && props.onToggleChapterDiagrams ? settings.chapter_diagrams : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
   const floatDrafts = settings?.float_drafts && props.onToggleFloatDrafts ? settings.float_drafts : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
@@ -1173,7 +1198,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'rows':
-        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} />;
+        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} {...props.rowsPreview} />;
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
@@ -1277,6 +1302,8 @@ export function SettingsPage(props: SettingsPageProps) {
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}
+              chapterDiagrams={chapterDiagrams}
+              onToggleChapterDiagrams={props.onToggleChapterDiagrams}
               bro={bro}
               onToggleBro={props.onToggleBro}
               floatDrafts={floatDrafts}

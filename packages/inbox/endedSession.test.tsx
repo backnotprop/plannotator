@@ -742,7 +742,7 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
 
 // A phone draws the pair on a line of its own under Reply and the open questions: it comes last in the markup too, so
 // Tab and a screen reader go in the order on screen (Reply, the open questions, then the pair).
-test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive come after the open questions, last in the row', async () => {
+test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive come after the open questions, last in the row; the first opens the box with the sheet of who gets the reply', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   const el = await render(threadOf(asking()), null, undefined, { phone: true });
   const parts = [...el.querySelector('[data-foot-buttons]')!.children];
@@ -752,6 +752,26 @@ test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive com
   expect(at('[data-foot-ended]')).toBe(parts.length - 1);
   const pair = [...parts[parts.length - 1]!.querySelectorAll('button')].map((b) => b.textContent?.trim());
   expect(pair).toEqual(['Send to another session', 'Archive']);
+  // The first opens the box with who gets the reply open: on a phone that is the bottom sheet (approval
+  // "inbox-phone-composer-picker"), the live session first and the asker, ended, last.
+  act(() => button(el, 'Send to another session').click());
+  await settle();
+  await settle();
+  const sheet = pillList(el) as HTMLElement;
+  expect(sheet.getAttribute('role')).toBe('dialog');
+  expect(pill(el)?.closest('[data-reply-row]') != null).toBe(true);
+  expect(pill(el)?.getAttribute('aria-expanded')).toBe('true');
+  expect(pill(el)?.getAttribute('aria-label')).toBe('Reply goes to Claude Code, ended. Change');
+  expect([...sheet.querySelectorAll('[data-recipient-row]')].map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-sheet-t')?.textContent, r.querySelector('.ib-sheet-d')?.textContent ?? null])).toEqual([
+    ['ses_other', 'Claude Code 2', 'ledger'],
+    ['ses_asker', 'Claude Code', 'ended'],
+  ]);
+  // A row: that session only. The sheet closes and the control names it, not ended.
+  await act(async () => (sheet.querySelector('[data-recipient-row="ses_other"]') as HTMLElement).click());
+  await settle();
+  expect(pill(el)?.getAttribute('aria-expanded')).toBe('false');
+  expect(pill(el)?.getAttribute('data-recipient-chosen')).toBe('ses_other');
+  expect(pill(el)?.getAttribute('aria-label')).toBe('Reply goes to Claude Code 2. Change');
 });
 
 test.skipIf(!hasDom)('ended, nothing live: only Archive, since nothing could take the reply', async () => {

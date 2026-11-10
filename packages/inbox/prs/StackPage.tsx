@@ -11,7 +11,9 @@ import { inboxPullIsOpen, inboxPullLabel, inboxPullLandsNext, type InboxPull, ty
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { ChecksMark, checksLabel } from './ChecksMark';
-import { ageShort, needsYou, stackCounts, statusWords, topFirst } from './sheetModel';
+import { ageShort, needsYou, stackCounts, statusParts, statusWords, topFirst } from './sheetModel';
+import { Named, Person } from '../pulls/Face';
+import { facesOnce, person, wordsText, type Words } from '../pulls/words';
 
 export interface StackPageProps {
   stack: InboxPullStack | null;
@@ -66,8 +68,8 @@ export function StackPage(props: StackPageProps) {
     counts.needYou > 0 ? { you: `${counts.needYou} need you` } : null,
     counts.failing > 0 ? { bad: `${counts.failing} failing` } : null,
     next ? `next to land ${inboxPullLabel(next)}` : null,
-    owner ? `by ${owner}${authors.length > 1 ? ` and ${authors.length - 1} ${authors.length === 2 ? 'other' : 'others'}` : ''}` : null,
-  ].filter(Boolean) as (string | { you: string } | { bad: string })[];
+    owner ? { by: ['by ', person(owner), ...(authors.length > 1 ? [` and ${authors.length - 1} ${authors.length === 2 ? 'other' : 'others'}`] : [])] as Words } : null,
+  ].filter(Boolean) as (string | { you: string } | { bad: string } | { by: Words })[];
   return (
     <section className="ib-prs ib-prst" aria-labelledby={titleId} data-pr-stack-page={stack.id} data-phone={phone ? '' : undefined}>
       <div className="ib-prs-scroll">
@@ -80,6 +82,10 @@ export function StackPage(props: StackPageProps) {
             {meta.map((m, i) =>
               typeof m === 'string' ? (
                 <span key={i}>{m}</span>
+              ) : 'by' in m ? (
+                <span key={i}>
+                  <Named words={m.by} host={stack.layers[0]!.host} />
+                </span>
               ) : 'you' in m ? (
                 <span key={i} className="ib-prs-you">
                   {m.you}
@@ -99,7 +105,8 @@ export function StackPage(props: StackPageProps) {
             const open = inboxPullIsOpen(pull);
             const lands = next?.key === pull.key;
             const other = pull.author && pull.author !== owner ? pull.author : null;
-            const status = lands && open && statusWords(pull, now) === 'Approved · ready to land' ? 'Approved · lands next' : statusWords(pull, now);
+            const said: Words = lands && open && statusWords(pull, now) === 'Approved · ready to land' ? ['Approved · lands next'] : statusParts(pull, now);
+            const status = wordsText(said);
             return (
               <li key={pull.key} className="ib-prst-li">
                 <button
@@ -118,14 +125,18 @@ export function StackPage(props: StackPageProps) {
                   <span className="ib-prst-n">{inboxPullLabel(pull)}</span>
                   <span className="ib-prst-t" dir="auto">
                     <span className="ib-prst-title">{pull.title || inboxPullLabel(pull)}</span>
-                    {other && <span className="ib-prst-who">{other}</span>}
+                    {other && (
+                      <span className="ib-prst-who">
+                        <Person login={other} host={pull.host} />
+                      </span>
+                    )}
                   </span>
                   <span className="ib-prst-ck">{open && <ChecksMark checks={pull.checks} />}</span>
                   <span className="ib-prst-diff">
                     <span className="ib-prst-add">+{pull.additions.toLocaleString()}</span> <span className="ib-prst-del">−{pull.deletions.toLocaleString()}</span>
                   </span>
                   <span className="ib-prst-st" title={status}>
-                    {status}
+                    <Named words={facesOnce(said, [other])} host={pull.host} />
                   </span>
                   <span className="ib-prst-age">{ageShort(pull.state === 'merged' && pull.merged_at ? pull.merged_at : pull.updated_at, now)}</span>
                 </button>

@@ -97,6 +97,32 @@ describe('checking a layout sent to be saved', () => {
   });
 });
 
+describe('Agents: a section between the stacks that hides and never moves', () => {
+  test('it is not a stack item, and the default shows it', () => {
+    expect([...D.top, ...D.bottom]).not.toContain('agents');
+    expect(D.hidden).toEqual([]);
+  });
+  test('a layout saved before Agents was an item reads as shown', () => {
+    const old = { top: [...D.top], bottom: [...D.bottom], hidden: ['feedback'] };
+    expect(inboxSidebarRead(old)!.hidden).toEqual(['feedback']);
+  });
+  test('it hides and shows, is saved in hidden, and passes the strict write check', () => {
+    const hidden = inboxSidebarSetShown(D, 'agents', false);
+    expect(hidden).toEqual(layout([...D.top], [...D.bottom], ['agents']));
+    expect(inboxSidebarCheck(hidden)).toEqual(hidden);
+    expect(inboxSidebarRead(JSON.parse(JSON.stringify(hidden)))).toEqual(hidden);
+    expect(inboxSidebarSetShown(hidden, 'agents', true)).toEqual(D);
+  });
+  test('named in a stack it is dropped; a move changes nothing', () => {
+    expect(inboxSidebarRead({ top: ['agents', ...D.top], bottom: [...D.bottom], hidden: [] })).toEqual(D);
+    expect(inboxSidebarMove(D, 'agents', 'top', 0)).toEqual(D);
+    expect(inboxSidebarToStack(D, 'agents', 'bottom')).toEqual(D);
+  });
+  test('no preset hides it', () => {
+    for (const preset of ['default', 'all-top', 'minimal'] as const) expect(INBOX_SIDEBAR_PRESETS[preset].layout.hidden).not.toContain('agents');
+  });
+});
+
 describe('showing and hiding', () => {
   const cases: [string, InboxSidebarItem, boolean, InboxSidebarItem[]][] = [
     ['Feedback hides', 'feedback', false, ['feedback']],

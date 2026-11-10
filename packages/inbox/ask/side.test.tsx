@@ -2,7 +2,10 @@
  * Ask AI's Side and its one icon (approval "inbox-ask-ai-flow", 2026-11-08):
  * selecting words in an agent's message, or in an open file, offers Side
  * after the reactions (Delete · Comment · 👍 | Side | ×), and Side opens the
- * thread's chat with the words quoted in its box. The thread's top bar keeps
+ * thread's chat with the words quoted in its box. Side is an icon-only button
+ * (approval "inbox-side-button", 2026-11-09): the mark of the agent that owns
+ * the thread, named "Side chat with <agent>"; the two bubbles and "Side chat"
+ * for an agent with no mark of its own. The thread's top bar keeps
  * one Ask icon; a full-screen file's bar has none.
  *
  * The question the agent gets says where the words came from (sideSource.ts),
@@ -14,7 +17,10 @@
  * reads `can_ask: false` too), or in the phone layout (the owner hides it
  * there; the top bar icon stays); Side out of its place; a press that opens the
  * window without the words, or not at all; the Ask icon coming back to the
- * full-screen file's bar.
+ * full-screen file's bar; the word "Side" back on the button; another agent's
+ * mark or name on it (Claude's in a Codex thread); the neutral code glyph, or
+ * nothing, for an agent with no mark; the file's bar drawing Side another way
+ * than the message's.
  *
  * The real useInboxAsk, MessageBody, ThreadPane, ui Viewer and
  * web-highlighter, with fetch answering for the Inbox; no Inbox server.
@@ -23,6 +29,8 @@
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { InboxAttachmentState, InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { Annotation } from '@plannotator/ui/types';
 
@@ -30,6 +38,7 @@ const hasDom = typeof document !== 'undefined';
 const { MessageBody, ThreadPane } = (hasDom ? await import('../components/Thread') : {}) as typeof import('../components/Thread');
 const { useInboxAsk } = (hasDom ? await import('./useInboxAsk') : {}) as typeof import('./useInboxAsk');
 const { sideTime } = (hasDom ? await import('./sideSource') : {}) as typeof import('./sideSource');
+const { SideButtonContext } = (hasDom ? await import('./sideButton') : {}) as typeof import('./sideButton');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'retry-abcdef', name: 'retry', root: '/work/retry', created_at: '2026-11-08T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
@@ -98,7 +107,7 @@ let asks: Record<string, unknown>[] = [];
 let queries: Record<string, unknown>[] = [];
 
 /** The Inbox's answers: the thread's Ask model (`can_ask` as given), its files, the file's text, and a question taken. */
-function serve(canAsk: boolean) {
+function serve(canAsk: boolean, agent: { host: string | null; name: string } = { host: 'claude-code', name: 'Claude Code' }) {
   asks = [];
   queries = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -116,7 +125,7 @@ function serve(canAsk: boolean) {
       return new Response('', { headers: { 'Content-Type': 'text/event-stream' } });
     }
     if (method === 'GET' && url.endsWith(`/threads/${ROOT}/ask`)) {
-      return Response.json({ subject: 'Retry budget', project: PROJECT.name, conversation: null, running: null, can_ask: canAsk, agent: { host: 'claude-code', name: 'Claude Code' } });
+      return Response.json({ subject: 'Retry budget', project: PROJECT.name, conversation: null, running: null, can_ask: canAsk, agent });
     }
     if (url.includes(NOTES.id) && url.includes('/view')) {
       return Response.json({ attachment: NOTES, version: 'current', text: '# Notes\n\nThe budget is five attempts with a one second start.\n', html: null });
@@ -132,9 +141,9 @@ const settle = async () => {
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 };
 
-async function until(check: () => boolean, what: string, ms = 3000) {
+async function until(check: () => boolean | Promise<boolean>, what: string, ms = 3000) {
   const end = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
     await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
   }
@@ -144,8 +153,8 @@ async function until(check: () => boolean, what: string, ms = 3000) {
 function MessageWithAsk({ phone = false }: { phone?: boolean }) {
   const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone, openThread: () => {}, replyInThread: () => {} });
   return (
+    <SideButtonContext.Provider value={ask.sideButton}>
     <div className="pn-inbox">
-      <div data-test-top="">{ask.button}</div>
       <MessageBody
         message={MESSAGE}
         projectRoot={PROJECT.root}
@@ -158,6 +167,7 @@ function MessageWithAsk({ phone = false }: { phone?: boolean }) {
       />
       {ask.layer}
     </div>
+    </SideButtonContext.Provider>
   );
 }
 
@@ -165,6 +175,7 @@ function MessageWithAsk({ phone = false }: { phone?: boolean }) {
 function ThreadWithAsk({ view }: { view: 'full' | 'side' }) {
   const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone: false, openThread: () => {}, replyInThread: () => {} });
   return (
+    <SideButtonContext.Provider value={ask.sideButton}>
     <div className="pn-inbox">
       <ThreadPane
         thread={THREAD}
@@ -175,11 +186,11 @@ function ThreadWithAsk({ view }: { view: 'full' | 'side' }) {
         file={{ id: NOTES.id, version: 'current', focus: null, view }}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        askButton={ask.button}
         onSide={ask.side}
       />
       {ask.layer}
     </div>
+    </SideButtonContext.Provider>
   );
 }
 
@@ -223,9 +234,16 @@ async function ask(words: string) {
   await until(() => queries.length > 0, 'the question to reach the agent');
 }
 
-const askIcon = () => document.querySelector<HTMLButtonElement>('[data-ask-open]');
+/** The top bar's Ask icon, gone (the owner, 2026-11-09): nothing on the page wears its mark or its name. */
+const noAskIcon = () => document.querySelectorAll('[data-ask-open], [aria-label="Ask AI about this thread"]').length === 0;
 const askBox = () => document.querySelector<HTMLTextAreaElement>('[data-chat-window] textarea');
 const side = () => document.querySelector<HTMLButtonElement>('.annotation-toolbar [data-annotation-side]');
+/** A host's mark as the thread draws it beside its messages (HostMark). */
+const markOf = (agentHost: string) => {
+  const box = document.createElement('div');
+  box.innerHTML = renderToStaticMarkup(<HostMark host={agentHost} />);
+  return box.firstElementChild;
+};
 /** The selection bar left to right: each button's name, "|" for a divider. */
 const barOrder = () =>
   [...document.querySelector('.annotation-toolbar [data-pn-annotation-toolbar-row]')!.children].map((el) => {
@@ -236,13 +254,15 @@ const barOrder = () =>
 test.skipIf(!hasDom)("an agent's message in a thread that can ask: Side after 👍, between dividers; it opens the chat with the words quoted", async () => {
   serve(true);
   await mount(<MessageWithAsk />);
-  await until(() => askIcon() !== null, 'the Ask icon');
-  // The top bar's icon is the two bubbles, with its name and tooltip as before.
-  expect(askIcon()!.getAttribute('aria-label')).toBe('Ask AI about this thread');
-  expect(askIcon()!.querySelectorAll('[data-ask-icon="messages-square"]')).toHaveLength(1);
-
-  await select(host!, WORDS);
-  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side', '|', 'Cancel']);
+  await until(async () => {
+    await select(host!, WORDS);
+    return side() !== null;
+  }, 'Side in the selection bar');
+  expect(noAskIcon()).toBe(true);
+  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side chat with Claude', '|', 'Cancel']);
+  // Icon only: Claude's mark as the thread draws it, and no word.
+  expect(side()!.textContent).toBe('');
+  expect(side()!.querySelector('.ib-mk')!.isEqualNode(markOf('claude-code'))).toBe(true);
   expect(document.querySelectorAll('[data-chat-window]')).toHaveLength(0);
 
   await act(async () => side()!.click());
@@ -261,6 +281,42 @@ test.skipIf(!hasDom)("an agent's message in a thread that can ask: Side after �
   expect(queries[0]!.prompt).toBe(`${source}\n\n> ${WORDS}\n\nWhy five?`);
 });
 
+test.skipIf(!hasDom)("a Codex thread: Side is Codex's mark, named for Codex", async () => {
+  serve(true, { host: 'codex', name: 'Codex' });
+  await mount(<MessageWithAsk />);
+  await until(async () => {
+    await select(host!, WORDS);
+    return side() !== null;
+  }, 'Side in the selection bar');
+  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side chat with Codex', '|', 'Cancel']);
+  expect(side()!.textContent).toBe('');
+  expect(side()!.querySelector('.ib-mk')!.isEqualNode(markOf('codex'))).toBe(true);
+  await act(async () => side()!.click());
+  await until(() => askBox() !== null, 'the Ask window');
+  expect(askBox()!.value).toBe(`> ${WORDS}\n\n`);
+});
+
+for (const agent of [
+  { host: 't3', name: 'T3 Code' },
+  { host: 'some-new-agent', name: 'some-new-agent' },
+  { host: null, name: 'An agent' },
+]) {
+  test.skipIf(!hasDom)(`an agent with no mark of its own (${agent.host ?? 'unknown'}): the two bubbles, "Side chat", never the code glyph`, async () => {
+    serve(true, agent);
+    await mount(<MessageWithAsk />);
+    await until(async () => {
+      await select(host!, WORDS);
+      return side() !== null;
+    }, 'Side in the selection bar');
+    expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side chat', '|', 'Cancel']);
+    expect(side()!.textContent).toBe('');
+    expect(side()!.querySelectorAll('.ib-mk, [data-icon="code"]')).toHaveLength(0);
+    expect(side()!.querySelectorAll('svg path')).toHaveLength(2);
+    await act(async () => side()!.click());
+    await until(() => askBox() !== null, 'the Ask window');
+  });
+}
+
 test.skipIf(!hasDom)('a thread that cannot ask (no live agent): no Ask icon, and the selection bar has no Side', async () => {
   serve(false);
   await mount(<MessageWithAsk />);
@@ -271,10 +327,10 @@ test.skipIf(!hasDom)('a thread that cannot ask (no live agent): no Ask icon, and
   expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
 });
 
-test.skipIf(!hasDom)('the phone layout: the top bar keeps its Ask icon, and the selection bar has no Side', async () => {
+test.skipIf(!hasDom)('the phone layout: the selection bar has no Side', async () => {
   serve(true);
   await mount(<MessageWithAsk phone />);
-  await until(() => askIcon() !== null, 'the Ask icon');
+  await settle();
   await select(host!, WORDS);
   expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Cancel']);
   expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
@@ -292,6 +348,9 @@ test.skipIf(!hasDom)('a full-screen file: its bar has no Ask icon (none on the p
   const page = document.querySelector<HTMLElement>('.ib-docscroll')!;
   await select(page, 'five attempts');
   await until(() => side() !== null, 'Side in the file');
+  // The file's bar draws Side as the message's does.
+  expect(barOrder().slice(-3)).toEqual(['Side chat with Claude', '|', 'Cancel']);
+  expect(side()!.querySelectorAll('.ib-mk')).toHaveLength(1);
   await act(async () => side()!.click());
   await until(() => askBox() !== null, 'the Ask window');
   expect(askBox()!.value).toBe('> five attempts\n\n');
@@ -303,10 +362,17 @@ test.skipIf(!hasDom)('a full-screen file: its bar has no Ask icon (none on the p
   expect(queries[0]!.prompt).toBe(`${source}\n\n> five attempts\n\nWhy five?`);
 });
 
-test.skipIf(!hasDom)('the file beside the thread: the one Ask icon is in the thread top bar', async () => {
+test.skipIf(!hasDom)('the file beside the thread: the thread top bar has no Ask icon; Side in the file opens the chat', async () => {
   serve(true);
   await mount(<ThreadWithAsk view="side" />);
-  await until(() => askIcon() !== null, 'the Ask icon');
-  expect(document.querySelectorAll('[data-ask-open]')).toHaveLength(1);
-  expect(askIcon()!.closest('.ib-phead') !== null).toBe(true);
+  await until(() => document.querySelector('.ib-phead') !== null && document.body.textContent!.includes('five attempts'), 'the thread and the file');
+  const page = document.querySelector<HTMLElement>('.ib-docscroll')!;
+  await until(async () => {
+    await select(page, 'five attempts');
+    return side() !== null;
+  }, 'Side in the file');
+  expect(noAskIcon()).toBe(true);
+  await act(async () => side()!.click());
+  await until(() => askBox() !== null, 'the Ask window');
+  expect(askBox()!.value).toBe('> five attempts\n\n');
 });

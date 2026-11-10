@@ -141,6 +141,8 @@ export interface ReviewPaneProps {
    * none of them, whatever Code review says (approval "code-review-029-shape-off"); Ask on selected lines stays.
    */
   shape?: boolean;
+  /** Settings → Capabilities → Chapter diagrams (on unless turned off). Off: a chapter's diagram draws folded under its Diagram header. */
+  chapterDiagrams?: boolean;
   /** No verdict here (a guide, or Code review off): back to the thread with its reply box open. */
   onWriteReply?: () => void;
   /** The window's Shape host and boards. */
@@ -175,7 +177,7 @@ const NO_VIEWED: ReadonlySet<string> = new Set();
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, chapterDiagrams = true, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
@@ -1261,6 +1263,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
                 renderChapterDiagram={renderChapterDiagram}
+                {...(chapterDiagrams ? {} : { chapterDiagramsFolded: true })}
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading

@@ -9,7 +9,7 @@ section: "Getting Started"
 Plannotator works with Claude Code in one of two ways. Both open the same review UI.
 
 - **The Plannotator mod** (Claude Code 2.1.287 or newer, in the interactive terminal). It is on by default. Claude does not wait for you.
-- **The classic hook** (older Claude Code, `claude -p` and SDK runs, Windows, or the mod turned off). Claude waits until you decide.
+- **The classic hook** (older Claude Code, `claude -p` and SDK runs, or the mod turned off). Claude waits until you decide.
 
 ## The Plannotator mod
 

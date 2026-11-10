@@ -21,6 +21,7 @@
  * the platform.
  */
 
+import { INBOX_ROWS_HELP_SECTION } from "@plannotator/core/inbox-types";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
@@ -377,7 +378,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "Set up the connection for the host you run in:",
     "",
-    `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later, on macOS or Linux, in an interactive session (not \`claude -p\`).`,
+    `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later, in an interactive session (not \`claude -p\`).`,
     `- **Pi** with the Plannotator extension (\`pi install npm:@plannotator/pi-extension\` if it is missing), or **OpenCode** with the Plannotator plugin (\`@plannotator/opencode@latest\` in opencode.json: \`"plugin": [...]\` on OpenCode 1, \`"plugins": [{ "package": ... }]\` on OpenCode 2): the inbox tool is off by default there. Turn it on for your host by merging ${code(`{ "inboxTool": { "pi": true } }`)} (or \`"opencode"\`) into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. Then start a new Pi session (or \`/reload\`), or restart OpenCode. Pi and OpenCode send the tool with every request: ${inboxToolCostText("pi")} each (the size measured on both; the token count depends on the model), so tell the person before you turn it on.`,
     `- **DeepSeek Harness** with Plannotator's plugin (\`dsh plugin --profile <profile> add @plannotator/dsh\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "dsh": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer (\`inbox/inbox.json\` in the data folder); if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies when DeepSeek Harness next starts, never in a running one, so tell the person to restart it. DeepSeek Harness sends the tool with every request too, so tell the person before you turn it on. Over MCP the Inbox cannot tell DeepSeek Harness sessions apart, so use the plugin, not the stdio server.`,
     `- **Cline** with Plannotator's plugin (\`cline plugin install npm:@plannotator/cline\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "cline": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer; if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies to Cline sessions started after that, never to a running one. Cline sends the tool with every request too, so tell the person before you turn it on. The plugin works in the Cline CLI, Kanban, the desktop app and the VS Code extension's new version; the extension's Legacy version loads no plugins, so there register the stdio server.`,
@@ -521,6 +522,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "4. Tell the person what you combined, and that you can undo it. Their window shows no notice of your combine: the project just leaves the sidebar.",
     "",
     "`undo` takes the id of the project that went in, listed under \"Combined into it\", not the one that stayed. It works at any time, from any session, and brings back that project with whatever went into it. It gives back the project's name, its cards and its threads, the ones started since the combine too. A message or a card that joined the other project's thread stays with that thread. After an undo, the project is not suggested back into the project it left, or into whatever that project has gone into. Combining never crosses machines.",
+    "",
+    ...INBOX_ROWS_HELP_SECTION,
     "",
     "## Scripting the Inbox",
     "",

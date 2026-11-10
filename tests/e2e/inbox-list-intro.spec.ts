@@ -13,8 +13,8 @@
  *  - Escape and Keep as it is change nothing and retire it, even after a pick (with reduced motion: no demo at all).
  *  - "Customize rows" opens Settings → Rows, saves nothing and retires it.
  *  - A key or a click during the demo jumps to the held picture.
- *  - Never on the same load as the tour (the next load shows it); after the sound dialog, never that load nor the next
- *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": one a day, two days apart).
+ *  - Never on the same load as the tour (the next load shows it); with the sound dialog due too, this one goes first and the sound never on that load nor the next
+ *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": 40 minutes apart).
  *  - Its moment is back on the list (approval "inbox-one-time-dialogs"): a first load on a thread link (desktop or
  *    phone) never shows it over the thread; back on the list it shows after the same short wait as a first load on the
  *    list; never while a file is open beside the thread, nor with the thread alone; never under an image opened full
@@ -98,6 +98,10 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         inboxAgentNotes: { offered: true },
         // Due on a used Inbox, and its check would run the `codex` on this PATH.
         inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+        // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+        favicon: 'glass',
+        // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+        inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
         ...(options.seenOld ? { inboxListIntro: { dueAt: '2026-10-20T10:00:00.000Z', shownAt: '2026-10-21T10:00:00.000Z' } } : {}),
       }),
@@ -416,24 +420,23 @@ for (const how of ['a key', 'a click'] as const) {
   });
 }
 
-test('after the sound dialog: never on that load, nor on the next (one a day, two days apart)', async ({ browser }) => {
+test('with the sound dialog due too: this one first (the owner\'s order, 2026-11-10), and the sound not on that load nor on the next, inside the gap (40 minutes apart)', async ({ browser }) => {
   const w = await world({ earlier: true, soundDue: true });
   const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(w.url);
   const sound = page.locator('[data-dialog="sound-intro"]');
-  await expect(sound).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(DIALOG)).toHaveCount(0);
-  await page.keyboard.press('Escape');
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(sound).toHaveCount(0);
-  await page.waitForTimeout(3500);
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+  await page.keyboard.press('Escape');
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(saved(w)?.shownAt).toBeUndefined();
+  await page.waitForTimeout(3500);
+  await expect(sound).toHaveCount(0);
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(6000);
-  await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect(sound).toHaveCount(0);
-  expect(saved(w)?.shownAt).toBeUndefined();
+  await expect(page.locator(DIALOG)).toHaveCount(0);
 });
 
 test('never on the same load as the tour: the next load shows it', async ({ browser }) => {

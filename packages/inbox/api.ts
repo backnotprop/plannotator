@@ -5,8 +5,9 @@
  * writing into a store it did not read.
  */
 
+import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -14,6 +15,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
+import type { InboxAgentFaceChange } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -76,6 +78,7 @@ import type {
   InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
+  InboxCodexAccount,
   InboxAnnotationRecord,
   InboxCardColumn,
   InboxCardHistoryEntry,
@@ -99,15 +102,15 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
-/** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
+/** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
-/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
 
 /**
- * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
- * one on the load right after the load that showed the last (packages/shared/inbox/reveals.ts).
+ * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
+ * dialog's stamp, as a record (packages/shared/inbox/reveals.ts; the page-load rule it once served ended 2026-11-09).
  */
 const pageLoad = newUuid();
 
@@ -329,6 +332,11 @@ export interface ListModel {
    * an older Inbox and for a tailnet guest, which then read every session as before.
    */
   session_labels?: Record<string, string>;
+  /**
+   * Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked
+   * machine's on the merged view. Absent from an older Inbox.
+   */
+  agents?: InboxAgentsGroup[];
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
@@ -551,9 +559,11 @@ export interface SettingsModel {
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
    * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
    * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
-   * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
+   * line; absent from an older Inbox: it never shows); `sidebar_tip`: the Sidebar tip may show at a calm moment beside
+   * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
+   * older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -573,7 +583,7 @@ export interface SettingsModel {
   text_size?: InboxTextSize;
   /**
    * The favicon (config.json `favicon`), shared with plan review, code review and annotate: 'glass' unless chosen,
-   * 'totman' (shown as Face) or 'classic' (shown as P). Absent from an older Inbox.
+   * 'yellow' or 'totman' (shown as Face). Absent from an older Inbox.
    */
   favicon?: FaviconStyle;
   /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved. Absent from an older Inbox. */
@@ -619,6 +629,12 @@ export interface SettingsModel {
    * Settings row shows only then). Whether System shows is `systemShown()` (system/gate.ts).
    */
   system?: { on: boolean };
+  /**
+   * Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): its switch, present only while Code review
+   * is on (the Settings row shows only then). Off: agents are not offered chapter diagrams, and one that still arrives
+   * draws folded. Absent: on.
+   */
+  chapter_diagrams?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -860,6 +876,8 @@ export class InboxApiError extends Error {
     readonly field: string | null = null,
     /** When a held read may be asked again (ms since the epoch), when the answer says. */
     readonly retryAt: number | null = null,
+    /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
+    readonly threadId: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -875,6 +893,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
       typeof body.retry_at === 'number' ? body.retry_at : null,
+      typeof body.thread_id === 'string' ? body.thread_id : null,
     );
   }
   return body as T;
@@ -1258,6 +1277,10 @@ export interface HomeFoldersAnswer {
   nearest?: { path: string; folders: string[] };
   /** A missing path under a file or a folder that can't be opened. */
   blocked?: { path: string; state: 'file' | 'locked' };
+  /** The folder itself is never started in (home, a folder above it, `/`, the folder drives are in). Absent: it can be. */
+  start?: false;
+  /** Of `folders`, the ones listed but never started in (absent from an older Inbox). */
+  nostart?: string[];
 }
 
 /** Clone from a git URL: where that machine would clone it (`GET /api/inbox/launch/clone`), each path as `~/…`. */
@@ -1298,6 +1321,8 @@ export interface StartThreadInput {
   review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
+  /** Settings → Rows' ask box: the agent also receives how to change the rows. */
+  rows_ask?: true;
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
@@ -1482,6 +1507,8 @@ export const inboxApi = {
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
+  /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
+  saveChapterDiagrams: (on: boolean) => post<{ chapter_diagrams?: { on: boolean } }>(inboxUrl('/settings'), { chapter_diagrams: { on } }),
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),
   systemDrawing: (project: string) => get<SystemDrawingAnswer<SystemModel>>(inboxUrl(`/system/drawing?project=${encodeURIComponent(project)}`)),
@@ -1796,13 +1823,20 @@ export const inboxApi = {
     return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined, machine));
   },
   /**
-   * "Another folder on <machine>…": the folder names in one folder under that machine's home (`GET
-   * /api/inbox/launch/folders?path=~/…`), one level, no hidden ones. `machine`: a linked machine's, through the
-   * forward; null: this computer's. A path that isn't there is `exists: false`; a hidden one or one outside home is a
-   * 422 (`folder_hidden`, `folder_outside_home`), a guest or a call from outside the window a 403.
+   * "Another folder on <machine>…": the folder names in one folder on that machine (`GET
+   * /api/inbox/launch/folders?path=~/…` or a full path), one level, no hidden or system ones. `machine`: a linked
+   * machine's, through the forward; null: this computer's. A path that isn't there is `exists: false`; a hidden or
+   * system one is a 422 (`folder_hidden`, `folder_system`; an older Inbox's `folder_outside_home`), a drive that
+   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a guest or a call from
+   * outside the window a 403.
    */
-  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal) =>
-    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path }).toString(), machine), signal),
+  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal, fresh = false) =>
+    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path, ...(fresh ? { fresh: '1' } : {}) }).toString(), machine), signal),
+  /**
+   * "Choose in Finder…": macOS's folder dialog on this computer (this computer's own window only). The folder picked
+   * as a full path, or `cancelled`.
+   */
+  chooseFolder: () => post<{ path?: string; cancelled?: true }>(inboxUrl('/launch/choose-folder'), {}),
   /** Clone from a git URL: where `url` would be cloned on that machine (`into` absent: its default clone folder, C1). */
   cloneTarget: (url: string, into: string | null, machine?: string | null, signal?: AbortSignal) =>
     get<CloneTargetAnswer>(inboxUrl('/launch/clone', new URLSearchParams({ url, ...(into ? { into } : {}) }).toString(), machine), signal),
@@ -1821,6 +1855,8 @@ export const inboxApi = {
   launchTrust: (launchId: string, warning: string | null, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`, undefined, machine), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  /** Settings → Agents' Codex account line: read from Codex on this computer (the plan and its limits), never polled. */
+  codexAccount: () => get<{ account: InboxCodexAccount }>(inboxUrl('/codex/account')),
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
@@ -1997,6 +2033,10 @@ export const inboxApi = {
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
   /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
+  agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
+  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
+  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
   setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
@@ -2247,7 +2287,7 @@ export interface InboxEventHandlers {
    * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
    * and the authors read the list again.
    */
-  onDeliveries?: (change?: { labels: boolean; sessions: boolean }) => void;
+  onDeliveries?: (change?: { labels: boolean; sessions: boolean; agents?: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -2255,7 +2295,7 @@ export interface InboxEventHandlers {
    * With a shared stream (sharedEvents.ts) also called when the tab whose
    * stream serves this one changes, so the report names it (`served_by`).
    */
-  onConnect?: () => void;
+  onConnect?: (hello?: RestartHello) => void;
   /**
    * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
@@ -2270,13 +2310,16 @@ export interface InboxEventHandlers {
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  onRows?: (rows: unknown, rev: unknown) => void;
+  /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
+  onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
+  /** An agent icon's face was saved (`{ faces, rev }`, unparsed). */
+  onAgentFaces?: (data: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -2314,7 +2357,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2355,7 +2398,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       // Only proof the stream is alive: no read, nothing to show.
       return;
     case 'hello':
-      handlers.onConnect?.();
+      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
+      handlers.onConnect?.(readHello(frame.data) ?? undefined);
       return;
     case 'reach':
       try {
@@ -2384,14 +2428,17 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'deliveries': {
       let labels = false;
       let sessions = false;
+      let agents = false;
       try {
-        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown } | null;
+        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown; agents?: unknown } | null;
         labels = change?.labels === true;
         sessions = change?.sessions === true;
+        // The sidebar's Agents moved (agentsList.ts).
+        agents = change?.agents === true;
       } catch {
         // An empty or malformed frame is a delivery change alone.
       }
-      handlers.onDeliveries?.({ labels, sessions });
+      handlers.onDeliveries?.({ labels, sessions, agents });
       return;
     }
     case 'pins':
@@ -2405,8 +2452,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'rows':
       try {
-        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
-        handlers.onRows?.(data.rows, data.rev);
+        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
+        handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
       } catch {
         // A malformed frame changes nothing.
       }
@@ -2415,6 +2462,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
         handlers.onSidebar?.(data.sidebar, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'agent-faces':
+      try {
+        handlers.onAgentFaces?.(JSON.parse(frame.data));
       } catch {
         // A malformed frame changes nothing.
       }
@@ -2429,7 +2483,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -2438,6 +2492,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
+          ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
         });
       } catch {
         // A malformed frame changes nothing.

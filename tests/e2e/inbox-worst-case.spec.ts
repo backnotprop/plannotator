@@ -164,10 +164,23 @@ for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[
       expect(await shapes(page)).toEqual([]);
       const cell = await page.locator('section.ib-pane .ib-body td').first().evaluate((el) => el.getBoundingClientRect().width);
       expect(cell, 'a table cell keeps a word whole').toBeGreaterThan(40);
-      const img = page.locator('section.ib-pane .ib-body img[data-ib-tall]');
+      // A full-page capture (390 by 4000) shows its top down to 70% of the window (never under 320 px); "Show all" opens it in place.
+      const img = page.locator('section.ib-pane .ib-body img[data-ib-cut]');
       await expect(img).toHaveCount(1);
-      expect((await img.boundingBox())!.height).toBeLessThanOrEqual(481);
+      const cut = (await img.boundingBox())!;
+      expect(cut.height).toBeLessThanOrEqual(Math.max(320, w.height * 0.7) + 1);
+      expect(cut.width).toBeLessThanOrEqual(390.5);
+      const more = page.locator('section.ib-pane .ib-body').getByRole('button', { name: 'Show all of The checkout page on a phone' });
+      await expect(more).toBeVisible();
       await shot(page, `${w.name}-${scheme}-kitchen`);
+      if (scheme === 'light') {
+        const at = page.url();
+        await more.click();
+        const whole = (await page.locator('section.ib-pane .ib-body img[data-ib-open]').boundingBox())!;
+        expect(Math.round(whole.height / whole.width), 'the whole picture, its shape kept').toBe(Math.round(4000 / 390));
+        expect(page.url(), 'Show all opens nothing else').toBe(at);
+        await expect(page.locator('section.ib-pane .ib-body').getByRole('button', { name: 'Show less of The checkout page on a phone' })).toBeVisible();
+      }
       // Settings: Storage keeps its sizes and Delete in view (rows 64, 65); Archived keeps Unarchive on its row (row 67).
       await page.goto(`${world.url}/#settings/storage`);
       await page.waitForSelector('[data-store-project]');
@@ -253,13 +266,17 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await page.locator('.ib-pfoot .ib-btn', { hasText: 'Reply' }).first().click();
       await page.locator('.ib-rtext').fill('Wait for Monday.');
       await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).click();
-      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient").
+      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient"). At 1024 it is the
+      // pill's own list; the 720 px window is a phone's layout, where it is the bottom sheet (approval
+      // "inbox-phone-composer-picker"), a dialog whose rows scroll in the listbox inside it.
       await page.waitForSelector('[data-recipient-list]');
       await page.waitForTimeout(300);
+      if (w.width < 768) await expect(page.locator('[data-recipient-list]')).toHaveAttribute('role', 'dialog');
       // The list starts inside the window and scrolls; Send stays in the window (row 6).
       const list = (await page.locator('[data-recipient-list]').boundingBox())!;
       expect(list.y).toBeGreaterThanOrEqual(0);
-      expect(await page.locator('[data-recipient-list]').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      expect(list.y + list.height, 'the list ends inside the window').toBeLessThanOrEqual(w.height);
+      expect(await page.locator('[data-recipient-list]').evaluate((el) => [el, ...el.querySelectorAll('[role="listbox"]')].some((box) => box.scrollHeight > box.clientHeight))).toBe(true);
       const send = (await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).boundingBox())!;
       expect(send.y + send.height).toBeLessThanOrEqual(w.height);
       expect(await shapes(page)).toEqual([]);

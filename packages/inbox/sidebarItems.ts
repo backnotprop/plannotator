@@ -1,13 +1,14 @@
 /**
  * The window's side of the sidebar's items (the registry is core `INBOX_SIDEBAR_ITEMS`): each item's icon in the
  * menu and the Customize panel, and which items this Inbox draws now. An item it does not draw (Board with the
- * Board off, Reviews with Code review off, Shape, Usage without `cswap`, Copy prompt and the keyboard button on a
- * phone) is left out of the menu and the panel, and keeps its place in the layout for when it comes back.
+ * Board off, Reviews with Code review off, Shape, Usage without `cswap`, Search, New message, Copy prompt and the
+ * keyboard button on a phone) is left out of the menu and the panel, and keeps its place in the layout for when it comes back.
+ * Agents has no icon here: the panel draws the section's own goggles.
  */
 import { INBOX_SIDEBAR_ITEMS, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
 import type { IconName } from './icons';
 
-export const SIDEBAR_ITEM_ICON: Record<InboxSidebarItem, IconName> = {
+export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents'>, IconName> = {
   logo: 'photo',
   search: 'search',
   'new-message': 'compose',
@@ -39,6 +40,8 @@ export interface SidebarFeatures {
   artifacts?: boolean;
   shortcuts?: boolean;
   copyPrompt?: boolean;
+  /** The Agents section: absent in a sidebar that has none to draw (an Inbox whose list names no agents). */
+  agents?: boolean;
   phone: boolean;
 }
 
@@ -49,11 +52,13 @@ export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxS
   if (!features.reviews) off.add('reviews');
   if (!features.shape) off.add('shape');
   if (!features.usage) off.add('usage');
-  if (features.search === false) off.add('search');
-  if (features.compose === false) off.add('new-message');
+  // A phone's sheet holds neither (approval "inbox-phone-sidebar-sheet"): both are in the list's header there.
+  if (features.phone || features.search === false) off.add('search');
+  if (features.phone || features.compose === false) off.add('new-message');
   if (features.feedback === false) off.add('feedback');
   if (features.drafts === false) off.add('drafts');
   if (features.artifacts === false) off.add('artifacts');
+  if (features.agents === false) off.add('agents');
   if (features.phone || features.shortcuts === false) off.add('shortcuts');
   if (features.phone || features.copyPrompt === false) off.add('copy-prompt');
   return new Set(INBOX_SIDEBAR_ITEMS.map((spec) => spec.id).filter((id) => !off.has(id)));
