@@ -337,6 +337,78 @@ describe('useAnnotationHighlighter: a drag that overshoots onto something else o
     expect(paintedText(container)).toBe('paragraph');
   });
 
+  test.skipIf(!hasDom)('off to the side with nothing selectable there: the selection run to the document\'s own first words is not taken', async () => {
+    // Nothing selectable comes before the document (a panel of buttons), so the browser's runaway
+    // selection ends on the document's first text and still lies wholly inside it.
+    const { container, first, second, gutter, added } = await mount('redline');
+    container.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 400, x: 100, y: 0, width: 400, height: 400, toJSON: () => ({}) }) as DOMRect;
+
+    await act(async () => {
+      second.dispatchEvent(mouse('mousedown', { clientX: 250, clientY: 50 }));
+      window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 7);
+      document.dispatchEvent(new Event('selectionchange'));
+      second.dispatchEvent(mouse('mousemove', { clientX: 170, clientY: 50 }));
+      // A browser moves its selection AFTER the move that took the pointer off the document.
+      gutter.dispatchEvent(mouse('mousemove', { clientX: 40, clientY: 50 }));
+      window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, first.firstChild!, 0);
+      document.dispatchEvent(new Event('selectionchange'));
+      gutter.dispatchEvent(mouse('mouseup', { clientX: 40, clientY: 50 }));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('paragrap');
+  });
+
+  test.skipIf(!hasDom)('off to the side on the same line: the highlight runs to the edge of that line, where the browser has a caret for it', async () => {
+    const { container, second, gutter, added } = await mount('selection');
+    container.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 400, x: 100, y: 0, width: 400, height: 400, toJSON: () => ({}) }) as DOMRect;
+    const doc = document as unknown as { caretRangeFromPoint?: unknown; caretPositionFromPoint?: unknown };
+    const saved = [doc.caretRangeFromPoint, doc.caretPositionFromPoint];
+    // The start of the pressed line, for any point at the document's left edge.
+    doc.caretPositionFromPoint = (x: number) => (x <= 102 ? { offsetNode: second.firstChild!, offset: 0 } : null);
+    try {
+      await act(async () => {
+        second.dispatchEvent(mouse('mousedown', { clientX: 250, clientY: 50 }));
+        window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 2);
+        document.dispatchEvent(new Event('selectionchange'));
+        second.dispatchEvent(mouse('mousemove', { clientX: 120, clientY: 50 }));
+        gutter.dispatchEvent(mouse('mousemove', { clientX: 40, clientY: 50 }));
+        gutter.dispatchEvent(mouse('mouseup', { clientX: 40, clientY: 50 }));
+        await new Promise((r) => setTimeout(r, 30));
+      });
+    } finally {
+      [doc.caretRangeFromPoint, doc.caretPositionFromPoint] = saved;
+    }
+
+    expect(paintedText(container)).toBe('Second paragrap');
+    expect(added).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('in redline that line-edge stretch is not added: only what was selected inside is deleted', async () => {
+    const { container, second, gutter, added } = await mount('redline');
+    container.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 400, x: 100, y: 0, width: 400, height: 400, toJSON: () => ({}) }) as DOMRect;
+    const doc = document as unknown as { caretRangeFromPoint?: unknown; caretPositionFromPoint?: unknown };
+    const saved = [doc.caretRangeFromPoint, doc.caretPositionFromPoint];
+    doc.caretPositionFromPoint = (x: number) => (x <= 102 ? { offsetNode: second.firstChild!, offset: 0 } : null);
+    try {
+      await act(async () => {
+        second.dispatchEvent(mouse('mousedown', { clientX: 250, clientY: 50 }));
+        window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 2);
+        document.dispatchEvent(new Event('selectionchange'));
+        second.dispatchEvent(mouse('mousemove', { clientX: 120, clientY: 50 }));
+        gutter.dispatchEvent(mouse('mousemove', { clientX: 40, clientY: 50 }));
+        gutter.dispatchEvent(mouse('mouseup', { clientX: 40, clientY: 50 }));
+        await new Promise((r) => setTimeout(r, 30));
+      });
+    } finally {
+      [doc.caretRangeFromPoint, doc.caretPositionFromPoint] = saved;
+    }
+
+    expect(added.length).toBe(1);
+    expect(added[0]!.originalText).toBe('cond paragrap');
+  });
+
   test.skipIf(!hasDom)('nothing was ever selected inside the document: nothing is made, and the selection is left alone', async () => {
     const { container, first, panel, added } = await mount('redline');
     const panelText = panel.querySelector('p')!.firstChild!;

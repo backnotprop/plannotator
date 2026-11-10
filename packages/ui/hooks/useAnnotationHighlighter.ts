@@ -1987,7 +1987,26 @@ export function useAnnotationHighlighter({
     // selection is left as it is.
     // The press itself: where it started and whether the pointer ever went a drag's distance from there.
     let pressed: { x: number; y: number; moved: boolean; plain: boolean } | null = null;
-    let seenInside: { anchorNode: Node; anchorOffset: number; focusNode: Node; focusOffset: number; length: number } | null = null;
+    //
+    // Off to the SIDE of the document (left or right of its box) even a
+    // selection wholly inside it is not trusted: with nothing selectable
+    // beside the document the browser's runaway selection ends on the
+    // document's own first or last words. There the highlight is what was
+    // selected while the pointer was still over the document
+    // (`seenUnderPointer`), stretched at most to the edge of the line the
+    // pointer is level with (a caret looked up just inside the document's box),
+    // and in redline not stretched at all. Above or below the document the
+    // browser's selection grows as the page scrolls, and is trusted as said.
+    type SeenSelection = { anchorNode: Node; anchorOffset: number; focusNode: Node; focusOffset: number; length: number };
+    let seenInside: SeenSelection | null = null;
+    let seenUnderPointer: SeenSelection | null = null;
+    let pointerOverDocument = true;
+    /** Where the pointer last was with the button down, for a release the page never hears. */
+    let lastPressPoint: { x: number; y: number } | null = null;
+    const stillThere = (seen: SeenSelection) =>
+      seen.anchorNode.isConnected && seen.focusNode.isConnected
+      && seen.anchorOffset <= (seen.anchorNode.nodeValue?.length ?? seen.anchorNode.childNodes.length)
+      && seen.focusOffset <= (seen.focusNode.nodeValue?.length ?? seen.focusNode.childNodes.length);
     const noteSelectionInside = () => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
@@ -1995,19 +2014,41 @@ export function useAnnotationHighlighter({
       if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) return;
       const length = selection.getRangeAt(0).toString().length;
       if (seenInside && selectionRanAway(length, seenInside.length)) return;
-      seenInside = { anchorNode, anchorOffset: selection.anchorOffset, focusNode, focusOffset: selection.focusOffset, length };
+      const seen = { anchorNode, anchorOffset: selection.anchorOffset, focusNode, focusOffset: selection.focusOffset, length };
+      seenInside = seen;
+      if (pointerOverDocument) seenUnderPointer = seen;
     };
-    const commitReleasedOutside = (seen: typeof seenInside) => {
+    /** At most this many characters past what was selected under the pointer: the rest of a line or two. */
+    const LINE_EDGE_STRETCH = 400;
+    const commitReleasedOutside = (seen: SeenSelection | null, underPointer: SeenSelection | null, at: { x: number; y: number } | null) => {
       const selection = window.getSelection();
       if (disposed || !listening || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
-      const live = selection.getRangeAt(0);
-      const liveInside = container.contains(live.startContainer) && container.contains(live.endContainer);
-      if (!liveInside || (seen && selectionRanAway(live.toString().length, seen.length))) {
-        if (!seen || !seen.anchorNode.isConnected || !seen.focusNode.isConnected) return;
-        if (seen.anchorOffset > (seen.anchorNode.nodeValue?.length ?? seen.anchorNode.childNodes.length)) return;
-        if (seen.focusOffset > (seen.focusNode.nodeValue?.length ?? seen.focusNode.childNodes.length)) return;
-        selection.setBaseAndExtent(seen.anchorNode, seen.anchorOffset, seen.focusNode, seen.focusOffset);
+      const box = container.getBoundingClientRect();
+      if (at && (at.x < box.left || at.x > box.right)) {
+        // Off to the side.
+        if (!underPointer || !stillThere(underPointer)) return;
+        const { anchorNode, anchorOffset, focusNode, focusOffset, length } = underPointer;
+        const edge = (pendingModeOverrideRef.current ?? modeRef.current) === 'redline' ? null : textCaretAt(
+          container,
+          Math.min(Math.max(at.x, box.left + 1), box.right - 1),
+          Math.min(Math.max(at.y, Math.max(box.top, 0) + 1), Math.min(box.bottom, window.innerHeight) - 1),
+        );
+        if (edge) {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, edge.node, edge.offset);
+          const stretched = selection.rangeCount > 0 ? selection.getRangeAt(0).toString().length : 0;
+          if (stretched < length || stretched > length + LINE_EDGE_STRETCH) selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        } else {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        }
         if (selection.isCollapsed || selection.rangeCount === 0) return;
+      } else {
+        const live = selection.getRangeAt(0);
+        const liveInside = container.contains(live.startContainer) && container.contains(live.endContainer);
+        if (!liveInside || (seen && selectionRanAway(live.toString().length, seen.length))) {
+          if (!seen || !stillThere(seen)) return;
+          selection.setBaseAndExtent(seen.anchorNode, seen.anchorOffset, seen.focusNode, seen.focusOffset);
+          if (selection.isCollapsed || selection.rangeCount === 0) return;
+        }
       }
       const range = selection.getRangeAt(0).cloneRange();
       if (rangeInsideExcluded(container, range)) return;
@@ -2076,6 +2117,9 @@ export function useAnnotationHighlighter({
     const endPress = () => {
       caretDrag = null;
       seenInside = null;
+      seenUnderPointer = null;
+      pointerOverDocument = true;
+      lastPressPoint = null;
       pressed = null;
       document.removeEventListener('mouseup', handlePressRelease, true);
       document.removeEventListener('mousemove', handlePressMove, true);
@@ -2087,6 +2131,8 @@ export function useAnnotationHighlighter({
       if (caretDrag?.driving && listening) driveCaretDrag(event.clientX, event.clientY);
       noteSelectionInside();
       const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = { x: event.clientX, y: event.clientY };
       const press = pressed;
       endPress();
       // A click with a wobble is not a drag: the pointer never went a drag's
@@ -2108,7 +2154,7 @@ export function useAnnotationHighlighter({
         if (done) return;
         done = true;
         window.removeEventListener('mouseup', commit);
-        commitReleasedOutside(seen);
+        commitReleasedOutside(seen, underPointer, at);
       };
       window.addEventListener('mouseup', commit);
       window.setTimeout(commit, 0);
@@ -2118,14 +2164,19 @@ export function useAnnotationHighlighter({
     const handlePressMove = (event: MouseEvent) => {
       if (event.buttons & 1) {
         if (pressed && !pressed.moved && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= DRAG_SLOP_PX) pressed.moved = true;
+        // The selection read at this move is the one the browser made of the move before.
         noteSelectionInside();
+        pointerOverDocument = event.target instanceof Node && container.contains(event.target);
+        lastPressPoint = { x: event.clientX, y: event.clientY };
         followCaretDrag(event);
         return;
       }
       noteSelectionInside();
       const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = lastPressPoint;
       endPress();
-      commitReleasedOutside(seen);
+      commitReleasedOutside(seen, underPointer, at);
     };
     const handlePressStart = (event: MouseEvent) => {
       // The main button only; Ctrl+click is the context menu on a Mac.
