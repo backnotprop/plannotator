@@ -942,7 +942,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
+      // With it: the look from before (never saved reads as the defaults) and who saved (no one: the window), for Undo.
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames"], inboxRowsBy: null });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -979,6 +980,61 @@ describe("the window's routes: settings, restart, favicon", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
       expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-rows-settings-page" ("tell your agent"): `plannotator inbox rows set` saves with who made it, and
+  // any save can be undone once. What can regress: an agent's save the windows cannot attribute, a save that forgets
+  // the look before it, an undo that is not one save (or that invents a look when there is nothing to put back), and
+  // `rows_by` or `rows_undo` reaching another setting.
+  test("a rows save keeps the look before it and who made it; windows hear both; rows_undo puts the look back once", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13, inboxRows: ["smallNames", "roomy"], inboxRowsRev: 4, inboxRowsDefaults: 2 }));
+      const server = await start(dataDir);
+      const save = async (body: Record<string, unknown>) => {
+        const res = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+      };
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      // A look saved before this build has nothing to undo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 4, rows_undone: false, rows_prev: null, rows_by: null });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-rows-by&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+      const heard = async (rev: number) => {
+        while (!text.includes(`"rev":${rev}`)) text += decoder.decode((await reader.read()).value);
+        return JSON.parse(text.split("\n").find((line) => line.startsWith("data: ") && line.includes(`"rev":${rev}`))!.slice(6)) as Record<string, unknown>;
+      };
+
+      // An agent's command: who made it rides with the save, to the file, the answer and every window.
+      const by = { host: "claude-code", session: "ses_rows" };
+      expect((await save({ rows: ["compact", "smallNames"], rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 5, rows_prev: ["smallNames", "roomy"], rows_by: by });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "smallNames"], inboxRowsRev: 5, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: by });
+      expect(await heard(5)).toEqual({ rows: ["compact", "smallNames"], rev: 5, prev: ["smallNames", "roomy"], by });
+
+      // Undo is one save of the look from before, by whoever asked (here the window: no one); undo again is a redo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 6, rows_undone: true, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect(await heard(6)).toEqual({ rows: ["smallNames", "roomy"], rev: 6, prev: ["compact", "smallNames"], by: null });
+      expect((await save({ rows_undo: true, rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 7, rows_undone: true, rows_by: by });
+      // A save of the same look leaves nothing to put back.
+      expect((await save({ rows: ["compact", "smallNames"] })).body).toMatchObject({ rows_rev: 8, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows_rev: 8, rows_undone: false });
+      // A `rows_by` that is not a host and a session is no one, never an error; no other setting moved.
+      expect((await save({ rows: ["smallNames"], rows_by: { host: "claude-code" } })).body).toMatchObject({ rows: ["smallNames"], rows_rev: 9, rows_by: null });
+      expect(onDisk().inboxTextSize).toBe(13);
+      controller.abort();
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
