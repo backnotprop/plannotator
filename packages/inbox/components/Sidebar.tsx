@@ -317,7 +317,7 @@ export function Sidebar(props: SidebarProps) {
   const agentsClosed = sections.closed('agents');
   // Agents shows while the list names agents (an Inbox from before them names none) or a machine is linked.
   const agentsRead = useInboxAgents();
-  const agentsShown = agentsRead !== null || machineList.length > 0;
+  const agentsDrawn = agentsRead !== null || machineList.length > 0;
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
@@ -417,9 +417,12 @@ export function Sidebar(props: SidebarProps) {
     artifacts: Boolean(props.onArtifacts),
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
+    agents: agentsDrawn,
     phone,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
+  const agentsShown = shows('agents');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
