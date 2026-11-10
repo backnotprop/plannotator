@@ -364,30 +364,35 @@ const turnOf = (an: FakeAnimation) => {
   return deg(an.frames[an.frames.length - 1]) - deg(an.frames[0]);
 };
 
-for (const calm of ['A', 'B', 'C'] as const) {
-  test.skipIf(!hasDom)(`Claude at calm ${calm}: nothing runs between gestures, no turn goes on and on, each turn is small, and it still gestures by itself`, async () => {
-    motion.agentMotionOptions.calm = calm;
-    motion.agentMotionOptions.clock = 400;
-    try {
-      const [star] = handSidebar(['claude']) as [HTMLElement];
-      // Started: no loop at all (no endless turn, no breathing wave).
-      expect(made.filter((an) => star.contains(an.target) && an.options.iterations === Infinity)).toEqual([]);
-      const spin = star.querySelector('.am-spin')!;
-      await until(() => made.filter((an) => an.target === spin).length >= 3, 'three part turns');
-      const own = made.filter((an) => star.contains(an.target));
-      // Every animation it ever ran ends; every turn is a part turn within the calm's bound, never a whole one.
-      expect(own.every((an) => an.options.iterations === undefined || an.options.iterations === 1)).toBe(true);
-      const max = motion.CLAUDE_CALM[calm].turn[1];
-      for (const an of own.filter((a) => a.target === spin)) {
-        expect(Math.abs(turnOf(an))).toBeGreaterThan(1);
-        expect(Math.abs(turnOf(an))).toBeLessThanOrEqual(max + 0.01);
-        expect(Number(an.options.duration)).toBeGreaterThanOrEqual(motion.CLAUDE_CALM[calm].turnMs[0]);
-      }
-    } finally {
-      motion.agentMotionOptions.calm = 'B';
-    }
-  });
-}
+test.skipIf(!hasDom)('Claude: nothing runs between gestures, no turn goes on and on, each turn is small, and it still gestures by itself', async () => {
+  motion.agentMotionOptions.clock = 400;
+  const [star] = handSidebar(['claude']) as [HTMLElement];
+  // Started: no loop at all (no endless turn, no breathing wave).
+  expect(made.filter((an) => star.contains(an.target) && an.options.iterations === Infinity)).toEqual([]);
+  const spin = star.querySelector('.am-spin')!;
+  await until(() => made.filter((an) => an.target === spin).length >= 3, 'three part turns');
+  const own = made.filter((an) => star.contains(an.target));
+  // Every animation it ever ran ends; every turn is a part turn within the bound, never a whole one.
+  expect(own.every((an) => an.options.iterations === undefined || an.options.iterations === 1)).toBe(true);
+  for (const an of own.filter((a) => a.target === spin)) {
+    expect(Math.abs(turnOf(an))).toBeGreaterThan(1);
+    expect(Math.abs(turnOf(an))).toBeLessThanOrEqual(motion.CLAUDE_CALM.turn[1] + 0.01);
+    expect(Number(an.options.duration)).toBeGreaterThanOrEqual(motion.CLAUDE_CALM.turnMs[0]);
+  }
+});
+
+test.skipIf(!hasDom)('Claude under reduced motion: it holds still, no gesture and no turn ever starts', async () => {
+  reduce = true;
+  motion.agentMotionOptions.clock = 400;
+  const [star] = handSidebar(['claude']) as [HTMLElement];
+  // At 400 times the clock its first gesture would come within about 20 ms; give it ten times that.
+  await wait(250);
+  expect(made.filter((an) => star.contains(an.target))).toEqual([]);
+  // The same mark with motion allowed does gesture, so the stillness above is reduced motion's doing.
+  reduce = false;
+  const [moving] = handSidebar(['claude']) as [HTMLElement];
+  await until(() => made.some((an) => moving.contains(an.target)), 'a gesture with motion allowed');
+});
 
 test.skipIf(!hasDom)('several Claude marks never move in step: each starts its gestures on its own schedule, and a turn picks up where the last one left the star', async () => {
   motion.agentMotionOptions.clock = 400;

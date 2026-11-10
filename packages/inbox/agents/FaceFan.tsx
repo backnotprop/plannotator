@@ -23,19 +23,6 @@ import { fanLayout, type FanOptions, type FanSpot } from './fanLayout';
 /** How long the pointer rests on a mark before the fan opens. */
 export const FAN_DWELL_MS = 350;
 
-/**
- * The plate's look (agents.css): '0' flat; glass with the choices set into it, '1' subtle and '2' stronger; glass with
- * the choices resting on it, '3' subtle (the default) and '4' stronger. How the face shown is marked on the glass the
- * choices rest on: 'dot' (a dot under it, the default) or 'lift' (lifted and lit). Prototype until the owner picks:
- * `?fan-glass=0..4` and `?fan-mark=dot|lift` in the window's address choose.
- */
-export type FanGlass = '0' | '1' | '2' | '3' | '4';
-const asked = (name: string, values: RegExp) => (typeof location !== 'undefined' ? new RegExp(`[?&]${name}=(${values.source})\\b`).exec(location.search)?.[1] : undefined);
-export const fanOptions: { glass: FanGlass; mark: 'dot' | 'lift' } = {
-  glass: (asked('fan-glass', /[0-4]/) as FanGlass | undefined) ?? '3',
-  mark: (asked('fan-mark', /dot|lift/) as 'dot' | 'lift' | undefined) ?? 'dot',
-};
-const glassLook = (glass: FanGlass) => (glass === '0' ? {} : { 'data-glass': glass === '2' || glass === '4' ? '2' : '1', 'data-sit': glass === '1' || glass === '2' ? 'in' : 'on', 'data-mark': fanOptions.mark });
 /** How long a touch is held before the fan opens. */
 export const FAN_PRESS_MS = 450;
 /** How long the pointer may be outside the mark and the fan before it closes. */
@@ -207,7 +194,6 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             data-still={still ? '' : undefined}
             data-opening={opening ? '' : undefined}
             data-touch={touch ? '' : undefined}
-            {...glassLook(fanOptions.glass)}
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(face))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? { current: anchor } : false}

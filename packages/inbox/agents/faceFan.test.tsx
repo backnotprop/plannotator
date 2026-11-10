@@ -131,6 +131,24 @@ test.skipIf(!hasDom)('a choice is kept for its agent and shown on its mark, and 
   key(again, 'Enter');
   await until(() => group() !== null, 'the picker');
   expect(choice('glass-blue')!.getAttribute('aria-checked')).toBe('true');
+  // Only the face shown carries the mark (the dot is drawn from aria-checked, below).
+  expect([...document.querySelectorAll('[aria-checked="true"]')].map((el) => el.getAttribute('data-face-choice'))).toEqual(['glass-blue']);
+});
+
+// The owner, 2026-11-09: the faces rest on the glass, the face shown has a dot under it; no well behind a face and
+// no outline ring for the shown one (the Inbox's rule: a selection is a fill or a mark, never a border).
+test("the face shown is marked by a dot under it, and nothing puts a well or an outline behind a face", async () => {
+  const css = await Bun.file(new URL('./agents.css', import.meta.url)).text();
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+  const dot = rules.find((r) => r.sel.split(',').some((one) => one.trim() === '.am-fan-i[aria-checked="true"]::after'));
+  expect(dot).toBeDefined();
+  expect(dot!.body).toMatch(/content:\s*""/);
+  expect(dot!.body).toMatch(/border-radius:\s*50%/);
+  for (const r of rules.filter((x) => /\.am-fan-i\b/.test(x.sel) && !/:focus-visible|::after/.test(x.sel))) {
+    expect(r.body).not.toMatch(/(^|;|\s)(outline|box-shadow)\s*:/);
+    expect(r.body).not.toMatch(/(^|;|\s)border\s*:(?!\s*(0|none)\s*;)/);
+    expect(r.body).not.toMatch(/(^|;|\s)background(-color)?\s*:(?!\s*none\s*;)/);
+  }
 });
 
 test.skipIf(!hasDom)('Escape closes it, and so does the pointer leaving the mark and the fan (after a short grace); the way to a choice does not', async () => {

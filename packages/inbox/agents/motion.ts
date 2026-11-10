@@ -14,7 +14,7 @@
  * - Claude is mostly at rest (the owner, 2026-11-09: it "spins too much"; "a little bit more random and subtle"): it
  *   never turns on and on. Now and then, after a gap drawn from its own seeded chances, it makes one small gesture: a
  *   slow part turn that eases in and out and settles, a soft breath of a few percent, or a ray's shimmer. How small
- *   and how often is `agentMotionOptions.calm` (CLAUDE_CALM: A very subtle, B subtle, C a bit livelier).
+ *   and how often: CLAUDE_CALM (the owner chose this level, 2026-11-09).
  * - Attention: while the pointer is in the sidebar the section is in, each icon leans a little toward it (the `.am-look`
  *   layer: at most AGENT_LOOK.shift px and AGENT_LOOK.turn degrees) and a rig's eyes (the `.am-e` layer: Codex's
  *   prompt, OpenCode's square, Pi's top block) look that way too. Each icon follows on its own critically damped
@@ -49,29 +49,26 @@ export function agentRigOf(host: string | null | undefined): AgentRigKind | null
   return null;
 }
 
-/** How lively Claude's rare gestures are: A very subtle, B subtle, C a bit livelier. */
-export type AgentCalm = 'A' | 'B' | 'C';
-
 /**
- * Claude's gestures at each calm: the gap before the next (ms, drawn evenly from the range, each mark from its own
- * seed), a part turn's size (degrees, either way) and length (ms), a breath's swell and a ray's shimmer (fractions of
- * its size), and how often each comes ([turn, breath, shimmer, ripple, a turn with a ripple]).
+ * Claude's rare gestures: the gap before the next (ms, drawn evenly from the range, each mark from its own seed), a
+ * part turn's size (degrees, either way) and length (ms), a breath's swell and a ray's shimmer (fractions of its
+ * size), and how often each comes ([turn, breath, shimmer, ripple]).
  */
-export const CLAUDE_CALM: Readonly<Record<AgentCalm, { gap: [number, number]; turn: [number, number]; turnMs: [number, number]; breath: number; shimmer: number; weights: [number, number, number, number, number] }>> = {
-  A: { gap: [7000, 16000], turn: [12, 24], turnMs: [2200, 2800], breath: 0.015, shimmer: 0.06, weights: [3, 2, 2, 0.5, 0] },
-  B: { gap: [4000, 12000], turn: [18, 40], turnMs: [1800, 2400], breath: 0.025, shimmer: 0.09, weights: [3, 2, 2, 1, 0] },
-  C: { gap: [3000, 8000], turn: [30, 72], turnMs: [1500, 2100], breath: 0.035, shimmer: 0.12, weights: [3, 1.5, 1.5, 1.5, 1] },
+export const CLAUDE_CALM: Readonly<{ gap: [number, number]; turn: [number, number]; turnMs: [number, number]; breath: number; shimmer: number; weights: [number, number, number, number] }> = {
+  gap: [4000, 12000],
+  turn: [18, 40],
+  turnMs: [1800, 2400],
+  breath: 0.025,
+  shimmer: 0.09,
+  weights: [3, 2, 2, 1],
 };
-
-/* Prototype only (the try-it's A/B/C switch, until the owner picks one): `?am-calm=A|B|C` in the page's address. */
-const calmAsked = typeof location !== 'undefined' ? /[?&]am-calm=([ABC])\b/.exec(location.search)?.[1] : undefined;
 
 /**
  * Timers and the pointer's spring run at `clock` times their rate (a recorder that slows the page sets it; the tests
  * speed it up); `fidgets` off: no gestures; `simulatedDom`: move in a simulated DOM too (the marks' own tests, which
- * stand in for Web Animations); `calm`: Claude's liveliness (CLAUDE_CALM), read when a mark starts.
+ * stand in for Web Animations).
  */
-export const agentMotionOptions: { clock: number; fidgets: boolean; simulatedDom: boolean; calm: AgentCalm } = { clock: 1, fidgets: true, simulatedDom: false, calm: (calmAsked as AgentCalm | undefined) ?? 'B' };
+export const agentMotionOptions: { clock: number; fidgets: boolean; simulatedDom: boolean } = { clock: 1, fidgets: true, simulatedDom: false };
 
 /**
  * How far an icon follows the pointer: `shift` px of lean and `turn` degrees at most, its eyes `eyes` px more; the
@@ -360,7 +357,7 @@ const visit = (t: number, stay: number, zeta: number, omega: number) => (t < sta
    shimmer or a soft ripple round the rays; never a turn that goes on. No life loop: between gestures it is still. */
 const claudeRig = (R: Rand): Rig => {
   const n = CLAUDE_RAY_ANGLES.length;
-  const calm = CLAUDE_CALM[agentMotionOptions.calm] ?? CLAUDE_CALM.B;
+  const calm = CLAUDE_CALM;
   const parts: Rig['parts'] = { body: { sel: '[data-p="body"]' } };
   CLAUDE_RAY_ANGLES.forEach((a, i) => (parts[`r${i}`] = { sel: `[data-p="r${i}"]`, a }));
   const between = (lo: number, hi: number) => lo + (hi - lo) * R();
@@ -378,7 +375,7 @@ const claudeRig = (R: Rand): Rig => {
     if (R() < 0.3) way = -way;
     I.rotate(way * between(...calm.turn), between(...calm.turnMs));
   };
-  const [wTurn, wBreath, wShimmer, wRipple, wBoth] = calm.weights;
+  const [wTurn, wBreath, wShimmer, wRipple] = calm.weights;
   const acts: Rig['acts'] = [
     [wTurn, turn],
     [
@@ -399,20 +396,13 @@ const claudeRig = (R: Rand): Rig => {
       },
     ],
     [wRipple, (I) => ripple(I, calm.shimmer * 0.7)],
-    [
-      wBoth,
-      (I) => {
-        turn(I);
-        ripple(I, calm.shimmer * 0.6);
-      },
-    ],
   ];
   return {
     parts,
     life: () => undefined,
     lean: 0,
     gap: (first) => (first ? between(400, calm.gap[1] * 0.7) : between(...calm.gap)),
-    acts: acts.filter(([w]) => w > 0),
+    acts,
   };
 };
 
