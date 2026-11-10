@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
-import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusWords, topFirst } from './sheetModel';
+import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, topFirst } from './sheetModel';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -59,6 +59,15 @@ describe('needsYou (your turn)', () => {
     expect(needsYou(draft)).toBe('review');
     expect(statusWords(draft, NOW)).toBe('Draft · waits on your review');
   });
+});
+
+test('"Waits on" names its reviewer as a person, so the pop-up and the stack page draw their face', () => {
+  const waits = pr({ reviewers: ['nina-k', 'lena-v'], checks: 'success' });
+  expect(statusParts(waits, NOW)).toEqual(['Waits on ', { person: 'nina-k' }, ' and 1 more']);
+  expect(statusWords(waits, NOW)).toBe('Waits on nina-k and 1 more');
+  expect(statusParts(pr({ reviewers: ['nina-k'] }), NOW)).toEqual(['Waits on ', { person: 'nina-k' }]);
+  // Words with no one in them stay one plain part.
+  expect(statusParts(pr({ requested: true }), NOW)).toEqual(['Waits on your review']);
 });
 
 describe('order inside a repository', () => {

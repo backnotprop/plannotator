@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayo
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { fileSideSource } from '../ask/sideSource';
+import { useSideButton } from '../ask/sideButton';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -1523,6 +1524,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
   // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
+  const sideButton = useSideButton();
   const sideFrom = props.onSide
     ? (text: string, context: SelectionActionContext) =>
         props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
@@ -2664,6 +2666,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               scrollClear={panelOverFrame}
               mentionSource={props.mentionSource}
               onSide={sideFrom}
+              sideButton={sideButton}
               mode="selection"
               inputMethod="pinpoint"
               annotateModeActive={armed}
@@ -2945,6 +2948,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 allowImages={false}
                 quickLabels={false}
                 onSide={sideFrom}
+                sideButton={sideButton}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}

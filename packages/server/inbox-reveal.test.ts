@@ -21,6 +21,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { INBOX_SIDEBAR_DEFAULT } from "@plannotator/core/inbox-sidebar";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -865,5 +866,61 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect(tailnet.saved().inboxReveals.launch_tip.shownAt).toMatch(/^\d{4}-/);
 
     expect((await off.post("/api/inbox/reveal", { id: "launch_tip", answer: "not_now" })).status).toBe(422);
+  });
+});
+
+describe("the Sidebar tip: outside the line, stamped once when shown, never for someone who customized the sidebar", () => {
+  const KEY = "sidebar-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.sidebar_tip; a second window gets no; the same key is shown it again", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.sidebar_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.sidebar_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // Not a dialog: the line's day, spacing and load stay as they were, and its next is untouched.
+    expect(saved.dayShownAt).toBeUndefined();
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.shownLoad).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.sidebar_tip).toBe(false);
+    // Another window: no. The same page's retry after a lost answer: yes, with no second write.
+    expect((await w.claim("sidebar_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("sidebar_tip")).show).toBe(false);
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.sidebar_tip.shownAt).toBe(saved.sidebar_tip.shownAt);
+    // The Launch tip is its own stamp.
+    expect(saved.launch_tip).toBeUndefined();
+  });
+
+  test("never once a sidebar layout was saved, also one set back to the default; a save between the read and the claim refuses it unstamped", async () => {
+    const customized = await world({ config: { inboxSidebar: { ...INBOX_SIDEBAR_DEFAULT, hidden: ["feedback"] }, inboxSidebarRev: 1 } });
+    expect((await customized.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await customized.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(customized.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+
+    const w = await world();
+    expect((await w.settings()).reveal.sidebar_tip).toBe(true);
+    // The person finds Customize by themselves and ends on the default again: they know it.
+    expect((await w.post("/api/inbox/settings", { sidebar: INBOX_SIDEBAR_DEFAULT })).status).toBe(200);
+    expect((await w.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await w.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+  });
+
+  test("never on the first day; never for a guest, or as a Not now", async () => {
+    const dayZero = await world({ days: 0 });
+    expect((await dayZero.settings()).reveal.sidebar_tip).toBe(false);
+    expect((await dayZero.claim("sidebar_tip", KEY)).show).toBe(false);
+    expect(dayZero.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+
+    const tailnet = await world({ tailnet: "owner" });
+    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(false);
+    expect(tailnet.saved().inboxReveals?.sidebar_tip).toBeUndefined();
+    expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(true);
+    expect(tailnet.saved().inboxReveals.sidebar_tip.shownAt).toMatch(/^\d{4}-/);
+
+    expect((await tailnet.post("/api/inbox/reveal", { id: "sidebar_tip", answer: "not_now" })).status).toBe(422);
   });
 });

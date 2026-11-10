@@ -14,6 +14,9 @@
  * Show me and the Overview's drawing ride Shape's own switch too). These texts
  * change for everyone on purpose, so the test names the words and not the
  * texts; a control proves each word is real, with Code review and Shape on.
+ *
+ * Chapter diagrams (Settings → Capabilities, under Code review, config.json `inboxChapterDiagrams`): with Code review
+ * on and it off, no chapter diagram word reaches an agent either, Shape off or on.
  */
 import { afterAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -58,12 +61,18 @@ const CHAPTER_WORDS = {
   get_guide_brief: ["sections[].diagram", "one diagram at the top of a chapter"],
   /** INBOX_REVIEW_CURATE_DRAWING_LINE(_NO_SHAPE) and INBOX_REVIEW_RECHECK_DRAWING_LINE */
   "the review skills": ["sections[].diagram", "draw it again in the chapter"],
+  /** INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES: submit_guide's `guide` field */
+  "mcp tools/list": ["diagram?"],
 };
 
-/** Each text an agent reads, with Code review on or off (and Shape, off unless named). */
-async function agentTexts(codeReview: boolean, shape = false): Promise<Record<string, string>> {
-  const dataDir = join(root, `data-texts-${codeReview ? "on" : "off"}${shape ? "-shape" : ""}`);
+/**
+ * Each text an agent reads, with Code review on or off (and Shape, off unless named). `diagrams`: Chapter diagrams,
+ * written to config.json as the Settings switch writes it (absent: never set, on).
+ */
+async function agentTexts(codeReview: boolean, shape = false, diagrams?: boolean): Promise<Record<string, string>> {
+  const dataDir = join(root, `data-texts-${codeReview ? "on" : "off"}${shape ? "-shape" : ""}${diagrams === undefined ? "" : diagrams ? "-diagrams" : "-no-diagrams"}`);
   mkdirSync(dataDir, { recursive: true });
+  if (diagrams !== undefined) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxChapterDiagrams: diagrams }));
   const saved = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const server = await startInboxServer({ dataDir, codeReview, shape, phones: false });
@@ -135,6 +144,37 @@ test("Code review on and Shape off: no agent text holds a Show me word (no overv
   expect(texts.get_guide_brief).toContain("diffs[].notes");
   const missing = Object.entries(CHAPTER_WORDS).flatMap(([name, words]) => words.filter((word) => !texts[name]!.includes(word)).map((word) => `${name}: ${word}`));
   expect(missing).toEqual([]);
+});
+
+test("Code review on and Chapter diagrams off: no agent text holds a chapter diagram's word, Shape off or on", async () => {
+  // Every word of CHAPTER_WORDS, and in the brief and the skills any diagram or Mermaid word at all (the html kind's too).
+  const words = [...new Set(Object.values(CHAPTER_WORDS).flat())];
+  for (const shape of [false, true]) {
+    const texts = {
+      ...(await agentTexts(true, shape, false)),
+      "the review skills": inboxReviewSkills({ shape, diagrams: false }).map((skill) => skill.body).join("\n"),
+    };
+    const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${shape}: ${name}: ${word}`));
+    for (const name of ["get_guide_brief", "the review skills"]) {
+      for (const word of ["diagram", "mermaid", "plannotator shape --help"]) if (texts[name]!.toLowerCase().includes(word)) leaks.push(`${shape}: ${name}: ${word}`);
+    }
+    expect(leaks).toEqual([]);
+    // The rest of Code review's words stay: the notes rule.
+    expect(texts.get_guide_brief).toContain("diffs[].notes");
+  }
+  // Turned on again (config.json `true`), every chapter word is back.
+  const on = await agentTexts(true, false, true);
+  const back = { ...on, "the review skills": inboxReviewSkills({ diagrams: true }).map((skill) => skill.body).join("\n") };
+  const missing = Object.entries(CHAPTER_WORDS).flatMap(([name, list]) => list.filter((word) => !back[name]!.includes(word)).map((word) => `${name}: ${word}`));
+  expect(missing).toEqual([]);
+});
+
+test("Code review on and Chapter diagrams on, or never set: the agent texts are the same byte for byte", async () => {
+  for (const shape of [false, true]) {
+    const unset = await agentTexts(true, shape);
+    const on = await agentTexts(true, shape, true);
+    expect(on).toEqual(unset);
+  }
 });
 
 test("Code review and Shape on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
