@@ -56,6 +56,7 @@
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
+import { DRAFTING_EVENT_TYPE, DraftingFeed, DraftingSender } from './drafting'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import { isAbsolutePath } from './paths'
 import { shellArgv } from './shell'
@@ -1372,6 +1373,31 @@ export class InboxLink {
   /** A main-loop turn started: whatever held this session's input has let go. */
   onMainTurnStart(): void {
     this.heldForInput = false
+  }
+
+  /**
+   * The Inbox message the model is writing, told to the Inbox as it is written (drafting.ts): one post at a
+   * time, never waited for by the response. A call's first post checks that the registry's port is still this
+   * Inbox (as a tool call does), so a stale registry never sends a message's text to another process; a post
+   * the Inbox does not take (stopped, or one that predates the event) ends that call's posts.
+   */
+  private readonly draftingSender = new DraftingSender(async (post, first) => {
+    if (this.disposed) return false
+    if (first) {
+      const registry = await this.registry()
+      if (!registry || !(await this.isRunning(registry)) || this.disposed) return false
+    }
+    const response = await this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: DRAFTING_EVENT_TYPE, ...post })
+    return response?.status === 200
+  })
+
+  /** A feed for one model response's chunks (register.ts `turn.step`); `toolName` is the Inbox tool as registered. */
+  draftingFeed(toolName: string): DraftingFeed {
+    return new DraftingFeed(
+      () => Date.now(),
+      (post) => this.draftingSender.post(post),
+      toolName,
+    )
   }
 
   /** A main-loop model request of `turnId` is going out: the replies put into that turn are in it. */

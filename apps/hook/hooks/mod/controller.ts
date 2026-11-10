@@ -1860,6 +1860,14 @@ export class PlannotatorMod {
     this.inbox?.onMainStep(turnId)
   }
 
+  /**
+   * A feed for one main-loop model response as it streams, from register.ts: an Inbox message with a drawing
+   * in it is told to the Inbox as the model writes it (drafting.ts). Null where this session has no Inbox link.
+   */
+  draftingFeed(toolName: string): { onChunk(chunk: unknown): void; close(): void } | null {
+    return this.inbox?.draftingFeed(toolName) ?? null
+  }
+
   /** A model request of a turn is about to go out (turn.step), from register.ts. */
   onTurnStep(turnId: string): void {
     this.turns.onStep(turnId)

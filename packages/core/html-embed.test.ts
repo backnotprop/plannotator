@@ -11,7 +11,41 @@
  *   Escape, or an unbounded height.
  */
 import { describe, expect, test } from "bun:test";
-import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, readEmbedMessage } from "./html-embed";
+import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, readEmbedMessage, themedSvg } from "./html-embed";
+
+describe("themedSvg: a drawing takes the host's colors", () => {
+  const theme = { vars: { "--foreground": "oklch(0.2 0 0)", "--chart-1": "#123456", "--font-sans": '"Inter", sans-serif' }, scheme: "dark" as const };
+
+  test("the host's tokens come first inside the svg, before the drawing's own styles, with the text color and scheme", () => {
+    const out = themedSvg('<?xml version="1.0"?>\n<svg viewBox="0 0 1 1"><style>rect{fill:red}</style><rect fill="var(--chart-1)"/></svg>', theme);
+    const style = out.indexOf("<style>:root{");
+    expect(style).toBe(out.indexOf(">", out.indexOf("<svg")) + 1);
+    expect(style).toBeLessThan(out.indexOf("<style>rect"));
+    expect(out).toContain("--foreground:oklch(0.2 0 0);");
+    expect(out).toContain("--chart-1:#123456;");
+    expect(out).toContain("color-scheme:dark;color:var(--foreground,CanvasText)");
+    // A theme with no chart colors still gives five.
+    expect(themedSvg("<svg></svg>", { vars: {}, scheme: "light" })).toContain("--chart-5:#8b5cf6;");
+  });
+
+  test("a token value that could end the rule or the element never goes in", () => {
+    const out = themedSvg("<svg></svg>", { vars: { "--foreground": "red}</style><script>x</script>", "--card": "a;b" }, scheme: "light" });
+    expect(out).not.toContain("script");
+    expect(out).not.toContain("--card:");
+    expect(out.match(/<style>/g)).toHaveLength(1);
+  });
+
+  test("a > inside a quoted attribute does not end the opening tag, and an svg in a comment is not the drawing", () => {
+    const out = themedSvg('<!-- <svg> draft --><svg viewBox="0 0 1 1" aria-label="request -> response"><rect/></svg>', theme);
+    expect(out).toContain('aria-label="request -> response"><style>:root{');
+    expect(out.startsWith("<!-- <svg> draft --><svg viewBox")).toBe(true);
+  });
+
+  test("markup with no svg opening tag is left as it is", () => {
+    expect(themedSvg("<rect/>", theme)).toBe("<rect/>");
+    expect(themedSvg("<svg/>", theme)).toBe("<svg/>");
+  });
+});
 
 const directives = new Map(
   EMBED_RESPONSE_CSP.split(";").map((part) => {

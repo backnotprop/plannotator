@@ -154,6 +154,7 @@ import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTi
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_DRAFTING_EVENT_TYPE, INBOX_DRAFTING_MAX_JSON, liveSvgFences, partialJsonStringFields, type InboxDraftingFrame } from "@plannotator/core/inbox-drafting";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -1135,6 +1136,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const draftListeners = new Set<(threadId: string | null) => void>();
   /** An Ask AI conversation changed (inbox-ask.ts): the owner's windows' streams say `event: ask`. */
   const askListeners = new Set<(threadId: string) => void>();
+  /** An agent is writing a message with a drawing (core/inbox-drafting.ts): the windows' streams say `event: drafting`. Never stored. */
+  const draftingListeners = new Set<(frame: InboxDraftingFrame) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
@@ -3491,6 +3494,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
+        // A message being written, with a drawing in it: the open thread draws it as it grows. Windows only.
+        // Each frame holds everything so far, so a window that is behind (a slow link) skips one; never the last.
+        const onDrafting = (frame: InboxDraftingFrame) => {
+          if (!frame.done && (controller.desiredSize ?? 1) <= 0) return;
+          send(`event: drafting\ndata: ${JSON.stringify(frame)}\n\n`);
+        };
+        if (windowId) draftingListeners.add(onDrafting);
         // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId) pinListeners.add(onPins);
@@ -3566,6 +3576,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           stopReach();
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
+          draftingListeners.delete(onDrafting);
           pinListeners.delete(onPins);
           artifactPinListeners.delete(onArtifactPins);
           snoozeListeners.delete(onSnoozes);
@@ -3887,6 +3898,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (body.type === "send_now_failed" && typeof body.id === "string") {
       live.steerDone(session);
       store.clearDeliverNow(body.id, acting);
+      return json({ ok: true });
+    }
+    // The arguments of a send_message call as the model writes them: the windows draw the body's drawings so far.
+    // Only a reply (the thread is known from `reply_to`), and only while a window listens. Nothing is kept, and
+    // only the drawings go on: the words of a message that may never land stay here.
+    if (body.type === INBOX_DRAFTING_EVENT_TYPE) {
+      if (draftingListeners.size === 0 || typeof body.call !== "string" || typeof body.json !== "string" || body.json.length > INBOX_DRAFTING_MAX_JSON) return json({ ok: true });
+      const fields = partialJsonStringFields(body.json);
+      const threadId = fields.action === "send_message" && fields.reply_to ? (store.message(fields.reply_to)?.thread_id ?? null) : null;
+      if (!threadId || typeof fields.body !== "string") return json({ ok: true });
+      const drawings = liveSvgFences(fields.body);
+      const done = body.done === true;
+      if (drawings.length === 0 && !done) return json({ ok: true });
+      const frame: InboxDraftingFrame = { call: body.call.slice(0, 128), session, thread_id: threadId, drawings, done, dropped: done && body.dropped === true };
+      for (const listener of draftingListeners) listener(frame);
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {

@@ -1450,6 +1450,12 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 30px 18px; container: ib-thread / inline-size; }
 .ib-subject { font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; margin: 0 0 14px; line-height: 1.3; }
 .ib-message + .ib-message { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--ib-hair); }
+/* A drawing of a message still being written (LiveDrawings.tsx): lined up with a message's body. No rule above it:
+   one that came and went with the drawing read as a flicker (the owner, 2026-11-09). */
+.ib-drafting { padding-left: 34px; margin-top: 22px; }
+.ib-drafting-line { margin: 0 0 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-drafting-svg { display: block; height: auto; max-width: 100%; }
+.ib-drafting-svg + .ib-drafting-svg { margin-top: 12px; }
 /* The body lines up with the head row's name: the 24 px mark and its 10 px gap (inbox-polish, item 5). */
 .ib-msg { padding-left: 34px; }
 .ib-attach-h { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
