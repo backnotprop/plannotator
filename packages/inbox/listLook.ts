@@ -26,6 +26,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { inboxRowsBy, type InboxRowsBy } from '@plannotator/core/inbox-rows-words';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -357,7 +358,7 @@ export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): v
  * relay frames, and a rows frame has no seq to tell copies apart, sharedEvents.ts). Only a settings read can tell
  * which, so `onDoubt` asks for one.
  */
-export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void): void {
+export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void, last?: { prev: unknown; by: unknown }): void {
   if (rows === undefined) return;
   if (typeof rev === 'number') {
     if (rev <= eventRev) {
@@ -367,6 +368,24 @@ export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void
     eventRev = rev;
   }
   adopt(rows, rev);
+  // An agent's command made this save (`plannotator inbox rows set`): Settings → Rows says who, with Undo.
+  const by = inboxRowsBy(last?.by);
+  const before = inboxRowsRead(last?.prev);
+  const after = inboxRowsRead(rows);
+  if (by && before && after) for (const listener of agentChangeListeners) listener({ by, before: lookFromRows(before), after: lookFromRows(after) });
+}
+
+/** A rows save an agent's command made, as the windows hear it: who, the look before it and the look it saved. */
+export interface AgentRowsChange {
+  by: InboxRowsBy;
+  before: ListLook;
+  after: ListLook;
+}
+const agentChangeListeners = new Set<(change: AgentRowsChange) => void>();
+/** Hear each save an agent's command makes while the page is open. Returns the way to stop. */
+export function onAgentRowsChange(listener: (change: AgentRowsChange) => void): () => void {
+  agentChangeListeners.add(listener);
+  return () => void agentChangeListeners.delete(listener);
 }
 
 function adopt(rows: unknown, rev: unknown): void {

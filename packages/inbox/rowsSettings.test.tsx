@@ -35,6 +35,8 @@ beforeEach(() => {
   stored = new Map<string, string>();
   setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
   globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+    // The ask box reads who is running (none here); every other call is the settings save.
+    if (!init?.body) return new Response(JSON.stringify({ projects: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     const rows = (JSON.parse(init?.body ?? '{}') as { rows?: unknown[] }).rows;
     if (rows) saves.push(rows);
     return new Response(JSON.stringify({ rows }), { status: 200, headers: { 'Content-Type': 'application/json' } });
