@@ -2,12 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
 import type { InboxAskChat, InboxAskConversationWire, InboxAskModel } from '../api';
 import { useOpenInCodeRegion } from '../components/OpenIn';
-import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
 import { readAsk } from './askReads';
 import { askUnseen } from './askModel';
 import { sideQuote } from './askWords';
+import { sideButtonFor, type SideButton } from './sideButton';
 
 export interface InboxAskOptions {
   /** The settings are read, this is not a tailnet guest's page, and not the tour: while false nothing is read and nothing shows. */
@@ -22,14 +22,25 @@ export interface InboxAskOptions {
 }
 
 export interface InboxAskParts {
-  /** The Ask AI icon for the thread's top bar, or null. The only icon: a full-screen file's bar has none. */
-  button: ReactNode;
   /**
    * Side in a message's or a file's selection bar (approval "inbox-ask-ai-flow", 2026-11-08): the selected
-   * words, quoted, open the thread's chat. Undefined wherever the icon is null (this thread cannot ask, Ask off),
+   * words, quoted, open the thread's chat. Undefined while this thread cannot ask (`can_ask` false, Ask off),
    * and in the phone layout (`phone`, App's usePhone), where the owner keeps the selection bar without it.
    */
   side: ((selected: string, source?: string) => void) | undefined;
+  /**
+   * How the selection bar draws Side (approval "inbox-side-button", 2026-11-09): the mark of the agent that owns the
+   * thread and "Side chat with <agent>", or the two bubbles and "Side chat" (sideButton.tsx). App provides it to the
+   * thread's selection bars through `SideButtonContext`.
+   */
+  sideButton: SideButton;
+  /**
+   * The reply box's `/side` (the owner, 2026-11-09: "Similar to draw, I want a baked in command for side chat"): the
+   * words typed in the reply go to the thread's chat, in its box after any words already there, unquoted, and the box
+   * takes focus; `taken` is called once they are in the box, so the reply clears only then. No words: the chat just
+   * opens. Undefined exactly where `side` is: the command is listed only where it works.
+   */
+  sideWords: ((words: string, taken?: () => void) => void) | undefined;
   /** The window. Outside the thread's section: see AskChat. */
   layer: ReactNode;
   /**
@@ -63,19 +74,6 @@ export interface AskCorner {
 }
 
 /**
- * Lucide's messages-square (ISC), the two bubbles Side wears in the selection bar: `packages/inbox` does not depend
- * on lucide. The owner dropped the sparkles for it (approval "inbox-ask-ai-flow", 2026-11-08).
- */
-function MessagesSquareIcon() {
-  return (
-    <svg className="ib-ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" data-ask-icon="messages-square">
-      <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-      <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />
-    </svg>
-  );
-}
-
-/**
  * Ask AI in the Inbox, for App.tsx: one window whose chat follows the open
  * thread. A thread comes back as it was left: open if it was open, minimized
  * otherwise. Picking a row only changes `#thread=`, so the window shows the
@@ -94,7 +92,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
-  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number; source?: string } | null>(null);
+  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number; source?: string; taken?: () => void } | null>(null);
   /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
   const wantsFocus = useRef<string | null>(null);
   const askForFocus = (threadId: string) => {
@@ -144,20 +142,6 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   }, [askFor, store]);
 
   const model = read?.threadId === askFor ? read.model : null;
-  const pressed = !minimized && askFor !== null;
-
-  const press = () => {
-    if (!askFor) return;
-    if (pressed) {
-      openChats.current.delete(askFor);
-      store.setMinimized(true);
-      return;
-    }
-    openChats.current.add(askFor);
-    store.setMinimized(false);
-    askForFocus(askFor);
-  };
-
   const pick = (chat: InboxAskChat) => {
     if (chat.thread_id === askFor) return;
     openChats.current.add(chat.thread_id);
@@ -177,24 +161,18 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     });
   };
 
-  const button =
-    model?.can_ask ? (
-      <Tip content="Ask AI about this thread">
-        <button type="button" className="ib-iconbtn ib-artbtn" aria-label="Ask AI about this thread" aria-pressed={pressed} data-chat-launcher="" data-ask-open="" onClick={press}>
-          <MessagesSquareIcon />
-        </button>
-      </Tip>
-    ) : null;
-
   // One function for the window's life (a review's selection actions hold it): the thread on screen through its ref.
   const askWith = useCallback(
-    (words: string, source?: string) => {
+    (words: string, source?: string, taken?: () => void) => {
       const thread = onScreen.current;
       if (!thread) return;
       openChats.current.add(thread);
       store.setMinimized(false);
-      seedCount += 1;
-      setSeed({ threadId: thread, words, token: seedCount, ...(source ? { source } : {}) });
+      // No words (a bare `/side`): the chat opens with its box as it was.
+      if (words.trim()) {
+        seedCount += 1;
+        setSeed({ threadId: thread, words, token: seedCount, ...(source ? { source } : {}), ...(taken ? { taken } : {}) });
+      }
       wantsFocus.current = thread;
       setFocusRequest((count) => count + 1);
     },
@@ -224,14 +202,19 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
 
   const canAsk = model?.can_ask === true;
   const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
+  const sideWords = useCallback((words: string, taken?: () => void) => askWith(words, undefined, taken), [askWith]);
+
+  const sideHost = model?.agent?.host ?? null;
+  const sideButton = useMemo(() => sideButtonFor(sideHost), [sideHost]);
 
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
   return {
     askWith,
     corner,
-    button,
     side: canAsk && !phone ? side : undefined,
+    sideWords: canAsk && !phone ? sideWords : undefined,
+    sideButton,
     layer: askFor ? (
       // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
       <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>

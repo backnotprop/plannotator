@@ -6,7 +6,7 @@
  * itself are gone and the Inbox page is clear and settled, never over something typed or open, nor over a question
  * waiting in the open thread. The claim goes through the line (`useLineReveal`: `POST /api/inbox/reveal` `code_review`,
  * one stamp per Inbox, safe to repeat with the page's key). The agent note waits for it (`settled`), then keeps the
- * line's one-a-day rule.
+ * line's gap.
  *
  * "Turn on code review" saves the switch as Settings → Capabilities does; "Not now", Escape and a click outside are the
  * line's Not now (`inboxApi.revealNotNow('code_review')`) and leave it off. Every way out is final.
@@ -16,7 +16,7 @@ import { useRef } from 'react';
 import { useLineReveal, type RevealStage } from './reveal';
 
 export interface CodeReviewOfferInput {
-  /** The Inbox has it next for this page (settings `reveal.next === 'code_review'`), read once per load. */
+  /** The Inbox has it next for this page (settings `reveal.next === 'code_review'`), as the load's latch holds it (reveal.ts `useLineLatch`). */
   due: boolean;
   /** An update, the sound or another one-time dialog was on screen on this load. */
   blocked: boolean;

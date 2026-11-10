@@ -151,15 +151,15 @@ export function prototypeTargets(markdown: string): PrototypeTarget[] {
   return out;
 }
 
-/** Each question block of a body, parsed as the Inbox reads it. */
-function questionBlocksOf(markdown: string): { key: string; startLine: number; parsed: ParsedQuestion }[] {
+/** Each question block of a body (or an attached file, `frontmatter` as its viewer reads it), parsed as the Inbox reads it. */
+function questionBlocksOf(markdown: string, frontmatter = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];
   // Each block is read over the markdown with reference links resolved, as
   // the renderer reads it, so a prompt written with a reference link keeps
   // the key the card computes.
   const resolved = resolveReferenceLinks(markdown).split("\n");
   const out: { key: string; startLine: number; parsed: ParsedQuestion }[] = [];
-  for (const location of findQuestionBlocks(markdown, { frontmatter: false })) {
+  for (const location of findQuestionBlocks(markdown, { frontmatter })) {
     const lines = resolved
       .slice(location.startLine - 1, location.endLine)
       .join("\n")
@@ -177,11 +177,13 @@ function questionBlocksOf(markdown: string): { key: string; startLine: number; p
 /**
  * The question blocks of a message body, in block order. A body is read like
  * a comment: no frontmatter. A body with no block (or none that parses)
- * answers [].
+ * answers []. An attached Markdown file (issue #2828) is read as its viewer
+ * reads it: `frontmatter: true` for a `.md` file, whose leading `--- … ---`
+ * block the viewer strips (lines stay the file's).
  */
-export function parseInboxQuestionBlocks(markdown: string): ParsedInboxQuestion[] {
+export function parseInboxQuestionBlocks(markdown: string, options: { frontmatter?: boolean } = {}): ParsedInboxQuestion[] {
   const out: ParsedInboxQuestion[] = [];
-  for (const { key, startLine, parsed } of questionBlocksOf(markdown)) {
+  for (const { key, startLine, parsed } of questionBlocksOf(markdown, options.frontmatter === true)) {
     const location = { key, startLine };
     const context = parsed.context.trim();
     out.push({
@@ -437,7 +439,55 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
           action_result: record.action_result ? { ...record.action_result } : null,
         }
       : {}),
+    ...(record.attachment ? { attachment: { ...record.attachment } } : {}),
   };
+}
+
+// ─────────────────────── Questions in attached files ───────────────────────
+
+/**
+ * The record key of a question inside an attached file (issue #2828): its key
+ * in the file when no question of the message has it yet, else the first
+ * free `-N` (N from 2) on the key the file's parser hashed. Every key keeps
+ * the shape `parseInboxSupersedeRef` reads (`q-<hash8>` with an optional
+ * `-N` of up to three digits), so the agent supersedes or replaces it like
+ * any other. `taken` holds the message's keys so far (its body's first);
+ * the key returned is added to it. Null when no free key is left (the
+ * question is not recorded, its card stays read-only).
+ */
+export function inboxFileQuestionKey(fileKey: string, taken: Set<string>): string | null {
+  if (!taken.has(fileKey)) {
+    taken.add(fileKey);
+    return fileKey;
+  }
+  const base = fileKey.replace(/-\d{1,3}$/, "");
+  for (let n = 2; n <= 999; n++) {
+    const key = `${base}-${n}`;
+    if (taken.has(key)) continue;
+    taken.add(key);
+    return key;
+  }
+  return null;
+}
+
+/** A question's place in its message: the body (null) or the attached file it is in. Sorted: the body first, then each file in the message's attachment order. */
+export function inboxQuestionPlace(q: { attachment?: { id: string } | null }): string | null {
+  return q.attachment?.id ?? null;
+}
+
+/**
+ * A message's questions in the order its places show them: the body's by
+ * position, then each attached file's by position, the files in the order
+ * they first appear in `list` (the store keeps them in the message's
+ * attachment order). Stable; a new array.
+ */
+export function inboxQuestionsInPlaceOrder<T extends { position: number; attachment?: { id: string } | null }>(list: readonly T[]): T[] {
+  const rank = new Map<string | null, number>([[null, 0]]);
+  for (const q of list) {
+    const place = inboxQuestionPlace(q);
+    if (!rank.has(place)) rank.set(place, rank.size);
+  }
+  return [...list].sort((a, b) => rank.get(inboxQuestionPlace(a))! - rank.get(inboxQuestionPlace(b))! || a.position - b.position);
 }
 
 // ─────────────────────────────── Superseding ───────────────────────────────
@@ -668,11 +718,14 @@ function composeReplyParts(input: {
   // Action items (`kind: "action"`) are reported in their own section ("Actions
   // you asked for"), never numbered or counted as questions here.
   const questionsOnly = <T extends { kind: string }>(list: readonly T[]): T[] => list.filter((q) => q.kind !== "action");
-  const groups: readonly InboxReplyMessageAnswers[] = (
+  const groups: readonly PlaceAnswers[] = (
     input.messages ?? [
       { message_id: input.questions[0]?.message_id ?? input.replyTo ?? "", questions: input.questions, sent: input.sent, earlier: input.earlier },
     ]
-  ).map((g) => ({ ...g, questions: questionsOnly(g.questions), sent: questionsOnly(g.sent), earlier: questionsOnly(g.earlier) }));
+  )
+    .map((g) => ({ ...g, questions: questionsOnly(g.questions), sent: questionsOnly(g.sent), earlier: questionsOnly(g.earlier) }))
+    // A message's questions inside an attached file (issue #2828) are answered in a group of their own, numbered as that file's cards.
+    .flatMap(splitByPlace);
   // The same rule as the answers section's "x of y answered" line
   // (formatQuestionAnswersSection): a pick, Other or text answers; a note
   // alone answers only a settled question; a skip that answers nothing is a
@@ -689,7 +742,9 @@ function composeReplyParts(input: {
   }
   const sentence = replySentence(answered, skipped);
   const sentGroups = groups.filter((g) => g.sent.length > 0);
-  const labelled = sentGroups.length > 1 || (sentGroups.length === 1 && input.replyTo !== undefined && sentGroups[0]!.message_id !== input.replyTo);
+  const labelled =
+    sentGroups.length > 1 ||
+    (sentGroups.length === 1 && (sentGroups[0]!.file !== null || (input.replyTo !== undefined && sentGroups[0]!.message_id !== input.replyTo)));
   let section = "";
   if (sentGroups.length === 1 && !labelled) {
     section = answersSection(sentGroups[0]!, 2);
@@ -697,7 +752,7 @@ function composeReplyParts(input: {
     // One section, a sub-heading per message: the agent can tell which "Q1" is which.
     const parts = sentGroups.flatMap((g) => {
       const body = answersSection(g, 3).replace(/^### [^\n]*\n\n/, "");
-      return body === "" ? [] : [`### Your message ${g.message_id}\n\n${body}`];
+      return body === "" ? [] : [`${answersGroupHeading(g)}\n\n${body}`];
     });
     if (parts.length > 0) section = `## ${QUESTION_ANSWERS_HEADING}\n\n${parts.join("\n\n")}`;
   }
@@ -727,6 +782,38 @@ export interface InboxReplyMessageAnswers {
   questions: readonly InboxQuestionRecord[];
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
+}
+
+/** A group of the answers section: a message's body questions (`file` null), or its questions inside one attached file. */
+type PlaceAnswers = InboxReplyMessageAnswers & { file: InboxQuestionRecord["attachment"] | null };
+
+/** A file's name as one line of the reply (a name never holds a newline, but a reply's grammar must not break if one did). */
+const fileNameLine = (name: string): string => name.replace(/\s+/g, " ").trim() || "file";
+
+/**
+ * One message's questions split by where they were asked (issue #2828): the
+ * body's first, then each attached file's, in the order the store keeps them.
+ * Each answer goes with its question's place; one whose question is not
+ * listed stays with the body (as before).
+ */
+function splitByPlace(group: InboxReplyMessageAnswers): PlaceAnswers[] {
+  if (!group.questions.some((q) => q.attachment)) return [{ ...group, file: null }];
+  const places = new Map<string | null, PlaceAnswers>([[null, { message_id: group.message_id, questions: [], sent: [], earlier: [], file: null }]]);
+  const placeOfKey = new Map<string, string | null>();
+  for (const q of group.questions) {
+    const place = inboxQuestionPlace(q);
+    if (!places.has(place)) places.set(place, { message_id: group.message_id, questions: [], sent: [], earlier: [], file: q.attachment ?? null });
+    (places.get(place)!.questions as InboxQuestionRecord[]).push(q);
+    placeOfKey.set(q.key, place);
+  }
+  for (const a of group.sent) (places.get(placeOfKey.get(a.key) ?? null)!.sent as QuestionAnswer[]).push(a);
+  for (const a of group.earlier) (places.get(placeOfKey.get(a.key) ?? null)!.earlier as QuestionAnswer[]).push(a);
+  return [...places.values()].filter((p) => p.file === null || p.questions.length > 0);
+}
+
+/** A labelled group's heading: "### Your message <id>", or for an attached file's questions "### Your file <name>, attached to message <id>". */
+function answersGroupHeading(group: PlaceAnswers): string {
+  return group.file ? `### Your file ${fileNameLine(group.file.name)}, attached to message ${group.message_id}` : `### Your message ${group.message_id}`;
 }
 
 /** One message's "Answers to your questions" section, at a heading level (its questions numbered as its cards are). */
@@ -860,7 +947,7 @@ const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}
 export const INBOX_REPLY_SENTENCE_LINE = /^(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.$/;
 
 const ANSWERS_SECTION_HEADING_LINE = `## ${QUESTION_ANSWERS_HEADING}`;
-const ANSWERS_GROUP_LINE = /^### Your message msg_[A-Za-z0-9]+$/;
+const ANSWERS_GROUP_LINE = /^### Your (?:message|file .+, attached to message) msg_[A-Za-z0-9]+$/;
 
 /**
  * Where a reply's "Answers to your questions" section that starts at line
@@ -991,12 +1078,13 @@ export function inboxSkipAnswer(record: { key: string; kind: QuestionKind; promp
 }
 
 /** Questions as `- Q1. <prompt>`, then action items as `- A1. <what to do>` (each numbered as its card). */
-function numberedLines(records: readonly (Pick<InboxQuestionRecord, "position" | "prompt"> & { kind?: string })[]): string[] {
-  const line = (prefix: string) => (q: Pick<InboxQuestionRecord, "position" | "prompt">) => `- ${prefix}${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}`;
-  const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
+function numberedLines(records: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string[] {
+  // A question inside an attached file is numbered as that file's cards, and says which file (issue #2828).
+  const line = (prefix: string) => (q: Pick<InboxQuestionRecord, "position" | "prompt" | "attachment">) =>
+    `- ${prefix}${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}${q.attachment ? ` (in your file ${fileNameLine(q.attachment.name)})` : ""}`;
   return [
-    ...records.filter((q) => q.kind !== "action").sort(byPosition).map(line("Q")),
-    ...records.filter((q) => q.kind === "action").sort(byPosition).map(line("A")),
+    ...inboxQuestionsInPlaceOrder(records.filter((q) => q.kind !== "action")).map(line("Q")),
+    ...inboxQuestionsInPlaceOrder(records.filter((q) => q.kind === "action")).map(line("A")),
   ];
 }
 
@@ -1008,7 +1096,7 @@ export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:"
  * (approval 2026-10-11: "tells the asking agent once"): the heading, then
  * each question with its card number.
  */
-export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt"> & { kind?: string })[]): string {
+export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
 }
@@ -1021,7 +1109,7 @@ export const INBOX_REOPENED_HEADING = "The person reopened these:";
  * not to wait on those questions: they are open again, and wait on the
  * person, so the agent must not go on as if they were set aside.
  */
-export function composeInboxReopenedBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt"> & { kind?: string })[]): string {
+export function composeInboxReopenedBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_REOPENED_HEADING, "", ...lines, "", "They are open again in the Inbox; wait for the person's answer before you rely on them."].join("\n");
 }

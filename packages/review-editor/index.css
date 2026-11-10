@@ -2317,6 +2317,7 @@ diffs-container {
 [data-markdown-preview] pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
+  min-width: max-content;
 }
 
 /* Code navigation peek panel — strip the syntax theme's block background */

@@ -20,7 +20,7 @@
  * and each `trak`'s `tkhd` + `mdia/hdlr` for the first video track's size.
  * It reads a few hundred bytes in all and visits a bounded number of boxes, so
  * a hostile file costs nothing. A parsed `moov` with tracks but no video track
- * is audio (an `.m4a` named `.mp4`): the caller keeps it a `file`.
+ * is audio (an `.m4a` named `.mp4`): the caller makes it `audio` (audio.ts).
  */
 
 /** Brands that hold video. */
@@ -90,7 +90,7 @@ function u64(bytes: Uint8Array, at: number): number {
 }
 
 /** The `ftyp` brands of an ISO base media file, or null when it is not one. */
-function ftypBrands(head: Uint8Array): { major: string; compatible: string[] } | null {
+export function ftypBrands(head: Uint8Array): { major: string; compatible: string[] } | null {
   if (head.length < 16 || fourcc(head, 4) !== "ftyp") return null;
   const size = u32(head, 0);
   if (size < 16) return null;
@@ -101,7 +101,7 @@ function ftypBrands(head: Uint8Array): { major: string; compatible: string[] } |
 }
 
 /** An EBML variable-length integer at `at`: its value (marker removed unless `keepMarker`) and its length. */
-function vint(bytes: Uint8Array, at: number, keepMarker: boolean): { value: number; length: number; unknown: boolean } | null {
+export function vint(bytes: Uint8Array, at: number, keepMarker: boolean): { value: number; length: number; unknown: boolean } | null {
   const first = bytes[at];
   if (first === undefined || first === 0) return null;
   let length = 1;
@@ -118,7 +118,7 @@ function vint(bytes: Uint8Array, at: number, keepMarker: boolean): { value: numb
 }
 
 /** The DocType a WebM/Matroska EBML header names, or null when the bytes do not start with one. */
-function ebmlDocType(head: Uint8Array): string | null {
+export function ebmlDocType(head: Uint8Array): string | null {
   if (head.length < 8 || head[0] !== 0x1a || head[1] !== 0x45 || head[2] !== 0xdf || head[3] !== 0xa3) return null;
   const size = vint(head, 4, false);
   if (!size) return null;

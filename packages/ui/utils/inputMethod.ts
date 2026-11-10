@@ -15,6 +15,8 @@ const DEFAULT_HTML_METHOD: InputMethod = 'pinpoint';
 export type InputMethodSurface = 'markdown' | 'html';
 
 function parseInputMethod(value: unknown): InputMethod | null {
+  // `word` was a third method for a short while; its click is part of Select now.
+  if (value === 'word') return 'drag';
   return value === 'drag' || value === 'pinpoint' ? value : null;
 }
 

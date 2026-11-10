@@ -62,8 +62,13 @@ export function launchOff(dataDir: string): void {
   writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
 }
 
-/** The config.json key every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. */
-export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false } } as const;
+/**
+ * The config.json keys every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. Besides
+ * launch off, the one-time "themes" dialog is settled (as for someone on another theme): on a release build it is due
+ * from day one for the default theme and opens 15 s into the page, over whatever a spec is doing. The spec about that
+ * dialog takes the key out.
+ */
+export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } } as const;
 
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch

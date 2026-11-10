@@ -218,7 +218,7 @@ test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the 
   const choice = () => document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="totman"]');
   await until(() => choice() !== null, 'the Favicon row');
   const labels = [...document.querySelectorAll('input[name="ib-favicon"]')].map((input) => input.closest('label')?.textContent);
-  expect(labels).toEqual(['Glass', 'Face', 'P']);
+  expect(labels).toEqual(['Glass', 'Yellow', 'Face']);
   expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="glass"]')?.checked).toBe(true);
 
   act(() => choice()!.click());

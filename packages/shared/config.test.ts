@@ -748,9 +748,9 @@ describe("favicon config persistence", () => {
   });
 
   test("persists and reads valid favicon styles via saveConfig and getServerConfig", () => {
-    saveConfig({ favicon: "classic" });
-    expect(loadConfig().favicon).toBe("classic");
-    expect(getServerConfig(null).favicon).toBe("classic");
+    saveConfig({ favicon: "yellow" });
+    expect(loadConfig().favicon).toBe("yellow");
+    expect(getServerConfig(null).favicon).toBe("yellow");
 
     saveConfig({ favicon: "totman" });
     expect(loadConfig().favicon).toBe("totman");
@@ -762,6 +762,12 @@ describe("favicon config persistence", () => {
     saveConfig({ favicon: unknownFavicon });
     expect(loadConfig().favicon).toBe(unknownFavicon);
     expect(getServerConfig(null).favicon).toBeUndefined();
+  });
+
+  test("a 'classic' left by 0.28.57 (the removed P icon) reads as unset and stays in the file", () => {
+    saveConfig({ favicon: "classic" as unknown as PlannotatorConfig["favicon"] });
+    expect(getServerConfig(null).favicon).toBeUndefined();
+    expect(loadConfig().favicon as string).toBe("classic");
   });
 });
 
@@ -841,8 +847,8 @@ describe("saveConfig never writes over a config.json it could not read", () => {
   test("a UTF-8 BOM (Notepad's “UTF-8 with BOM”) is read, and a save keeps every setting", () => {
     writeFileSync(configPath(), '﻿{"displayName":"Ada","theme":{"mode":"dark"}}');
     expect(loadConfig().displayName).toBe("Ada");
-    expect(saveConfig({ favicon: "classic" })).toBe(true);
-    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "classic" });
+    expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
   });
 
   test("a hand-edited value a save does not name is kept verbatim, whatever it holds", () => {
@@ -910,12 +916,12 @@ describe("saveConfig write serialization", () => {
     await Promise.all([
       (async () => saveConfig({ displayName: "a" }))(),
       (async () => saveConfig({ conventionalComments: true }))(),
-      (async () => saveConfig({ favicon: "classic" }))(),
+      (async () => saveConfig({ favicon: "yellow" }))(),
     ]);
     const cfg = loadConfig();
     expect(cfg.displayName).toBe("a");
     expect(cfg.conventionalComments).toBe(true);
-    expect(cfg.favicon).toBe("classic");
+    expect(cfg.favicon).toBe("yellow");
   });
 
   test("a lock left behind by a dead writer is taken over, not waited out", () => {

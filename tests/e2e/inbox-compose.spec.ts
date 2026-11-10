@@ -405,15 +405,16 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     const sheet = mobile.locator('dialog[data-compose]');
     await expect(sheet.locator('.ib-cp-bar h2')).toHaveText('New message');
     // Empty: no Save draft, and Send at the foot is disabled.
-    await expect(sheet.locator('.ib-cp-tobtn')).not.toHaveAttribute('data-loading', /.*/);
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveCount(0);
     await expect(sheet.locator('.ib-cp-foot [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
     await sheet.getByRole('textbox', { name: 'Message' }).fill('Rename the Quiet section to “Done”? Quiet reads like “muted” to me.');
-    // To starts empty: the top bar offers Save draft until a session is picked.
-    await expect(sheet.locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
+    // To (the pill in the foot's row) starts empty: the top bar offers Save draft until a session is picked.
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).toHaveAttribute('data-compose-to', 'choose');
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveText('Save draft');
-    await sheet.locator('.ib-cp-tobtn').click();
-    await sheet.locator('[data-compose-session="ses-claude"]').click();
+    await sheet.locator('.ib-cp-foot [data-compose-to]').click();
+    await sheet.locator('[data-compose-to-sheet] [data-compose-session="ses-claude"]').click();
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).toHaveAttribute('data-compose-to', 'ses-claude');
     await shot(mobile, '10-phone-compose', ['dark', 'light']);
     await sheet.locator('.ib-cp-foot [data-compose-send]').click();
     await expect(sheet).toHaveCount(0);
@@ -424,7 +425,7 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await mobile.locator('.ib-drafts [data-open-compose], .ib-drafts .ib-lhead-compose').first().click();
     await mobile.locator('dialog[data-compose] [data-compose-text] textarea').fill('A draft kept from a phone.');
     // Kept for a live session (the Drafts page's "is live" chip, later): To is picked, never filled by itself.
-    await mobile.locator('dialog[data-compose] .ib-cp-tobtn').click();
+    await mobile.locator('dialog[data-compose] .ib-cp-foot [data-compose-to]').click();
     await mobile.locator('dialog[data-compose] [data-compose-session="ses-claude"]').click();
     // Cancel keeps it as a draft, with no question.
     await mobile.locator('dialog[data-compose] [data-compose-cancel]').click();

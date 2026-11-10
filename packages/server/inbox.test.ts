@@ -18,7 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -869,7 +869,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
       expect(await read()).toBe("glass");
       expect(await icon()).toEqual(FAVICON_PNG_BYTES);
-      for (const bad of ["face", "Glass", "", null, 1, { style: "glass" }]) {
+      // "classic" was the P icon until it was removed after 0.28.57: no longer a choice.
+      for (const bad of ["face", "Glass", "classic", "", null, 1, { style: "glass" }]) {
         const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
         expect(refused.status).toBe(422);
         expect((await refused.json()).code).toBe("validation_error");
@@ -881,7 +882,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       for (const [style, bytes] of [
         ["totman", FACE_FAVICON_PNG_BYTES],
-        ["classic", P_FAVICON_PNG_BYTES],
+        ["yellow", YELLOW_FAVICON_PNG_BYTES],
         ["glass", FAVICON_PNG_BYTES],
       ] as const) {
         const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: style });
@@ -894,6 +895,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
       expect(await read()).toBe("totman");
+      // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      expect(onDisk().favicon).toBe("classic");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
@@ -936,7 +942,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
+      // With it: the look from before (never saved reads as the defaults) and who saved (no one: the window), for Undo.
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames"], inboxRowsBy: null });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -945,7 +952,8 @@ describe("the window's routes: settings, restart, favicon", () => {
         if (chunk && chunk.value) text += decoder.decode(chunk.value);
       }
       controller.abort();
-      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1 })}`);
+      // With the look from before and who saved (the window: no one), for "<agent> changed" and Undo.
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1, prev: ["smallNames"], by: null })}`);
 
       // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
       const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });
@@ -973,6 +981,61 @@ describe("the window's routes: settings, restart, favicon", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
       expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-rows-settings-page" ("tell your agent"): `plannotator inbox rows set` saves with who made it, and
+  // any save can be undone once. What can regress: an agent's save the windows cannot attribute, a save that forgets
+  // the look before it, an undo that is not one save (or that invents a look when there is nothing to put back), and
+  // `rows_by` or `rows_undo` reaching another setting.
+  test("a rows save keeps the look before it and who made it; windows hear both; rows_undo puts the look back once", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13, inboxRows: ["smallNames", "roomy"], inboxRowsRev: 4, inboxRowsDefaults: 2 }));
+      const server = await start(dataDir);
+      const save = async (body: Record<string, unknown>) => {
+        const res = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+      };
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      // A look saved before this build has nothing to undo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 4, rows_undone: false, rows_prev: null, rows_by: null });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-rows-by&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+      const heard = async (rev: number) => {
+        while (!text.includes(`"rev":${rev}`)) text += decoder.decode((await reader.read()).value);
+        return JSON.parse(text.split("\n").find((line) => line.startsWith("data: ") && line.includes(`"rev":${rev}`))!.slice(6)) as Record<string, unknown>;
+      };
+
+      // An agent's command: who made it rides with the save, to the file, the answer and every window.
+      const by = { host: "claude-code", session: "ses_rows" };
+      expect((await save({ rows: ["compact", "smallNames"], rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 5, rows_prev: ["smallNames", "roomy"], rows_by: by });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "smallNames"], inboxRowsRev: 5, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: by });
+      expect(await heard(5)).toEqual({ rows: ["compact", "smallNames"], rev: 5, prev: ["smallNames", "roomy"], by });
+
+      // Undo is one save of the look from before, by whoever asked (here the window: no one); undo again is a redo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 6, rows_undone: true, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect(await heard(6)).toEqual({ rows: ["smallNames", "roomy"], rev: 6, prev: ["compact", "smallNames"], by: null });
+      expect((await save({ rows_undo: true, rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 7, rows_undone: true, rows_by: by });
+      // A save of the same look leaves nothing to put back.
+      expect((await save({ rows: ["compact", "smallNames"] })).body).toMatchObject({ rows_rev: 8, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows_rev: 8, rows_undone: false });
+      // A `rows_by` that is not a host and a session is no one, never an error; no other setting moved.
+      expect((await save({ rows: ["smallNames"], rows_by: { host: "claude-code" } })).body).toMatchObject({ rows: ["smallNames"], rows_rev: 9, rows_by: null });
+      expect(onDisk().inboxTextSize).toBe(13);
+      controller.abort();
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

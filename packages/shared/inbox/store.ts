@@ -43,6 +43,8 @@ import {
   derivePersonThreadSubject,
   inboxQuestionState,
   inboxReplyStillOpenOf,
+  inboxFileQuestionKey,
+  inboxQuestionsInPlaceOrder,
   inboxQuestionWaitsOnPerson,
   inboxRowWaits,
   isInboxQuestionSupersedable,
@@ -52,6 +54,7 @@ import {
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
+  type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import {
@@ -140,6 +143,7 @@ import {
   isInboxAnnotationId,
   isInboxAnnotationVersion,
   isInboxAnnotatableKind,
+  isInboxTimedKind,
   INBOX_VIDEO_BLOCK_ID,
   readInboxAttachmentKind,
   readInboxVideoTime,
@@ -264,6 +268,14 @@ export interface InboxSendInput {
   thread?: string | null;
   /** The files attached, already recorded (blobs written) by recordInboxAttachments. */
   attachments?: InboxAttachment[];
+  /**
+   * The question blocks inside attached Markdown files (issue #2828), read by
+   * the server from each sent version (`parseInboxQuestionBlocks` as the
+   * file's viewer reads it), by the attachment's id. Each becomes a question
+   * of this message (`InboxQuestionRecord.attachment`), after the body's, in
+   * attachment order. An id that names none of `attachments` is ignored.
+   */
+  attachment_questions?: readonly { attachment_id: string; questions: readonly ParsedInboxQuestion[] }[];
   /**
    * The images the body shows, already captured (blobs written) by
    * captureInboxInlineImages. Absent: the body shows none (nothing is
@@ -1732,7 +1744,8 @@ export class InboxStore {
   private questionRecords(messageId: string): InboxQuestionRecord[] {
     const out: InboxQuestionRecord[] = [];
     for (const id of this.messageQuestions.get(messageId) ?? []) out.push(this.questions.get(id)!);
-    return out.sort((a, b) => a.position - b.position);
+    // The body's by position, then each attached file's (issue #2828), the files in the order they were written.
+    return inboxQuestionsInPlaceOrder(out);
   }
 
   private isResolved(threadId: string): boolean {
@@ -2041,12 +2054,17 @@ export class InboxStore {
    * this one, which is addressed to someone else.
    */
   private threadNameTaken(projectId: string, name: string, exceptRoot: string | null): boolean {
+    return this.openThreadsNamed(projectId, name, exceptRoot).length > 0;
+  }
+
+  /** The OPEN threads of the project that have this name (`threadNameTaken`'s rule), but `exceptRoot`. */
+  private openThreadsNamed(projectId: string, name: string, exceptRoot: string | null): string[] {
     const key = inboxThreadNameKey(name);
     // Threads the person started that still carry their compose name (an agent may have replaced a suggestion).
     const personRoots = this.projectGroup(projectId)
       .flatMap((id) => this.personNamed.get(`${id}\0${key}`) ?? [])
       .filter((rootId) => inboxThreadNameKey(this.messages.get(rootId)?.thread_name ?? "") === key);
-    return [...this.rootsNamed(projectId, name), ...personRoots].some((rootId) => rootId !== exceptRoot && !this.isResolved(rootId));
+    return [...new Set([...this.rootsNamed(projectId, name), ...personRoots])].filter((rootId) => rootId !== exceptRoot && !this.isResolved(rootId));
   }
 
   thread(threadId: string): InboxThread | null {
@@ -4076,9 +4094,12 @@ export class InboxStore {
     // Action items (approval "inbox-next-actions"): `:::action` blocks, kept as
     // question records of kind "action", numbered on their own (A1, A2…).
     const actions = parseInboxActionBlocks(body);
+    // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
+    // question of this message has (inboxFileQuestionKey), numbered within its file.
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
-    const superseding = this.planSupersede(threadId, id, supersedes, parsed, actions);
+    const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
     const agentSubject = subjectCheck.subject;
     const message: InboxMessage = {
@@ -4133,6 +4154,31 @@ export class InboxStore {
           picked_by: null,
           picked_at: null,
           sent_reply_id: null,
+        },
+        at,
+      );
+    }
+    for (const { key: fileKey, question, attachment } of fileQuestions) {
+      this.appendQuestion(
+        {
+          id: `${id}/${fileKey}`,
+          project_id: projectId,
+          message_id: id,
+          key: fileKey,
+          position: question.position,
+          kind: question.kind,
+          prompt: question.prompt,
+          parsed: question.parsed,
+          stopped: question.stopped,
+          holds_up: question.holds_up,
+          asked_by_agent_id: input.author.session,
+          answer: null,
+          revision: 0,
+          sent_revision: 0,
+          picked_by: null,
+          picked_at: null,
+          sent_reply_id: null,
+          attachment: { id: attachment.id, name: attachment.name, key: question.key },
         },
         at,
       );
@@ -4209,6 +4255,32 @@ export class InboxStore {
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
+  }
+
+  /**
+   * The questions of a send's attached Markdown files (issue #2828), in
+   * attachment order and each file's block order, with the record key each
+   * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
+   * item or an earlier file has it). Only files this send attaches; an
+   * action block in a file is not read (only questions).
+   */
+  private fileQuestionsOf(
+    attachments: readonly InboxAttachment[],
+    asked: NonNullable<InboxSendInput["attachment_questions"]>,
+    bodyKeys: readonly string[],
+  ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
+    if (asked.length === 0) return [];
+    const taken = new Set(bodyKeys);
+    const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
+    for (const attachment of attachments) {
+      const entry = asked.find((a) => a.attachment_id === attachment.id);
+      if (!entry) continue;
+      for (const question of entry.questions) {
+        const key = inboxFileQuestionKey(question.key, taken);
+        if (key !== null) out.push({ key, question, attachment });
+      }
+    }
+    return out;
   }
 
   /** send_message's `done` as the store keeps it: trimmed, each once, in order. */
@@ -5400,10 +5472,11 @@ export class InboxStore {
     }
     const id = (annotation as Record<string, unknown>).id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
-    // A comment on a video is at a moment: `blockId: "video"` and `inboxVideo.time` in seconds (contract 4).
-    if (readInboxAttachmentKind(hit.attachment.kind) === "video") {
+    // A comment on a video or a recording is at a moment: `blockId: "video"` and `inboxVideo.time` in seconds (contract 4).
+    if (isInboxTimedKind(hit.attachment.kind)) {
       if ((annotation as Record<string, unknown>).blockId !== INBOX_VIDEO_BLOCK_ID) {
-        throw new InboxError("validation_error", `annotation.blockId: "${INBOX_VIDEO_BLOCK_ID}" on a video.`, { field: "annotation.blockId" });
+        const noun = readInboxAttachmentKind(hit.attachment.kind) === "audio" ? "a recording" : "a video";
+        throw new InboxError("validation_error", `annotation.blockId: "${INBOX_VIDEO_BLOCK_ID}" on ${noun}.`, { field: "annotation.blockId" });
       }
       if (readInboxVideoTime(annotation) === null) {
         throw new InboxError("validation_error", "annotation.inboxVideo.time: the moment in seconds from the start (a number, 0 or more).", { field: "annotation.inboxVideo" });
@@ -6793,6 +6866,8 @@ export class InboxStore {
      * says how to answer. Only `true` sets it; a replay keeps the first Send's.
      */
     decision_ask?: unknown;
+    /** Sent from Settings → Rows' ask box: the root carries `rows_ask`, and what the agent receives for it carries the Rows instructions. */
+    rows_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
@@ -6835,6 +6910,7 @@ export class InboxStore {
       ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
+      ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
@@ -6860,7 +6936,13 @@ export class InboxStore {
     if (!name || !this.threadNameTaken(projectId, name, null)) return name;
     if (auto && numbered) return this.numberedThreadName(projectId, name);
     if (auto) return null;
-    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
+    // The thread that has it rides the refusal (`thread_id`), so compose can offer to send there instead; none when
+    // more than one has it (an agent's name and a compose name may both be open): there is no one "that thread".
+    const holders = this.openThreadsNamed(projectId, name, null);
+    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, {
+      field: "thread_name",
+      ...(holders.length === 1 ? { thread_id: holders[0] } : {}),
+    });
   }
 
   /** `name (n)` for the first n from 2 no open thread in the project has, cut to fit the name limit; null past 99. */

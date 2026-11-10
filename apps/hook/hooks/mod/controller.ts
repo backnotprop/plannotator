@@ -12,6 +12,7 @@ import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd,
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
 import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
+import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
@@ -36,7 +37,7 @@ import {
   pickerFile,
   planApprovalPathOf,
   privateDirArgv,
-  pruneArgv,
+  pruneArgvs,
   RECENT_MESSAGES_SUBJECT,
   removeFileArgv,
   recentAssistantTexts,
@@ -320,6 +321,8 @@ export interface SessionInfo {
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
+  continues?: () => Promise<readonly string[]>
   /**
    * Made by the self-heal (self-heal.ts), not by anything the person did: the
    * Inbox link starts without a touch, so a live lease another process holds stands.
@@ -415,6 +418,7 @@ export class PlannotatorMod {
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
+          ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
@@ -711,9 +715,12 @@ export class PlannotatorMod {
       dead: old.filter((record) => !mine(record) && age(record) <= LAUNCH_EXPIRED_MS).map((record) => record.dir),
       expired: old.filter((record) => !mine(record) && age(record) > LAUNCH_EXPIRED_MS).map((record) => record.dir),
     }
-    const probe = await this.host.run(pruneArgv(groups), { timeoutMs: 5_000 }).catch(() => null)
-    if (!probe || probe.exitCode !== 0) return
-    const gone = new Set(probe.stdout.split('\n').map((line) => line.trim()).filter(Boolean))
+    const gone = new Set<string>()
+    for (const argv of pruneArgvs(groups)) {
+      const result = await this.host.run(argv, { timeoutMs: 5_000 }).catch(() => null)
+      if (!result || result.exitCode !== 0) continue
+      for (const line of result.stdout.split('\n')) if (line.trim()) gone.add(line.trim())
+    }
     if (gone.size === 0) return
     const current = await this.host.storeGet(STORE_LAUNCHES)
     const all = Array.isArray(current) ? (current as LaunchRecord[]) : []
@@ -1376,7 +1383,7 @@ export class PlannotatorMod {
   private planHistoryRoot(): Promise<string | null> {
     this.historyRoot ??= (async () => {
       const root = this.session.root ? await this.session.root().catch(() => null) : null
-      return root && root.startsWith('/') ? root : null
+      return root && isAbsolutePath(root) ? root : null
     })()
     return this.historyRoot
   }

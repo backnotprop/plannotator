@@ -34,7 +34,7 @@ export const LAUNCH_TIP_TIMES = {
   leaveMs: 130,
 };
 
-/** The card's width (inbox.css `.ib-lt`), and its gaps: 16 px from the box, 12 px from the window's edge. */
+/** The card's width (inbox.css `.ib-ctip`), and its gaps: 16 px from the box, 12 px from the window's edge. */
 export const LAUNCH_TIP_WIDTH = 284;
 const BESIDE_GAP = 16;
 const EDGE = 12;
@@ -55,12 +55,15 @@ export function launchTipDue(settings: Pick<SettingsModel, 'guest' | 'reveal'> |
 }
 
 export interface LaunchTipPlace {
-  /** `right`: beside the box, arrow pointing left at To. `below`: under To, arrow pointing up at the chip. */
-  side: 'right' | 'below';
-  /** From the To row's top-left (the card is drawn inside the row, `position: absolute`). */
+  /**
+   * `right`: beside the box, arrow pointing left at To. `below`: under To, arrow pointing up at the chip. `above` (a
+   * phone, where To is in the foot's row): over that row, arrow pointing down at To.
+   */
+  side: 'right' | 'below' | 'above';
+  /** From the row's top-left (the card is drawn inside the row, `position: absolute`). `above`: its bottom, from the row's bottom. */
   top: number;
   left: number;
-  /** The arrow's left, from the card's left (`below` only). */
+  /** The arrow's left, from the card's left (`below` and `above`). */
   arrow: number;
 }
 
@@ -70,7 +73,7 @@ type Box = { left: number; right: number; top: number; bottom: number; width: nu
  * Where the card stands (the tour's rule for compose's To, Tour.tsx `SIDES['compose-to']`: right first, then below;
  * beside the dialog, never over the message being written). Right needs the card's width and its gaps between the box
  * and the window's edge (about 1320 px of window for the 680 px box); else it falls back under To. A phone always
- * stands it under To, edge to edge with 12 px margins.
+ * stands it over the foot's row, where its To is, edge to edge with 12 px margins.
  */
 export function launchTipPlace(input: { phone: boolean; viewportWidth: number; dialog: Box; row: Box; to: Box | null }): LaunchTipPlace {
   const { phone, viewportWidth, dialog, row } = input;
@@ -78,6 +81,7 @@ export function launchTipPlace(input: { phone: boolean; viewportWidth: number; d
   if (!phone && viewportWidth - dialog.right >= LAUNCH_TIP_WIDTH + BESIDE_GAP + EDGE) {
     return { side: 'right', left: dialog.right - row.left + BESIDE_GAP, top: Math.round(row.height / 2 - ARROW_Y), arrow: 0 };
   }
-  if (phone) return { side: 'below', left: EDGE, top: row.height + 8, arrow: Math.max(14, Math.round(to.left - row.left - EDGE + 22)) };
+  // A phone: To is in the foot's row (`row`), so the card stands over the row and its arrow points down at To.
+  if (phone) return { side: 'above', left: EDGE, top: row.height + 8, arrow: Math.max(14, Math.round(to.left - row.left - EDGE + 22)) };
   return { side: 'below', left: Math.round(to.left - row.left - 6), top: row.height + 2, arrow: 24 };
 }

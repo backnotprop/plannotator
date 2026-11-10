@@ -28,6 +28,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -49,6 +50,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { hintSaid, noteHintSaid, quietHint } from "./inbox-mcp-hints";
 import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
@@ -339,6 +341,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
    */
   shapeOn?: () => boolean;
+  /**
+   * Whether Chapter diagrams is on (Settings → Capabilities, config.json `inboxChapterDiagrams`, on unless false; read
+   * on every request). With Code review on and this off, get_guide_brief and submit_guide name no chapter diagram.
+   * Absent: on.
+   */
+  chapterDiagramsOn?: () => boolean;
 }
 
 
@@ -811,6 +819,8 @@ export async function sendAgentMessage(
     const base = here && isAbsolute(here) ? here : project.root;
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
+  // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
+  const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
@@ -851,6 +861,7 @@ export async function sendAgentMessage(
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
+      ...(attachmentQuestions.length > 0 ? { attachment_questions: attachmentQuestions } : {}),
       inline_images: captured?.images,
       ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
       guide: guide ?? null,
@@ -869,7 +880,8 @@ export async function sendAgentMessage(
   else await captured?.commit();
   const message = result.message;
   const landed = store.project(message.project_id)!;
-  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  // A question inside an attached file (issue #2828) names the file it is in.
+  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt, ...(q.attachment ? { file: q.attachment.name } : {}) }));
   // Action items (`:::action`): their keys, so the agent can mark one done later.
   const actions = (message.questions ?? []).filter((q) => q.kind === "action").map((q) => ({ key: q.key, prompt: q.prompt }));
   const superseded = store.supersededBy(message.id);
@@ -1191,6 +1203,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.actions > 0 ? `${sent.questions > 0 ? " and" : " with"} ${sent.actions} action item${sent.actions === 1 ? "" : "s"}` : "") +
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
+        // The picture-choices advice, once per session (a send with no session hears it each time, as before).
+        const pictureChoices = hintSaid(store, input.agent_session, "picture_choices") ? "" : choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures);
+        if (pictureChoices) noteHintSaid(store, input.agent_session, "picture_choices");
         // The hints after the sent line, in this order, each "" when it has nothing to say.
         // The ones that start with a space join the sent line; the question-opener warnings
         // follow them, each a line of its own (so no hint is glued onto a warning).
@@ -1200,10 +1215,16 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
           questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck),
-          choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures),
+          pictureChoices,
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
+        // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
+        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock() });
+        if (quiet) {
+          hints.push(`\n${quiet.line}`);
+          sent.structured.hint = quiet.line;
+        }
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,

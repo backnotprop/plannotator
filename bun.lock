@@ -25,11 +25,11 @@
     },
     "apps/cline-plugin": {
       "name": "@plannotator/cline",
-      "version": "0.28.51",
+      "version": "0.28.60",
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.28.51",
+      "version": "0.28.60",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -132,7 +132,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.28.51",
+      "version": "0.28.60",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -151,7 +151,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.28.51",
+      "version": "0.28.60",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.5.2",
@@ -286,7 +286,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.21",
+      "version": "0.25.22",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
@@ -337,6 +337,7 @@
         "@plannotator/core": "workspace:*",
         "@plannotator/guide-viewer": "workspace:*",
         "@plannotator/review-editor": "workspace:*",
+        "@plannotator/system": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "motion": "^14.4.0",
         "react": "^19.3.1",
@@ -387,13 +388,14 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.28.51",
+      "version": "0.28.60",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.5.2",
         "@plannotator/ai": "workspace:*",
         "@plannotator/core": "workspace:*",
         "@plannotator/shared": "workspace:*",
+        "@plannotator/system": "workspace:*",
         "@plannotator/t3-code": "workspace:*",
         "@plannotator/webtui": "0.1.0",
         "chokidar": "^5.0.0",
@@ -458,7 +460,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.62.0",
+      "version": "0.63.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -480,7 +482,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.5.2",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.21",
+        "@plannotator/core": "0.25.22",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",

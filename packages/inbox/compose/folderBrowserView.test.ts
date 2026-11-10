@@ -3,7 +3,7 @@
  * a typed path, from the folder listing's answers. Each case guards a rule the person relies on: a folder that is
  * there always leads (Enter never forces them deeper, except at home); a name that isn't there becomes Create, last
  * and quiet while a folder still starts with it; only the last folder can be made; a file, a folder that can't be
- * opened, one that can't be written, a hidden one or one outside home is said, never offered.
+ * opened, one that can't be written, a hidden or system one is said, never offered; a drive's root is started in.
  */
 import { describe, expect, test } from 'bun:test';
 import { cleanPastedPath, cloneAt, folderBrowserView, looksLikePath, needsNameRead, type CloneTargetRead, type FolderRead } from './homeFolders';
@@ -89,9 +89,21 @@ describe('folderBrowserView', () => {
     expect(kinds(view)).toEqual(['folder:2023', 'folder:2024']);
   });
 
-  test('A11: hidden or outside home: one line', () => {
+  test("A11: a hidden folder is one line, on a drive too; a system one is the server's to say", () => {
     expect(folderBrowserView({ typed: '~/.config/x', read: null, nameRead: null }).note).toBe("Hidden folders aren't offered.");
-    expect(folderBrowserView({ typed: '/etc', read: null, nameRead: null }).note).toBe('Only folders inside your home folder.');
+    expect(folderBrowserView({ typed: '/Volumes/Studio SSD/.Trashes', read: null, nameRead: null }).note).toBe("Hidden folders aren't offered.");
+    expect(folderBrowserView({ typed: '/etc', read: null, nameRead: null, error: "System folders aren't offered." }).note).toBe("System folders aren't offered.");
+  });
+
+  // Any folder but a system or hidden one (approval "inbox-launch-any-folder").
+  test("a drive's root leads with Start in <drive>; the folder drives are in, and a folder above home, never start", () => {
+    const ssd: FolderRead = { exists: true, state: 'folder', folders: ['footage', 'renders'], writable: true };
+    expect(kinds(folderBrowserView({ typed: '/Volumes/Studio SSD/', read: ssd, nameRead: null }))).toEqual(['start:Studio SSD', 'folder:footage', 'folder:renders']);
+    const volumes: FolderRead = { exists: true, state: 'folder', folders: ['Backup', 'Studio SSD'], start: false, writable: false };
+    expect(kinds(folderBrowserView({ typed: '/Volumes/', read: volumes, nameRead: null }))).toEqual(['folder:Backup', 'folder:Studio SSD']);
+    // The disk's top: "/Volumes" typed exactly is a folder to go into, never to start in.
+    const top: FolderRead = { exists: true, state: 'folder', folders: ['Users', 'Volumes'], nostart: ['Users', 'Volumes'], start: false, writable: false };
+    expect(kinds(folderBrowserView({ typed: '/Volumes', read: top, nameRead: null }))).toEqual(['folder:Volumes']);
   });
 
   test('A12: one Backspace back to a folder that is there: Create goes, Start comes back', () => {
