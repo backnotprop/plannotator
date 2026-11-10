@@ -382,7 +382,7 @@ function ThemeChooserDialog({ inUse, onPick, onOwn, onDismiss, art, geometry: g 
           <span className="ib-thc-wm" aria-hidden="true">
             {WORDS.lettering.split('').map((letter, i) => (
               <span key={i} className={`ib-thc-t theme-${THEME_CHOOSER_TILES[i]!.theme}${THEME_CHOOSER_TILES[i]!.light ? ' light' : ''}`}>
-                <span style={{ fontFamily: `"${STAR_ASK_DISPLAY_FONT}", sans-serif` }}>{letter}</span>
+                <span style={{ fontFamily: `"${STAR_ASK_DISPLAY_FONT}", sans-serif`, fontSize: 34 }}>{letter}</span>
               </span>
             ))}
           </span>

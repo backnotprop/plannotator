@@ -7404,7 +7404,8 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 /* The title: "themes" as six letter tiles, each one a real theme (its background, its primary). Lowercase letters as drawn, not a transformed label. */
 .ib-thc-wm { display: inline-flex; gap: 4px; align-items: flex-end; line-height: 1; user-select: none; -webkit-user-select: none; }
 .ib-thc-t { width: 40px; height: 50px; border-radius: 8px; display: grid; place-items: center; background: var(--background); color: var(--primary); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 18%, transparent), 0 6px 12px -8px oklch(0 0 0 / 0.5); }
-.ib-thc-t > span { font-weight: 900; font-size: 34px; line-height: 1; letter-spacing: -0.01em; transform: translateY(-1px); }
+/* The letter's size is the tile's (set with its face in ThemeChooser.tsx): lettering, not text, so it does not follow the text size. */
+.ib-thc-t > span { font-weight: 900; line-height: 1; letter-spacing: -0.01em; transform: translateY(-1px); }
 .ib-thc-t:nth-child(odd) { transform: rotate(-2.5deg); }
 .ib-thc-t:nth-child(even) { transform: rotate(2deg) translateY(-3px); }
 /* The fan. */
