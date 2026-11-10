@@ -6,8 +6,8 @@
  *    to the rows.
  *  - Shown: Show brought rows in and some are out of view (Show never scrolls). A press goes to the nearest.
  *
- * It counts one direction at a time, never both in one number: the rows that land (or are) below the view, at
- * the bottom edge; with none there, those above, at the top edge. After a press the pill shows what is left.
+ * It counts one direction at a time, never both in one number: the side with more rows, below the view (the
+ * bottom edge) or above it (the top edge), below on a tie. After a press the pill shows what is left.
  *
  * How long it stays is `LIST_NEW_PILL_STAYS`: until it is pressed or the reader scrolls there (the default), or,
  * set to false, `LIST_NEW_PILL_MS` after the last arrival and then a fade (the owner's first ask: "show for five
@@ -146,12 +146,14 @@ export function ListNewPill({ news, unseen, body, order, layout, covered, onShow
   const where = useWhere(body, [...new Set(fresh.map((item) => item.lands))].join(','), order.join(','), layout);
   const watching = usePageShown() && !covered;
   // Held news first; else the rows Show brought in. Either way one direction at a time, never a count that mixes
-  // both: what is below first, then what is above.
+  // both: the side with more of them (the owner: "make the pill say which way most of the new ones are"; a tie
+  // is below), and after a press the other side's.
   const held = watching && fresh.length > 0 && where !== null && !where.sign;
   const rest = unseen.filter((row) => !seen.has(shownKey(row)));
   const edges = held ? fresh.map((item) => where.edges[item.lands] ?? 'top') : rest.map((row) => row.edge);
-  const edge: Edge = edges.includes('bottom') ? 'bottom' : 'top';
-  const count = edges.filter((at) => at === edge).length;
+  const below = edges.filter((at) => at === 'bottom').length;
+  const edge: Edge = below > 0 && below >= edges.length - below ? 'bottom' : 'top';
+  const count = edge === 'bottom' ? below : edges.length - below;
   const on = held || (watching && count > 0);
   const burst = held ? fresh.map((item) => item.key).join('\n') : rest.map(shownKey).join('\n');
   // Everything that could show is in `burst`, so an effect that follows `burst` always holds it as it is.

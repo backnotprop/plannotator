@@ -6,7 +6,8 @@
  *    already had a sign of, and it stays (no clock takes it away) until it is pressed or the line is in view;
  *  - a press is Show (the row drawn, a folded group it lands in opened) and asks to go to the row; the line's
  *    own Show asks for no move;
- *  - after Show, the rows it brought in that are out of view are counted, those below first; a press goes there;
+ *  - after Show, the rows it brought in that are out of view are counted; a press goes there;
+ *  - one direction at a time, the side with more (a tie is below), never one number for both;
  *  - news that lands in Quiet or Sent shows none;
  *  - it waits while the list is covered or the tab is hidden;
  *  - its name is whole, and it is said once as it comes;
@@ -257,10 +258,10 @@ test.skipIf(!hasDom)('it stays and counts up: no clock takes it away', () => {
   expect(pillOn() && !fading()).toBe(true);
 });
 
-test.skipIf(!hasDom)('after Show, the rows it brought in that are out of view are counted, those below first; a press goes there', () => {
+test.skipIf(!hasDom)('after Show, the rows it brought in that are out of view are counted, the side with more first; a press goes there', () => {
   draw();
   expect(pillOn()).toBe(false);
-  // Show brought three rows in: two past the bottom edge, one past the top.
+  // Show brought three rows in: two past the bottom edge, one past the top. The side with more is counted.
   setUnseen([{ id: 't_a', edge: 'top' }, { id: 't_b', edge: 'bottom' }, { id: 't_c', edge: 'bottom' }]);
   expect(pillOn()).toBe(true);
   expect(pill().textContent).toBe('2 new');
@@ -349,7 +350,7 @@ test.skipIf(!hasDom)('it points to where the row will land: below the view, else
   expect(pill().getAttribute('aria-label')).toBe('1 new message above, show and go there');
 });
 
-test.skipIf(!hasDom)('news that lands above and below is never one mixed count: what is below first, then what is above', () => {
+test.skipIf(!hasDom)('news that lands above and below is never one mixed count: the side with more, then the rest', () => {
   draw();
   // The reader is between the two groups: a question lands in Waiting on you, above; two updates land in New, below.
   arrive(row('t_a', 'waiting', later()), row('t_b', 'new', later()), row('t_c', 'new', later()));
@@ -366,6 +367,30 @@ test.skipIf(!hasDom)('news that lands above and below is never one mixed count: 
   expect(pill().textContent).toBe('1 new');
   expect(edge()).toBe('top');
   expect(pill().getAttribute('aria-label')).toBe('1 new message above, go there');
+});
+
+test.skipIf(!hasDom)('more above than below: the pill points up with that count, and after the press shows the one below; a tie is below', () => {
+  draw();
+  arrive(row('t_a', 'waiting', later()), row('t_b', 'waiting', later()), row('t_c', 'new', later()));
+  see('out of view', { waiting: 'above', new: 'below' });
+  expect(pill().textContent).toBe('2 new');
+  expect(edge()).toBe('top');
+  expect(pill().getAttribute('aria-label')).toBe('2 new messages above, show and go there');
+  act(() => pill().click());
+  expect(shows).toEqual(['top']);
+  setUnseen([{ id: 't_c', edge: 'bottom' }]);
+  expect(pill().textContent).toBe('1 new');
+  expect(edge()).toBe('bottom');
+  expect(pill().getAttribute('aria-label')).toBe('1 new message below, go there');
+
+  // As many each way: below.
+  setUnseen([{ id: 't_c', edge: 'bottom' }, { id: 't_d', edge: 'top' }]);
+  expect(pill().textContent).toBe('1 new');
+  expect(edge()).toBe('bottom');
+  // More above among the rows Show brought in: up.
+  setUnseen([{ id: 't_c', edge: 'bottom' }, { id: 't_d', edge: 'top' }, { id: 't_e', edge: 'top' }]);
+  expect(pill().textContent).toBe('2 new');
+  expect(edge()).toBe('top');
 });
 
 test.skipIf(!hasDom)('a group with no row yet is not drawn: the next group drawn stands for where the row lands', () => {
