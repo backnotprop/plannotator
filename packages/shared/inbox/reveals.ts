@@ -114,7 +114,7 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Inbox and never chose a favicon (config.json `favicon` unset), decided at the release start; fresh installs never.
   // It opens 15 s into the page (packages/inbox/tabIconChoice.ts).
   { id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // 2. The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; who: config.json `inboxThemeChooser`,
+  // 2. The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; who: local-state.json `inboxThemeChooser`,
   // theme-chooser.ts: only someone still on the default theme). The owner (2026-11-10): "it can't compete with the
   // favicon one… The favicon one should come first. Themes must come only after, like thirty minutes after. If favicon's
   // already done, themes can show up fifteen seconds after opening." So: right after the tab icon dialog, never offered
@@ -131,7 +131,7 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
   // 5. The sound (who: config.json `inboxSound`): only after an update that adds it.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // 6. Voice (who: config.json `inboxVoiceIntro`, and a `codex` CLI on this computer; inbox-voice.ts).
+  // 6. Voice (who: local-state.json `inboxVoiceIntro`, and a `codex` CLI on this computer; inbox-voice.ts).
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // The later group. 7. Snooze: its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
@@ -155,7 +155,7 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "grill_me_tip", kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true },
   // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): shown from the second day
   // of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread minimum), once
-  // across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the owner: no offer
+  // across every surface (local-state.json `starAsk`). Aside from the line's order (the coordinator, for the owner: no offer
   // may lose its showing to it): it takes a calm moment while the line is free, and its claim stamps only its own
   // `inboxReveals.star`, so every other dialog keeps its day. Its claim runs the already-starred check (gh) before it
   // stamps anything; starred already, nothing shows.
@@ -180,13 +180,13 @@ export const REVEAL_HEAVY_USE = { threads: 10, windowMs: 7 * DAY_MS, days: 2 } a
 /** What the server knows. Every time is an ISO string. */
 export interface RevealState {
   release: boolean;
-  /** The person's first use of the Inbox (config.json `inboxSnoozeIntro.firstUseAt`). */
+  /** The person's first use of the Inbox (local-state.json `inboxSnoozeIntro.firstUseAt`). */
   firstUseAt?: string | null;
-  /** The last dialog that stamps the spacing clock on this machine (config.json `inboxReveals.lastShownAt`). */
+  /** The last dialog that stamps the spacing clock on this machine (local-state.json `inboxReveals.lastShownAt`). */
   lastShownAt?: string | null;
-  /** The last dialog of any kind in the line, the agent note included (config.json `inboxReveals.dayShownAt`; the name is from the one-a-day rule it once kept). */
+  /** The last dialog of any kind in the line, the agent note included (local-state.json `inboxReveals.dayShownAt`; the name is from the one-a-day rule it once kept). */
   dayShownAt?: string | null;
-  /** The last offer closed with Not now (config.json `inboxReveals.notNowAt`). */
+  /** The last offer closed with Not now (local-state.json `inboxReveals.notNowAt`). */
   notNowAt?: string | null;
   /** Heavy use holds (`revealHeavyUse`). Absent: false. */
   heavy?: boolean;
@@ -194,14 +194,14 @@ export interface RevealState {
   threads: number;
   /** Per entry: its own conditions hold (not shown yet; its feature never decided by the person). Absent: false. */
   open: Partial<Record<RevealId, boolean>>;
-  /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
+  /** Per entry: when it first became next (local-state.json `inboxReveals.waitingSince`). Patience counts from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
   /**
-   * When a tip outside the line was last shown (config.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`):
+   * When a tip outside the line was last shown (local-state.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`):
    * the gap counts from it too, so no dialog follows a tip within 40 minutes, and a tip waits out the gap after a dialog.
    */
   tipShownAt?: string | null;
-  /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
+  /** When an `aside` entry was last shown (local-state.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
 }
 
@@ -413,7 +413,7 @@ export function revealHeavyUse(reads: Iterable<{ threadId: string; at: string }>
   return threads.size >= REVEAL_HEAVY_USE.threads && days.size >= REVEAL_HEAVY_USE.days;
 }
 
-/** What config.json keeps for the line (`inboxReveals`), the fields this module writes. */
+/** What local-state.json keeps for the line (`inboxReveals`), the fields this module writes. */
 export interface RevealsSaved {
   lastShownAt?: string;
   dayShownAt?: string;

@@ -2426,7 +2426,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarWire = (state: { sidebar: InboxSidebarLayout | null; rev: number }) => ({ sidebar: state.sidebar, sidebar_rev: state.rev });
 
   /**
-   * The onboarding tour (config.json `inboxTour`, approval
+   * The onboarding tour (local-state.json `inboxTour`, approval
    * "inbox-onboarding-tour"): when it was started, finished or skipped, and
    * whether the first real thread offers notifications once more. Kept per
    * machine, so a port change keeps it.
@@ -2567,7 +2567,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The "themes" dialog (approval "inbox-theme-chooser"; `theme_chooser` in shared/inbox/reveals.ts, who it is for in
    * shared/inbox/theme-chooser.ts): decided at the first release start of the version that ships it, as the tab icon's
-   * is. Someone on the default theme gets it due (config.json `inboxThemeChooser.dueAt`), a fresh install too, from its
+   * is. Someone on the default theme gets it due (local-state.json `inboxThemeChooser.dueAt`), a fresh install too, from its
    * first day. Anyone on another theme is marked as not needing it (`notNeededAt`), then or at
    * any later look (each start, a theme saved from the Inbox, a claim), and going back to the default theme never
    * brings it up. A dev build decides nothing.
@@ -2920,7 +2920,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   /**
    * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
-   * it (config.json `starAsk`, shared with plan review, code review and annotate), in a release build. It stands aside
+   * it (local-state.json `starAsk`, shared with plan review, code review and annotate), in a release build. It stands aside
    * from the line (reveals.ts `aside`): the line gives it its day and a free moment, never a turn; its claim
    * (`claimStarReveal`, inbox-star-ask.ts) runs the already-starred check before any stamp and stamps nothing of the line.
    */
@@ -3100,7 +3100,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The "Star the repo" ask's claim (inbox-star-ask.ts `claimInboxStar`): only while the line is free (checked before
-   * the already-starred check and again after it), then one save stamps `inboxReveals.star` and config.json `starAsk`,
+   * the already-starred check and again after it), then one save stamps `inboxReveals.star` and local-state.json `starAsk`,
    * nothing of the line. Starred already: `starAsk.answer` "already", nothing shown. `key`: the same page's retry after
    * a lost answer is shown it again, while it is still unanswered.
    */

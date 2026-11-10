@@ -10,14 +10,14 @@
  * more after the person's first use, until it was shown once. It stands outside the order of the line of one-time
  * dialogs (reveals.ts), but keeps its 40-minute gap both ways (the server: `tipFree`, `RevealState.tipShownAt`): it
  * never shows within the gap of a dialog, and no dialog follows it within the gap. The claim stamps only
- * config.json `inboxReveals.sidebar_tip`, when it shows (every way out is final), with the page's key so that page's
+ * local-state.json `inboxReveals.sidebar_tip`, when it shows (every way out is final), with the page's key so that page's
  * retry after a lost answer is shown it again and no other window is.
  */
 
 /** A day after first use: never on a first-run day. */
 export const SIDEBAR_TIP_TENURE_MS = 24 * 60 * 60 * 1000;
 
-/** What config.json keeps: `inboxReveals.sidebar_tip`. */
+/** What local-state.json keeps: `inboxReveals.sidebar_tip`. */
 export interface SidebarTipSaved {
   shownAt?: string;
   key?: string;

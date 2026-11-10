@@ -4,7 +4,7 @@
  * person has things to put away, and when) is packages/inbox/snoozeIntro.ts. Inbox-only, so neither half is a core
  * export: the published UI package never needs them.
  *
- * Who (config.json `inboxSnoozeIntro`): a release build, first use at least two days ago (rebuilt once from the event
+ * Who (local-state.json `inboxSnoozeIntro`): a release build, first use at least two days ago (rebuilt once from the event
  * log on upgrade), never snoozed anything (a mark of its own: snoozes.json deletes itself with the last snooze), and
  * not shown yet. There is no active-days rule (the owner, 2026-11-02). It shows on this computer and on the owner's
  * phone, never to a tailnet guest (the owner, q-e29f8cd6).
@@ -13,7 +13,7 @@
 /** First use must be at least this long ago: two days (the owner: "I think this needs to be 2 days"). */
 export const SNOOZE_INTRO_TENURE_MS = 2 * 24 * 60 * 60 * 1000;
 
-/** What config.json keeps (`inboxSnoozeIntro`). Every field is an ISO time. */
+/** What local-state.json keeps (`inboxSnoozeIntro`). Every field is an ISO time. */
 export interface SnoozeIntroSaved {
   /** The person's first use of the Inbox: the oldest record in the event log. */
   firstUseAt?: string;

@@ -11,7 +11,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { readStarAskRecord, type StarAskClaim, type StarAskRecord, type StarAskService } from "@plannotator/shared/star-ask";
 
-/** config.json `inboxReveals.star`: when the Inbox showed it, and the page's key (a retry after a lost answer). */
+/** local-state.json `inboxReveals.star`: when the Inbox showed it, and the page's key (a retry after a lost answer). */
 export type InboxStarSaved = { shownAt?: string; key?: string };
 
 export function inboxStarSaved(): InboxStarSaved | undefined {
