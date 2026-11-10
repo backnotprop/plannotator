@@ -41,6 +41,9 @@ import { useStarredAbove } from '../starredPills';
 import { StarredPills } from './StarredPills';
 import type { PinnedAction } from './PinnedRow';
 import { useListGroups } from '../listGroups';
+import type { HeldNews } from '../held';
+import type { ListEdge, UnseenRow } from '../showLight';
+import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
@@ -73,9 +76,12 @@ export interface InboxListProps {
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
    * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
-   * the rows it brings in are on screen (List has no groups to open).
+   * the rows it brings in are on screen (List has no groups to open). `news`: the threads it counts (held.ts
+   * `heldNews`), for the pill at the list's edge while this line is out of view (ListNewPill.tsx).
    */
-  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
+  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[]; news?: readonly HeldNews[] } | null;
+  /** The list is drawn but out of sight (a thread covers it: a phone, a stacked window, full screen): its pill waits. */
+  covered?: boolean;
   /**
    * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
    * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
@@ -85,7 +91,11 @@ export interface InboxListProps {
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
-  onShowNew: () => void;
+  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the rows it brings in past that edge. */
+  onShowNew: (fromPill?: ListEdge) => void;
+  /** The rows Show brought in that are not in view yet (showLight.ts): the pill counts them, and its press is `onGoNew`. */
+  unseenNew?: readonly UnseenRow[];
+  onGoNew?: (edge: ListEdge) => void;
   /**
    * The title, pressed, refreshes the list it names (click Inbox to refresh):
    * ↻ beside it on hover with the tooltip, one turn on a click. Absent: a plain heading.
@@ -1290,6 +1300,9 @@ function newSince(rows: readonly InboxListRow[], since: number): boolean {
   return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
 }
 
+const NO_NEWS: readonly HeldNews[] = [];
+const NO_UNSEEN: readonly UnseenRow[] = [];
+
 export function InboxList(props: InboxListProps) {
   // Every group closes by a click on its header, this browser's choice (listGroups.ts). Quiet and the Snoozed band
   // under it start closed (approval "inbox-snooze"), every other group open.
@@ -1472,6 +1485,14 @@ export function InboxList(props: InboxListProps) {
     return () => fonts.removeEventListener('loadingdone', refit);
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
+  /** Show, from the "N new" line or from the pill that stands for it while it is out of view. */
+  const showNew = (fromPill?: ListEdge) => {
+    // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
+    // rows: closed, they would come in out of sight and Show would seem to do nothing.
+    const lands = props.notice?.lands;
+    if (lands && !asList) groups.open(lands);
+    props.onShowNew(fromPill);
+  };
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowOf = (threadId: string) => {
@@ -1680,6 +1701,17 @@ export function InboxList(props: InboxListProps) {
           </span>
         </div>
       )}
+      {/* Before the rows, where the "N new" line it stands for is: Tab reaches it from the header, ahead of the list. */}
+      <ListNewPill
+        news={props.notice?.news ?? NO_NEWS}
+        body={bodyRef}
+        order={props.sections.map((section) => section.id)}
+        layout={`${asList}|${visible.map((section) => section.id).join(',')}`}
+        covered={props.covered === true}
+        onShow={showNew}
+        unseen={props.unseenNew ?? NO_UNSEEN}
+        onGo={(edge) => props.onGoNew?.(edge)}
+      />
         <ThreadRowMenu
           ref={bodyRef}
           className="ib-lbody"
@@ -1710,13 +1742,7 @@ export function InboxList(props: InboxListProps) {
             <HeldNoticeLine
               count={props.notice.count}
               project={props.notice.project ?? null}
-              onShow={() => {
-                // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
-                // rows: closed, they would come in out of sight and Show would seem to do nothing.
-                const lands = props.notice?.lands;
-                if (lands && !asList) groups.open(lands);
-                props.onShowNew();
-              }}
+              onShow={() => showNew()}
             />
           )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
