@@ -306,12 +306,15 @@ describe("a leftover usage-counts/ folder (the removed usage counts)", () => {
     const fixture = createFixture();
     const dir = seed(fixture.dataDir);
     writeFileSync(join(fixture.dataDir, "config.json"), JSON.stringify({ usageCounts: false }));
+    writeFileSync(join(fixture.dataDir, "local-state.json"), JSON.stringify({ inboxTour: { version: 2 } }));
     const planned = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
     expect(planned.planned.filter((line) => line === dir)).toHaveLength(1);
     expect(existsSync(dir)).toBe(true);
     await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
     expect(existsSync(dir)).toBe(false);
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "config.json"), "utf-8")).usageCounts).toBe(false);
+    // This computer's state stays with the settings: a reinstall shows no dialog again (#2852).
+    expect(JSON.parse(readFileSync(join(fixture.dataDir, "local-state.json"), "utf-8"))).toEqual({ inboxTour: { version: 2 } });
   });
 
   test("the numbers Decision data keeps from deleted threads go with a purge, and stay through a plain uninstall", async () => {
@@ -1345,6 +1348,8 @@ describe("purge uninstall", () => {
     // and it must not be reported as an unrecognized custom entry.
     writeText(join(fixture.dataDir, "feedback", "repo", "index.jsonl"));
     writeJson(join(fixture.dataDir, "config.json"), { theme: "dark" });
+    // This computer's state (#2852): Plannotator's own file, so purge removes it and never lists it as the person's.
+    writeJson(join(fixture.dataDir, "local-state.json"), { inboxTour: { version: 2 } });
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
     const customVendorPath = join(
       fixture.dataDir,
@@ -1366,8 +1371,12 @@ describe("purge uninstall", () => {
     expect(existsSync(join(fixture.dataDir, "history"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "feedback"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "config.json"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "local-state.json"))).toBe(false);
     expect(result.preserved).not.toContain(
       `${join(fixture.dataDir, "feedback")} (unrecognized custom entry)`,
+    );
+    expect(result.preserved).not.toContain(
+      `${join(fixture.dataDir, "local-state.json")} (unrecognized custom entry)`,
     );
     expect(existsSync(join(fixture.dataDir, "vendor", "sem"))).toBe(false);
     expect(existsSync(customVendorPath)).toBe(true);
