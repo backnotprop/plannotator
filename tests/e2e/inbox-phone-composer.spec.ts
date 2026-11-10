@@ -10,7 +10,8 @@
  *   the card ends 8 px over it, Send in reach, and a long reply scrolls inside 40% of what is left.
  * - The sheet (a thread with two agents): a dialog that takes focus from the field and gives it back, a long label
  *   cut on one line, closed by Escape, the scrim and a drag down on its head; with reduced motion it does not slide.
- * - Reply, two agents: the pill names the recipient, a row picks one, a circle adds one, and Send reaches both.
+ * - Reply, two agents: the pill is the recipient's mark and a chevron, named for a screen reader; a row picks one, a
+ *   circle adds one, and Send reaches both. Two sessions of one agent: the pill also says which, in 14ch at most.
  * - New message: To in the foot's row, its sheet with the filter unfocused, the card 8 px over the keyboard with the
  *   title kept, the dialog's own ground under the keyboard. Chromium at 1440 x 900: none of it applies.
  *
@@ -77,7 +78,7 @@ class Poll {
   }
 }
 
-let world: { url: string; agents: SimAgent[]; polls: Record<string, Poll>; oneThread: string; twoThread: string; serverSession: string };
+let world: { url: string; agents: SimAgent[]; polls: Record<string, Poll>; oneThread: string; twoThread: string; sameThread: string; serverSession: string };
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -105,8 +106,11 @@ test.beforeAll(async () => {
   const one = await claude.send({ project_path: project, subject: 'Checkout: the sticky footer', body: 'The footer holds on a phone.', agent_session: ONE } as never, { wakes: true });
   await claude.send({ project_path: project, subject: 'Checkout: the promo field', thread: 'composer-two', body: 'First, from Claude Code.', agent_session: TWO_A } as never, { wakes: true });
   const two = await pi.send({ project_path: project, subject: 'Checkout: the promo field', thread: 'composer-two', body: 'Second, from Pi.', agent_session: TWO_B } as never, { wakes: true });
+  // Two sessions of one agent in one thread: the mark alone cannot say which gets the reply.
+  await claude.send({ project_path: project, subject: 'Checkout: the totals', thread: 'composer-same', body: 'First, from one Claude Code.', agent_session: ONE } as never, { wakes: true });
+  const same = await claude.send({ project_path: project, subject: 'Checkout: the totals', thread: 'composer-same', body: 'Second, from another.', agent_session: TWO_A } as never, { wakes: true });
   const settings = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { serverSession: string };
-  world = { url, agents: [claude, pi], polls, oneThread: one.thread_id as string, twoThread: two.thread_id as string, serverSession: settings.serverSession };
+  world = { url, agents: [claude, pi], polls, oneThread: one.thread_id as string, twoThread: two.thread_id as string, sameThread: same.thread_id as string, serverSession: settings.serverSession };
 });
 
 test.afterAll(async () => {
@@ -121,7 +125,7 @@ test.afterAll(async () => {
 
 /** Every test starts with no reply draft: a thread opened with one opens its box by itself, holding the words. */
 test.beforeEach(async () => {
-  for (const thread of [world.oneThread, world.twoThread]) {
+  for (const thread of [world.oneThread, world.twoThread, world.sameThread]) {
     const gone = await fetch(new URL(`/api/inbox/threads/${thread}/draft/delete`, world.url), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serverSession: world.serverSession }) });
     expect(gone.status, 'the reply draft of the test before could not be deleted').toBe(200);
   }
@@ -400,15 +404,23 @@ for (const engine of ENGINES) {
       await page.context().close();
     });
 
-    test('reply, two agents: the pill names who gets it, a row picks one, a circle adds one, and Send reaches both', async () => {
+    test('reply, two agents: the pill is a mark named for a screen reader, a row picks one, a circle adds one, Send reaches both; two sessions of one agent: the pill says which', async () => {
       const page = await phone();
       await openBox(page, world.twoThread);
       const box = pane(page).locator('.ib-rbox');
       const sheet = replySheet(page);
       await expect(recipient(page), 'a two-agent thread shows the recipient as a pill').toHaveAttribute('data-agent-pill', '');
-      await expect(recipient(page).locator('.ib-apill-n'), 'the pill has no name').toHaveText(/\S/);
+      await expect(recipient(page).locator('.ib-apill-n'), 'agents of two kinds: the pill shows words beside the mark').toHaveCount(0);
+      // What a screen reader hears: the agent, and its session's title where it has one.
+      const named = async (session: string) => {
+        const heard = (await recipient(page).getAttribute('aria-label')) ?? '';
+        for (const part of session === TWO_A ? ['Claude Code', LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the pill's name leaves out "${part}"`).toContain(part);
+        expect(heard, 'the pill\'s name does not say what it is for').toMatch(/^Reply goes to .*\. Change$/);
+      };
+      await named((await recipient(page).getAttribute('data-recipient-chosen'))!);
       const pill = await spot(recipient(page));
       expect(pill.height, 'the pill is taller than one line').toBeLessThanOrEqual(37);
+      expect(pill.width, 'a mark and a chevron take 70 px or more').toBeLessThan(70);
       expect(pill.left, 'the pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
       expect(pill.right, 'the pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
       await shot(page, `${engine.name}-reply-two`);
@@ -420,7 +432,8 @@ for (const engine of ENGINES) {
       const other = (await sheet.locator('[data-recipient-row][aria-selected="false"]').getAttribute('data-recipient-row'))!;
       await sheet.locator(`[data-recipient-row="${other}"] .ib-sheet-t`).tap();
       await expect(sheet, 'a tap on a row did not close the sheet').toHaveCount(0);
-      await expect(recipient(page), 'the pill does not name the agent tapped').toHaveAttribute('data-recipient-chosen', other);
+      await expect(recipient(page), 'the pill is not the agent tapped').toHaveAttribute('data-recipient-chosen', other);
+      await named(other);
       await expect(replyField(page), 'after a pick focus is not in the reply (a real keyboard would stay down)').toBeFocused();
       await recipient(page).tap();
       await sheetOpen(sheet);
@@ -436,6 +449,26 @@ for (const engine of ENGINES) {
       await box.getByRole('button', { name: 'Send', exact: true }).tap();
       await expect(pane(page).locator('article.ib-message[data-author="person"]', { hasText: words }), 'the thread does not show the reply').toBeVisible();
       for (const session of [TWO_A, TWO_B]) await expect.poll(() => world.polls[session]!.got(words, world.twoThread), { message: `${session} was not handed the reply`, timeout: 30_000 }).toBe(true);
+      // Two Claude Code sessions: the pill says which, on one line, in 14ch at most, still between Skills and the mic.
+      await openBox(page, world.sameThread);
+      const name = recipient(page).locator('.ib-apill-n');
+      await expect(name, 'two sessions of one agent: the pill does not say which').toHaveText(/\S/);
+      const said = await name.evaluate((el) => {
+        const zero = document.createElement('span');
+        zero.textContent = '0';
+        zero.style.cssText = 'position:absolute;visibility:hidden';
+        el.parentElement!.appendChild(zero);
+        const ch = zero.getBoundingClientRect().width;
+        zero.remove();
+        return { width: el.getBoundingClientRect().width, most: 14 * ch + 1, height: el.getBoundingClientRect().height, ellipsis: getComputedStyle(el).textOverflow };
+      });
+      expect(said.width, 'the name in the pill is wider than 14ch').toBeLessThanOrEqual(said.most);
+      expect(said.height, 'the name in the pill wraps').toBeLessThanOrEqual(24);
+      expect(said.ellipsis, 'a long name in the pill is not cut with an ellipsis').toBe('ellipsis');
+      const both = await spot(recipient(page));
+      expect(both.left, 'the named pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
+      expect(both.right, 'the named pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
+      await shot(page, `${engine.name}-reply-same-agent`);
       await page.context().close();
     });
 

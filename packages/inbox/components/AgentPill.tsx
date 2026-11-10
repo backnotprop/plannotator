@@ -3,7 +3,8 @@
  * button that opens the picker sheet.
  *
  * - `AgentPill`: the agent's mark, a short name that gives way with "…", and a small chevron. New message's To, and
- *   the reply row of a thread with several agents (the person sees who gets the reply).
+ *   the reply row of a thread with several agents: there the mark and the chevron alone, with the name only when two
+ *   of the thread's agents wear the same mark.
  * - `AgentMark`: round like the paperclip and Skills beside it: the first recipient's mark and how many get the
  *   reply, when several do.
  *
@@ -50,7 +51,8 @@ export function AgentPill({
 }: Common & {
   /** The agent whose mark leads the words. Undefined: no mark ("Choose an agent"). */
   host?: string | null;
-  label: string;
+  /** The name beside the mark. Null: the mark and the chevron alone (the mark says who). */
+  label: string | null;
   /** A quiet word after the name ("ended"). */
   detail?: string | null;
   /** Nobody is chosen yet: the pill asks, in the primary colour. */
@@ -66,9 +68,11 @@ export function AgentPill({
           <HostMark host={host} />
         </span>
       )}
-      <span className="ib-apill-n" dir="auto">
-        {struck ? <s>{label}</s> : label}
-      </span>
+      {label !== null && (
+        <span className="ib-apill-n" dir="auto">
+          {struck ? <s>{label}</s> : label}
+        </span>
+      )}
       {detail && <span className="ib-apill-d">{detail}</span>}
       <Chevron />
     </button>

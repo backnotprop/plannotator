@@ -213,7 +213,7 @@ for (const width of [390, 320] as const) {
 }
 
 for (const width of [390, 320] as const) {
-  test(`a phone at ${width} wide, two agents: who gets the reply is a pill in the row after Skills, 36 px drawn and 44 px to press, never on the line over it`, async ({ browser }) => {
+  test(`a phone at ${width} wide, two agents: who gets the reply is a pill (its mark and a chevron) in the row after Skills, 36 px drawn and 44 px to press, never on the line over it`, async ({ browser }) => {
     const page = await phone(browser, width);
     await page.goto(`${world.url}#thread=${twoAgents}`);
     await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
@@ -229,11 +229,12 @@ for (const width of [390, 320] as const) {
       const box = el.closest('.ib-rbox')!.getBoundingClientRect();
       const skills = el.closest('[data-reply-row]')!.querySelector('[data-reply-skills]')!.getBoundingClientRect();
       const mic = el.closest('[data-reply-row]')!.querySelector('[data-voice-mic]')!.getBoundingClientRect();
-      const name = el.querySelector<HTMLElement>('.ib-apill-n')!;
       return {
         height: r.height,
         press: parseFloat(getComputedStyle(el, '::after').height),
-        name: name.textContent!.trim().length > 0 && name.getClientRects().length > 0,
+        // The two agents wear different marks (Claude Code, Codex): the mark and the chevron, no name.
+        name: el.querySelector('.ib-apill-n') !== null,
+        mark: (el.querySelector('.ib-apill-m .ib-mk')?.getClientRects().length ?? 0) > 0 && el.querySelector('.ib-apill-c') !== null,
         afterSkills: r.left >= skills.right - 0.5 && Math.abs((r.top + r.bottom) / 2 - (skills.top + skills.bottom) / 2) <= 2,
         beforeMic: r.right <= mic.left + 0.5,
         inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
@@ -241,7 +242,7 @@ for (const width of [390, 320] as const) {
     });
     expect(drawn.height, 'the pill is drawn 36 px tall').toBe(36);
     expect(drawn.press, 'the pill is 44 px to press').toBeGreaterThanOrEqual(44);
-    expect({ name: drawn.name, afterSkills: drawn.afterSkills, beforeMic: drawn.beforeMic, inside: drawn.inside }).toEqual({ name: true, afterSkills: true, beforeMic: true, inside: true });
+    expect({ name: drawn.name, mark: drawn.mark, afterSkills: drawn.afterSkills, beforeMic: drawn.beforeMic, inside: drawn.inside }).toEqual({ name: false, mark: true, afterSkills: true, beforeMic: true, inside: true });
     oneRow(await readRow(page));
     await page.context().close();
   });

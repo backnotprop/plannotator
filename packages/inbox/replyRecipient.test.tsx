@@ -572,7 +572,9 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in t
   expect(control.getAttribute('data-recipient-chosen')).toBe('ses_pi');
   expect(control.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
   expect(control.getAttribute('aria-haspopup')).toBe('dialog');
-  expect((control.querySelector('.ib-apill-n')?.textContent ?? '').length).toBeGreaterThan(0);
+  // No other agent here wears Pi's mark: the mark and the chevron say it, with no name (the label has it).
+  expect(control.querySelector('.ib-apill-n')).toBeNull();
+  expect(control.querySelector('.ib-apill-m') !== null && control.querySelector('.ib-apill-c') !== null).toBe(true);
   await openList(el);
   const sheet = el.querySelector('[data-recipient-list]') as HTMLElement;
   expect(sheet.getAttribute('role')).toBe('dialog');
@@ -611,6 +613,20 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in t
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
   expect(replies()[0]!.body.tags).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): the pill names the one that gets the reply, and the other once it is picked', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M4, FARCLAUDE, 45, { from_project: { name: FAR.name, root: FAR.root } })), true);
+  await write(el, 'Which folder?');
+  expect(pill(el)!.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_far');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (plannotator). Change');
+  expect(pill(el)!.querySelector('.ib-apill-n')?.textContent).toBe('plannotator');
+  await openList(el);
+  await act(async () => sheetRow(el, 'ses_claude').click());
+  await settle();
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+  expect(pill(el)!.querySelector('.ib-apill-n')?.textContent).toBe('superfans');
 });
 
 test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: its row can\'t be picked alone, and the reply stays with the agent that wrote', async () => {

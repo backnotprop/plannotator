@@ -172,19 +172,32 @@ test.skipIf(!hasDom)('a phone, one agent: no agent control in the row (the paper
   expect(q('[data-reply-send] svg')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('a phone, several agents: the mark and a name, so the person sees who gets the reply; a session\'s title is the name', async () => {
+test.skipIf(!hasDom)('a phone, several agents of different kinds: the mark and a chevron alone, in the row after Skills; its name still says who, with the session\'s title', async () => {
   await openReply(TWO_AGENTS(), true);
   const row = q('[data-reply-row][data-phone]')!;
-  // In the row, after Skills and before Send.
   expect([...row.querySelectorAll('[data-reply-skills], [data-recipient], [data-reply-send]')].map((el) => (el.hasAttribute('data-recipient') ? 'recipient' : el.hasAttribute('data-reply-send') ? 'send' : 'skills'))).toEqual(['skills', 'recipient', 'send']);
   const pill = control()!;
   expect(pill.hasAttribute('data-agent-pill')).toBe(true);
-  expect(pill.querySelector('.ib-apill-n')!.textContent).toBe('Pi');
+  expect(pill.getAttribute('data-recipient-chosen')).toBe('ses_pi');
+  // The mark says who: no name beside it.
+  expect(pill.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill.textContent).toBe('');
   expect(pill.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
   act(() => setSessionLabels({ ses_pi: 'Copy pass on the order summary' }));
   await settle();
-  expect(control()!.querySelector('.ib-apill-n')!.textContent).toBe('Copy pass on the order summary');
+  expect(control()!.querySelector('.ib-apill-n')).toBeNull();
   expect(control()!.getAttribute('aria-label')).toBe('Reply goes to Pi · Copy pass on the order summary. Change');
+});
+
+test.skipIf(!hasDom)('a phone, two agents of one kind: the mark cannot tell them apart, so the chosen one\'s name follows it (its session\'s title when it has one)', async () => {
+  const SECOND = { kind: 'agent' as const, host: 'claude-code', session: 'ses_pi', name: null };
+  await openReply(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, SECOND, 45)), true);
+  const pill = control()!;
+  expect(pill.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill.querySelector('.ib-apill-n')!.textContent).toBe('Claude Code 2');
+  act(() => setSessionLabels({ ses_pi: 'Invoice PDF fonts' }));
+  await settle();
+  expect(control()!.querySelector('.ib-apill-n')!.textContent).toBe('Invoice PDF fonts');
 });
 
 test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes the sheet and puts focus back in the reply; Send goes to the agent the control names', async () => {
@@ -199,7 +212,8 @@ test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes 
   await click(q('[data-recipient-row="ses_claude"]'));
   expect(sheet()).toBeNull();
   expect(document.activeElement).toBe(text);
-  expect(control()!.querySelector('.ib-apill-n')!.textContent).toBe('Claude Code');
+  expect(control()!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+  expect(control()!.getAttribute('aria-label')).toBe('Reply goes to Claude Code. Change');
   await sheetGone();
   await click(q('[data-reply-send]'));
   await settle();
