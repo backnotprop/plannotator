@@ -332,6 +332,11 @@ export interface PRReviewRetry {
 /** A platform review for which every requested mutation completed. */
 export interface PRReviewSubmissionComplete {
   status: "complete";
+  /**
+   * What went when it is not what was asked: `comment` when a GitLab older
+   * than 18.9 has no request-changes, so the review stays a plain comment.
+   */
+  postedAs?: "comment";
 }
 
 /**
@@ -349,6 +354,8 @@ export interface PRReviewSubmissionPartial {
   /** Why the general comment failed (Bitbucket; `retry.body` then carries it). */
   reviewBodyError?: string;
   recoveryFile?: string;
+  /** As `PRReviewSubmissionComplete.postedAs`: the decision already went as a comment. */
+  postedAs?: "comment";
   retry: PRReviewRetry;
 }
 

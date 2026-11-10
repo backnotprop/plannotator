@@ -325,7 +325,8 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
       took.current.clear();
       setPlan({ targets: [], orphans: [] });
       setGeneral('');
-      onPosted({ action, url: pull.url, posted, head: planHead.current });
+      // What went: an older GitLab posts a request for changes as a comment.
+      onPosted({ action: attempt.postedAs ?? action, url: pull.url, posted, head: planHead.current });
     } finally {
       setSubmitting(false);
     }
