@@ -96,6 +96,8 @@ interface User {
   codeReviewOff?: boolean;
   /** The day the person's third question card is answered (grill-me-tip.ts `revealGrillMeGap`): from then the tip is open. Absent: never. */
   grillMeGap?: number;
+  /** Still on the default theme (shared/inbox/theme-chooser.ts): the "themes" dialog is open. Absent: a theme was picked. */
+  defaultTheme?: boolean;
 }
 
 interface Shown {
@@ -134,7 +136,7 @@ function simulate(user: User, days = 30): Shown[] {
         open: Object.fromEntries(
           TABLE.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.kind === "offer" || user.update),
+            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,

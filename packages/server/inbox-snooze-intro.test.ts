@@ -104,6 +104,8 @@ async function world(options: Options = {}) {
     inboxVoiceIntro: { shownAt: settledAt },
     // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
     favicon: "glass",
+    // The "themes" dialog (the front of the line): settled, as for someone on another theme.
+    inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
   if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });

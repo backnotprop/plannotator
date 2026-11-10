@@ -7386,6 +7386,83 @@ html:not(.light) .ib-tic { --tic-strip: color-mix(in oklch, black 34%, var(--pop
 .ib-cro-phone .ib-tic-big { width: 52px; height: 52px; }
 @media (prefers-reduced-motion: reduce) { .ib-tic-opt { transition: none; } }
 
+/* ---------- The one-time "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; components/ThemeChooser.tsx) ----------
+   A fan of three cards in one 3D context. Each card is one layer moved by one transform; its size comes from its depth, so
+   the depth order is the order on screen and no z-index changes between cards. Only transform and opacity animate. The
+   custom properties keep the `--thc-` prefix: short names such as --d and --e are registered elsewhere in this sheet, and a
+   registered property of another type computes the transition to `all 0s`. */
+.pn-inbox dialog.ib-dlg.ib-thc, dialog.ib-dlg.ib-thc { width: min(1180px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 24px); overflow: hidden; }
+dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+@keyframes ib-thc-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+.ib-thc > .ib-dlg-in { padding: 18px 20px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ib-thc-head { display: flex; align-items: flex-start; gap: 14px; }
+.ib-thc-head h2 { margin: 0; line-height: 0; }
+.ib-thc-head .ib-bsp { flex: 1; }
+.pn-inbox .ib-thc-x, .ib-thc-x { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border-radius: 8px; background: transparent; border: 0; color: var(--muted-foreground); cursor: pointer; }
+.ib-thc-x:hover { background: var(--ib-hover, var(--muted)); color: var(--foreground); }
+.ib-thc-x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* The title: "themes" as six letter tiles, each one a real theme (its background, its primary). Lowercase letters as drawn, not a transformed label. */
+.ib-thc-wm { display: inline-flex; gap: 4px; align-items: flex-end; line-height: 1; user-select: none; -webkit-user-select: none; }
+.ib-thc-t { width: 40px; height: 50px; border-radius: 8px; display: grid; place-items: center; background: var(--background); color: var(--primary); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 18%, transparent), 0 6px 12px -8px oklch(0 0 0 / 0.5); }
+.ib-thc-t > span { font-weight: 900; font-size: 34px; line-height: 1; letter-spacing: -0.01em; transform: translateY(-1px); }
+.ib-thc-t:nth-child(odd) { transform: rotate(-2.5deg); }
+.ib-thc-t:nth-child(even) { transform: rotate(2deg) translateY(-3px); }
+/* The fan. */
+.ib-thc-wrap { position: relative; height: calc(var(--thc-stage-h) * var(--thc-k, 1)); }
+.ib-thc-stage { position: absolute; left: 50%; top: 0; width: var(--thc-w); height: var(--thc-stage-h); margin-left: calc(var(--thc-w) / -2); transform: scale(var(--thc-k, 1)); transform-origin: 50% 0; perspective: 1900px; perspective-origin: 50% 46%; transform-style: preserve-3d; touch-action: pan-y; }
+.ib-thc-card { position: absolute; left: 50%; top: 10px; width: var(--thc-cw); margin: 0 0 0 calc(var(--thc-cw) / -2); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 18px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 30px 60px -30px oklch(0 0 0 / 0.5), 0 2px 8px -2px oklch(0 0 0 / 0.12); transform-origin: 50% 130%; backface-visibility: hidden; transition: transform var(--thc-d, 600ms) var(--thc-e, cubic-bezier(0.22, 0.61, 0.36, 1)) var(--thc-dl, 0ms); }
+.ib-thc-moving .ib-thc-card { will-change: transform; }
+.ib-thc-foot { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.ib-thc-name { display: flex; align-items: baseline; gap: 6px; font-size: var(--ib-fs-15, 15px); white-space: nowrap; }
+.ib-thc-name > span { color: var(--muted-foreground); }
+.ib-thc-name > b { font-weight: 600; }
+.ib-thc-card .ib-lvc-tag { white-space: nowrap; flex: none; }
+.ib-thc-line { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-thc-foot .ib-bsp { flex: 1; }
+.pn-inbox .ib-thc-card .ib-btn, .ib-thc-card .ib-btn { height: 34px; padding: 0 16px; flex: none; }
+/* A theme is two real screenshots, light and dark. The one in front is the mode it would show; the other sits behind it, out to
+   the top right, so its top edge and its right edge show. Pointing at that corner (or tapping it, or its button) shuffles them. */
+.ib-thc-pair, .ib-thc-own { position: relative; width: calc(var(--thc-sw) + var(--thc-px)); height: calc(var(--thc-sh) + var(--thc-py)); }
+.ib-thc-sheet { position: absolute; left: 0; top: 0; width: var(--thc-sw); height: var(--thc-sh); border-radius: 10px; overflow: hidden; background: var(--muted); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent), 0 16px 34px -18px oklch(0 0 0 / 0.6); }
+.ib-thc-sheet img { display: block; width: 100%; height: 100%; }
+.ib-thc-sheet[data-pos="front"] { transform: translate3d(0, var(--thc-py), 0); z-index: 2; }
+.ib-thc-sheet[data-pos="back"] { transform: translate3d(var(--thc-px), 0, 0) rotate(1.4deg); z-index: 1; }
+.ib-thc-shuffling .ib-thc-sheet, .ib-thc-shuffling .ib-thc-corner { will-change: transform, opacity; }
+/* The corner that says what is behind, and is the button for it. */
+.pn-inbox .ib-thc-corner, .ib-thc-corner { position: absolute; right: 7px; top: 6px; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 7px; border-radius: 999px; border: 0; font: 600 var(--ib-fs-12, 12px)/1 var(--font-sans, system-ui); cursor: pointer; transition: opacity 160ms ease; background: color-mix(in oklch, var(--popover) 88%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px var(--border), 0 4px 10px -4px oklch(0 0 0 / 0.4); }
+.ib-thc-corner svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ib-thc-sheet[data-pos="front"] .ib-thc-corner { opacity: 0; pointer-events: none; }
+.ib-thc-card:not([data-front]) .ib-thc-corner { pointer-events: none; }
+/* The two hit bands of the back sheet's visible edge (top and right). */
+.ib-thc-hit { position: absolute; z-index: 3; cursor: pointer; }
+.ib-thc-hit[data-band="top"] { left: var(--thc-px); top: 0; width: var(--thc-sw); height: var(--thc-py); }
+.ib-thc-hit[data-band="right"] { left: var(--thc-sw); top: 0; width: var(--thc-px); height: var(--thc-sh); }
+.ib-thc-card:not([data-front]) .ib-thc-hit, .ib-thc-moving .ib-thc-hit { pointer-events: none; }
+/* Choose your own: three more themes, also real screenshots, dealt in a cascade. */
+.ib-thc-own .ib-thc-sheet { width: calc(var(--thc-sw) * 0.62); height: calc(var(--thc-sh) * 0.62); }
+.ib-thc-own .ib-thc-sheet:nth-child(1) { transform: translate3d(0, calc((var(--thc-sh) + var(--thc-py)) * 0.38), 0) rotate(-2deg); z-index: 1; }
+.ib-thc-own .ib-thc-sheet:nth-child(2) { transform: translate3d(calc((var(--thc-sw) + var(--thc-px)) * 0.19), calc((var(--thc-sh) + var(--thc-py)) * 0.19), 0); z-index: 2; }
+.ib-thc-own .ib-thc-sheet:nth-child(3) { transform: translate3d(calc((var(--thc-sw) + var(--thc-px)) * 0.38), 0, 0) rotate(2deg); z-index: 3; }
+.ib-thc-own-name { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; font: 600 var(--ib-fs-12, 12px)/1.5 var(--font-sans, system-ui); background: color-mix(in oklch, var(--popover) 90%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); }
+.ib-thc-dots { display: none; justify-content: center; gap: 6px; padding: 2px 0; }
+.ib-thc-dots span { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in oklch, var(--foreground) 22%, transparent); }
+.ib-thc-dots span[data-on] { background: var(--foreground); }
+/* A phone (the deck, themeChooser.ts THEME_CHOOSER_DECK_MAX): a sheet from the bottom, the cards side by side, swiped. */
+@media (max-width: 520px) {
+  .pn-inbox dialog.ib-dlg.ib-thc, dialog.ib-dlg.ib-thc { margin: auto 6px 6px; width: calc(100vw - 12px); max-height: calc(100dvh - 12px); }
+  .ib-thc > .ib-dlg-in { padding: 12px 12px 10px; gap: 4px; }
+  .ib-thc-wm { transform: scale(0.8); transform-origin: 0 0; margin: 0 -54px -11px 0; }
+  .ib-thc-stage { width: 100%; left: 0; margin-left: 0; transform: none; }
+  .ib-thc-wrap { height: var(--thc-stage-h); margin: 0 -12px; }
+  .ib-thc-card { padding: 10px; gap: 10px; border-radius: 16px; }
+  .ib-thc-line { display: none; }
+  .ib-thc-foot { flex-wrap: wrap; gap: 6px 8px; }
+  .pn-inbox .ib-thc-card .ib-btn, .ib-thc-card .ib-btn { height: 40px; width: 100%; justify-content: center; }
+  .pn-inbox .ib-thc-corner, .ib-thc-corner { right: 5px; top: 4px; height: 20px; padding: 0 8px 0 6px; }
+  .ib-thc-dots { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) { dialog.ib-dlg.ib-thc[open] { animation: none; } .pn-inbox .ib-thc-corner, .ib-thc-corner { transition: none; } .ib-thc-card { transition: none; } }
+
 /* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
    ones (.ib-stp, .ib-st-btn). */

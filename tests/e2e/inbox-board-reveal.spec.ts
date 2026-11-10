@@ -90,6 +90,8 @@ async function world(): Promise<World> {
       inboxVoiceIntro: { shownAt: past },
       // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: 'glass',
+      // The "themes" dialog (the front of the line): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxReveals: { lastShownAt: snoozeShown },
     }),

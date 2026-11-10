@@ -125,7 +125,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   if (options.updatedFrom) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
     // Due on a used Inbox, and its check would run the `codex` on this PATH.
-    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' }, favicon: 'glass' }));
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' }, favicon: 'glass', inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
   }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,

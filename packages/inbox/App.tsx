@@ -19,7 +19,7 @@ import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
+import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { shareUnchanged } from './shareUnchanged';
@@ -183,7 +183,7 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync } from './theme';
+import { adoptSavedTheme, inboxServerSync, useInboxThemePick } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
@@ -219,6 +219,8 @@ import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
+import { ThemeChooser } from './components/ThemeChooser';
+import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -5194,10 +5196,29 @@ function Inbox() {
     toast: toast !== null,
     idle: pageIdle,
   });
+  // The "themes" dialog (approval "inbox-theme-chooser"; themeChooser.ts): at the front of the line for someone still on
+  // the default theme, armed while it is `reveal.next`, at the same calm moment as the tab icon dialog.
+  const themeNow = useTheme();
+  const pickTheme = useInboxThemePick();
+  const themeChooser = useThemeChooser({
+    due: snoozeIntroLatch.current?.next === 'theme_chooser',
+    blocked: revealBlocked,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    thread: tabIconThread,
+    rows: snoozeIntroRows,
+    clear: listViewRevealClear(listIntroClear, tabIconThread, pageIdle),
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    idle: pageIdle,
+    light: themeNow.lightTheme,
+    dark: themeNow.darkTheme,
+  });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -5286,7 +5307,9 @@ function Inbox() {
     listViewReveal.stage !== 'open' &&
     listViewReveal.stage !== 'claimed' &&
     tabIconChoice.stage !== 'open' &&
-    tabIconChoice.stage !== 'claimed';
+    tabIconChoice.stage !== 'claimed' &&
+    themeChooser.stage !== 'open' &&
+    themeChooser.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -7487,6 +7510,22 @@ function Inbox() {
           }}
           // Escape or a click outside: the tab's own icon is back (the dialog put it back), nothing saved. Final.
           onDismiss={tabIconChoice.close}
+        />
+      )}
+      {themeChooser.stage === 'open' && (
+        <ThemeChooser
+          inUse={{ light: themeNow.lightTheme, dark: themeNow.darkTheme, mode: themeNow.mode }}
+          onPick={(pick) => {
+            // Settings' own writes (theme.ts): applied at once, and config.json `theme` for plan review and code review.
+            pickTheme(pick);
+            themeChooser.close();
+          }}
+          onOwn={() => {
+            themeChooser.close();
+            openThemeSettings();
+          }}
+          // The close button, Escape or a click outside: nothing changes. Final (the claim stamped it).
+          onDismiss={themeChooser.close}
         />
       )}
       {voiceIntro.stage === 'open' && (

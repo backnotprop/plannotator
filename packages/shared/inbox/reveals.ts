@@ -5,7 +5,8 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
+ * In the line, in this order: the "themes" dialog (from the second day of use, for someone still on the default theme;
+ * theme-chooser.ts), Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
  * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
@@ -41,7 +42,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "theme_chooser" | "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -98,6 +99,12 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
+  // The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; the owner: "This dialogue should show a little bit
+  // earlier and only for users who don't already have a custom theme"): at the front of the line for someone still on
+  // the default theme (config.json `inboxThemeChooser`, theme-chooser.ts; anyone on another theme is marked as not
+  // needing it). From the second day of use (`laterDay`), so day 0 stays setup's and Code review's offer keeps its
+  // "immediately". No thread minimum; it never retires (an update-day dialog) and has no Not now.
+  { id: "theme_chooser", kind: "update", tenureMs: 0, minThreads: 0, laterDay: true, enabled: true },
   CODE_REVIEW_OFFER,
   // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
   // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.

@@ -99,6 +99,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
         // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
         favicon: 'glass',
+        // The "themes" dialog (the front of the line): settled, as for someone on another theme.
+        inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
         ...(options.seenOld ? { inboxListIntro: { dueAt: '2026-10-20T10:00:00.000Z', shownAt: '2026-10-21T10:00:00.000Z' } } : {}),
       }),

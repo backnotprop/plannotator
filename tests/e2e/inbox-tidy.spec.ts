@@ -214,6 +214,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       inboxVoiceIntro: { shownAt: new Date(now).toISOString() },
       // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: 'glass',
+      // The "themes" dialog (the front of the line): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxAgentNotes: { offered: true },
     }),
   );
