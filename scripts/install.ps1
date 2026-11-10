@@ -940,6 +940,8 @@ $claudePluginRegistry = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\pl
 # | no-marketplace (the plannotator marketplace is gone; re-add it)
 $claudePluginState = "none"
 $claudePluginVersion = ""
+# The installed plugin's version before this run (for Show-ClaudePluginReloadAlert).
+$claudePluginFromVersion = ""
 
 # The user-scope install record for plannotator@plannotator, or $null. A record
 # without a scope (the v1 registry) counts as the user install; a project- or
@@ -1036,6 +1038,7 @@ function Update-ClaudePluginIfInstalled {
     $local:ErrorActionPreference = 'Continue'
     $record = Get-ClaudePluginUserRecord
     if ($null -eq $record) { return }
+    $script:claudePluginFromVersion = if ($record.version) { "$($record.version)" } else { "" }
     $claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     # Not on PATH: Claude Code's own install folders (its native installer's
     # .local\bin, the older .claude\local), as the Inbox's launcher looks. An
@@ -2627,3 +2630,82 @@ if ((Test-Path $pluginHooks) -and (Test-Path $claudeSettings)) {
 
 # The full install completed: remember its command-line switches for auto-update.
 Write-InstallFlags
+
+# When Claude Code sessions that are open right now cannot load the plugin by
+# themselves: one Windows notification and the plugin-update page on
+# plannotator.ai in the default browser (same rule and URL as install.sh's
+# notify_claude_plugin_reload): updated from a plugin older than 0.28.52, the
+# first release whose mod reloads itself (#2356), state=reload; or not updated
+# (manual / failed / no-marketplace) while older than this release,
+# state=manual. Never on a fresh install, a skipped or current plugin, with no
+# live Claude Code session (sessions\<pid>.json), in CI, over SSH, in a
+# non-interactive session or under PLANNOTATOR_TEST_SANDBOX. Opt out with
+# PLANNOTATOR_INSTALL_NOTIFY=0; PLANNOTATOR_BROWSER is honored for the page (a
+# "none" value opens none). The toast is shown by Windows PowerShell
+# (powershell.exe; PowerShell 7 has no WinRT types), time-bounded; nothing here
+# fails the install.
+function Get-ClaudePluginReloadAlert {
+    param([string]$State, [string]$From, [string]$To, [string]$Tag)
+    if ($env:PLANNOTATOR_INSTALL_NOTIFY -match '^(0|false|no|off|disabled)$') { return $null }
+    if ($env:PLANNOTATOR_TEST_SANDBOX -or $env:CI -or $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY) { return $null }
+    if (-not [Environment]::UserInteractive) { return $null }
+    $plain = { param($v) if ([string]$v -match '^v?(\d+)\.(\d+)\.(\d+)$') { "$($Matches[1]).$($Matches[2]).$($Matches[3])" } else { "" } }
+    $have = & $plain $From
+    if (-not $have) { return $null }
+    $tagPlain = & $plain $Tag
+    if ($State -eq "updated") {
+        if ([version]$have -ge [version]"0.28.52") { return $null }
+        $kind = "reload"
+        $to = & $plain $To
+        if (-not $to) { $to = $tagPlain }
+        $alert = @{ Title = "Plannotator updated its Claude Code plugin"; Body = "Type /reload-plugins in each open Claude Code session to load it." }
+    } elseif ($State -in @("manual", "failed", "no-marketplace")) {
+        if (-not $tagPlain -or [version]$have -ge [version]$tagPlain) { return $null }
+        $kind = "manual"
+        $to = $tagPlain
+        $alert = @{ Title = "Plannotator could not update its Claude Code plugin"; Body = "See Settings > Agents in the Plannotator Inbox for the two commands to run." }
+    } else {
+        return $null
+    }
+    $sessions = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR "sessions" } else { Join-Path $env:USERPROFILE ".claude\sessions" }
+    if (-not (Test-Path -LiteralPath $sessions -PathType Container)) { return $null }
+    $open = $false
+    foreach ($f in @(Get-ChildItem -LiteralPath $sessions -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+        if ($f.BaseName -match '^\d+$' -and (Get-Process -Id ([int]$f.BaseName) -ErrorAction SilentlyContinue)) { $open = $true; break }
+    }
+    if (-not $open) { return $null }
+    $alert.Url = "https://plannotator.ai/plugin-update?state=$kind&from=$have" + $(if ($to) { "&to=$to" } else { "" })
+    return $alert
+}
+
+function Show-ClaudePluginReloadAlert {
+    param($Alert)
+    if ($null -eq $Alert) { return }
+    $ps = Get-Command powershell.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ps) {
+        $t = $Alert.Title -replace "'", "''"
+        $b = $Alert.Body -replace "'", "''"
+        $toast = "`$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; " +
+            "`$x = `$m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); " +
+            "`$n = `$x.GetElementsByTagName('text'); " +
+            "`$null = `$n.Item(0).AppendChild(`$x.CreateTextNode('$t')); " +
+            "`$null = `$n.Item(1).AppendChild(`$x.CreateTextNode('$b')); " +
+            "`$m::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new(`$x))"
+        $info = New-Object System.Diagnostics.ProcessStartInfo
+        $info.FileName = $ps.Source
+        $info.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($toast))
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        try {
+            $p = [System.Diagnostics.Process]::Start($info)
+            if (-not $p.WaitForExit(10000)) { try { $p.Kill() } catch { } }
+        } catch { }
+    }
+    $browser = [string]$env:PLANNOTATOR_BROWSER
+    if ($browser.Trim().ToLowerInvariant() -in @("none", "false", "0", "off", "no", "true", "1", ":")) { return }
+    try {
+        if ($browser) { Start-Process -FilePath $browser -ArgumentList $Alert.Url -ErrorAction Stop }
+        else { Start-Process -FilePath $Alert.Url -ErrorAction Stop }
+    } catch { }
+}
+try { Show-ClaudePluginReloadAlert (Get-ClaudePluginReloadAlert -State $claudePluginState -From $claudePluginFromVersion -To $claudePluginVersion -Tag $latestTag) } catch { }
