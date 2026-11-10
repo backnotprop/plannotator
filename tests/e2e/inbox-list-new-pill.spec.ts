@@ -6,8 +6,11 @@
  *
  * - The reader is scrolled down, so the line at the list's top is out of view: news shows the pill at the list's
  *   bottom edge, counting, and the list's rows stay as they are.
- * - A press is Show: the line goes, the row is lit near the middle of the list, the pill is gone.
- * - With the line in view there is no pill.
+ * - A press is Show: the line goes, the row is lit near the middle of the list, the pill is gone. The light is
+ *   fresh when the reader gets there: pressed four seconds after the first arrival, it starts once the row is in
+ *   view and lasts its whole 3 s from there.
+ * - With the line in view there is no pill; and scrolling down to where the rows will land lights nothing and
+ *   draws nothing before Show.
  * - A 390 px phone: the pill is above the list's bottom edge with a 44 px target, and a tap brings the row in view.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -119,9 +122,42 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     // The list held still: the same rows in the same order, the new one not drawn.
     expect(await order()).toEqual(before);
 
-    await news();
+    // A second arrival 1.5 s later keeps the pill up (its 5 s start again); the press comes 4 s after the first.
+    await page.waitForTimeout(1500);
+    const second = await news();
     await expect(pill(page)).toHaveText('2 new');
     await expect(pill(page)).toHaveAccessibleName('2 new messages below, show');
+    await page.waitForTimeout(2500);
+    await expect(pill(page)).not.toHaveAttribute('data-off', '');
+
+    // Each frame from the press on: when each new row is first in view in the list, when it is lit, when the light goes.
+    await page.evaluate((ids) => {
+      const seen: Record<string, { inView: number | null; lit: number | null; off: number | null }> = {};
+      (window as unknown as { __light: typeof seen }).__light = seen;
+      const box = document.querySelector('.ib-listcol .ib-lbody')!;
+      let pressed: number | null = null;
+      document.addEventListener('pointerdown', (event) => {
+        if ((event.target as Element).closest('[data-list-new-pill]')) pressed = performance.now();
+      }, true);
+      const tick = () => {
+        if (pressed !== null) {
+          const view = box.getBoundingClientRect();
+          for (const id of ids) {
+            const el = [...box.querySelectorAll<HTMLElement>(`[data-thread-id="${id}"]`)].find((node) => node.getClientRects().length > 0);
+            if (!el) continue;
+            const at = (seen[id] ??= { inView: null, lit: null, off: null });
+            const rect = el.getBoundingClientRect();
+            const share = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top)) / rect.height;
+            const now = performance.now() - pressed;
+            if (at.inView === null && share >= 0.9) at.inView = now;
+            if (at.lit === null && el.hasAttribute('data-lit')) at.lit = now;
+            if (at.lit !== null && at.off === null && !el.hasAttribute('data-lit')) at.off = now;
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, [first, second]);
 
     await pill(page).click();
     await expect(line(page)).toHaveCount(0);
@@ -129,6 +165,15 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
     await expect(row).toBeInViewport({ ratio: 1 });
     await expect(row).toHaveAttribute('data-lit', '');
+    // Both rows the pill counted: never lit before they are in view, and lit for the light's whole 3 s from there.
+    type Light = Record<string, { inView: number | null; lit: number | null; off: number | null }>;
+    await expect.poll(async () => Object.values(await page.evaluate(() => (window as unknown as { __light: Light }).__light)).filter((at) => at.off !== null).length, { timeout: 8000 }).toBe(2);
+    for (const at of Object.values(await page.evaluate(() => (window as unknown as { __light: Light }).__light))) {
+      expect(at.inView).not.toBeNull();
+      expect(at.lit!).toBeGreaterThanOrEqual(at.inView! - 34);
+      expect(at.off! - at.lit!).toBeGreaterThanOrEqual(2800);
+      expect(at.off! - at.lit!).toBeLessThanOrEqual(3600);
+    }
     // Near the middle of the list, not at the edge the pointer pressed at (the smooth scroll has ended).
     await expect.poll(async () => Math.abs((await placeIn(page, `.ib-lbody [data-thread-id="${first}"]`)).middle)).toBeLessThan(150);
   } finally {
@@ -142,7 +187,7 @@ test('with the "N new" line in view, news shows no pill', async ({ browser }: { 
     const page = await context.newPage();
     await page.goto(world.url);
     await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
-    await news();
+    const held = await news();
     await expect(line(page)).toBeInViewport();
     await expect(line(page)).toContainText('1 new');
     await expect(pill(page)).toHaveAttribute('data-off', '');
@@ -153,6 +198,13 @@ test('with the "N new" line in view, news shows no pill', async ({ browser }: { 
     await expect(line(page)).not.toBeInViewport();
     await page.waitForTimeout(500);
     await expect(pill(page)).toHaveAttribute('data-off', '');
+    // They scroll on to where the row will land: it is still held behind the line, so nothing is drawn or lit.
+    await body(page).evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(500);
+    await expect(page.locator(`.ib-lbody [data-thread-id="${held}"]`)).toHaveCount(0);
+    await expect(page.locator('.ib-lbody [data-lit]')).toHaveCount(0);
   } finally {
     await context.close();
   }

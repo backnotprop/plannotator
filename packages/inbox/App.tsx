@@ -65,6 +65,7 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
+import { useShowLight } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
@@ -81,7 +82,6 @@ import {
   SETTLE_AFTER_SIDEBAR_MS,
   SETTLE_BEAT_MS,
   SHOW_LIT_AFTER_SLIDE_MS,
-  SHOW_LIT_MS,
   stopSettle,
   type SettleSnapshot,
 } from './settle';
@@ -1459,13 +1459,7 @@ function Inbox() {
    * Only Show lights rows: not a thread's close, not the first load.
    */
   const showFrom = useRef<InboxListSection[] | null>(null);
-  const [lit, setLit] = useState<ReadonlySet<string>>(() => new Set());
-  const litTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const clearLit = useCallback(() => {
-    for (const timer of litTimers.current) clearTimeout(timer);
-    litTimers.current = [];
-  }, []);
-  useEffect(() => clearLit, [clearLit]);
+  const { lit, light } = useShowLight();
   /** The thread a compose send just started, to light once its row is drawn (see the layout effect on the list order). One-shot: taken on the next commit, found or not. */
   const [sentLight, setSentLight] = useState<{ thread: string } | null>(null);
   /** Clicking Inbox with a thread open: the close adopts the refresh's read instead of settling (refreshInbox). */
@@ -6130,16 +6124,9 @@ function Inbox() {
     setSentLight(null);
     const body = listBody(rootRef.current);
     if (!body || !rowElement(body, sentLight.thread)) return;
-    clearLit();
-    const ids = new Set([sentLight.thread]);
     // A slide armed for this commit (below) plays first, as for Show.
-    const start = slideFrom.current ? SHOW_LIT_AFTER_SLIDE_MS : 0;
-    setLit(new Set());
-    litTimers.current.push(
-      setTimeout(() => setLit(ids), start),
-      setTimeout(() => setLit(new Set()), start + SHOW_LIT_MS),
-    );
-  }, [sentLight, clearLit]);
+    light(new Set([sentLight.thread]), slideFrom.current ? SHOW_LIT_AFTER_SLIDE_MS : 0);
+  }, [sentLight, light]);
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
@@ -6163,15 +6150,9 @@ function Inbox() {
       const ids = showBroughtIn(showBefore, shown);
       if (body) brought = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')].filter((el) => ids.has(el.getAttribute('data-thread-id')!) && el.getClientRects().length > 0);
       // A read that brings nothing in (Show again, a second refresh) leaves the light already on as it is.
-      if (ids.size > 0) {
-        clearLit();
-        setLit(new Set());
-        const start = from ? SHOW_LIT_AFTER_SLIDE_MS : 0;
-        litTimers.current.push(
-          setTimeout(() => setLit(ids), start),
-          setTimeout(() => setLit(new Set()), start + SHOW_LIT_MS),
-        );
-      }
+      // The pill's press scrolls to the first of them, perhaps from far: the light waits for it to be in view, so
+      // its whole time runs in front of the reader (showLight.ts).
+      if (ids.size > 0) light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, pressedShow === 'center' ? brought[0] : null);
     }
     const shownAll = focusAfterShow.current;
     focusAfterShow.current = false;
