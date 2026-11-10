@@ -644,7 +644,7 @@ export interface PlannotatorConfig {
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
     grill_me_tip?: { shownAt?: string; key?: string };
-    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    /** The "Star the repo" ask's claim in the line (local-state.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
     /**
@@ -652,7 +652,7 @@ export interface PlannotatorConfig {
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
      */
     tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
-    /** The "themes" dialog's claim in the line (who it is for: config.json `inboxThemeChooser`). */
+    /** The "themes" dialog's claim in the line (who it is for: local-state.json `inboxThemeChooser`). */
     theme_chooser?: { shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
@@ -944,6 +944,10 @@ export const LOCAL_STATE_KEYS = [
   "starAsk",
   "inboxAgentNotes",
   "inboxThemeChooser",
+  // The list look's Undo: the look before the last save and who made it. Rewritten with every list-look save, so
+  // they would keep changing config.json; the look itself (`inboxRows`, `inboxRowsRev`) is a setting and stays.
+  "inboxRowsPrev",
+  "inboxRowsBy",
 ] as const satisfies readonly (keyof PlannotatorConfig)[];
 
 /** Settings that carry a few state fields: those fields go to local-state.json, the rest stays in config.json. */
@@ -1296,14 +1300,9 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       return false;
     }
     configSaveMergeWindowHook?.();
-    if (writesState) {
-      const base = stateFile ?? legacyLocalState(current ?? {});
-      const next: Record<string, unknown> = { ...base, ...state };
-      for (const [key, value] of Object.entries(next)) {
-        if (value === undefined || (SPLIT_KEYS.includes(key as SplitKey) && isPlainObject(value) && Object.keys(value).length === 0)) delete next[key];
-      }
-      writeConfigAtomic(getLocalStatePath(), JSON.stringify(next, null, 2) + "\n");
-    }
+    // config.json first: when it can't be written (a read-only dotfiles or Nix file), a save that also holds state
+    // writes nothing, as before local-state.json, rather than half of itself (a list-look save's Undo record
+    // pointing at a look that was never saved).
     if (writesSettings && current) {
       // The nested settings merge key by key (one experimental switch saved keeps the others), but a
       // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
@@ -1334,6 +1333,14 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
         else delete merged[key];
       }
       writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    }
+    if (writesState) {
+      const base = stateFile ?? legacyLocalState(current ?? {});
+      const next: Record<string, unknown> = { ...base, ...state };
+      for (const [key, value] of Object.entries(next)) {
+        if (value === undefined || (SPLIT_KEYS.includes(key as SplitKey) && isPlainObject(value) && Object.keys(value).length === 0)) delete next[key];
+      }
+      writeConfigAtomic(getLocalStatePath(), JSON.stringify(next, null, 2) + "\n");
     }
     saved = true;
   } catch (e) {

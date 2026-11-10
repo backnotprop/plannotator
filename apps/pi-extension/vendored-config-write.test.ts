@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -54,6 +54,19 @@ describe("vendored config write path", () => {
     expect(lockedDuringMerge).toBe(true);
     expect(existsSync(lockPath)).toBe(false);
     expect(loadConfig().agentTerminalSide).toBe("right");
+  });
+
+  // #2852: the Pi server's star ask and settings saves go through this copy, so it routes this computer's state the
+  // same way: a config.json kept in a dotfiles repo is never rewritten by it.
+  test("this computer's state goes to local-state.json, never config.json, on this side of the vendor boundary too", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ displayName: "me", starAsk: { shownAt: "old" }, inboxRowsPrev: ["roomy"] }, null, 2));
+    const before = readFileSync(configPath, "utf-8");
+    expect(loadConfig()).toMatchObject({ starAsk: { shownAt: "old" }, inboxRowsPrev: ["roomy"] });
+    expect(saveConfig({ starAsk: { shownAt: "new", answer: "starred" }, inboxRowsBy: { host: "pi", session: "s" } })).toBe(true);
+    expect(readFileSync(configPath, "utf-8")).toBe(before);
+    expect(JSON.parse(readFileSync(join(tempDir, "local-state.json"), "utf-8"))).toEqual({ starAsk: { shownAt: "new", answer: "starred" }, inboxRowsPrev: ["roomy"], inboxRowsBy: { host: "pi", session: "s" } });
+    expect(loadConfig()).toMatchObject({ displayName: "me", starAsk: { answer: "starred" }, inboxRowsPrev: ["roomy"] });
   });
 
   test("the side guard the annotate endpoint uses accepts exactly the core sides", () => {
