@@ -331,38 +331,41 @@ if ($found.Success) { Write-Line $found.Value }
 exit 0`,
 
   /**
-   * For each `.jsonl` file in the folder `argv[0]`, looks in its last `argv[1]`
-   * bytes and prints its last `continued-in` line (cut to 1,024 characters)
-   * when no `user` or `assistant` line follows it; at most 200 lines, nothing
-   * for a folder that is not there.
+   * For each `.jsonl` file in the folder `argv[0]` (the `argv[2]` most recently
+   * written), looks in its last `argv[1]` bytes and prints its last 4
+   * `continued-in` lines (each cut to 1,024 characters), whatever follows
+   * them; at most 400 lines, nothing for a folder that is not there. A file is
+   * read a line at a time, never held whole.
    */
-  'transcript-continued-in': String.raw`$length = [int]$argv[1]
-try { $paths = [IO.Directory]::GetFiles($argv[0], '*.jsonl') } catch { exit 0 }
+  'transcript-continued-in': String.raw`$length = [int64]$argv[1]
+$most = [int]$argv[2]
+try {
+  $paths = @([IO.Directory]::GetFiles($argv[0], '*.jsonl') | Sort-Object { [IO.File]::GetLastWriteTimeUtc($_) } -Descending | Select-Object -First $most)
+} catch { exit 0 }
 $shown = 0
 foreach ($path in $paths) {
-  if ($shown -ge 200) { break }
+  if ($shown -ge 400) { break }
+  $found = New-Object 'System.Collections.Generic.List[string]'
   try {
     $file = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
-    $take = [int][Math]::Min([int64]$length, $file.Length)
-    $null = $file.Seek(-$take, 'End')
-    $buffer = New-Object byte[] $take
-    $got = 0
-    while ($got -lt $take) {
-      $read = $file.Read($buffer, $got, $take - $got)
-      if ($read -le 0) { break }
-      $got += $read
+    try {
+      $take = [Math]::Min($length, $file.Length)
+      $null = $file.Seek(-$take, 'End')
+      $reader = New-Object IO.StreamReader($file, [Text.Encoding]::UTF8)
+      while ($null -ne ($line = $reader.ReadLine())) {
+        if ($line.Contains('"type":"continued-in"')) {
+          $found.Add($line.Substring(0, [Math]::Min($line.Length, 1024)))
+          if ($found.Count -gt 4) { $found.RemoveAt(0) }
+        }
+      }
+    } finally {
+      $file.Close()
     }
-    $file.Close()
   } catch {
     continue
   }
-  $found = ''
-  foreach ($line in [Text.Encoding]::UTF8.GetString($buffer, 0, $got).Split([char]10)) {
-    if ($line.Contains('"type":"continued-in"')) { $found = $line.TrimEnd([char]13) }
-    elseif ($line.Contains('"type":"user"') -or $line.Contains('"type":"assistant"')) { $found = '' }
-  }
-  if ($found -ne '') {
-    Write-Line ($found.Substring(0, [Math]::Min($found.Length, 1024)))
+  foreach ($line in $found) {
+    Write-Line $line
     $shown += 1
   }
 }
