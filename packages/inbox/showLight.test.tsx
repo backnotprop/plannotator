@@ -142,11 +142,13 @@ test.skipIf(!hasDom)('go scrolls to the nearest row past that edge, to the middl
   // On the way there the count does not change under the reader.
   scroll(200);
   expect(show.unseen).toHaveLength(2);
-  // The scroll ends with one of the two in view: it is lit, and only now is the count told, the one that is left.
+  // A row the list passes on the way is not lit yet. The scroll ends with one of the two in view: it is lit, and only
+  // now is the count told, the one that is left.
   scroll(150);
-  expect(litRows()).toEqual(['t_a', 't_b']);
+  expect(litRows()).toEqual(['t_a']);
   expect(show.unseen).toHaveLength(2);
   act(() => void body().dispatchEvent(new Event('scrollend')));
+  expect(litRows()).toEqual(['t_a', 't_b']);
   expect(show.unseen).toEqual([{ id: 't_c', edge: 'bottom' }]);
 });
 
@@ -159,12 +161,14 @@ test.skipIf(!hasDom)('go asked with Show (the pill\'s press) waits for the rows 
   expect(scrolled).toEqual([]);
   pass(1);
   expect(scrolled).toEqual([{ id: 't_b', block: 'center' }]);
-  expect(litRows()).toEqual(['t_a']);
+  // A row in view when the press came is not lit as the list leaves it: it is read where the scroll ends, and
+  // there it is past the top edge, so it waits and is counted.
+  expect(litRows()).toEqual([]);
   expect(show.unseen).toEqual([]);
   scroll(500);
   act(() => void body().dispatchEvent(new Event('scrollend')));
-  expect(litRows()).toEqual(['t_a', 't_b', 't_c']);
-  expect(show.unseen).toEqual([]);
+  expect(litRows()).toEqual(['t_b', 't_c']);
+  expect(show.unseen).toEqual([{ id: 't_a', edge: 'top' }]);
 });
 
 test.skipIf(!hasDom)('a row whose group is closed is no longer waited for', async () => {

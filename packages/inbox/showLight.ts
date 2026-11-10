@@ -82,8 +82,10 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
       }
       const rect = row.el.getBoundingClientRect();
       const showing = Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top);
-      // A list with no height cannot say (no layout): the row counts as in view.
-      if (view.height === 0 || showing >= rect.height * IN_VIEW) {
+      // A list with no height cannot say (no layout): the row counts as in view. While `go` scrolls the list no row
+      // is taken as seen: one in view when the press came, or passed on the way, would spend its light as the list
+      // leaves it. They are read where the scroll ends.
+      if (!going && (view.height === 0 || showing >= rect.height * IN_VIEW)) {
         waiting.delete(id);
         seen.push(id);
       } else row.edge = rect.top + rect.height / 2 < view.top + view.height / 2 ? 'top' : 'bottom';
