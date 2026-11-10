@@ -14,12 +14,12 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.1.18",
-    "@tailwindcss/vite": "^4.3.3"
+    "@tailwindcss/vite": "^4.3.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.6"
   }
 }
