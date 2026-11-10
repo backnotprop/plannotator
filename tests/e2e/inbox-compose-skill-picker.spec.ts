@@ -21,6 +21,12 @@
  * whose list is 4½ rows); it starts at the caret's line, not at the field's
  * bottom; and Escape closes the picker, not the dialog.
  *
+ * The comment card on picked words (a message's, and so a file's: one card) has the same picker. The bug there:
+ * the list was drawn inside the card's scrolling field, which clipped all of it, so `/` showed nothing; and the
+ * card could not be dragged (a drag from its words selected the page and closed it as a draft). Typing `/` in the
+ * card shows the list with nothing over its rows, a click writes the reference, and dragging the quoted words
+ * moves the card, open, with its words, whole inside the window.
+ *
  * Build the binary first (see inbox.spec.ts), then
  * `bun run test:e2e:inbox -- inbox-compose-skill-picker.spec.ts`.
  * PNGs land in .local/proof/compose-skill-picker/ (and SKILL_PICKER_SHOTS_DIR
@@ -55,6 +61,8 @@ interface World {
   agent: SimAgent;
   stopPolling: () => Promise<void>;
   files: string[];
+  /** The agent's message, opened in the window. */
+  thread: string;
 }
 
 let world: World;
@@ -125,13 +133,13 @@ test.beforeAll(async () => {
   const url = started.stdout.trim();
   const project = scratchProject(join(root, 'src'), 'plannotator');
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  await agent.send({ project_path: project, subject: 'Run finished', body: 'The export now streams rows to the file.' });
+  const sent = await agent.send({ project_path: project, subject: 'Run finished', body: 'The export now streams rows to the file.' });
   const files = ['notes.md', 'plan.md'].map((name) => {
     const file = join(root, name);
     writeFileSync(file, `# ${name}\n\nA file to attach.\n`);
     return file;
   });
-  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files };
+  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url) };
 });
 
 test.afterAll(async () => {
@@ -336,5 +344,71 @@ test('an iPhone (WebKit): the picker opens full width at the caret, 44 px rows, 
     await context.close();
   } finally {
     await browser.close();
+  }
+});
+
+test('the comment card on picked words: "/" lists the skills on top, a pick writes the reference, and its words drag it', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const words = page.getByText('The export now streams rows to the file.').last();
+    await expect(words).toBeVisible();
+    const line = (await words.boundingBox())!;
+    await page.mouse.move(line.x + 3, line.y + line.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(line.x + 150, line.y + line.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.locator('.annotation-toolbar').getByRole('button', { name: 'Comment', exact: true }).click();
+    const card = page.locator('[data-comment-popover][data-comment-card]');
+    const field = card.locator('textarea');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Tighten this /');
+    const menu = card.locator('[data-skill-menu]');
+    await expect(menu).toBeVisible();
+    await page.waitForTimeout(150);
+    // Every row that shows is hit at its middle: nothing clips or covers the list, and it is inside the window.
+    const seen = await card.locator('[data-skill-item]').evaluateAll((rows) => {
+      const list = rows[0]!.parentElement!.getBoundingClientRect();
+      const menuBox = rows[0]!.closest('[data-skill-menu]')!.getBoundingClientRect();
+      const shown = rows.filter((row) => { const r = row.getBoundingClientRect(); return r.top >= list.top - 0.5 && r.bottom <= list.bottom + 0.5; });
+      return {
+        shown: shown.length,
+        covered: shown.filter((row) => { const r = row.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !row.contains(hit); }).map((row) => row.getAttribute('data-skill-item')),
+        inside: menuBox.top >= 0 && menuBox.left >= 0 && menuBox.bottom <= window.innerHeight && menuBox.right <= window.innerWidth,
+      };
+    });
+    expect(seen.shown).toBeGreaterThanOrEqual(4);
+    expect(seen.covered).toEqual([]);
+    expect(seen.inside).toBe(true);
+    await card.locator('[data-skill-item="agents"]').click();
+    await expect(field).toHaveValue('Tighten this /agents ');
+    await expect(menu).toHaveCount(0);
+
+    // Dragged by the quoted words: it moves that far, stays open with its words, and no draft was left behind.
+    const handle = card.locator('[data-comment-card-handle]');
+    const from = (await card.boundingBox())!;
+    const grip = (await handle.boundingBox())!;
+    await page.mouse.move(grip.x + 40, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + 40 + 180, grip.y + grip.height / 2 + 120, { steps: 10 });
+    await page.mouse.up();
+    const to = (await card.boundingBox())!;
+    expect(Math.abs(to.x - from.x - 180)).toBeLessThanOrEqual(1);
+    expect(Math.abs(to.y - from.y - 120)).toBeLessThanOrEqual(1);
+    await expect(field).toHaveValue('Tighten this /agents ');
+    await expect(page.locator('[data-comment-draft-badge]')).toHaveCount(0);
+    // Thrown past a corner, the whole card is still inside the window.
+    const grip2 = (await handle.boundingBox())!;
+    await page.mouse.move(grip2.x + 40, grip2.y + grip2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(4000, 4000, { steps: 6 });
+    await page.mouse.up();
+    const far = (await card.boundingBox())!;
+    expect(far.x + far.width).toBeLessThanOrEqual(1440 + 1);
+    expect(far.y + far.height).toBeLessThanOrEqual(900 + 1);
+    await expect(field).toHaveValue('Tighten this /agents ');
+  } finally {
+    await context.close();
   }
 });
