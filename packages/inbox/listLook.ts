@@ -76,6 +76,11 @@ export interface ListLook {
   statusMark: boolean;
   /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */
   boldNames: boolean;
+  /**
+   * Settings → Rows only: Pull requests off (approval "inbox-rows-settings-page"): no PR mark at any row's end
+   * (`RowPullsMark`). Off by default, so a look saved before it shows them. The thread's own PR button stays.
+   */
+  hidePulls: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -105,6 +110,7 @@ export const LIST_LOOK_OFF: ListLook = {
   dividers: false,
   statusMark: false,
   boldNames: false,
+  hidePulls: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -376,7 +382,7 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}${look.hidePulls ? ' ib-lk-nopulls' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {

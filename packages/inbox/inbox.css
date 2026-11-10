@@ -8640,31 +8640,89 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .ib-rl :is(.ib-rl-pop, .ib-rl-sbm) { animation: none !important; }
 }
 
-/* Settings → Rows (components/RowsSettings.tsx): the narrow picture and the controls side by side (the controls drop
-   under it when the page is too narrow), the full-width picture under both. The page reaches into the window's right
-   margin, up to 240 px, so the full-width picture draws a wide list at its own size from a 1440 px window; narrower,
-   it zooms (RowsSettings `WidePreview`). The pictures are the list's own rows on the list's own ground, in a frame. */
+/* Settings → Rows (components/RowsSettings.tsx, approval "inbox-rows-settings-page"): "Your list" beside the choices,
+   staying in view as they scroll (sticky), the looks to start from above the choices. The page reaches into the
+   window's right margin, up to 240 px, so both columns have room. On a phone the list is pinned at the top, two rows
+   tall. The list is the Inbox's own rows on the list's own ground, in a frame. */
 .ib-spg[data-settings-section="rows"] { max-width: none; margin-right: calc(-1 * clamp(0px, (100vw - 1000px) / 2, 240px)); }
-.ib-rws-top { display: flex; flex-wrap: wrap; gap: 20px 28px; align-items: flex-start; margin-top: 20px; }
-.ib-rws-fig { margin: 0; min-width: 0; }
-.ib-rws-fig > figcaption { margin: 0 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; }
-.ib-rws-fig-narrow { flex: none; width: 382px; max-width: 100%; }
-.ib-rws-fig-wide { margin-top: 24px; }
-.ib-rws-ctl { flex: 1 1 320px; min-width: 0; }
-.ib-rws-ctl > .ib-sgroup-first { margin-top: 0; }
-.ib-rws-ctl .ib-sgroup > h2 { margin-bottom: 8px; }
-.ib-rws-frame { overflow: hidden; border: 1px solid var(--ib-line); border-radius: 10px; background: var(--card); }
-.ib-rws-frame .ib-listcol.ib-rws-list { position: relative; inset: auto; visibility: visible; width: auto; border-right: 0; }
-.pn-inbox .ib-rws-frame .ib-lbody { overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
-.ib-rws-frame .ib-lbody > .ib-group > .ib-rw, .ib-rws-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
-.ib-rws-head { display: flex; align-items: center; gap: 16px; }
-.ib-rws-head > .ib-lede { flex: 1; min-width: 0; margin: 0; }
+.ib-rws-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 16px; }
+.ib-rws-head > .ib-lede { flex: 1 1 260px; min-width: 0; margin: 0; }
+.ib-rws-acts { display: flex; gap: 8px; flex: none; }
+.pn-inbox .ib-rws-acts .ib-btn.ib-ghost { color: var(--foreground); }
+.pn-inbox .ib-rws-acts .ib-btn:disabled { opacity: 0.45; cursor: default; }
+.ib-rws-grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 20px; }
+.ib-rws-sentinel { display: none; }
+.ib-rws-pv { position: sticky; top: 16px; min-width: 0; }
+.ib-rws-pvhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; min-height: 22px; margin-bottom: 8px; }
+.ib-rws :is(.ib-rws-pvhead, .ib-rws-ctl) > h2 { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; }
+.ib-rws-ctl > h2 { margin-bottom: 8px; }
+.ib-rws-last { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.5; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-rws .ib-rws-last .ib-lnk { display: inline-flex; margin-top: 0; font-size: inherit; align-self: center; flex: none; white-space: nowrap; }
+.pn-inbox .ib-rws-last .ib-lnk svg.ib-ic { flex: none; }
+.ib-rws-ctl { min-width: 0; }
+.ib-rws-frame { overflow: hidden auto; max-height: calc(100vh - 200px); min-height: 120px; border: 1px solid var(--ib-line); border-radius: 10px; background: var(--card); }
+.ib-rws .ib-listcol.ib-rws-list { position: relative; inset: auto; visibility: visible; width: auto; border-right: 0; }
+.pn-inbox .ib-rws .ib-rws-list .ib-lbody { overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
+.ib-rws .ib-rws-list .ib-lbody > .ib-group > :is(.ib-rw, .ib-mrow) { content-visibility: visible; }
+.ib-rws-empty { margin: 0; padding: 8px 18px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* The looks to start from: each a small picture of the person's first rows in that look, and its name. The picked
+   one is filled like the picked page in Settings' own nav, never ringed. */
+.ib-rws-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.ib-rws-pre { position: relative; display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding: 6px; border-radius: 10px; background: var(--ib-fill, var(--muted)); }
+.ib-rws-pre:hover { background: color-mix(in oklch, var(--foreground) 9%, transparent); }
+/* The primary tint on every theme: the Modern themes' own picked fill is a grey too close to the cards'. */
+.ib-rws-pre[data-on], .ib-rws-pre[data-on]:hover { background: color-mix(in oklch, var(--primary) 18%, transparent); color: var(--primary); }
+.ib-rws-pre:has(.ib-rws-pre-n:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-rws-pic { display: block; height: 64px; overflow: hidden; border-radius: 6px; background: var(--card); pointer-events: none; }
+.ib-rws-pic-in { display: block; zoom: 0.5; }
+.pn-inbox .ib-rws-pre-n { display: block; padding: 6px 2px 1px; border: 0; background: none; color: inherit; text-align: left; font-size: var(--ib-fs-13, 13px); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.pn-inbox .ib-rws-pre-n:focus-visible { outline: none; }
+.ib-rws-pre-n::after { content: ''; position: absolute; inset: 0; border-radius: 10px; }
+.ib-rws-ctl .ib-prow { min-height: 48px; padding-top: 7px; padding-bottom: 7px; flex-wrap: wrap; gap: 6px 14px; }
+.ib-rws-ctl .ib-prow .ib-txt { flex: 1 1 96px; }
+.ib-rws-ctl .ib-prow .ib-ctl { max-width: 100%; }
+.ib-rws-ctl .ib-seg { flex-wrap: wrap; max-width: 100%; }
+.pn-inbox .ib-rws-fold { display: flex; align-items: center; gap: 6px; padding: 12px 0 8px; border: 0; background: none; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; color: var(--foreground); cursor: pointer; }
+.pn-inbox .ib-rws-fold:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 6px; }
+.ib-rws-fold svg.ib-ic { transition: transform 150ms ease-out; }
+.ib-rws-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
+.ib-rws-fold-n { font-weight: 400; color: var(--muted-foreground); }
 .ib-rws-note { margin-top: 12px; }
+/* What a small change moved, in "Your list": a fill that fades, never an outline. Two names, so a change made while
+   the last one still fades starts again. A letter badge or a count's pill keeps its own colour (it is its meaning):
+   the fill shows around it instead. Reduced motion: no tint; the line beside the title says it. */
+@keyframes ib-rws-flash-a { 0%, 35% { background-color: color-mix(in oklch, var(--primary) 20%, transparent); } 100% { background-color: transparent; } }
+@keyframes ib-rws-flash-b { 0%, 35% { background-color: color-mix(in oklch, var(--primary) 20%, transparent); } 100% { background-color: transparent; } }
+.ib-rws [data-rows-flash]:not(.ib-lm, .ib-lm-dot, .ib-badge) { border-radius: 5px; }
+.ib-rws [data-rows-flash="ib-rws-flash-a"] { animation: ib-rws-flash-a 1.6s ease-out; }
+.ib-rws [data-rows-flash="ib-rws-flash-b"] { animation: ib-rws-flash-b 1.6s ease-out; }
+@keyframes ib-rws-flash-lm-a { 0%, 35% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 26%, transparent); } 100% { box-shadow: 0 0 0 4px transparent; } }
+@keyframes ib-rws-flash-lm-b { 0%, 35% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 26%, transparent); } 100% { box-shadow: 0 0 0 4px transparent; } }
+.ib-rws :is(.ib-lm, .ib-lm-dot, .ib-badge)[data-rows-flash="ib-rws-flash-a"] { animation-name: ib-rws-flash-lm-a; }
+.ib-rws :is(.ib-lm, .ib-lm-dot, .ib-badge)[data-rows-flash="ib-rws-flash-b"] { animation-name: ib-rws-flash-lm-b; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-rws [data-rows-flash] { animation: none; }
+  .ib-rws-fold svg.ib-ic { transition: none; }
+}
+@media (max-width: 1100px) { .ib-rws-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-spg[data-settings-section="rows"] { margin-right: 0; }
-  .ib-rws-top { margin-top: 14px; }
-  .ib-rws-fig-narrow, .ib-rws-ctl { flex: 1 1 100%; width: auto; }
-  .ib-rws-ctl > .ib-sgroup-first { margin-top: 4px; }
+  .ib-rws-grid { display: block; margin-top: 12px; }
+  .ib-rws-sentinel { display: block; height: 1px; margin-bottom: -1px; }
+  /* Pinned: the title, the change line and two rows, edge to edge on the page's own ground. */
+  /* The pinned list covers what scrolls under it with the page's own ground, whatever the theme: each box down to it
+     inherits the Settings page's background. */
+  .ib-spage:has([data-settings-rows]) :is(.ib-sframe-in, .ib-scols, .ib-spg, .ib-rws, .ib-rws-grid, .ib-rws-pv) { background: inherit; }
+  .ib-rws-pv { top: 0; z-index: 5; margin: 0 -16px 12px; padding: 4px 16px 6px; }
+  .ib-rws-pv[data-stuck] { box-shadow: 0 8px 12px -10px rgb(0 0 0 / 0.25); }
+  .ib-rws-pvhead { margin-bottom: 4px; min-height: 20px; }
+  .ib-rws-frame { max-height: none; min-height: 0; overflow: hidden; }
+  /* The pinned rows at seven eighths, so two of them and the change line leave the choices most of the screen. */
+  .ib-rws-pv .ib-rws-list { zoom: 0.875; }
+  .pn-inbox .ib-rws .ib-rws-pv .ib-rws-list .ib-lbody { padding-top: 0; padding-bottom: 0; }
+  .ib-rws-empty { padding: 6px 2px 0; }
+  .ib-rws-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ib-rws-ctl .ib-prow { min-height: 56px; }
 }
 
 /* Settings → Rows, round 2 (listLook.ts): each rule needs its option's class on the list column, so with every option
@@ -8680,21 +8738,6 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-pmi.ib-pmi-noicon { padding-left: 31px; }
 /* A phone's sheet: its icons stay 15 px (Icon's own size), its items 12 px apart. */
 .ib-pm-pos[data-phone] .ib-pmi.ib-pmi-noicon { padding-left: 39px; }
-/* The presets beside the lede ("Start from"), and "Custom" when the look matches none. The control rows sit 10 px
-   tighter than other Settings rows, so eight of them fit beside the narrow picture. */
-.ib-rws-head { flex-wrap: wrap; }
-.ib-rws-presets { display: flex; align-items: center; gap: 10px; flex: none; }
-.ib-rws-presets > .ib-l { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-/* The presets are buttons (pressed: the look's), so a key moves through them without choosing one. */
-.pn-inbox .ib-rws-presets .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.ib-rws-custom { padding: 3px 8px; border: 1px dashed var(--ib-line); border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-rws-ctl .ib-prow { min-height: 48px; padding-top: 7px; padding-bottom: 7px; }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .ib-rws-head { gap: 12px; }
-  .ib-rws-presets { flex-wrap: wrap; width: 100%; }
-  .ib-rws-presets > .ib-l { flex: 1 1 100%; }
-  .ib-rws-ctl .ib-prow { min-height: 56px; }
-}
 /* Density "Roomy": more room above and below every row, on every shape. */
 .ib-lk-roomy .ib-nrow { padding-top: 14px; padding-bottom: 14px; gap: 4px; }
 .ib-lk-roomy .ib-row { height: 60px; }
