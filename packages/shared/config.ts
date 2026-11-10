@@ -437,6 +437,13 @@ export interface PlannotatorConfig {
    */
   inboxRowsDefaults?: number;
   /**
+   * The look before the last save of `inboxRows` (null: none was saved before it), so the last change can be undone
+   * (`plannotator inbox rows undo`, the Rows page's Undo after an agent's change). Written with every save.
+   */
+  inboxRowsPrev?: string[] | null;
+  /** Who made the last save of `inboxRows`, when an agent's command did (`{ host, session }`); null for the person's own. */
+  inboxRowsBy?: { host: string; session: string } | null;
+  /**
    * The Inbox sidebar's layout (approval "inbox-sidebar-customize"): `{ top, bottom, hidden }`, lists of item names
    * (core `INBOX_SIDEBAR_ITEMS`): the order of the top and bottom stacks, and the items hidden. Unset: today's
    * sidebar. Written by the sidebar's right-click menu and its Customize panel through POST /api/inbox/settings

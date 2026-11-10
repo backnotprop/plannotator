@@ -8688,6 +8688,20 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rws-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .ib-rws-fold-n { font-weight: 400; color: var(--muted-foreground); }
 .ib-rws-note { margin-top: 12px; }
+/* The ask box (components/RowsAsk.tsx): one quiet line under the list; the picker and Send show once it has focus. */
+.ib-rws-ask { margin-top: 12px; }
+.ib-rws-askrow { display: flex; align-items: center; gap: 6px; }
+.pn-inbox .ib-rws-askrow input { flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
+.pn-inbox .ib-rws-askrow input::placeholder { color: var(--muted-foreground); }
+.pn-inbox .ib-rws-askrow input:focus { background: var(--card); }
+.pn-inbox .ib-rws-askrow select { flex: 0 1 auto; min-width: 0; max-width: 40%; height: 34px; padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.pn-inbox .ib-rws-askrow .ib-btn { height: 34px; flex: none; }
+.ib-rws-asknote { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-rws-asklog { display: grid; gap: 4px; margin-top: 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-rws-asklog p { margin: 0; overflow-wrap: anywhere; }
+.ib-rws-asklog b { font-weight: 600; color: var(--foreground); }
+.pn-inbox .ib-rws .ib-rws-asklog .ib-lnk { display: inline; margin: 0; font-size: inherit; }
+.ib-rws-asklog .ib-mk, .ib-rws-last .ib-mk { display: inline-flex; vertical-align: -3px; }
 /* What a small change moved, in "Your list": a fill that fades, never an outline. Two names, so a change made while
    the last one still fades starts again. A letter badge or a count's pill keeps its own colour (it is its meaning):
    the fill shows around it instead. Reduced motion: no tint; the line beside the title says it. */
@@ -8722,6 +8736,9 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .pn-inbox .ib-rws .ib-rws-pv .ib-rws-list .ib-lbody { padding-top: 0; padding-bottom: 0; }
   .ib-rws-empty { padding: 6px 2px 0; }
   .ib-rws-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ib-rws-ask { margin: 14px 0 4px; }
+  .pn-inbox .ib-rws-askrow :is(input, select, .ib-btn) { height: 40px; }
+  .pn-inbox .ib-rws-askrow input { font-size: var(--ib-fs-16-in, 16px); }
   .ib-rws-ctl .ib-prow { min-height: 56px; }
 }
 

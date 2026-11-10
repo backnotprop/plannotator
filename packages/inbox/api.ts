@@ -1320,6 +1320,8 @@ export interface StartThreadInput {
   review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
+  /** Settings → Rows' ask box: the agent also receives how to change the rows. */
+  rows_ask?: true;
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
@@ -2303,7 +2305,8 @@ export interface InboxEventHandlers {
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  onRows?: (rows: unknown, rev: unknown) => void;
+  /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
+  onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
@@ -2442,8 +2445,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'rows':
       try {
-        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
-        handlers.onRows?.(data.rows, data.rev);
+        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
+        handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
       } catch {
         // A malformed frame changes nothing.
       }

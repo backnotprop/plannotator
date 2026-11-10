@@ -53,6 +53,8 @@ export * from "./inbox-pull-risk";
 export * from "./inbox-reviews";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
+// Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
+export * from "./inbox-rows-words";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -754,6 +756,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   decision_ask?: true;
+  /**
+   * On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent
+   * receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
+   */
+  rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**

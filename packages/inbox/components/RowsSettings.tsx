@@ -16,10 +16,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RowMarksScope } from '../letterMarks';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, isDefaultListLook, listLookClasses, lookWithChange, useListLook, type ListLook } from '../listLook';
+import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, isDefaultListLook, listLookClasses, lookWithChange, onAgentRowsChange, useListLook, type ListLook } from '../listLook';
+import { RowsAsk } from './RowsAsk';
 import { ROWS_MAIN_CONTROLS, ROWS_MORE_CONTROLS, ROWS_PRESETS, lookWithChoice, rowsChangeWords, rowsChangedControls, rowsPreset, type RowsControl, type RowsControlId } from '../rowsControls';
 import { ListRow } from './InboxList';
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
 
 export { ROWS_PRESETS, rowsPreset, type RowsPreset } from '../rowsControls';
 
@@ -290,7 +292,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
   const source = own ?? examples;
   // This visit's changes, oldest first: Undo takes the last. Kept here, not saved: leaving the page forgets them.
   const [steps, setSteps] = useState<readonly Step[]>([]);
-  const [last, setLast] = useState<{ words: string[]; undone: boolean } | null>(null);
+  const [last, setLast] = useState<{ words: string[]; undone: boolean; by?: { host: string; name: string } } | null>(null);
   const [more, setMore] = useState(false);
   // The choices that moved in the last change (the tint), and a count so the same one twice tints twice.
   const [flash, setFlash] = useState<{ ids: readonly RowsControlId[]; n: number; tint: boolean }>({ ids: [], n: 0, tint: false });
@@ -392,8 +394,24 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
     return () => observer.disconnect();
   }, [phone]);
 
+  // An agent's command changed the rows (the ask box below, or any `plannotator inbox rows set`): the list already
+  // shows it; the line says who and what, and Undo, here and in the header, puts the look before it back.
+  useEffect(
+    () =>
+      onAgentRowsChange(({ by, before, after }) => {
+        const changed = rowsChangedControls(before, after);
+        if (changed.length === 0) return;
+        const words = rowsChangeWords(before, after);
+        broughtProjects.current = false;
+        setSteps((all) => [...all, { look: before, words, whole: !changed.every((control) => FLASH_PARTS[control.id]) }]);
+        setLast({ words, undone: false, by: { host: by.host, name: INBOX_HOST_NAMES[by.host] ?? 'An agent' } });
+        setFlash((was) => ({ ids: changed.map((control) => control.id), n: was.n + 1, tint: changed.every((control) => FLASH_PARTS[control.id]) }));
+      }),
+    [],
+  );
+
   const step = steps.at(-1);
-  const line = last ? `${last.undone ? 'Undid' : 'Changed'}: ${last.words.join(', ')}` : '';
+  const line = last ? `${last.undone ? 'Undid' : last.by ? `${last.by.name} changed` : 'Changed'}: ${last.words.join(', ')}` : '';
   const controlRow = (control: RowsControl) => <ControlRow key={control.id} control={control} look={look} onChoice={choose} />;
   return (
     <div className="ib-rws" data-settings-rows="" data-rows-preset={preset ?? 'none'}>
@@ -416,6 +434,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
             <h2 id="ib-rows-yours">Your list</h2>
             {/* What the last change was, said to a screen reader as it happens; Undo beside it while there is one. */}
             <span className="ib-rws-last" data-rows-last="">
+              {last?.by && !last.undone && <HostMark host={last.by.host} />}
               <span role="status" aria-live="polite">
                 {line}
               </span>
@@ -431,6 +450,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
             <LookList rows={shown} look={look} phone={phone} examples={!own} projectNames={projectNames} awayMachines={awayMachines} />
           </div>
           {!own && phone && <p className="ib-rws-empty">You have no threads yet. These examples show the look.</p>}
+          {!phone && <RowsAsk />}
         </div>
         <div className="ib-rws-ctl">
           <h2 id="ib-rows-preset">Start from</h2>
@@ -466,6 +486,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
               {ROWS_MORE_CONTROLS.map(controlRow)}
             </div>
           </div>
+          {phone && <RowsAsk />}
           <div className="ib-note ib-rws-note">
             <Icon name="info" />
             <span>
