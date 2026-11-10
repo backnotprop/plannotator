@@ -4,7 +4,9 @@
  * keeps the menu open and saves; Reset to default only once changed; nothing that moves), the keyboard's way in
  * (Shift+F10 / the menu key on a focused control) and no menu on a touch; the panel's switches, locks, grip menu,
  * presets, Reset and Escape; an item a capability turns off keeping its place; another window's save arriving; the
- * tour's sidebar ignoring the saved layout. The model itself is packages/core/inbox-sidebar.test.ts.
+ * tour's sidebar ignoring the saved layout; and the Agents section as an item that hides (listed in the menu and the
+ * panel only while the sidebar draws it, the whole section gone when hidden, on a phone too, kept across a reload,
+ * and shown by a layout saved before it was an item). The model itself is packages/core/inbox-sidebar.test.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -22,6 +24,7 @@ const { drawnSidebarItems } = await import('./sidebarItems');
 const { hearSidebarEvent, openSidebarCustomizer, resetSidebarLayoutForTests, SIDEBAR_LAYOUT_COOKIE } = await import('./sidebarLayout');
 const { INBOX_SIDEBAR_DEFAULT } = await import('@plannotator/core/inbox-sidebar');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+const { setInboxAgents } = await import('./agentsList');
 
 const stored = new Map<string, string>();
 const saves: unknown[] = [];
@@ -46,13 +49,17 @@ beforeEach(() => {
     return new Response(JSON.stringify({ sidebar, sidebar_rev: ++serverRev }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   resetSidebarLayoutForTests();
+  setInboxAgents(null);
 });
 
+const realMatchMedia = hasDom ? window.matchMedia : undefined;
 afterEach(() => {
   globalThis.fetch = realFetch;
   resetStorageBackend();
+  if (hasDom) act(() => root?.unmount());
+  setInboxAgents(null);
   if (!hasDom) return;
-  act(() => root?.unmount());
+  window.matchMedia = realMatchMedia!;
   root = null;
   host?.remove();
   host = null;
@@ -278,4 +285,100 @@ test.skipIf(!hasDom)('the tour\'s sidebar draws the default whatever is saved, a
   const event = await rightClick(document.querySelector('[data-board-nav]')!);
   expect(event.defaultPrevented).toBe(false);
   expect(menu()).toBeNull();
+});
+
+/* ---------- Agents: a section that hides (the owner, 2026-11-09) ---------- */
+
+const agentsSection = () => document.querySelector('.ib-side [data-agents-surface]');
+const agentsHeading = () => document.querySelector('.ib-side [data-sidebar-section="agents"]');
+/** A reload: the page forgets what it heard and paints from this browser's cookie. */
+function reload(over: Partial<SidebarProps> = {}) {
+  act(() => root?.unmount());
+  host?.remove();
+  host = null;
+  root = null;
+  resetSidebarLayoutForTests();
+  draw(over);
+}
+
+test.skipIf(!hasDom)('Agents is listed in the menu and the panel only while the sidebar draws the section', async () => {
+  // An Inbox whose list names no agents, no machine linked: no section, so nothing to hide.
+  draw();
+  expect(agentsSection()).toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  expect(panel()!.querySelector('[data-sbc-fixed="agents"]')).toBeNull();
+  // The list names agents (none running now): the section, and its row between Top and Bottom.
+  await act(async () => setInboxAgents([]));
+  expect(agentsSection()).not.toBeNull();
+  const row = panel()!.querySelector('[data-sbc-fixed="agents"]')!;
+  expect(row.textContent).toBe('Agents');
+  expect(row.closest('[data-sbc-zone]')).toBeNull();
+  // It hides; it does not move.
+  expect(row.querySelector('.ib-sbc-grip')).toBeNull();
+  expect(row.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+  expect(panel()!.querySelector('[data-sbc-zone="top"]')!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(panel()!.querySelector('[data-sbc-zone="bottom"]')!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  await rightClick(agentsHeading()!);
+  expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'agents', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
+});
+
+test.skipIf(!hasDom)('hiding Agents takes the whole section away, saves it, and a reload keeps it; showing puts it back', async () => {
+  await act(async () => setInboxAgents([]));
+  draw();
+  expect(agentsHeading()).not.toBeNull();
+  expect(document.querySelector('[data-agents-add="agent"]')).not.toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  await click(panel()!.querySelector('[data-sidebar-switch="agents"]'));
+  expect(agentsSection()).toBeNull();
+  expect(agentsHeading()).toBeNull();
+  expect(document.querySelector('[data-agents-add]')).toBeNull();
+  expect(document.querySelector('.ib-side')!.textContent).not.toContain('Agents');
+  // Projects and the rest are untouched.
+  expect(document.querySelector('.ib-side [data-sidebar-section="projects"]')).not.toBeNull();
+  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['agents'] });
+  // The panel still lists it, switched off: the way back.
+  expect(panel()!.querySelector('[data-sidebar-switch="agents"]')!.getAttribute('aria-checked')).toBe('false');
+
+  reload();
+  expect(agentsSection()).toBeNull();
+  expect(document.querySelector('.ib-side [data-sidebar-section="projects"]')).not.toBeNull();
+
+  await rightClick(document.querySelector('[data-board-nav]')!);
+  await click(document.querySelector('[data-sidebar-toggle="agents"]'));
+  expect(agentsHeading()).not.toBeNull();
+  expect(saves.at(-1)).toEqual(INBOX_SIDEBAR_DEFAULT);
+});
+
+test.skipIf(!hasDom)('a layout saved before Agents was an item shows the section, from the cookie and from the server', async () => {
+  await act(async () => setInboxAgents([]));
+  stored.set(SIDEBAR_LAYOUT_COOKIE, `${INBOX_SIDEBAR_DEFAULT.top.join(',')};${INBOX_SIDEBAR_DEFAULT.bottom.join(',')};feedback`);
+  draw();
+  expect(document.querySelector('[data-feedback-nav]')).toBeNull();
+  expect(agentsSection()).not.toBeNull();
+  await act(async () => hearSidebarEvent({ top: [...INBOX_SIDEBAR_DEFAULT.top], bottom: [...INBOX_SIDEBAR_DEFAULT.bottom], hidden: ['logo'] }, 3));
+  expect(document.querySelector('.ib-brand')).toBeNull();
+  expect(agentsSection()).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('on a phone: the sheet lists Agents, and hidden it is gone from the sidebar there too', async () => {
+  window.matchMedia = ((query: string) => ({ media: query, matches: true, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) as unknown as typeof window.matchMedia;
+  await act(async () => setInboxAgents([]));
+  draw({}, drawnSidebarItems({ board: true, reviews: false, shape: false, usage: false, phone: true }));
+  expect(agentsSection()).not.toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  expect(panel()!.hasAttribute('data-phone')).toBe(true);
+  await click(panel()!.querySelector('[data-sidebar-switch="agents"]'));
+  expect(agentsSection()).toBeNull();
+  expect(agentsHeading()).toBeNull();
+  reload();
+  expect(agentsSection()).toBeNull();
+});
+
+test.skipIf(!hasDom)('the tour\'s sidebar shows Agents whatever is saved', async () => {
+  await act(async () => setInboxAgents([]));
+  draw();
+  await act(async () => hearSidebarEvent({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['agents'] }, 1));
+  expect(agentsSection()).toBeNull();
+  draw({ rememberSections: false });
+  expect(agentsSection()).not.toBeNull();
 });
