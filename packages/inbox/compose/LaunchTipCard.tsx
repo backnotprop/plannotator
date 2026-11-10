@@ -1,6 +1,6 @@
 /**
  * The Launch tip's card (approval "launch-tip", variant Beside; rules in launchTip.ts): the tour's coach card look
- * (`.ib-tour-coach`), drawn inside compose's To row, so inside the modal `<dialog>` (a portal to the body would sit
+ * (`.ib-tour-coach`), drawn inside compose's To row (a phone: its foot's row, where To is), so inside the modal `<dialog>` (a portal to the body would sit
  * under the backdrop, inert) and one Tab after To. It never takes focus: Got it keeps focus where it was on a press,
  * and on a keyboard press sends it to To, the thing the tip was about.
  */
@@ -29,9 +29,9 @@ export function LaunchTipCard(props: {
       data-side={side}
       data-phone={props.phone ? '' : undefined}
       data-leaving={leaving ? '' : undefined}
-      style={place ? { top: place.top, left: place.left } : { visibility: 'hidden' }}
+      style={place ? (side === 'above' ? { bottom: place.top, left: place.left } : { top: place.top, left: place.left }) : { visibility: 'hidden' }}
     >
-      <span className="ib-ctip-arrow" data-side={side === 'right' ? 'left' : 'up'} style={side === 'below' && place ? { left: place.arrow } : undefined} aria-hidden="true" />
+      <span className="ib-ctip-arrow" data-side={side === 'right' ? 'left' : side === 'above' ? 'down' : 'up'} style={side !== 'right' && place ? { left: place.arrow } : undefined} aria-hidden="true" />
       <div className="ib-tc-eb">{LAUNCH_TIP_WORDS.eyebrow}</div>
       <h2 id={props.titleId}>{LAUNCH_TIP_WORDS.title}</h2>
       <p id={props.lineId}>{LAUNCH_TIP_WORDS.line}</p>

@@ -27,6 +27,7 @@ import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
+import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
@@ -256,6 +257,8 @@ export function Sidebar(props: SidebarProps) {
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
   const sections = useSidebarSections(props.rememberSections !== false);
+  // "Keep starred above the list" (starredPills.ts): on, the starred threads are the list's pills and no section here.
+  const [starredAbove] = useStarredAbove(props.rememberSections !== false);
   const pinnedClosed = sections.closed('pinned');
   const projectsClosed = sections.closed('projects');
   const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
@@ -263,7 +266,7 @@ export function Sidebar(props: SidebarProps) {
   // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
   const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}`);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
    * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
@@ -314,7 +317,7 @@ export function Sidebar(props: SidebarProps) {
   const agentsClosed = sections.closed('agents');
   // Agents shows while the list names agents (an Inbox from before them names none) or a machine is linked.
   const agentsRead = useInboxAgents();
-  const agentsShown = agentsRead !== null || machineList.length > 0;
+  const agentsDrawn = agentsRead !== null || machineList.length > 0;
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
@@ -414,9 +417,12 @@ export function Sidebar(props: SidebarProps) {
     artifacts: Boolean(props.onArtifacts),
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
+    agents: agentsDrawn,
     phone,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
+  const agentsShown = shows('agents');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
@@ -674,7 +680,7 @@ export function Sidebar(props: SidebarProps) {
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {/* A phone's sheet has one scroll: the places scroll with the sections. */}
         {phone && stack(layout.top)}
-        {pins.length > 0 && sheetSection('pinned',
+        {pins.length > 0 && !starredAbove && sheetSection('pinned',
           <>
             {sheetHeading(
             <SectionHeader

@@ -130,7 +130,7 @@
  * (tests/helpers/fake-cswap.ts). Without it that PATH is empty. Either way no
  * real claude-swap can be reached.
  */
-import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { startInboxServer } from "../../packages/server/inbox";
@@ -353,6 +353,14 @@ const leakedIds =
         }),
       )
     : [];
+// The one-time "themes" dialog is settled in every world (as for someone on another theme): on a release version it is
+// due from day one and would be the line's next dialog, ahead of the one a test is about.
+{
+  mkdirSync(dataDir, { recursive: true });
+  const file = join(dataDir, "config.json");
+  const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
+  if (config.inboxThemeChooser === undefined) writeFileSync(file, JSON.stringify({ ...config, inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } }));
+}
 const server = await startInboxServer({
   dataDir,
   setAsideDelayMs: Number(process.env.INBOX_DOM_SET_ASIDE_MS) > 0 ? Number(process.env.INBOX_DOM_SET_ASIDE_MS) : 60_000,

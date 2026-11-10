@@ -71,7 +71,7 @@ import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
-import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
+import { inboxMessageImageBase, inlineImageRefFromSrc, syncMessageImages, toggleMessageImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
 import { ArmScope, createMessageArms } from '../messageArming';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
@@ -124,6 +124,7 @@ import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
+import { PhoneReplyRecipient } from './PhoneReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
 import { spaced } from '../voiceField';
@@ -661,8 +662,8 @@ export function MessageBody({
     },
     [imageBaseDir, widths],
   );
-  // A tall screenshot in the body shows its top, cropped like the gallery's
-  // (inbox.css); a click still opens it whole.
+  // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
+  // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
   const bodyRef = useRef<HTMLDivElement>(null);
   const pressSelected = useRef(false);
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
@@ -685,17 +686,6 @@ export function MessageBody({
   );
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const onLoad = (event: Event) => {
-      if (event.target instanceof HTMLImageElement) markTallImage(event.target);
-    };
-    for (const img of body.querySelectorAll('img')) if (img.complete) markTallImage(img);
-    // Load does not bubble: a capture listener on the body hears every image in it.
-    body.addEventListener('load', onLoad, true);
-    return () => body.removeEventListener('load', onLoad, true);
-  }, []);
   // Images the body shows open in the thread's one viewer (approval "inbox-image-viewer"): a
   // click, or Enter / Space on one (every image the window loads from the message is a button).
   // Until the store has captured it (a later read of the thread does, in the background), the
@@ -734,6 +724,44 @@ export function MessageBody({
     return image?.width && image.height ? { width: image.width, height: image.height } : null;
     // A new identity when the records change (an older message's pictures are captured on its first open).
   }, [imageOf, message.inline_images]);
+  // Each picture's box, from its recorded size before it loads (no jump as the thread fills in), and the
+  // "Show all" of a very long one. Before paint on every render; again when a picture loads, the body's
+  // column changes width or the window changes height.
+  const openPictures = useRef(new Set<string>());
+  const fitImages = useCallback(() => {
+    const body = bodyRef.current;
+    if (body) syncMessageImages(body, (img) => imageOf(img.getAttribute('src')), openPictures.current);
+  }, [imageOf]);
+  useLayoutEffect(fitImages);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLImageElement) fitImages();
+    };
+    // Load does not bubble: a capture listener on the body hears every image in it.
+    body.addEventListener('load', onLoad, true);
+    const onMore = (event: MouseEvent) => {
+      const img = toggleMessageImage(event.target, openPictures.current);
+      if (!img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const closing = img.hasAttribute('data-ib-open');
+      fitImages();
+      // Closed from the bottom of a long picture: its top comes back into view rather than the thread jumping past it.
+      if (closing) img.scrollIntoView?.({ block: 'nearest' });
+    };
+    body.addEventListener('click', onMore);
+    window.addEventListener('resize', fitImages);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitImages);
+    observer?.observe(body);
+    return () => {
+      body.removeEventListener('load', onLoad, true);
+      body.removeEventListener('click', onMore);
+      window.removeEventListener('resize', fitImages);
+      observer?.disconnect();
+    };
+  }, [fitImages]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
@@ -5648,29 +5676,37 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
     if (foot && now !== was) foot.scrollTop += now - was;
   }, [draftAboveShows]);
-  const rcptPill = pillActive ? (
-    <ReplyRecipient
+  const onlyRecipient = (row: RecipientRow) => {
+    aimReply([row.session]);
+    setRcptOpen(false);
+    announce(`This reply goes to ${row.label}.`);
+  };
+  const toggleReplyRecipient = (row: RecipientRow) => {
+    // The agents typed with `@` count toward the most one reply goes to.
+    const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
+    const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
+    aimReply(next);
+    announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+  };
+  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
+  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
+  // one agent has no control at all.
+  const rcptPill = !pillActive ? null : phone ? (
+    <PhoneReplyRecipient
       rows={rcptAgents}
       chosen={rcptChosen}
       open={rcptOpen}
       onOpen={setRcptOpen}
-      onOnly={(row) => {
-        aimReply([row.session]);
-        setRcptOpen(false);
-        announce(`This reply goes to ${row.label}.`);
-      }}
-      onToggle={(row) => {
-        // The agents typed with `@` count toward the most one reply goes to.
-        const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
-        const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
-        aimReply(next);
-        announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
-      }}
+      onOnly={onlyRecipient}
+      onToggle={toggleReplyRecipient}
       onTagAnother={tagAnother}
-      phone={phone}
       section={sectionRef.current}
+      labels={sessionLabels}
+      folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
-  ) : null;
+  ) : (
+    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} />
+  );
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}
@@ -7258,11 +7294,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   {draftStamp}
                 </div>
               )}
-              {/* A phone: what goes with the reply and who gets it, on one quiet line over the row. */}
+              {/* A phone: what goes with the reply, on one quiet line over the row (who gets it is in the row). */}
               {phone && (
-                <div className="ib-rline" data-reply-line="" data-recipient-anchor="" data-empty={replySummaryShown || pillActive ? undefined : ''}>
+                <div className="ib-rline" data-reply-line="" data-empty={replySummaryShown ? undefined : ''}>
                   <ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null} />
-                  {pillActive && rcptPill}
                 </div>
               )}
               <ReplyRow
@@ -7278,6 +7313,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
                     {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                     {sending && <span className="ib-spin" aria-hidden="true" />}
+                    {/* A phone: the round arrow; the word stays as the button's name. */}
+                    {phone && <Icon name="arrowUp" size={20} className="ib-rsend-i" />}
                     <span className="ib-rsend-w">Send</span>
                   </button>
                   )
@@ -7314,7 +7351,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={!phone && pillActive ? rcptPill : null}
+                pill={rcptPill}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's

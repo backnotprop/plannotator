@@ -2,7 +2,7 @@
  * "Choose how your list looks" (approval "inbox-rows-dialog", round 7b; it replaced the switches of approval
  * "inbox-list-options-intro", shipped in 0.28.42). A one-time dialog: the picture of an Inbox with example projects
  * plays a short demo of letter marks and logos and holds on the stacked look (RowsIntroPicture.tsx); under it three
- * looks, Minimal, Balanced and Detailed (Settings → Rows' presets, RowsSettings.tsx `ROWS_PRESETS`), each its name
+ * looks, Minimal, Balanced and Detailed (three of Settings → Rows' presets, RowsSettings.tsx `ROWS_INTRO_PRESETS`), each its name
  * alone. The person's look is picked when it opens and marked "Current" (Balanced, the defaults, for most; the
  * owner: "balance should be selected by default"), so Done at once keeps it; a custom look picks none and Done waits
  * for a pick. Once the demo holds, a card rises over the blurred picture with the person's own rows in the picked
@@ -20,7 +20,7 @@ import { LIST_INTRO_SWAP_MS, ROWS_INTRO_END_MS, ROWS_INTRO_STEPS_MS, rowsIntroSc
 import { RowMarksScope } from '../letterMarks';
 import { ListRow } from './InboxList';
 import { Modal } from './Updates';
-import { ROWS_PRESETS, rowsPreset, type RowsPreset } from './RowsSettings';
+import { ROWS_INTRO_PRESETS, ROWS_PRESETS, rowsPreset, type RowsPreset } from './RowsSettings';
 import { RowsIntroNotes, RowsIntroWindow } from './RowsIntroPicture';
 import { Icon } from '../icons';
 import { themeSupportsHalf } from '@plannotator/ui/utils/themeRegistry';
@@ -204,7 +204,8 @@ export interface ListLookIntroProps {
 }
 
 export function ListLookIntro({ groups, initial, projectNames, awayMachines, phone, onDone, onKeep, onCustomize }: ListLookIntroProps) {
-  const [current] = useState(() => rowsPreset(initial));
+  // Only the dialog's own three: a look that is another of Settings → Rows' presets (Dense) is custom here.
+  const [current] = useState(() => ROWS_INTRO_PRESETS.find((preset) => preset.id === rowsPreset(initial))?.id ?? null);
   // The person's look starts picked (null for a custom look): Done without a change saves the same look.
   const [pick, setPick] = useState<RowsPreset | null>(current);
   const { t, moving } = useDemo();
@@ -252,7 +253,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
         <div className="ib-rl-card" inert aria-hidden="true" data-list-intro-card={shown ?? undefined} style={{ width: fit.w, height: fit.ch, top: fit.top + Math.round((fit.h - fit.ch) / 2) }}>
           <div className="ib-rl-ch">Inbox</div>
           <div className="ib-rl-cls">
-            {ROWS_PRESETS.map((preset) => (
+            {ROWS_INTRO_PRESETS.map((preset) => (
               <div key={preset.id} className="ib-rl-cl" data-look={preset.id} data-on={shown === preset.id ? '' : undefined}>
                 <LookRows rows={rows} look={preset.look} phone={phone} projectNames={projectNames} awayMachines={awayMachines} />
               </div>
@@ -271,7 +272,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
         </p>
       </div>
       <div className="ib-rl-looks" role="radiogroup" aria-labelledby="ib-lo-title" tabIndex={-1}>
-        {ROWS_PRESETS.map((preset) => (
+        {ROWS_INTRO_PRESETS.map((preset) => (
           <label key={preset.id} className="ib-rl-look" data-on={pick === preset.id ? '' : undefined} data-list-intro-look={preset.id}>
             <input type="radio" name="ib-rl-look" value={preset.id} checked={pick === preset.id} onChange={() => choose(preset.id)} />
             {/* The look's name alone (the owner: no icons), centred; "Current" under it never moves it, so the three line up. */}
