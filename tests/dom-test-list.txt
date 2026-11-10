@@ -220,6 +220,7 @@ packages/inbox/ask/askWindow.test.tsx
 packages/inbox/ask/askReadsOnce.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
+packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
@@ -253,6 +254,7 @@ packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/connectLine.test.tsx
 packages/inbox/agentsSettings.test.tsx
+packages/inbox/agents/agentMotion.test.tsx
 packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx

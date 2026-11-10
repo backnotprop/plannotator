@@ -41,6 +41,8 @@ import {
   InboxApiError,
   inboxApi,
   onReplySent,
+  adoptPageSession,
+  pageServerSession,
   setPageSession,
   subscribeInboxEvents,
   tailnetGuest,
@@ -56,6 +58,7 @@ import {
   type WhatsNewReleasesModel,
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
+import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
 import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
 import { createOwnSaves } from './ownSaves';
 import { createSignal } from './signal';
@@ -160,7 +163,7 @@ import { drawnSidebarItems } from './sidebarItems';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage, type WhatsNewError } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
-import { reloadOntoInbox, useStalePage } from './stalePage';
+import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
@@ -1530,6 +1533,8 @@ function Inbox() {
 
   /** The newest list cursor taken, by Inbox run: a list read that brings nothing new keeps the list held, with its older cursor. */
   const listCursor = useRef<{ session: string; cursor: number } | null>(null);
+  /** The Inbox's release at the page's first list read: a restarted Inbox on another one is never adopted (sessionAdopt.ts). */
+  const loadedVersion = useRef<string | null>(null);
   /** The list header's Tidy hears a list read that brought nothing new (useTidy's `listRead`). */
   const listTidyRead = useRef<(() => void) | null>(null);
   /** The open thread was not here, and the list names the machine that holds it: open it there. */
@@ -1564,6 +1569,8 @@ function Inbox() {
         listTidyRead.current?.();
         return held;
       }
+      // The release the Inbox ran at the page's first list read, the one its session is from (sessionAdopt.ts).
+      if (!firstList.current!.done) loadedVersion.current = typeof next.version === 'string' ? next.version : null;
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
@@ -2210,6 +2217,39 @@ function Inbox() {
         readAfterRecord(own ? null : event, { ...(own ? { own } : {}), now: i === held.length - 1 });
       });
     };
+    let adopting = false;
+    /** A `hello` from a run that is not the page's: take its session when it is the same Inbox, data and release (sessionAdopt.ts). */
+    const adoptAfterRestart = async (hello: RestartHello) => {
+      if (adopting || cancelled) return;
+      adopting = true;
+      try {
+        const result = await adoptRestartedInbox(hello, {
+          pageSession: pageServerSession,
+          loadedVersion: () => loadedVersion.current,
+          pageCursor: () => listCursor.current?.cursor ?? null,
+          readHealth: () => inboxApi.healthWithin(STALE_HEALTH_MS),
+          // What a reload would bring, before any write carries the new session.
+          catchUp: async () => {
+            const open = routeRef.current.thread;
+            const [list] = await Promise.all([refreshList(false), open ? refreshThread(open) : null, refreshDrafts(), refreshSettings()]);
+            // The run the read came from (a read that changed nothing answers the list held, which names the old run).
+            return cancelled || !list ? null : (listCursor.current?.session ?? null);
+          },
+          adopt: adoptPageSession,
+        });
+        // The open thread's look was refused while the page carried the old session: recorded now, once.
+        const open = routeRef.current.thread;
+        // A browser proof's log (sharedEvents.ts `trace`): what the page decided, and why not.
+        const log = (globalThis as { __plannotatorInboxEventLog?: unknown }).__plannotatorInboxEventLog;
+        if (Array.isArray(log) && result.state !== 'same') log.push({ type: 'session', ...result, at: Date.now() });
+        if (result.state === 'adopted' && !cancelled && open && threadLoaded.current?.thread_id === open) {
+          await inboxApi.seen(open, latestAgentSeq(threadLoaded.current)).catch(() => {});
+          void refreshList(false);
+        }
+      } finally {
+        adopting = false;
+      }
+    };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
     let settingsAsked = false;
@@ -2364,7 +2404,9 @@ function Inbox() {
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
         },
-        onConnect: () => {
+        onConnect: (hello) => {
+          // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
+          if (hello) void adoptAfterRestart(hello);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
@@ -6992,6 +7034,7 @@ function Inbox() {
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
             onSide={ask.side}
+            onSideWords={ask.sideWords}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
             replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}
