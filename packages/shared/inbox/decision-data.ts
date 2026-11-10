@@ -65,7 +65,8 @@ const ms = (iso: string | null | undefined): number | null => {
   return Number.isFinite(at) ? at : null;
 };
 
-function agentLabel(author: { host?: string | null; name?: string | null }): string {
+/** An agent as the person sees it: its host's name ("Claude Code"), never a session or machine. */
+export function agentLabel(author: { host?: string | null; name?: string | null }): string {
   if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
   if (author.name) return author.name;
   return "An agent";
