@@ -609,10 +609,10 @@ export interface PlannotatorConfig {
    * the claiming page's own key, so that page's retry after a lost answer is
    * shown it again (any other key is not). The schedule (approval
    * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
-   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * any kind (the agent note included: the 40-minute gap counts from it); `notNowAt`, the last offer
    * closed with Not now (three days before the next); `shownLoad`, the page
-   * load that showed the last dialog (never on two loads in a row; the loads
-   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * load that showed the last dialog (a record only since 2026-11-09:
+   * nothing reads it). `agentNote.shownFor`: the agents the
    * agent note was shown for (once each, so an unanswered note never takes
    * another day). `waitingSince` also counts the 14 days after which an offer
    * retires (an update-day dialog never does).

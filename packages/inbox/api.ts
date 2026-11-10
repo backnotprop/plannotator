@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
@@ -107,8 +108,8 @@ export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' |
 export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
 
 /**
- * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
- * one on the load right after the load that showed the last (packages/shared/inbox/reveals.ts).
+ * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
+ * dialog's stamp, as a record (packages/shared/inbox/reveals.ts; the page-load rule it once served ended 2026-11-09).
  */
 const pageLoad = newUuid();
 
@@ -561,7 +562,7 @@ export interface SettingsModel {
    * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
    * older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -2284,7 +2285,7 @@ export interface InboxEventHandlers {
    * With a shared stream (sharedEvents.ts) also called when the tab whose
    * stream serves this one changes, so the report names it (`served_by`).
    */
-  onConnect?: () => void;
+  onConnect?: (hello?: RestartHello) => void;
   /**
    * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
@@ -2384,7 +2385,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       // Only proof the stream is alive: no read, nothing to show.
       return;
     case 'hello':
-      handlers.onConnect?.();
+      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
+      handlers.onConnect?.(readHello(frame.data) ?? undefined);
       return;
     case 'reach':
       try {

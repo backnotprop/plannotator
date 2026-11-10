@@ -16,7 +16,7 @@ export const VOICE_INTRO_MIN_WORDS = 40;
 export const VOICE_INTRO_MOMENT_MS = 60_000;
 
 export interface VoiceIntroLoad {
-  /** The Inbox has it due (settings `voice.intro_due`), read once per load. */
+  /** The Inbox has it due (settings `voice.intro_due`), as the load's latch holds it (reveal.ts `useLineLatch`). */
   due: boolean;
   /** The page is on this computer. */
   local: boolean;
