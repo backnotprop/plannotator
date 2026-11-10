@@ -31,7 +31,15 @@ const ISSUES = 'https://github.com/backnotprop/plannotator/issues';
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
     <main class="pu-page max-w-2xl mx-auto px-5 sm:px-8 pt-24 sm:pt-28 pb-20">
-      <p class="pu-eyebrow">Plannotator update</p>
+      <div class="pu-alert" role="status">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <p>
+          <strong>Action needed.</strong>
+          <span class="pu-v pu-v-general">Your Claude Code plugin may be out of date.</span>
+          <span class="pu-v pu-v-reload">Your open Claude Code sessions still run the old plugin.</span>
+          <span class="pu-v pu-v-manual">Your Claude Code plugin was not updated.</span>
+        </p>
+      </div>
 
       <h1 class="font-display pu-heading">
         <span class="pu-v pu-v-general">One thing left to do</span>
@@ -42,22 +50,8 @@ const ISSUES = 'https://github.com/backnotprop/plannotator/issues';
       <section aria-labelledby="pu-what" class="pu-section">
         <h2 id="pu-what" class="pu-h2">What happened</h2>
         <p>
-          For a while, a Plannotator update could update the app but leave its Claude Code plugin on an
-          older version. That happened on computers where the update could not find the <code>claude</code> command.
-        </p>
-        <p>
-          The app is fine and nothing was lost. Updates now look for <code>claude</code> in more places, so
-          future updates bring the plugin along.
-        </p>
-        <p class="pu-v pu-v-general pu-status">
-          If your plugin is still behind, two commands bring it up to date. Then reload Claude Code.
-        </p>
-        <p class="pu-v pu-v-reload pu-status">
-          This update brought the plugin up to date. Claude Code sessions that were already open still run
-          the old one until they reload.
-        </p>
-        <p class="pu-v pu-v-manual pu-status">
-          This update still could not update the plugin on this computer, so it takes two commands from you.
+          A recent update left the Claude Code plugin on an older version on some computers. The app is
+          fine and nothing was lost.
         </p>
         <p class="pu-versions pu-v pu-v-reload" hidden>
           Plugin updated from <span class="pu-ver" data-pu-version="from"></span> to <span class="pu-ver" data-pu-version="to"></span>.
@@ -140,14 +134,24 @@ const ISSUES = 'https://github.com/backnotprop/plannotator/issues';
   html[data-pu-state='manual'] .pu-page h1 .pu-v-manual { display: inline; }
   .pu-page .pu-versions[hidden] { display: none !important; }
 
-  .pu-eyebrow {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--primary);
-    margin-bottom: 0.75rem;
+  .pu-alert {
+    --pu-amber: oklch(0.7 0.17 65);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.75rem 0.9rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid oklch(from var(--pu-amber) l c h / 0.6);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    background: oklch(from var(--pu-amber) l c h / 0.14);
+    color: var(--foreground);
+    font-size: 0.975rem;
+    line-height: 1.5;
   }
+  .pu-alert svg { flex: none; margin-top: 0.15rem; color: var(--pu-amber); }
+  .pu-alert p { margin: 0; }
+  .pu-alert strong { font-weight: 700; }
   .pu-heading {
     font-size: clamp(1.75rem, 5vw, 2.5rem);
     line-height: 1.1;
