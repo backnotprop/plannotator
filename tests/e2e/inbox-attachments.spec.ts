@@ -566,8 +566,8 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
 
 /**
  * A phone's open reply box (approval "inbox-reply-box", T6): no chip; the line naming the questions and comments on its
- * own line over the row, its words on one line; the row (paperclip, Skills, mic, Send) one row inside the box. Problems
- * as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
+ * own line over the row, its words on one line; the row (paperclip, Skills, who gets the reply in a thread with several
+ * agents, mic, Send) one row inside the box. Problems as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
  */
 async function phoneFootProblems(page: Page, narrow = false): Promise<string[]> {
   return page.evaluate((narrow) => {
