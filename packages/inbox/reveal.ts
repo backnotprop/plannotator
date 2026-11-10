@@ -130,6 +130,10 @@ export function noteOneTimeDialogShown(): void {
 export function oneTimeDialogShownThisLoad(): boolean {
   return otherOneTimeDialog;
 }
+/** A test starts each case as a fresh load. */
+export function resetOneTimeDialogShownForTests(): void {
+  otherOneTimeDialog = false;
+}
 
 export function useRevealMoment(input: RevealMomentInput) {
   const [stage, setStage] = useState<RevealStage>('none');
@@ -512,7 +516,7 @@ export function useStepsReveal(input: StepsRevealInput) {
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
-  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip'>;
+  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip'>;
   /**
    * The Inbox has it for this page, read once per load: `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.

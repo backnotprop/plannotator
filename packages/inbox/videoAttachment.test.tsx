@@ -153,6 +153,15 @@ test.skipIf(!hasDom)('the tile reads "MP4 video · 7:41 · 1920 × 1080 · size"
   expect(host!.querySelector(`button[data-attachment-id="${film.id}"] .ib-kd`)!.textContent).toBe('MP4 video · 7:41 · 2 comments · 1920 × 1080 · 461.0 MB');
 });
 
+test.skipIf(!hasDom)('the tile of the film open beside the thread keeps Play and its name; aria-current and the highlight mark it', async () => {
+  await render(<AttachmentTiles attachments={[film]} annotationCounts={new Map()} onOpen={() => {}} openId={film.id} />);
+  const tile = host!.querySelector<HTMLButtonElement>(`button[data-attachment-id="${film.id}"]`)!;
+  expect(tile.getAttribute('aria-current')).toBe('true');
+  expect(tile.classList.contains('ib-open-beside')).toBe(true);
+  expect(tile.querySelector('.ib-open')!.textContent).toBe('Play');
+  expect(tile.getAttribute('aria-label')).toBe(`Play ${film.name}`);
+});
+
 test.skipIf(!hasDom)('the pane plays the film from its Range route; a dot per comment on the rail seeks there', async () => {
   globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
   await render(pane([later, earlier]));

@@ -566,6 +566,13 @@ export interface PlannotatorConfig {
    */
   inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
   /**
+   * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
+   * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
+   * text names one, and a guide that still has one draws it folded under its Diagram header. Written by
+   * `POST /api/inbox/settings` `{ chapter_diagrams: { on } }`, read on every request (`inboxChapterDiagramsOn`).
+   */
+  inboxChapterDiagrams?: boolean;
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
@@ -626,6 +633,8 @@ export interface PlannotatorConfig {
     tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
+    /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
+    sidebar_tip?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -881,6 +890,11 @@ function getConfigDir(): string {
 }
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
+}
+
+/** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
+export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
+  return config.inboxChapterDiagrams !== false;
 }
 
 /**

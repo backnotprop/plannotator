@@ -22,6 +22,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import { agentName } from '../tags';
 import { stackLink, startLayer } from './topology';
+import { person, possessiveTail, wordsText, type Words } from './words';
 
 export { inboxPullLabel };
 
@@ -389,46 +390,51 @@ function stackAuthors(layers: readonly InboxPull[]): string {
   return `- Authors: ${[...by].map(([who, labels]) => `${who} (${labels.join(', ')})`).join(', ')}`;
 }
 
-const possessive = (name: string) => (name.endsWith('s') ? `${name}'` : `${name}'s`);
-
 /** A PR the person's review was asked for (the owner's words): "Review requested · tomas's PR", or "Review requested" with no author. */
-export const requestedWords = (author: string | null | undefined): string => (author ? `Review requested · ${author}'s PR` : 'Review requested');
+export const requestedParts = (author: string | null | undefined): Words => (author ? ['Review requested · ', person(author, "'s"), ' PR'] : ['Review requested']);
+
+export const requestedWords = (author: string | null | undefined): string => wordsText(requestedParts(author));
 
 /** Why a PR is where it is, in words ("Review requested · tomas's PR"). */
 export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link: InboxPullLink | null): string {
+  return wordsText(reasonParts(item, link));
+}
+
+/** `reasonWords` in parts: the people it names stay people (`words.ts`). */
+export function reasonParts(item: Pick<InboxPullItem, 'reason' | 'focus'>, link: InboxPullLink | null): Words {
   const pull = item.focus;
   switch (item.reason) {
     case 'requested':
-      return requestedWords(pull.author);
+      return requestedParts(pull.author);
     case 'assigned':
-      return 'Assigned to you';
+      return ['Assigned to you'];
     case 'agent_ready': {
       // Its review thread (the person's ask, or the agent's own thread that names it); the agent unnamed, only the ask.
       const name = linkAgentName(link);
-      return name ? `${agentThreadWords(name, link?.agent?.ended === true)} · your review` : 'Your review';
+      return [name ? `${agentThreadWords(name, link?.agent?.ended === true)} · your review` : 'Your review'];
     }
     case 'running':
-      return 'Checks running';
+      return ['Checks running'];
     case 'changes':
-      return 'Changes requested';
+      return ['Changes requested'];
     case 'failing':
-      return 'Checks failed';
+      return ['Checks failed'];
     case 'conflicts':
-      return 'Has conflicts';
+      return ['Has conflicts'];
     case 'approved':
-      return `${pull.approved_by ?? 'Approved'}${pull.approved_by ? ' approved' : ''}${pull.checks === 'success' ? ' · checks passed' : ''}`;
+      return [...(pull.approved_by ? [person(pull.approved_by), ' approved'] : ['Approved']), ...(pull.checks === 'success' ? [' · checks passed'] : [])];
     case 'approved_running':
-      return 'Approved · checks running';
+      return ['Approved · checks running'];
     case 'draft':
-      return 'Draft';
+      return ['Draft'];
     case 'review':
-      return pull.reviewers[0] ? `Waiting on ${possessive(pull.reviewers[0])} review` : 'Waiting on review';
+      return pull.reviewers[0] ? ['Waiting on ', person(pull.reviewers[0], possessiveTail(pull.reviewers[0])), ' review'] : ['Waiting on review'];
     case 'others':
-      return pull.author ? `Waiting on ${pull.author}` : 'Waiting on others';
+      return pull.author ? ['Waiting on ', person(pull.author)] : ['Waiting on others'];
     case 'merged':
-      return 'Merged';
+      return ['Merged'];
     case 'closed':
-      return 'Closed';
+      return ['Closed'];
   }
 }
 

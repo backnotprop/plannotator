@@ -76,6 +76,7 @@ import type {
   InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
+  InboxCodexAccount,
   InboxAnnotationRecord,
   InboxCardColumn,
   InboxCardHistoryEntry,
@@ -102,8 +103,8 @@ import { newUuid } from './uuid';
 export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
-/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
@@ -556,9 +557,11 @@ export interface SettingsModel {
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
    * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
    * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
-   * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
+   * line; absent from an older Inbox: it never shows); `sidebar_tip`: the Sidebar tip may show at a calm moment beside
+   * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
+   * older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -624,6 +627,12 @@ export interface SettingsModel {
    * Settings row shows only then). Whether System shows is `systemShown()` (system/gate.ts).
    */
   system?: { on: boolean };
+  /**
+   * Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): its switch, present only while Code review
+   * is on (the Settings row shows only then). Off: agents are not offered chapter diagrams, and one that still arrives
+   * draws folded. Absent: on.
+   */
+  chapter_diagrams?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1491,6 +1500,8 @@ export const inboxApi = {
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
+  /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
+  saveChapterDiagrams: (on: boolean) => post<{ chapter_diagrams?: { on: boolean } }>(inboxUrl('/settings'), { chapter_diagrams: { on } }),
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),
   systemDrawing: (project: string) => get<SystemDrawingAnswer<SystemModel>>(inboxUrl(`/system/drawing?project=${encodeURIComponent(project)}`)),
@@ -1837,6 +1848,8 @@ export const inboxApi = {
   launchTrust: (launchId: string, warning: string | null, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`, undefined, machine), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  /** Settings → Agents' Codex account line: read from Codex on this computer (the plan and its limits), never polled. */
+  codexAccount: () => get<{ account: InboxCodexAccount }>(inboxUrl('/codex/account')),
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
@@ -2292,7 +2305,7 @@ export interface InboxEventHandlers {
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -2448,7 +2461,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -2457,6 +2470,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
+          ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
         });
       } catch {
         // A malformed frame changes nothing.

@@ -98,6 +98,23 @@ test('whose move decides the words and how loud they are', () => {
   expect(words({ move: 'agents', reason: 'curating', review: null } as never)[0]).toBe('Curating…');
 });
 
+test('a row names people as people, not baked into the words: each one can have a face, the text stays the same', () => {
+  const asked = row({ reason: 'requested', review: null, stacks: inboxPullStacks([pull(880, { mine: false, requested: true, author: 'tomas' })]) } as never);
+  const line = reviewRowLine(asked);
+  expect(line.status).toBe("Review requested · tomas's PR");
+  expect(line.parts).toEqual(['Review requested · ', { person: 'tomas', tail: "'s" }, ' PR']);
+  const waiting = reviewRowLine(row({ move: 'waiting', reason: 'forge_review', stacks: inboxPullStacks([pull(865, { reviewers: ['lena-v', 'kai'] })]) } as never));
+  expect(waiting.status).toBe('Waiting on lena-v’s review');
+  expect(waiting.parts).toEqual(['Waiting on ', { person: 'lena-v', tail: '’s' }, ' review']);
+  // A listed PR: its author is a person; the person's own is "yours", and a deleted account is words, with no face.
+  const listed = (fields: Partial<InboxPull>) => reviewRowLine(row({ reviewed: false, move: 'not_reviewed', reason: 'not_reviewed', review: null, stacks: inboxPullStacks([pull(7, fields)]) } as never)).parts;
+  expect(listed({ mine: false, author: 'tomas', state: 'draft' })).toEqual([{ person: 'tomas' }, ' · draft']);
+  expect(listed({ mine: true })).toEqual(['yours', ' · checks passed']);
+  expect(listed({ mine: false, author: null })).toEqual(['a deleted account', ' · checks passed']);
+  // No author: no person.
+  expect(reviewRowLine(row({ reason: 'requested', review: null, stacks: inboxPullStacks([pull(881, { mine: false, requested: true, author: null })]) } as never)).parts).toEqual(['Review requested']);
+});
+
 const answer = (rows: InboxReviewRow[]): InboxReviewsAnswer => ({ rows, projects: { 'github.com/northwind/web-app': ['prj_web'] } }) as unknown as InboxReviewsAnswer;
 
 test('a project keeps its own rows, local ones by their thread; Mine keeps local reviews; Others does not', () => {

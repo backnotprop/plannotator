@@ -37,7 +37,10 @@ export function inboxLaunchNotReadyWords(input: { agent: string; code: InboxLaun
     case "signed_out":
       return {
         line: `${agent} isn't signed in ${on}`,
-        fix: input.overSsh
+        // Codex keeps its login in its own home (`codex login`), not the macOS keychain an SSH start can't open.
+        fix: agent === "Codex"
+          ? `Run \`codex login\` ${on}, then try again.`
+          : input.overSsh
           ? `Plannotator ${on} was started over SSH, and macOS keeps the login locked for SSH. Start Plannotator again from Terminal ${on} itself, then try again.`
           : `Run \`claude\` ${on} once to sign in, then try again.`,
         command: null,
