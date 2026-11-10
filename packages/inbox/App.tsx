@@ -19,7 +19,7 @@ import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
+import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { shareUnchanged } from './shareUnchanged';
@@ -68,7 +68,7 @@ import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads'
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { flatRows, useListView, type ListSort } from './listView';
+import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
@@ -187,7 +187,7 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync } from './theme';
+import { adoptSavedTheme, inboxServerSync, useInboxThemePick } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
@@ -223,6 +223,8 @@ import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
+import { ThemeChooser } from './components/ThemeChooser';
+import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -5086,8 +5088,12 @@ function Inbox() {
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
   const listOptionsClear = listIntroClear && (!route.thread || pageIdle);
+  // Grouping before Rows (the owner's order, 2026-11-10): the Inbox arms List view beside the Rows dialog (`reveal.ahead`,
+  // it never holds the line); while List view's own need holds on this page (Smart groups, the list taller than the
+  // screen), Rows waits for it. When it does not hold, Rows goes as before.
+  const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
   const listIntroLoad: ListIntroLoad = {
-    due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true,
+    due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
     local: listIntroAtLoad?.local ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
@@ -5316,7 +5322,8 @@ function Inbox() {
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
-  // while it is `reveal.next`, at the line's calm moment (back on the list, or the page idle), 60 s into the page.
+  // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
+  // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
   const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const tabIconChoice = useTabIconChoice({
     due: lineLatch?.next === 'tab_icon',
@@ -5325,16 +5332,35 @@ function Inbox() {
     firstRun,
     thread: tabIconThread,
     rows: snoozeIntroRows,
-    clear: listViewRevealClear(listIntroClear, tabIconThread, pageIdle),
+    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
+    clear: listIntroClear && updateDialog === null && !restarting,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
     toast: toast !== null,
-    idle: pageIdle,
+  });
+  // The "themes" dialog (approval "inbox-theme-chooser"; themeChooser.ts): right after the tab icon dialog in the line,
+  // for someone still on the default theme, armed while it is `reveal.next`, at the same 15 s moment.
+  const themeNow = useTheme();
+  const pickTheme = useInboxThemePick();
+  const themeChooser = useThemeChooser({
+    due: lineLatch?.next === 'theme_chooser',
+    blocked: revealBlocked,
+    listLoaded: lineLatch !== null,
+    firstRun,
+    thread: tabIconThread,
+    rows: snoozeIntroRows,
+    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
+    clear: listIntroClear && updateDialog === null && !restarting,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    light: themeNow.lightTheme,
+    dark: themeNow.darkTheme,
   });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -5423,7 +5449,9 @@ function Inbox() {
     listViewReveal.stage !== 'open' &&
     listViewReveal.stage !== 'claimed' &&
     tabIconChoice.stage !== 'open' &&
-    tabIconChoice.stage !== 'claimed';
+    tabIconChoice.stage !== 'claimed' &&
+    themeChooser.stage !== 'open' &&
+    themeChooser.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5953,7 +5981,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -7627,6 +7655,22 @@ function Inbox() {
           }}
           // Escape or a click outside: the tab's own icon is back (the dialog put it back), nothing saved. Final.
           onDismiss={tabIconChoice.close}
+        />
+      )}
+      {themeChooser.stage === 'open' && (
+        <ThemeChooser
+          inUse={{ light: themeNow.lightTheme, dark: themeNow.darkTheme, mode: themeNow.mode }}
+          onPick={(pick) => {
+            // Settings' own writes (theme.ts): applied at once, and config.json `theme` for plan review and code review.
+            pickTheme(pick);
+            themeChooser.close();
+          }}
+          onOwn={() => {
+            themeChooser.close();
+            openThemeSettings();
+          }}
+          // The close button, Escape or a click outside: nothing changes. Final (the claim stamped it).
+          onDismiss={themeChooser.close}
         />
       )}
       {voiceIntro.stage === 'open' && (

@@ -28,6 +28,11 @@ import { newUuid } from './uuid';
 export const REVEAL_TIMES = {
   /** The page has been loaded this long. */
   pageAgeMs: 60_000,
+  /**
+   * The tab icon and the "themes" dialogs' own page age (the owner, 2026-11-10: "Fifteen seconds after the inbox
+   * opens"): their moment needs no leave and no stillness (`soonMayClaim`).
+   */
+  soonPageAgeMs: 15_000,
   /** The thread was open this long before the person left it: they read it. */
   readMs: 5_000,
   /** The Inbox page settled this long, without a break. */
@@ -54,7 +59,7 @@ export const REVEAL_TIMES = {
  * person who keeps a thread open beside the list never makes: App counts idle only while one of them is armed (and
  * the list options' update-day dialog, which waits for the list the same way).
  */
-export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip', 'tab_icon']);
+export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip']);
 
 /**
  * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
@@ -63,6 +68,18 @@ export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>([
 export function idleClockArmed(armed: (Pick<RevealArmed, 'next' | 'ahead'> & { aside?: readonly InboxRevealId[] }) | null, listIntroDue: boolean): boolean {
   if (armed === null) return false;
   return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || (armed.aside ?? []).some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+}
+
+/**
+ * The need of a dialog that opens soon after the page does (the tab icon dialog, the "themes" dialog; the owner,
+ * 2026-11-10, after the themes dialog never came up for them: it had waited for 60 s and then for a page left still):
+ * the list loaded and not the first-run screen, the page `soonPageAgeMs` (15 s) old, and the tab visible. With `atOnce`
+ * (`RevealMomentInput`) that is the whole moment: no thread read and left, and no stillness, so a pointer that never
+ * rests does not postpone it. What still holds it back is the at-once path's own guards, the ones Code review's offer
+ * has: the Inbox page clear (`clear`), nothing typed or open (`heldBack`), no toast, and the settling wait.
+ */
+export function soonMayClaim(gate: { listLoaded: boolean; firstRun: boolean }, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.soonPageAgeMs && (typeof document === 'undefined' || document.visibilityState === 'visible');
 }
 
 /** One visit to a thread: which, and when it opened. */

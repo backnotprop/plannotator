@@ -114,6 +114,8 @@ async function world(options: Options = {}) {
     inboxVoiceIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
     // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
     favicon: "glass",
+    // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+    inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -730,6 +732,121 @@ describe("the tab icon dialog (\"Which favicon do you prefer?\", an update-day d
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal.next).toBe("tab_icon");
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "tab_icon" })).json()) as Json).show).toBe(true);
+  });
+});
+
+describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab icon dialog, only on the default theme", () => {
+  const KEY = "page-key-themes";
+  /** Someone still on the default theme, on the version that ships the dialog (the world's own mark taken away). */
+  const onDefault = (over: Options = {}) => world({ ...over, config: { inboxThemeChooser: undefined, ...over.config } });
+
+  test("the tab icon dialog done: due at the first start, next ahead of the offers, claimed once, the theme untouched", async () => {
+    // A favicon was chosen (the world's own), and the Board is due too (day 4): this one is ahead of it.
+    const w = await onDefault();
+    expect(typeof w.saved().inboxThemeChooser.dueAt).toBe("string");
+    expect(w.saved().inboxThemeChooser.notNeededAt).toBeUndefined();
+    expect(await w.next()).toBe("theme_chooser");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(true);
+    const config = w.saved();
+    // The claim only stamps it: the dialog's own button saves the theme, as Settings does.
+    expect(config.theme).toBeUndefined();
+    expect(config.inboxReveals.theme_chooser.shownAt).toBe(config.inboxReveals.lastShownAt);
+    // The gap: nothing follows it at once.
+    expect(await w.next()).toBeNull();
+    // The same page's retry after a lost answer is shown it again; another tab, window or device never.
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(true);
+    expect((await w.claim("theme_chooser", "page-key-other")).show).toBe(false);
+    expect((await w.claim("theme_chooser")).show).toBe(false);
+    // Every way out is final: no Not now.
+    expect((await w.post("/api/inbox/reveal", { id: "theme_chooser", answer: "not_now" })).ok).toBe(false);
+  });
+
+  test("never while the tab icon dialog is still due (the owner: \"The favicon one should come first\"), not even once that one has waited out its patience", async () => {
+    const w = await onDefault({ config: { favicon: undefined } });
+    expect(typeof w.saved().inboxThemeChooser.dueAt).toBe("string");
+    expect(await w.next()).toBe("tab_icon");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals.theme_chooser).toBeUndefined();
+    // The tab icon dialog shows: the gap starts, so the themes dialog is not offered on its heels.
+    expect((await w.claim("tab_icon", "page-key-tab-icon")).show).toBe(true);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+
+    // A tab icon dialog that never found its moment in 3 days lets the offers pass it, but never this one.
+    const stuck = await onDefault({ config: { favicon: undefined, inboxReveals: { tab_icon: { dueAt: new Date(Date.now() - 4 * DAY).toISOString() }, waitingSince: { tab_icon: new Date(Date.now() - 3 * DAY).toISOString() } } } });
+    expect(await stuck.next()).not.toBe("theme_chooser");
+    expect((await stuck.claim("theme_chooser", KEY)).show).toBe(false);
+    // A favicon chosen in Settings: the tab icon dialog is settled, and this one is next.
+    expect((await stuck.post("/api/inbox/settings", { favicon: "glass" })).ok).toBe(true);
+    expect(await stuck.next()).toBe("theme_chooser");
+  });
+
+  test("the line's gap after the tab icon dialog showed (40 minutes, the line's own; the owner: \"like thirty minutes after\"): then next, and claimed", async () => {
+    const shown = new Date(Date.now() - 40 * 60_000 - 1_000).toISOString();
+    const w = await onDefault({ config: { favicon: undefined, inboxReveals: { lastShownAt: shown, dayShownAt: shown, tab_icon: { dueAt: new Date(Date.now() - DAY).toISOString(), shownAt: shown } } } });
+    expect(await w.next()).toBe("theme_chooser");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(true);
+    // A minute short of it: not yet, and the page is told when to ask again.
+    const early = new Date(Date.now() - 39 * 60_000).toISOString();
+    const soon = await onDefault({ config: { favicon: undefined, inboxReveals: { lastShownAt: early, dayShownAt: early, tab_icon: { dueAt: new Date(Date.now() - DAY).toISOString(), shownAt: early } } } });
+    const settings = await soon.settings();
+    expect(settings.reveal.next).toBeNull();
+    expect(settings.reveal.again_in).toBeGreaterThan(0);
+    expect(settings.reveal.again_in).toBeLessThanOrEqual(60_000);
+  });
+
+  test("on another theme at the first start: marked as not needed, never next, and going back to the default theme changes nothing", async () => {
+    const w = await onDefault({ config: { theme: { mode: "dark", light: "plannotator", dark: "tokyo-night" } } });
+    expect(typeof w.saved().inboxThemeChooser.notNeededAt).toBe("string");
+    expect(w.saved().inboxThemeChooser.dueAt).toBeUndefined();
+    expect(await w.next()).toBe("board");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+    expect((await w.post("/api/inbox/settings", { theme: { dark: "plannotator" } })).ok).toBe(true);
+    expect(await w.next()).toBe("board");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+  });
+
+  test("a palette picked in the Inbox before its moment: marked as not needed and no longer next; a mode alone keeps it", async () => {
+    const w = await onDefault();
+    expect(await w.next()).toBe("theme_chooser");
+    // Light or dark alone is not a theme: still the default one.
+    expect((await w.post("/api/inbox/settings", { theme: { mode: "light" } })).ok).toBe(true);
+    expect(await w.next()).toBe("theme_chooser");
+    expect((await w.post("/api/inbox/settings", { theme: { light: "plannotator-modern" } })).ok).toBe(true);
+    expect(typeof w.saved().inboxThemeChooser.notNeededAt).toBe("string");
+    // The line moves on to what is behind it (the Board, at day 4).
+    expect(await w.next()).toBe("board");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals.theme_chooser).toBeUndefined();
+  });
+
+  test("a palette picked elsewhere (plan review writes config.json itself): the claim is refused and marks it", async () => {
+    const w = await onDefault();
+    expect(await w.next()).toBe("theme_chooser");
+    writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ ...w.saved(), theme: { mode: "system", light: "nord", dark: "nord" } }));
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(false);
+    expect(typeof w.saved().inboxThemeChooser.notNeededAt).toBe("string");
+    expect(w.saved().inboxReveals.theme_chooser).toBeUndefined();
+  });
+
+  test("a fresh install: due from day one, with first use not known yet", async () => {
+    const w = await world({ fresh: true, days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxThemeChooser: undefined } });
+    expect(typeof w.saved().inboxThemeChooser.dueAt).toBe("string");
+    expect(await w.next()).toBe("theme_chooser");
+    expect((await w.claim("theme_chooser", KEY)).show).toBe(true);
+  });
+
+  test("a dev build decides nothing; a guest is never armed and never claims; the owner's phone claims", async () => {
+    const dev = await onDefault({ version: "dev" });
+    expect(dev.saved().inboxThemeChooser).toBeUndefined();
+    const w = await onDefault({ tailnet: "owner" });
+    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
+    expect(guestSettings.reveal.next).toBeNull();
+    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "theme_chooser" })).json()) as Json).show).toBe(false);
+    expect(w.saved().inboxReveals?.theme_chooser).toBeUndefined();
+    const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
+    expect(ownerSettings.reveal.next).toBe("theme_chooser");
+    expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "theme_chooser" })).json()) as Json).show).toBe(true);
   });
 });
 

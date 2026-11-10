@@ -268,6 +268,7 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
+import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/theme-chooser";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
@@ -2202,6 +2203,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the Inbox holds in the next plan review too, and one made there holds
    * here. null: never chosen (the cookies, else the OS, decide).
    */
+  /** Set once the "themes" dialog's record exists (below): a theme saved from the Inbox is looked at again. */
+  let themeChooserNoteTheme: () => void = () => {};
   const themeState = (): ThemeConfig | null => {
     const theme = loadConfig().theme;
     return theme && typeof theme === "object" ? theme : null;
@@ -2239,6 +2242,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!saved || Object.entries(next).some(([key, value]) => saved[key as keyof ThemeConfig] !== value)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
+    // A palette picked: the "themes" dialog is no longer needed (shared/inbox/theme-chooser.ts).
+    themeChooserNoteTheme();
     return saved;
   };
 
@@ -2530,6 +2535,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const tabIconUndecided = () => {
     const config = loadConfig();
     return typeof config.inboxReveals?.tab_icon?.dueAt === "string" && !isFaviconStyle(config.favicon);
+  };
+
+  /**
+   * The "themes" dialog (approval "inbox-theme-chooser"; `theme_chooser` in shared/inbox/reveals.ts, who it is for in
+   * shared/inbox/theme-chooser.ts): decided at the first release start of the version that ships it, as the tab icon's
+   * is. Someone on the default theme gets it due (config.json `inboxThemeChooser.dueAt`), a fresh install too, from its
+   * first day. Anyone on another theme is marked as not needing it (`notNeededAt`), then or at
+   * any later look (each start, a theme saved from the Inbox, a claim), and going back to the default theme never
+   * brings it up. A dev build decides nothing.
+   */
+  const themeChooserLookNow = () => {
+    if (normalizeStableVersion(version) === null) return;
+    const config = loadConfig();
+    const next = themeChooserLook(config.inboxThemeChooser, config.theme, new Date().toISOString());
+    if (next) saveConfig({ inboxThemeChooser: next });
+  };
+  themeChooserLookNow();
+  themeChooserNoteTheme = themeChooserLookNow;
+  /** Due, never marked as not needed, and on the default theme now (read live: a theme picked anywhere drops it). */
+  const themeChooserUndecided = () => {
+    const config = loadConfig();
+    return themeChooserOpen(config.inboxThemeChooser, config.theme);
   };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
@@ -2892,6 +2919,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
+    // The "themes" dialog: due since the release start and still on the default theme, read live. Never while the tab
+    // icon dialog is still due (the owner, 2026-11-10: "it can't compete with the favicon one… The favicon one should
+    // come first"): closed until that one is shown or a favicon is chosen, so patience cannot let it pass.
+    theme_chooser: () => themeChooserUndecided() && !(tabIconUndecided() && !lineOfferSaved("tab_icon")?.shownAt),
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
@@ -3028,6 +3059,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!undecided || !owner || !snoozeIntroRelease) return false;
     if (key && lineOfferSaved(id)?.key === key) return undecided();
     const now = new Date();
+    // A theme picked elsewhere (plan review, code review) since the last look: marked now, so the claim is refused for good.
+    if (id === "theme_chooser") themeChooserLookNow();
     if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
     const at = now.toISOString();
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
