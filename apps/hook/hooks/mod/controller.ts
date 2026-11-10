@@ -321,6 +321,8 @@ export interface SessionInfo {
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
+  continues?: () => Promise<readonly string[]>
   /**
    * Made by the self-heal (self-heal.ts), not by anything the person did: the
    * Inbox link starts without a touch, so a live lease another process holds stands.
@@ -416,6 +418,7 @@ export class PlannotatorMod {
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
+          ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
