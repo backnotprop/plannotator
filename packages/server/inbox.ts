@@ -39,6 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
+import { inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-rows-words";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -93,6 +94,7 @@ import {
   inboxRowsRead,
   inboxRowsSaved,
   INBOX_ROWS_DEFAULTS_VERSION,
+  INBOX_ROWS_DEFAULT,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -1141,7 +1143,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
-  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
@@ -2357,18 +2359,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { rows: inboxRowsSaved(inboxRowsRead(config.inboxRows), config.inboxRowsDefaults), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
   };
 
-  const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
+  /** The look before the last save and who made that save, for Undo and "<agent> changed" (core inbox-rows-words.ts). */
+  const rowsLast = (): { prev: InboxRowsOption[] | null; by: InboxRowsBy | null } => {
+    const config = loadConfig();
+    return { prev: inboxRowsRead(config.inboxRowsPrev), by: inboxRowsBy(config.inboxRowsBy) };
+  };
+  const saveRows = (input: unknown, validateOnly = false, by: InboxRowsBy | null = null): { rows: InboxRowsOption[]; rev: number } => {
     const rows = inboxRowsList(input);
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
-    const rev = rowsState().rev + 1;
+    const before = rowsState();
+    const rev = before.rev + 1;
     if (validateOnly) return { rows, rev };
-    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION });
+    // The look before this save is kept (as the windows read it: never saved is the defaults), so one Undo puts it back.
+    const prev = before.rows ?? [...INBOX_ROWS_DEFAULT];
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION, inboxRowsPrev: prev, inboxRowsBy: by });
     const saved = rowsState();
     if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    for (const listener of rowsListeners) listener(rows, rev);
+    for (const listener of rowsListeners) listener(rows, rev, { prev, by });
     return { rows, rev };
   };
-  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev });
+  /** Undo the last save: the look before it is saved again (so a second undo is a redo). Null: nothing to put back. */
+  const undoRows = (by: InboxRowsBy | null): { rows: InboxRowsOption[]; rev: number; prev: InboxRowsOption[] } | null => {
+    const { prev } = rowsLast();
+    const now = rowsState().rows;
+    if (!prev || prev.join() === (now ?? []).join()) return null;
+    return { ...saveRows(prev, false, by), prev: now ?? [...INBOX_ROWS_DEFAULT] };
+  };
+  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev, rows_prev: rowsLast().prev, rows_by: rowsLast().by });
 
   /**
    * The sidebar's layout (config.json `inboxSidebar`, approval "inbox-sidebar-customize"): which items show, their
@@ -3439,7 +3456,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
-        const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
+        const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
@@ -5332,6 +5349,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.reactions === undefined &&
           body.reaction_change === undefined &&
           body.rows === undefined &&
+          body.rows_undo === undefined &&
           body.sidebar === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
@@ -5434,7 +5452,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
         const favicon = body.favicon === undefined ? faviconState() : saveFavicon(body.favicon);
         const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
-        const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
+        // `rows_by`: an agent's command says who it is (`plannotator inbox rows set`). `rows_undo`: the look before the last
+        // save, put back (with no `rows`); with nothing to put back the answer says `rows_undone: false`.
+        const rowsBy = inboxRowsBy(body.rows_by);
+        const rowsUndone = body.rows === undefined && body.rows_undo === true ? undoRows(rowsBy) : null;
+        const rows = { ...rowsWire(rowsUndone ?? (body.rows === undefined ? rowsState() : saveRows(body.rows, false, rowsBy))), ...(body.rows_undo === true ? { rows_undone: rowsUndone !== null } : {}) };
         const sidebar = sidebarWire(body.sidebar === undefined ? sidebarState() : saveSidebar(body.sidebar));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
