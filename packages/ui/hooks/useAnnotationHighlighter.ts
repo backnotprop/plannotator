@@ -240,6 +240,16 @@ const escapeAttrValue = (value: string): string => {
 // web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
 const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 
+/** Everything the highlighter's painter skips (its `exceptSelectors`). */
+const PAINT_SKIPPED_SELECTORS = [
+  '.annotation-toolbar',
+  'button',
+  '.math-annotatable',
+  '.katex',
+  ANNOTATION_EXCLUDED_SELECTOR,
+];
+const PAINT_SKIPPED_SELECTOR = PAINT_SKIPPED_SELECTORS.join(',');
+
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
 
@@ -535,6 +545,63 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
     return true;
   }
   return false;
+};
+
+/** The outermost element around `node`, inside `container`, that the painter skips. */
+const paintSkippedAncestor = (container: Element, node: Node | null): Element | null => {
+  let skipped: Element | null = null;
+  let element = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+  while (element && element !== container && container.contains(element)) {
+    if (element.matches(PAINT_SKIPPED_SELECTOR)) skipped = element;
+    element = element.parentElement;
+  }
+  return skipped;
+};
+
+/**
+ * Move a range's end off any element the painter skips, back onto the end of
+ * the last text before it that can be painted. The end-side twin of
+ * {@link snapRangeStartPastExcluded}.
+ *
+ * web-highlighter stops painting when its walk MEETS the end node, and the
+ * walk never enters a skipped element (`painter/dom.ts` skips it before the
+ * "are we at the end node" check). An end inside one (a release on a button in
+ * the text, a code block's Copy button, a formula, an alert's hidden type
+ * word) or right at one (an element boundary whose next child is skipped) is
+ * therefore never met, and every text node from the start to the end of the
+ * document is painted. Pulling the end back changes nothing that could have
+ * been painted, and takes the half-selected chrome out of the quote.
+ *
+ * A range wholly inside one skipped element is left alone, and so is one with
+ * no paintable text between its start and that element. Returns whether the
+ * range was changed.
+ */
+const snapRangeEndBeforeSkipped = (container: Element, range: Range): boolean => {
+  const { endContainer, endOffset } = range;
+  // An element boundary addresses the child at its offset (`formatDomNode`).
+  const endNode = endContainer.nodeType === Node.ELEMENT_NODE
+    ? endContainer.childNodes[endOffset] ?? endContainer
+    : endContainer;
+  if (!container.contains(endNode)) return false;
+  const skipped = paintSkippedAncestor(container, endNode);
+  if (!skipped || skipped.contains(range.commonAncestorContainer)) return false;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (skipped.contains(node)) break;
+    if (!(skipped.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+    const text = node as Text;
+    if (!text.length || paintSkippedAncestor(container, text)) continue;
+    last = text;
+  }
+  if (!last) return false;
+  // Never before the range's own start.
+  if (range.comparePoint(last, last.length) !== 0) return false;
+  if (last === range.startContainer && range.startOffset >= last.length) return false;
+  range.setEnd(last, last.length);
+  return true;
 };
 
 /** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
@@ -1615,13 +1682,7 @@ export function useAnnotationHighlighter({
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
-      exceptSelectors: [
-        '.annotation-toolbar',
-        'button',
-        '.math-annotatable',
-        '.katex',
-        ANNOTATION_EXCLUDED_SELECTOR,
-      ],
+      exceptSelectors: PAINT_SKIPPED_SELECTORS,
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
@@ -1829,7 +1890,8 @@ export function useAnnotationHighlighter({
       }
       const snappedOutOfSlot = snapRangeOutOfBelowTitle(container, range);
       const snappedPastExcluded = snapRangeStartPastExcluded(range);
-      if (snappedOutOfSlot || snappedPastExcluded) {
+      const snappedBeforeSkipped = snapRangeEndBeforeSkipped(container, range);
+      if (snappedOutOfSlot || snappedPastExcluded || snappedBeforeSkipped) {
         selection.removeAllRanges();
         selection.addRange(range);
       }
@@ -1956,6 +2018,7 @@ export function useAnnotationHighlighter({
       if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
       snapRangeOutOfBelowTitle(containerRef.current, range);
       snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(containerRef.current, range);
       pendingRangeRunsRef.current = rangeTextPieces(range);
       try {
         highlighter.fromRange(range);
@@ -2017,6 +2080,7 @@ export function useAnnotationHighlighter({
     const painted = range.cloneRange();
     snapRangeOutOfBelowTitle(container, painted);
     snapRangeStartPastExcluded(painted);
+    snapRangeEndBeforeSkipped(container, painted);
     pendingRangeRunsRef.current = rangeTextPieces(painted);
 
     const selection = window.getSelection();
