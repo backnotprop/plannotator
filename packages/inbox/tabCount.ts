@@ -49,6 +49,11 @@ export function tabTitle(base: string, count: number): string {
  * The same count on the installed app's icon (the Dock, the taskbar), through
  * the Badging API: the number, and no badge at zero. A browser without the API
  * does nothing, and a refusal is dropped: the tab still carries the count.
+ *
+ * The badge is one for all of the app's windows and the last write wins, so
+ * the window writes it only from a list it has read (App.tsx), never while it
+ * has none (zero then means "not known", not "nothing unread") and never when
+ * it goes away.
  */
 export function setAppBadge(count: number, nav: Pick<Navigator, 'setAppBadge' | 'clearAppBadge'> = navigator): void {
   try {
@@ -200,7 +205,6 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
     }
     const start = original.current;
     document.title = tabTitle(start.title, count);
-    setAppBadge(count);
     if (!link) return;
     if (count <= 0) {
       setIcon(link, start.href, start.type);
@@ -238,7 +242,6 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
       const start = original.current;
       if (!start) return;
       document.title = start.title;
-      setAppBadge(0);
       const link = iconLink();
       if (link) setIcon(link, start.href, start.type);
     },
