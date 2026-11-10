@@ -19,9 +19,17 @@
 .pn-inbox .ib-agents-cap .ib-proj { height: 30px; padding-left: 9px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .pn-inbox .ib-agents-cap .ib-proj.ib-on { color: var(--ib-cur-fg); }
 /* An agent: a 24 px mark and its name, a small step in under its machine's caption; with no captions (one machine), flush. */
+.pn-inbox .ib-sbagent { position: relative; }
 .pn-inbox .ib-sbagent .ib-proj { height: 36px; gap: 10px; padding-left: 17px; padding-right: 10px; }
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .ib-proj { padding-left: 9px; }
 .pn-inbox .ib-sbagent .ib-proj .ib-name { min-width: 0; }
+/* The mark is its own button (AgentMark.tsx), over its place in the row: a 28 px target round the 24 px mark. Over
+   it, or with its picker open, the row fills as on its own hover. */
+.pn-inbox .ib-sbagent .am-slot { flex: none; width: var(--ib-mark-24); height: var(--ib-mark-24); }
+.pn-inbox .ib-sbagent .am-btn { position: absolute; left: 15px; top: calc(50% - 14px); width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ib-rl-sm-s, 7px); background: none; display: grid; place-items: center; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.pn-inbox .ib-agents-body[data-flat] .ib-sbagent .am-btn { left: 7px; }
+.pn-inbox .ib-sbagent .am-btn:focus-visible { outline-offset: -2px; }
+.pn-inbox .ib-sbagent:is(:has(> .am-btn:hover), :has(> .am-btn[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
 /* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
    section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
 .pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
@@ -77,3 +85,49 @@
 .am-art-l { display: none; }
 :root.light .am-art-l { display: block; }
 :root.light .am-art-d { display: none; }
+
+/* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
+/* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */
+.am-fan-pos { z-index: 81; outline: none; }
+.am-fan { position: relative; width: 0; height: 0; outline: none; transition: opacity 150ms linear 30ms; }
+.am-fan[data-ending-style] { opacity: 0; }
+.am-fan-g { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+/* The dial: a half disc behind the choices, from the mark out past the farthest one, open round the mark itself (so
+   the mark stays in view). It takes presses between the choices, so a near miss never opens the row beneath. */
+.am-fan-dial { --o: 18px; position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 120ms linear; }
+/* Its shadow comes from a copy with a wider hole, under the plate: none falls on the mark in the hole. */
+.am-fan-shade, .am-fan-edge { position: absolute; inset: 0; }
+.am-fan-shade { filter: drop-shadow(0 6px 18px rgb(0 0 0 / 0.2)); }
+.am-fan-edge { filter: drop-shadow(0 0 0.5px color-mix(in oklch, var(--foreground) 34%, transparent)); }
+.am-fan-plate { --hole: 21px; display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; background: var(--popover); -webkit-mask: radial-gradient(circle at var(--o) 50%, transparent var(--hole), #000 calc(var(--hole) + 1px)); mask: radial-gradient(circle at var(--o) 50%, transparent var(--hole), #000 calc(var(--hole) + 1px)); }
+.am-fan-plate[data-shade] { --hole: 36px; }
+.am-fan[data-starting-style] .am-fan-dial, .am-fan[data-ending-style] .am-fan-dial { transform: rotate(var(--a)) scale(0.4); opacity: 0; }
+.am-fan[data-ending-style] .am-fan-dial { transition: transform 150ms cubic-bezier(0.4, 0, 1, 1) 30ms, opacity 120ms linear 50ms; }
+.am-fan[data-still] .am-fan-dial, .am-fan[data-still][data-starting-style] .am-fan-dial, .am-fan[data-still][data-ending-style] .am-fan-dial { transform: rotate(var(--a)); transition: opacity 120ms linear; }
+/* A choice: a 28 px bead (4 px or more apart) holding the face at 22 px. It springs out along its arc from the
+   mark, one after another (the whole fan in about 220 ms), and folds back the other way on close. */
+.am-fan-i { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9px; display: grid; place-items: center; color: var(--muted-foreground); background: transparent; cursor: pointer; transform: translate(var(--x), var(--y)); transition: transform 160ms cubic-bezier(0.3, 1.4, 0.6, 1) var(--d), opacity 100ms linear var(--d), background-color 120ms; -webkit-tap-highlight-color: transparent; }
+.am-fan[data-starting-style] .am-fan-i { transform: translate(0, 0) scale(0.4); opacity: 0; }
+.am-fan[data-ending-style] .am-fan-i { transform: translate(0, 0) scale(0.4); opacity: 0; transition: transform 140ms cubic-bezier(0.4, 0, 1, 1) var(--dr), opacity 120ms linear var(--dr); }
+/* While they travel out, a choice passing under the pointer does not take its hover. */
+.am-fan[data-opening] .am-fan-i { pointer-events: none; }
+.am-fan-i:hover { background: color-mix(in oklch, var(--foreground) 12%, var(--popover)); transform: translate(var(--x), var(--y)) scale(1.12); }
+/* The face shown now: a stronger fill. */
+.am-fan-i[aria-checked="true"] { background: color-mix(in oklch, var(--foreground) 24%, var(--popover)); }
+.am-fan-i:focus-visible { outline-offset: 1px; }
+.am-fan-f { width: 22px; height: 22px; display: grid; place-items: center; overflow: hidden; pointer-events: none; }
+.am-fan-f[data-kind="glass"] { border-radius: 4px; }
+.am-fan-f > img { display: block; width: 22px; height: 22px; }
+.am-fan-f > img.am-art-l { display: none; }
+:root.light .am-fan-f > img.am-art-l { display: block; }
+:root.light .am-fan-f > img.am-art-d { display: none; }
+.am-fan-f > .ib-mk, .am-fan-f > .ib-mk > svg, .am-fan-f > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
+/* A finger's fan (a long press): 40 px targets holding the face at 30 px. */
+.am-fan[data-touch] .am-fan-i { left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; }
+.am-fan[data-touch] .am-fan-f, .am-fan[data-touch] .am-fan-f > img { width: 30px; height: 30px; }
+.am-fan[data-touch] .am-fan-dial { --o: 24px; }
+.am-fan[data-touch] .am-fan-plate { --hole: 25px; }
+.am-fan[data-touch] .am-fan-plate[data-shade] { --hole: 40px; }
+/* Reduced motion: no travel, a plain fade. */
+.am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear, background-color 120ms; }
+.am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }

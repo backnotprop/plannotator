@@ -400,7 +400,7 @@ test.skipIf(!hasDom)('Add agent opens New message with "New … session" chosen:
   expect(inDialog('[data-compose-to]')!.textContent).toContain('New Claude Code session');
 });
 
-const ART = { glass: '<i data-art="glass"></i>', yellow: '<i data-art="yellow"></i>', transparent: '<i data-art="transparent"></i>', totman: '<i data-art="totman"></i>' };
+const ART = Object.fromEntries((motion.AGENT_FACES ?? []).filter((face) => face !== 'agent').map((face) => [face, `<i data-art="${face}"></i>`])) as Parameters<typeof motion.setAgentFaceArt>[0];
 
 test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yellow, Transparent, Face, agent), never opens the row, and the face is kept until the next click', async () => {
   motion.setAgentFaceArt(ART);
@@ -457,7 +457,8 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
 test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fidget; back on screen it plays; a hidden face stops; unmount cancels all', async () => {
   motion.setAgentFaceArt(ART);
   motion.agentMotionOptions.clock = 200;
-  setInboxAgents([group([agent('ses_c', { state: 'working' })], SELF)]);
+  // Codex: a mark with loops of its own (Claude is still between its rare gestures).
+  setInboxAgents([group([agent('ses_c', { host: 'codex', state: 'working' })], SELF)]);
   mount(<Sidebar {...sidebarProps({ machines: three() })} />);
   await wait(20);
   const el = mark('ses_c');
