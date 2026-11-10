@@ -8383,7 +8383,8 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rws-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
 .ib-rws-pre { position: relative; display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding: 6px; border-radius: 10px; background: var(--ib-fill, var(--muted)); }
 .ib-rws-pre:hover { background: color-mix(in oklch, var(--foreground) 9%, transparent); }
-.ib-rws-pre[data-on] { background: var(--ib-sn-bg-s, color-mix(in oklch, var(--primary) 14%, transparent)); color: var(--ib-sn-fg-s, var(--primary)); }
+/* The primary tint on every theme: the Modern themes' own picked fill is a grey too close to the cards'. */
+.ib-rws-pre[data-on], .ib-rws-pre[data-on]:hover { background: color-mix(in oklch, var(--primary) 18%, transparent); color: var(--primary); }
 .ib-rws-pre:has(.ib-rws-pre-n:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-rws-pic { display: block; height: 64px; overflow: hidden; border-radius: 6px; background: var(--card); pointer-events: none; }
 .ib-rws-pic-in { display: block; zoom: 0.5; }
@@ -8417,7 +8418,10 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .ib-rws-grid { display: block; margin-top: 12px; }
   .ib-rws-sentinel { display: block; height: 1px; margin-bottom: -1px; }
   /* Pinned: the title, the change line and two rows, edge to edge on the page's own ground. */
-  .ib-rws-pv { top: 0; z-index: 5; margin: 0 -16px 12px; padding: 4px 16px 6px; background: var(--ib-rws-ground, var(--background)); }
+  /* The pinned list covers what scrolls under it with the page's own ground, whatever the theme: each box down to it
+     inherits the Settings page's background. */
+  .ib-spage:has([data-settings-rows]) :is(.ib-sframe-in, .ib-scols, .ib-spg, .ib-rws, .ib-rws-grid, .ib-rws-pv) { background: inherit; }
+  .ib-rws-pv { top: 0; z-index: 5; margin: 0 -16px 12px; padding: 4px 16px 6px; }
   .ib-rws-pv[data-stuck] { box-shadow: 0 8px 12px -10px rgb(0 0 0 / 0.25); }
   .ib-rws-pvhead { margin-bottom: 4px; min-height: 20px; }
   .ib-rws-frame { max-height: none; min-height: 0; overflow: hidden; }
