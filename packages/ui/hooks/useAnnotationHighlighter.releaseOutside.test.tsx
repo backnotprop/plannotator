@@ -10,6 +10,15 @@
  * through the same guard, snaps, quote repair and mode routing as a release
  * inside.
  *
+ * What it commits is never more than the person saw selected in the document.
+ * When the pointer goes over something else on the page (a panel after the
+ * document, one before it, off the side of the window), the browser's own
+ * selection runs on to the END or the START of the document and into that
+ * other thing. Committing that highlighted (in redline: deleted) the rest of
+ * the document in one drag. Such a selection is never committed: the highlight
+ * is the last selection that lay wholly inside the document during the drag,
+ * and nothing when there was none.
+ *
  * DOM-gated (DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -125,11 +134,21 @@ const select = (start: Node, startOffset: number, end: Node, endOffset: number):
 const mouse = (type: string, init: MouseEventInit = {}) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1, ...init });
 
-/** Press on `from`, make the selection the drag would, let go on `to`. */
-const drag = async (from: EventTarget, to: EventTarget, makeSelection: () => void, press: MouseEventInit = {}) => {
+/**
+ * Press on `from`, make the selection the drag would, let go on `to`. Each
+ * selection is announced as a browser does (`selectionchange`, then a move),
+ * so the hook sees it during the drag. `then`: what the browser's selection
+ * becomes once the pointer is over `to`.
+ */
+const drag = async (from: EventTarget, to: EventTarget, makeSelection: () => void, press: MouseEventInit = {}, then?: () => void) => {
   await act(async () => {
     from.dispatchEvent(mouse('mousedown', press));
-    makeSelection();
+    for (const [make, at] of [[makeSelection, from], [then, to]] as const) {
+      if (!make) continue;
+      make();
+      document.dispatchEvent(new Event('selectionchange'));
+      at.dispatchEvent(mouse('mousemove', { button: press.button ?? 0 }));
+    }
     to.dispatchEvent(mouse('mouseup', { button: press.button ?? 0 }));
     await new Promise((r) => setTimeout(r, 30));
   });
@@ -176,36 +195,13 @@ describe('useAnnotationHighlighter: a drag let go outside the document', () => {
     expect(added).toEqual([]);
   });
 
-  test.skipIf(!hasDom)('below the document, the selection running into what follows: it stops at the document\'s end', async () => {
-    const { container, second, below, added, uncaught } = await mount('redline');
+  test.skipIf(!hasDom)('below the document, the selection still wholly inside it: that selection', async () => {
+    const { container, second, third, below, added } = await mount('redline');
 
-    await drag(second, below, () => select(second.firstChild!, 7, below, 0));
-
-    expect(added.length).toBe(1);
-    expect(paintedText(container)).toBe('paragraph beta.' + THIRD);
-    expect(uncaught).toEqual([]);
-  });
-
-  test.skipIf(!hasDom)('over a side panel, the selection reaching into its text: none of the panel\'s words are taken', async () => {
-    const { container, panel, third, added } = await mount('redline');
-    const panelText = panel.querySelector('p')!.firstChild!;
-
-    await drag(third, panel, () => select(third.firstChild!, 6, panelText, 5));
+    await drag(second, below, () => select(second.firstChild!, 7, third.firstChild!, 5));
 
     expect(added.length).toBe(1);
-    expect(paintedText(container)).toBe('paragraph gamma.');
-    expect(added[0]!.originalText.trim()).toBe('paragraph gamma.');
-    expect(panel.querySelectorAll('mark').length).toBe(0);
-  });
-
-  test.skipIf(!hasDom)('dragged backwards past the top of the document: it starts at the document\'s first words', async () => {
-    const { container, head, first, added } = await mount('redline');
-
-    await drag(first, head, () => select(head.firstChild!, 5, first.firstChild!, 5));
-
-    expect(added.length).toBe(1);
-    expect(paintedText(container)).toBe('First');
-    expect(added[0]!.originalText.trim()).toBe('First');
+    expect(paintedText(container)).toBe('paragraph beta.Third');
   });
 
   test.skipIf(!hasDom)('outside the window (the release reaches only the document)', async () => {
@@ -254,6 +250,114 @@ describe('useAnnotationHighlighter: a drag let go outside the document', () => {
     expect(added.length).toBe(1);
     expect(added[0]!.originalText).not.toContain('Hidden');
     expect(added[0]!.originalText.replace(/\s+/g, '')).toBe((SECOND + 'Third').replace(/\s+/g, ''));
+  });
+});
+
+describe('useAnnotationHighlighter: a drag that overshoots onto something else on the page', () => {
+  // In each, the person selected "paragraph" in the first block while the pointer was in the
+  // document; then the pointer went over something else and the browser's selection ran away.
+  const inside = (first: HTMLElement) => () => select(first.firstChild!, 6, first.firstChild!, 15);
+
+  for (const mode of ['selection', 'redline'] as const) {
+    test.skipIf(!hasDom)(`onto a panel after the document (${mode}): the words selected inside, never the rest of the document`, async () => {
+      const { container, first, panel, added, hook } = await mount(mode);
+      const panelText = panel.querySelector('p')!.firstChild!;
+
+      await drag(first, panel, inside(first), {}, () => select(first.firstChild!, 6, panelText, 5));
+
+      expect(paintedText(container)).toBe('paragraph');
+      expect(panel.querySelectorAll('mark').length).toBe(0);
+      if (mode === 'redline') {
+        expect(added.length).toBe(1);
+        expect(added[0]!.originalText).toBe('paragraph');
+      } else {
+        expect(hook.current!.toolbarState?.selectionText).toBe('paragraph');
+      }
+    });
+  }
+
+  test.skipIf(!hasDom)('off the right of the window, the selection run on to the end of the document and past it', async () => {
+    const { container, first, below, added } = await mount('redline');
+
+    await drag(first, document, inside(first), {}, () => select(first.firstChild!, 6, below, 0));
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('paragraph');
+  });
+
+  test.skipIf(!hasDom)('onto a panel before the document: the words selected inside, never from the top of the document', async () => {
+    const { container, head, first, added } = await mount('redline');
+    const backwards = () => window.getSelection()!.setBaseAndExtent(first.firstChild!, 15, first.firstChild!, 6);
+
+    await drag(first, head, backwards, {}, () => window.getSelection()!.setBaseAndExtent(first.firstChild!, 15, head.firstChild!, 5));
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('paragraph');
+  });
+
+  for (const x of [-5, 0]) {
+    test.skipIf(!hasDom)(`past the left edge of the window (x = ${x}), the selection run back out of the document`, async () => {
+      const { container, head, second, added } = await mount('redline');
+
+      await act(async () => {
+        second.dispatchEvent(mouse('mousedown', { clientX: 150 }));
+        window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 7);
+        document.dispatchEvent(new Event('selectionchange'));
+        second.dispatchEvent(mouse('mousemove', { clientX: 70 }));
+        window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, head.firstChild!, 0);
+        document.dispatchEvent(new Event('selectionchange'));
+        document.dispatchEvent(mouse('mousemove', { clientX: x }));
+        document.dispatchEvent(mouse('mouseup', { clientX: x }));
+        await new Promise((r) => setTimeout(r, 30));
+      });
+
+      expect(added.length).toBe(1);
+      expect(paintedText(container)).toBe('paragrap');
+      expect(added[0]!.originalText).toBe('paragrap');
+    });
+  }
+
+  test.skipIf(!hasDom)('above the document, the selection run back into what comes before it', async () => {
+    const { container, head, second, added } = await mount('redline');
+    const backwards = () => window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 0);
+
+    await drag(second, head, backwards, {}, () => window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, head.firstChild!, 3));
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('Second paragrap');
+  });
+
+  test.skipIf(!hasDom)('below the document, the selection run on into what follows it', async () => {
+    const { container, second, panel, added } = await mount('redline');
+    const panelText = panel.querySelector('p')!.firstChild!;
+
+    await drag(second, panel, () => select(second.firstChild!, 7, second.firstChild!, 16), {}, () => select(second.firstChild!, 7, panelText, 5));
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('paragraph');
+  });
+
+  test.skipIf(!hasDom)('nothing was ever selected inside the document: nothing is made, and the selection is left alone', async () => {
+    const { container, first, panel, added } = await mount('redline');
+    const panelText = panel.querySelector('p')!.firstChild!;
+
+    await drag(first, panel, () => select(first.firstChild!, 6, panelText, 5));
+
+    expect(added).toEqual([]);
+    expect(container.querySelectorAll('mark').length).toBe(0);
+    expect(window.getSelection()!.isCollapsed).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a selection that jumps to many times its size in one step inside the document is not trusted', async () => {
+    // The browser can also run a selection to the document's own last words (nothing follows it).
+    const { container, first, third, gutter, added } = await mount('redline');
+    const filler = 'x'.repeat(4000);
+    third.firstChild!.textContent = filler;
+
+    await drag(first, gutter, inside(first), {}, () => select(first.firstChild!, 6, third.firstChild!, filler.length));
+
+    expect(added.length).toBe(1);
+    expect(paintedText(container)).toBe('paragraph');
   });
 });
 
