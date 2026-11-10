@@ -8401,13 +8401,18 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rws-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .ib-rws-fold-n { font-weight: 400; color: var(--muted-foreground); }
 .ib-rws-note { margin-top: 12px; }
-/* What a change moved, in "Your list": a fill that fades, never an outline. Two names, so a change made while the
-   last one still fades starts again. Reduced motion: no tint; the line beside the title says it. */
+/* What a small change moved, in "Your list": a fill that fades, never an outline. Two names, so a change made while
+   the last one still fades starts again. A letter badge or a count's pill keeps its own colour (it is its meaning):
+   the fill shows around it instead. Reduced motion: no tint; the line beside the title says it. */
 @keyframes ib-rws-flash-a { 0%, 35% { background-color: color-mix(in oklch, var(--primary) 20%, transparent); } 100% { background-color: transparent; } }
 @keyframes ib-rws-flash-b { 0%, 35% { background-color: color-mix(in oklch, var(--primary) 20%, transparent); } 100% { background-color: transparent; } }
-.ib-rws [data-rows-flash] { border-radius: 5px; }
+.ib-rws [data-rows-flash]:not(.ib-lm, .ib-lm-dot, .ib-badge) { border-radius: 5px; }
 .ib-rws [data-rows-flash="ib-rws-flash-a"] { animation: ib-rws-flash-a 1.6s ease-out; }
 .ib-rws [data-rows-flash="ib-rws-flash-b"] { animation: ib-rws-flash-b 1.6s ease-out; }
+@keyframes ib-rws-flash-lm-a { 0%, 35% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 26%, transparent); } 100% { box-shadow: 0 0 0 4px transparent; } }
+@keyframes ib-rws-flash-lm-b { 0%, 35% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 26%, transparent); } 100% { box-shadow: 0 0 0 4px transparent; } }
+.ib-rws :is(.ib-lm, .ib-lm-dot, .ib-badge)[data-rows-flash="ib-rws-flash-a"] { animation-name: ib-rws-flash-lm-a; }
+.ib-rws :is(.ib-lm, .ib-lm-dot, .ib-badge)[data-rows-flash="ib-rws-flash-b"] { animation-name: ib-rws-flash-lm-b; }
 @media (prefers-reduced-motion: reduce) {
   .ib-rws [data-rows-flash] { animation: none; }
   .ib-rws-fold svg.ib-ic { transition: none; }

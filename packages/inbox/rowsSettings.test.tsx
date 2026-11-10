@@ -9,7 +9,7 @@
  * defaults; the change line not said to a screen reader; Pull requests hidden by default, or its switch leaving the
  * mark on the rows; GitHub pictures on then off leaving project badges on (and it taking off badges the person had
  * saved); "Your list" drawing examples for someone with threads, or more than two rows pinned on a phone; the tint
- * missing from the part that changed.
+ * missing from the part a small change moved, or drawn for a change that re-lays the whole row (the owner, 2026-11-10).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -288,6 +288,44 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect([...list.querySelectorAll('[data-rows-flash]')].map((part) => [part.closest('[data-thread-id]')!.getAttribute('data-thread-id'), part.className])).toEqual([['t3', 'ib-l3']]);
     await flip(el, 'pulls');
     expect([...list.querySelectorAll('[data-rows-flash]')].map((part) => part.className)).toEqual(['ib-prmark']);
+  });
+
+  test('only a small change tints: Spacing, First on the row, Lines between rows, a look to start from, Reset and their Undo tint nothing, and still say the change', async () => {
+    const el = render(false, OWN);
+    const tinted = () => el.querySelectorAll('[data-rows-flash]').length;
+    await press(el, '[data-rows-more]');
+    await pick(el, 'time', '10m ago');
+    expect(tinted()).toBe(OWN.length);
+    for (const [control, words] of [['spacing', 'Roomy'], ['first', 'Thread name']] as const) {
+      await pick(el, control, words);
+      expect([control, tinted(), said(el).startsWith('Changed: ')]).toEqual([control, 0, true]);
+    }
+    await flip(el, 'dividers');
+    expect([tinted(), said(el)]).toEqual([0, 'Changed: Lines between rows → on']);
+    await pick(el, 'preset', 'Dense');
+    expect(tinted()).toBe(0);
+    // Undoing the look re-lays every row too; undoing a small change tints its part.
+    await press(el, '[data-rows-undo]');
+    expect([tinted(), said(el).startsWith('Undid: ')]).toEqual([0, true]);
+    await flip(el, 'agents');
+    await press(el, '[data-rows-undo]');
+    expect(tinted()).toBeGreaterThan(0);
+    await press(el, '[data-rows-reset]');
+    expect([tinted(), said(el).startsWith('Changed: ')]).toEqual([0, true]);
+  });
+
+  test('a part that leaves tints the line it was on, never the whole row; letter badges are tinted themselves', async () => {
+    const el = render(false, OWN);
+    const tinted = () => [...new Set([...el.querySelectorAll('[data-rows-flash]')].map((part) => part.className.split(' ')[0]))];
+    await flip(el, 'project');
+    expect(tinted()).toEqual(['ib-from']);
+    await flip(el, 'project');
+    expect(tinted()).toEqual(['ib-p']);
+    await press(el, '[data-rows-more]');
+    await pick(el, 'badges', 'Projects');
+    expect(tinted()).toEqual(['ib-lm']);
+    await pick(el, 'badges', 'Off');
+    expect(tinted()).toEqual([]);
   });
 
   test('a phone brings a row that shows the change into its two pinned rows', async () => {

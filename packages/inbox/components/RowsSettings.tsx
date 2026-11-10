@@ -5,8 +5,8 @@
  * controls on a wide page, pinned at the top on a phone (two rows, the two that show the last change best). Labelled
  * examples stand in when there are no threads. Beside it: four looks to start from (Balanced = the defaults, Dense,
  * Minimal, Detailed), eight choices, and nine more under "More choices". Every change says what it was beside the
- * list's title ("Changed: Spacing → Compact", with Undo) and tints the part of the rows that moved for a moment
- * (not under reduced motion). Undo, in the header too, steps back through this visit's changes; Reset to default is
+ * list's title ("Changed: Spacing → Compact", with Undo); a small change also tints the part of the rows that moved
+ * for a moment (not under reduced motion, and not a change that re-lays the whole row). Undo, in the header too, steps back through this visit's changes; Reset to default is
  * Balanced.
  *
  * Every control is the list's look (listLook.ts) through the control model (rowsControls.ts): a change shows at once
@@ -146,24 +146,37 @@ function rowShows(control: RowsControlId, row: InboxListRow): boolean {
 }
 
 /**
- * Where a choice shows on a row: the parts to tint; none found (or none named), the whole rows. Letter badges are
- * not named: a badge's colour is its meaning, and the tint would paint over it.
- * The selectors are the list's own classes (InboxList.tsx, letterMarks.tsx, threadPulls/ThreadPulls.tsx).
+ * Where a small change shows on a row: the parts to tint (the list's own classes: InboxList.tsx, letterMarks.tsx,
+ * threadPulls/ThreadPulls.tsx). Only small changes tint (the owner, 2026-11-10: "Only for small changes: no flash
+ * when the whole row changes"): a choice that is not here re-lays every row (Spacing, First on the row, Lines between
+ * rows), as a look from "Start from" and Reset do, and tints nothing; the change line says it.
  */
 const FLASH_PARTS: Partial<Record<RowsControlId, readonly string[]>> = {
   preview: ['.ib-pv'],
-  first: ['.ib-title', '.ib-m-title'],
   time: ['.ib-t'],
   timeAt: ['.ib-t'],
-  needs: ['.ib-stm, .ib-qn, .ib-act, .ib-lc'],
-  agents: ['.ib-mks'],
-  project: ['.ib-pn'],
+  needs: ['.ib-qn, .ib-stm'],
+  agents: ['.ib-atiles'],
+  project: ['.ib-p'],
   pulls: ['.ib-prmark'],
-  newer: ['.ib-title', '.ib-m-title'],
-  boldAll: ['.ib-title', '.ib-m-title'],
-  pill: ['.ib-title', '.ib-m-title'],
+  newer: ['.ib-title, .ib-m2'],
+  boldAll: ['.ib-title, .ib-m2'],
+  pill: ['.ib-title, .ib-m2'],
+  badges: ['.ib-lm, .ib-lm-dot'],
+  shape: ['.ib-lm, .ib-lm-dot'],
+  logo: ['.ib-lm, .ib-lm-dot'],
+  github: ['.ib-lm, .ib-lm-dot'],
 };
-const FLASH_ROWS = '.ib-nrow, .ib-mrow';
+/**
+ * A part that just left has nothing to tint: the line it was on says so instead (first selector that finds any). A PR
+ * mark's only in the rows that had one. Badges turned off tint nothing.
+ */
+const FLASH_GONE: Partial<Record<RowsControlId, readonly string[]>> = {
+  pulls: ['.ib-l3, .ib-l4, .ib-m3', '.ib-l2-lead, .ib-m1-lead', '.ib-l1, .ib-m1'],
+  agents: ['.ib-from'],
+  project: ['.ib-from'],
+  preview: ['.ib-title, .ib-m2'],
+};
 
 /** The person's rows in one look, by the list's own row. Not interactive, not announced. */
 function LookList({ rows, look, phone, examples, projectNames, awayMachines, className = '' }: { rows: readonly RowsPreviewRow[]; look: ListLook; phone: boolean; examples: boolean; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string>; className?: string }) {
@@ -265,6 +278,8 @@ interface Step {
   /** The look before the change. */
   look: ListLook;
   words: string[];
+  /** A whole look (a look to start from, Reset): undoing it re-lays every row too, so it tints nothing. */
+  whole: boolean;
 }
 
 export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines }: RowsSectionProps) {
@@ -278,7 +293,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
   const [last, setLast] = useState<{ words: string[]; undone: boolean } | null>(null);
   const [more, setMore] = useState(false);
   // The choices that moved in the last change (the tint), and a count so the same one twice tints twice.
-  const [flash, setFlash] = useState<{ ids: readonly RowsControlId[]; n: number }>({ ids: [], n: 0 });
+  const [flash, setFlash] = useState<{ ids: readonly RowsControlId[]; n: number; tint: boolean }>({ ids: [], n: 0, tint: false });
   /**
    * A picture switch turned on while no project badges showed turned them on (listLook.ts `lookWithChange`). Until
    * the person picks the badges themselves (Letter badges, Badge shape, a look to start from, Undo), turning the
@@ -297,15 +312,18 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
   }, [phone, source, lead]);
 
   /** One change by the person: shown and saved (one save), remembered for Undo, said beside the list. */
-  const apply = (next: ListLook, undone?: Step) => {
+  const apply = (next: ListLook, how: { undone?: Step; whole?: boolean } = {}) => {
+    const { undone } = how;
+    const whole = how.whole === true || undone?.whole === true;
     const changed = rowsChangedControls(look, next);
     const words = rowsChangeWords(look, next);
     // The look is whole and settled (`lookWithChange`), so writing it over the one on screen writes exactly it.
     set(next);
     if (undone) setSteps((all) => all.slice(0, -1));
-    else setSteps((all) => [...all, { look, words }]);
+    else setSteps((all) => [...all, { look, words, whole }]);
     setLast({ words: undone ? undone.words : words, undone: !!undone });
-    setFlash((was) => ({ ids: changed.map((control) => control.id), n: was.n + 1 }));
+    // Only a small change tints: every control it moved has a part of the row to show it on.
+    setFlash((was) => ({ ids: changed.map((control) => control.id), n: was.n + 1, tint: !whole && changed.every((control) => FLASH_PARTS[control.id]) }));
   };
   const same = (next: ListLook) => LIST_LOOK_KEYS.every((key) => next[key] === look[key]);
   const choose = (control: RowsControl, value: string | boolean) => {
@@ -318,34 +336,34 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
   };
   const whole = (next: ListLook) => {
     broughtProjects.current = false;
-    if (!same(next)) apply(next);
+    if (!same(next)) apply(next, { whole: true });
   };
   const undo = () => {
     const step = steps.at(-1);
     if (!step) return;
     broughtProjects.current = false;
-    apply(step.look, step);
+    apply(step.look, { undone: step });
   };
 
-  // The tint: the changed parts of the rows in "Your list", by the list's own classes. A fill that fades (inbox.css),
-  // never an outline; reduced motion draws none. Set on the frame, which React leaves alone, so a row that renders
+  // The tint: the parts a small change moved in "Your list", by the list's own classes. A fill that fades (inbox.css),
+  // never an outline; reduced motion draws none. A part that left (but for a PR mark) tints nothing. Set on the frame, which React leaves alone, so a row that renders
   // again keeps it.
   useLayoutEffect(() => {
     const el = frame.current;
-    if (!el || flash.ids.length === 0) return;
+    if (!el || !flash.tint) return;
     const found: Element[] = [];
     for (const id of flash.ids) {
       const parts = FLASH_PARTS[id]?.flatMap((selector) => [...el.querySelectorAll(selector)]) ?? [];
       if (parts.length > 0) found.push(...parts);
-      // A part that just went (Pull requests off): the last line of the rows that had it, where it was.
-      else if (id === 'pulls') {
+      else {
+        // Gone: per row (a PR mark's: only the rows that had one), the last of the first lines found.
         for (const { row } of shown) {
-          if (!row.pulls) continue;
+          if (id === 'pulls' && !row.pulls) continue;
           const scope = el.querySelector(`[data-thread-id="${row.thread_id}"]`);
-          const line = [...(scope?.querySelectorAll('.ib-l3, .ib-l4, .ib-m3') ?? [])].at(-1) ?? [...(scope?.querySelectorAll('.ib-l2-lead, .ib-m1-lead, .ib-l1') ?? [])].at(-1);
+          const line = FLASH_GONE[id]?.map((selector) => [...(scope?.querySelectorAll(selector) ?? [])].at(id === 'pulls' ? -1 : 0)).find((part) => part);
           if (line) found.push(line);
         }
-      } else found.push(...el.querySelectorAll(FLASH_ROWS));
+      }
     }
     // Two names for one animation: a second change while the first still fades starts it again.
     const name = `ib-rws-flash-${flash.n % 2 ? 'a' : 'b'}`;
