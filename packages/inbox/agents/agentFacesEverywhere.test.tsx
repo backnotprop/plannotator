@@ -165,7 +165,7 @@ test.if(hasDom)('another window’s choice, carried by the shared stream, redraw
   // The frame name is one the tabs' shared stream passes on.
   expect(api.INBOX_EVENT_FRAMES).toContain('agent-faces');
   file.change({ agent: 'ses_a', face: 'glass-blue' });
-  act(() => api.dispatchInboxFrame({ name: 'agent-faces', data: JSON.stringify(events.at(-1)), id: null }, { onAgentFaces: faces.hearAgentFacesEvent }));
+  act(() => api.dispatchInboxFrame({ name: 'agent-faces', data: JSON.stringify(events.at(-1)), id: null }, { onRecord: () => {}, onStatus: () => {}, onAgentFaces: faces.hearAgentFacesEvent }));
   for (const s of ['row', 'author', 'recipient', 'sidebar']) expect(at(host, s)!.querySelector('[data-agent-face="glass-blue"], [data-face="glass-blue"]')).not.toBeNull();
   // An older copy (a late relay) never takes it back.
   act(() => faces.hearAgentFacesEvent({ faces: {}, rev: 0 }));
