@@ -707,6 +707,11 @@ button.ib-mut { border-radius: 6px; }
 .ib-star-more[data-popup-open] { background: var(--ib-pill-down); box-shadow: var(--ib-pill-shadow-down); color: var(--foreground); }
 .ib-star-menu { min-width: 240px; max-width: 300px; max-height: min(420px, var(--available-height, 420px)); overflow-y: auto; }
 .ib-star-menu .ib-pmi[aria-current="true"] { background: var(--ib-sel); }
+/* A row of the "+N" menu: the row's item, and its star over the item's left end (a sibling, as on a pill). The star
+   is a target on a touch screen too: the menu is the only place a hidden thread's star shows. */
+.ib-star-mrow { position: relative; }
+.ib-star-mrow > .ib-pmi { padding-left: 32px; }
+.ib-star-mrow > .ib-star-x { left: 5px; pointer-events: auto; }
 .ib-star-mi-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-star-mi-p { flex: none; color: var(--muted-foreground); }
 .ib-star-mi-s { flex: none; display: inline-flex; align-items: center; margin-left: auto; padding-left: 12px; }

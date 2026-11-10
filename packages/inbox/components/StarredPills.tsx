@@ -41,7 +41,8 @@ export interface StarredPillsProps {
  * touch screen the star is a picture: a tap anywhere opens, and a long press opens the same menu (a bottom sheet on a
  * phone).
  *
- * A wider window: at most two lines, then "+N" (with a dot when a hidden thread waits), a menu of the rest. A phone:
+ * A wider window: at most two lines, then "+N" (with a dot when a hidden thread waits), a menu of the rest, each row
+ * with its own star to unstar it. A phone:
  * one line that scrolls sideways, its right edge faded, with a dot in a gutter at the right while a waiting pill is
  * past the edge. Nothing is drawn with nothing starred. No keyboard shortcut.
  */
@@ -307,7 +308,7 @@ export function StarredPills(props: StarredPillsProps) {
           {!phone && (
             // Always drawn so its width is known before it is needed; out of sight and reach while every pill fits.
             <li className="ib-star-i" data-pill-more="" data-over={hidden.length === 0 ? '' : undefined} aria-hidden={hidden.length === 0 ? true : undefined}>
-              <MorePills hidden={hidden} total={pills.length} portal={portal} openThreadId={props.openThreadId} onOpen={props.onOpen} />
+              <MorePills hidden={hidden} total={pills.length} portal={portal} openThreadId={props.openThreadId} onOpen={props.onOpen} onUnstar={(row) => props.onAction(row, 'unpin')} />
             </li>
           )}
         </ContextMenu.Trigger>
@@ -399,55 +400,133 @@ function PillTip({ pill }: { pill: StarredPill }) {
   );
 }
 
-/** "+N": the starred threads past the second line, in a menu, each with its agent's mark, its name and its state. */
+/**
+ * "+N": the starred threads past the second line, in a menu. A row is a pill laid flat: the gold star at its left,
+ * the thread's name and its state (the owner, on the PR: "the drop-down menu for the pluses should have the stars
+ * too, so I can unstar the ones in the drop-down"). The star unstars and never opens the thread (a sibling of the
+ * row's item, as on a pill); the rest of the row opens it. After an unstar the menu stays open with the row gone and
+ * focus on the row now in its place; it closes when nothing is hidden any more.
+ *
+ * Keys: the rows are the menu's items (↑ ↓, Enter). ← on a row goes to its star ("Unstar <name>", Enter or Space),
+ * → comes back, and ↑ ↓ on a star go to the row above or below. No menu in the Inbox had a second action in a row
+ * before this one. No shortcut.
+ */
 function MorePills({
   hidden,
   total,
   portal,
   openThreadId,
   onOpen,
+  onUnstar,
 }: {
   hidden: readonly StarredPill[];
   total: number;
   portal: HTMLElement | null;
   openThreadId: string | null;
   onOpen: (row: InboxListRow) => void;
+  onUnstar: (row: InboxListRow) => void;
 }) {
   const none = hidden.length === 0;
   const waits = hidden.some((pill) => pillWaits(pill.state));
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  /** An unstar from the menu: once its row is gone, focus goes to the row now at this place. */
+  const refocus = useRef<{ at: number; until: number } | null>(null);
+  const ids = hidden.map((pill) => pill.row.thread_id).join('|');
+  const items = () => [...(popup.current?.querySelectorAll<HTMLElement>('[data-pills-more-item]') ?? [])];
+  useLayoutEffect(() => {
+    const pending = refocus.current;
+    if (!pending) return;
+    refocus.current = null;
+    if (Date.now() > pending.until) return;
+    const rows = items();
+    rows[Math.min(pending.at, rows.length - 1)]?.focus({ preventScroll: true });
+  }, [ids]);
+  // Nothing hidden any more (the last row was unstarred, or the list grew wider): no menu to show.
+  useEffect(() => {
+    if (none && open) setOpen(false);
+  }, [none, open]);
   return (
-    <Menu.Root modal={false}>
-      <Menu.Trigger className="ib-star-p ib-star-more" aria-label={moreName(hidden)} tabIndex={none ? -1 : undefined} data-pills-more="">
+    <Menu.Root open={open && !none} onOpenChange={setOpen} modal={false}>
+      <Menu.Trigger ref={trigger} className="ib-star-p ib-star-more" aria-label={moreName(hidden)} tabIndex={none ? -1 : undefined} data-pills-more="">
         {/* Drawn (out of sight) before it is needed, so its width is known: then with the widest count it can show. */}+{formatCount(none ? total : hidden.length)}
         {waits && <span className="ib-pdot" aria-hidden="true" data-pills-more-dot="" />}
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={6}>
-          <Menu.Popup className="ib-pm ib-star-menu" aria-label="More starred" data-pills-more-menu="">
-            {hidden.map((pill) => (
-              <Menu.Item
-                key={pill.row.thread_id}
-                className="ib-pmi"
-                label={pill.label}
-                aria-label={pillName(pill)}
-                aria-current={openThreadId === pill.row.thread_id ? 'true' : undefined}
-                data-pills-more-item={pill.row.thread_id}
-                onClick={() => onOpen(pill.row)}
-              >
-                <AuthorMark author={rowAgent(pill.row)} />
-                <span className="ib-star-mi-l" dir="auto">
-                  {pill.label}
-                </span>
-                {pill.twin && (
-                  <span className="ib-star-mi-p" dir="auto">
-                    {pill.project}
-                  </span>
-                )}
-                <span className="ib-star-mi-s">
-                  <PillState pill={pill} />
-                </span>
-              </Menu.Item>
-            ))}
+          <Menu.Popup
+            ref={popup}
+            className="ib-pm ib-star-menu"
+            aria-label="More starred"
+            data-pills-more-menu=""
+            // "+N" itself goes with its last row: focus then goes to the last pill on screen.
+            finalFocus={() => {
+              const more = trigger.current;
+              if (more && !more.closest('[data-over]')) return more;
+              const shown = more?.closest('ul')?.querySelectorAll<HTMLElement>('li[data-pill-item]:not([data-over]) [data-starred-pill]');
+              return shown?.[shown.length - 1] ?? true;
+            }}
+          >
+            {hidden.map((pill, index) => {
+              const id = pill.row.thread_id;
+              return (
+                <div key={id} className="ib-star-mrow" role="none" data-pills-more-row={id}>
+                  <Menu.Item
+                    className="ib-pmi"
+                    label={pill.label}
+                    aria-label={pillName(pill)}
+                    aria-current={openThreadId === id ? 'true' : undefined}
+                    data-pills-more-item={id}
+                    onClick={() => onOpen(pill.row)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'ArrowLeft') return;
+                      event.preventDefault();
+                      event.preventBaseUIHandler();
+                      event.currentTarget.parentElement?.querySelector<HTMLElement>('[data-pills-more-unstar]')?.focus();
+                    }}
+                  >
+                    <span className="ib-star-mi-l" dir="auto">
+                      {pill.label}
+                    </span>
+                    {pill.twin && (
+                      <span className="ib-star-mi-p" dir="auto">
+                        {pill.project}
+                      </span>
+                    )}
+                    <span className="ib-star-mi-s">
+                      <PillState pill={pill} />
+                    </span>
+                  </Menu.Item>
+                  <Tip content={<span data-pill-unstar-tip="">Unstar</span>} side="left">
+                    <button
+                      type="button"
+                      // One of the menu's items for a screen reader; reached with ← from its row, never with Tab.
+                      role="menuitem"
+                      tabIndex={-1}
+                      className="ib-star-x"
+                      aria-label={`Unstar ${pill.label}`}
+                      data-pills-more-unstar={id}
+                      onClick={() => {
+                        refocus.current = { at: index, until: Date.now() + 5000 };
+                        onUnstar(pill.row);
+                      }}
+                      onKeyDown={(event) => {
+                        const rows = items();
+                        const to = event.key === 'ArrowRight' ? index : event.key === 'ArrowDown' ? index + 1 : event.key === 'ArrowUp' ? index - 1 : null;
+                        if (to === null) return;
+                        // The menu's own arrows read its items: this star is not one of them.
+                        event.preventDefault();
+                        event.stopPropagation();
+                        rows[(to + rows.length) % rows.length]?.focus();
+                      }}
+                    >
+                      <Icon name="star" size={13} />
+                    </button>
+                  </Tip>
+                </div>
+              );
+            })}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

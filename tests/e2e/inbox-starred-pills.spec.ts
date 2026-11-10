@@ -11,7 +11,7 @@
  *  - the right-click menu's Move right and Move left change the server's order, which the sidebar shows again
  *    with the choice off;
  *  - Shift+F10 on a focused pill opens the menu (Unstar without a pointer);
- *  - 24 starred in the narrow list: two lines at most, then "+N" and its menu;
+ *  - 24 starred in the narrow list: two lines at most, then "+N" and its menu, whose rows have the star to unstar;
  *  - an iPhone in WebKit: one line that scrolls sideways and never widens the page; a tap on the star opens.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -255,6 +255,18 @@ test('24 starred in the narrow list: two lines at most, then "+N" and its menu',
   await more.click();
   const items = page.locator('[data-pills-more-item]');
   await expect(items).toHaveCount(24 - shown);
+  // A row has the pill's star, not an agent mark: it unstars from the menu, which stays open without that row;
+  // the count drops and no thread opens.
+  await expect(page.locator('[data-pills-more-menu] .ib-mk')).toHaveCount(0);
+  const first = (await items.first().getAttribute('data-pills-more-item'))!;
+  await expect(page.locator(`[data-pills-more-unstar="${first}"]`)).toHaveAccessibleName(/^Unstar /);
+  await page.locator(`[data-pills-more-unstar="${first}"]`).click();
+  await expect(page.locator(`[data-pills-more-item="${first}"]`)).toHaveCount(0);
+  await expect(page.locator('[data-pills-more-menu]')).toBeVisible();
+  await expect(more).toHaveText(`+${23 - shown}`);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Unstarred');
+  await expect(page).toHaveURL(new RegExp(`thread=${threads.diff}`));
+  expect(await serverPins(page)).not.toContain(first);
   const last = extra[extra.length - 1]!;
   await page.locator(`[data-pills-more-item="${last}"]`).click();
   await expect(page).toHaveURL(new RegExp(`thread=${last}`));

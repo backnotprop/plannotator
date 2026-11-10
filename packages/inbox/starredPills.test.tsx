@@ -500,6 +500,72 @@ describe('"+N"', () => {
     expect(calls.opened).toEqual([rows[20]!.thread_id]);
   });
 
+  test.skipIf(!hasDom)('a row of the "+N" menu has the star too: it unstars and opens nothing, the menu stays open and the count drops', async () => {
+    layout(100, 50, 330);
+    const rows = many(9, null);
+    const { el, calls } = draw({ start: rows });
+    await settle();
+    const more = () => el.querySelector<HTMLButtonElement>('[data-pills-more]')!;
+    expect(more().textContent).toBe('+4');
+    act(() => more().click());
+    await settle();
+    const menu = document.querySelector<HTMLElement>('[data-pills-more-menu]')!;
+    // The star takes the agent mark's place, as on a pill, and is not inside the row's item.
+    expect(menu.querySelector('.ib-mk')).toBeNull();
+    const star = menu.querySelector<HTMLButtonElement>(`[data-pills-more-unstar="${rows[6]!.thread_id}"]`)!;
+    expect(star.getAttribute('aria-label')).toBe('Unstar Thread 6');
+    expect(star.getAttribute('role')).toBe('menuitem');
+    expect(menu.querySelector(`[data-pills-more-item="${rows[6]!.thread_id}"]`)!.contains(star)).toBe(false);
+    act(() => star.click());
+    await settle();
+    expect(calls.actions).toEqual([[rows[6]!.thread_id, 'unpin']]);
+    expect(calls.opened).toEqual([]);
+    // Still open, without that row; "+N" counts one fewer; focus is on the row now in its place.
+    const left = [...document.querySelectorAll<HTMLElement>('[data-pills-more-item]')];
+    expect(left.map((item) => item.dataset.pillsMoreItem)).toEqual([rows[5], rows[7], rows[8]].map((r) => r!.thread_id));
+    expect(more().textContent).toBe('+3');
+    expect(document.activeElement).toBe(left[1]!);
+    // The rest of a row still opens its thread.
+    act(() => left[2]!.click());
+    expect(calls.opened).toEqual([rows[8]!.thread_id]);
+  });
+
+  test.skipIf(!hasDom)('the star in a row is reached from its row with the left arrow, and the arrows leave it for the rows', async () => {
+    layout(100, 50, 330);
+    const rows = many(9, null);
+    const { el, calls } = draw({ start: rows });
+    await settle();
+    act(() => el.querySelector<HTMLButtonElement>('[data-pills-more]')!.click());
+    await settle();
+    const item = (i: number) => document.querySelector<HTMLElement>(`[data-pills-more-item="${rows[i]!.thread_id}"]`)!;
+    const star = (i: number) => document.querySelector<HTMLElement>(`[data-pills-more-unstar="${rows[i]!.thread_id}"]`)!;
+    const key = (target: HTMLElement, name: string) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
+    act(() => item(6).focus());
+    key(item(6), 'ArrowLeft');
+    expect(document.activeElement).toBe(star(6));
+    key(star(6), 'ArrowRight');
+    expect(document.activeElement).toBe(item(6));
+    key(item(6), 'ArrowLeft');
+    key(star(6), 'ArrowDown');
+    expect(document.activeElement).toBe(item(7));
+    expect(calls.actions).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('unstarring the last hidden thread closes the menu: "+N" is gone with it', async () => {
+    layout(100, 50, 330);
+    const rows = many(7, null);
+    const { el } = draw({ start: rows });
+    await settle();
+    // Seven pills: five and "+2". One unstarred leaves six, which fit on two lines.
+    act(() => el.querySelector<HTMLButtonElement>('[data-pills-more]')!.click());
+    await settle();
+    act(() => document.querySelector<HTMLButtonElement>(`[data-pills-more-unstar="${rows[6]!.thread_id}"]`)!.click());
+    await settle();
+    expect(document.querySelector('[data-pills-more-menu]')).toBeNull();
+    expect(pills(el)).toHaveLength(6);
+    expect(el.querySelector('li[data-pill-more]')!.hasAttribute('data-over')).toBe(true);
+  });
+
   test.skipIf(!hasDom)('no dot while every hidden thread is quiet', async () => {
     layout(100, 50, 330);
     const { el } = draw({ start: many(9, 1) });
