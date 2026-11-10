@@ -588,6 +588,7 @@ packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
 packages/inbox/pulls/railTree.test.tsx
+packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
