@@ -5,13 +5,44 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNews, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
 }
 
 const sections = (...rows: InboxListRow[]): InboxListSection[] => [{ id: 'waiting', label: 'Waiting on you', threads: rows }];
+
+// The list's pill (ListNewPill.tsx) counts what "N new" counts, never its own idea of news.
+describe('heldNews', () => {
+  const at = (minute: number) => `2026-10-07T10:0${minute}:00Z`;
+  const inGroup = (r: InboxListRow, section: InboxListRow['section']) => ({ ...r, section }) as InboxListRow;
+
+  test('the threads "N new" counts, each with the group Show lands it in; the open thread and the person\'s own reply are not among them', () => {
+    const shown = sections(row('a', 'api', at(0), 'agent'), row('b', 'api', at(0), 'agent'), row('open', 'api', at(0), 'agent'));
+    const latest = sections(
+      inGroup(row('a', 'api', at(5), 'agent'), 'new'),
+      inGroup(row('b', 'api', at(6), 'person'), 'sent'),
+      inGroup(row('c', 'api', at(7), 'agent'), 'quiet'),
+      inGroup(row('open', 'api', at(8), 'agent'), 'new'),
+    );
+    const open = { threadId: 'open' };
+    const news = heldNews(shown, latest, undefined, open);
+    expect(news.map((item) => item.lands)).toEqual(['new', 'quiet']);
+    expect(news).toHaveLength(heldNotice(shown, latest, undefined, open).count);
+  });
+
+  test('a second agent message in a thread already counted is a new arrival: its key changes, its thread still counts once', () => {
+    const shown = sections(row('a', 'api', at(0), 'agent'));
+    const first = heldNews(shown, sections(inGroup(row('a', 'api', at(5), 'agent'), 'new')));
+    const second = heldNews(shown, sections(inGroup(row('a', 'api', at(6), 'agent'), 'new')));
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0]!.key).not.toBe(first[0]!.key);
+    // The same read again is the same arrival.
+    expect(heldNews(shown, sections(inGroup(row('a', 'api', at(6), 'agent'), 'new')))).toEqual(second);
+  });
+});
 
 describe('heldNotice', () => {
   test('a new thread and a newer agent message count; the person\'s own reply does not', () => {

@@ -67,7 +67,7 @@ import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents } from './agentsList';
@@ -4908,7 +4908,16 @@ function Inbox() {
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
-  const notice = heldNews?.text && shown ? { count: heldNews.count, project: heldNews.project ?? null, lands: showLandsIn(filterShown(shown), filterShown(latestGroups)) } : null;
+  // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
+  const notice =
+    heldNews?.text && shown
+      ? {
+          count: heldNews.count,
+          project: heldNews.project ?? null,
+          lands: showLandsIn(filterShown(shown), filterShown(latestGroups)),
+          news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
+        }
+      : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
   const staleNotice = stalePage.inbox && !restarting ? (
     <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />
@@ -6134,8 +6143,8 @@ function Inbox() {
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
-  /** Show was pressed: the list's next draw scrolls the first row it brought in into view. */
-  const scrollAfterShow = useRef(false);
+  /** Show was pressed: the list's next draw scrolls the first row it brought in into view, or to the middle (the pill's press). */
+  const scrollAfterShow = useRef<false | 'nearest' | 'center'>(false);
   /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
   const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -6187,7 +6196,9 @@ function Inbox() {
       target?.focus({ preventScroll: true });
     }
     // Show scrolls the first row it brought in into view (no further than that), in one jump under reduced motion.
-    if (pressedShow) brought[0]?.scrollIntoView?.({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    // The pill's press brings it to the middle instead: at the edge it would land under the pointer that pressed,
+    // whose hover paints over the light.
+    if (pressedShow) brought[0]?.scrollIntoView?.({ block: pressedShow, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     listOrder.current = body ? [...body.querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!) : [];
     const open = routeRef.current.thread;
     if (open && order.includes(open) && !listOrder.current.includes(open)) openSlot.current = { thread: open, order };
@@ -6787,6 +6798,7 @@ function Inbox() {
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
+          covered={route.thread !== null && (phone || stack.thread || full)}
           stale={staleNotice}
           ask={
             <>
@@ -6812,13 +6824,13 @@ function Inbox() {
           // A phone's pull down from the list's top does the same, its ↻ spinning until the read lands (pullRefresh.ts).
           onPullRefresh={() => refreshInbox(route.project, false)}
           refreshSpin={refreshSpin && refreshSpin.scope === route.project ? refreshSpin.key : null}
-          onShowNew={() => {
+          onShowNew={(centre) => {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
             focusAfterShow.current = lastInput() === 'keyboard';
             listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
             if (latestRef.current) {
               showFrom.current = shown;
-              scrollAfterShow.current = true;
+              scrollAfterShow.current = centre ? 'center' : 'nearest';
             }
             settleList('all', true);
           }}
