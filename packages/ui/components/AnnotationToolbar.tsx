@@ -252,9 +252,13 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const rect = element.getBoundingClientRect();
       // Touch screens (host opt-in) place and close by the WHOLE selection,
       // not its first piece; elsewhere `element` alone, as before.
-      const anchor = touchToolbar ? touchAnchorRectRef.current?.() ?? rect : rect;
+      const whole = touchAnchorRectRef.current?.() ?? rect;
+      const anchor = touchToolbar ? whole : rect;
 
-      if (closeOnScrollOut && (anchor.bottom < 0 || anchor.top > window.innerHeight)) {
+      // Close when the WHOLE selection is out of sight, not its first piece: a
+      // long drag that scrolled the page leaves its first words above the
+      // window, and closing on them removed the highlight as it was made.
+      if (closeOnScrollOut && (whole.bottom < 0 || whole.top > window.innerHeight)) {
         onClose();
         return;
       }
@@ -276,8 +280,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
       hiddenRef.current = false;
       if (positionMode === 'center-above') {
+        // On screen while the selection is: its first piece may be above the window.
         setPosition({
-          top: rect.top - 48,
+          top: Math.max(rect.top - 48, 8),
           left: rect.left + rect.width / 2,
         });
       } else {
