@@ -130,6 +130,12 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "Without an id, list this project's threads, newest activity first, and every thread in any project the person tagged you in that you have not taken yet (`tagged_you: true` on its row; its line says \"the person tagged you here\"): only the ones you sent in unless `asked_by` is `\"anyone\"`, only open ones unless `include_resolved`, up to `limit` (default 20). Each row is short: `thread_id`, `subject`, `thread_name`, `section` (where it sits in the person's list), `message_count`, `questions: { open, picked, prompt }`, `last_author` (`agent` or `person`), `last_at`, `last_person_at` and `last_person_message_id` (the person's last message, null when they wrote none; the Inbox's own notes, such as the set-aside note, do not count), `unread` (the person wrote something in it for you that no agent has read yet: a reply no agent has read with read_thread, or a message addressed to you that your wake has not delivered yet; read_thread does not deliver it; after a reply you may have missed, read those threads) and, on a resolved thread (with `include_resolved`, or one an agent wrote in after the archive), `resolved_at`. Read a thread by its id for its messages.",
     ],
   },
+  show_thread: {
+    args: ["thread_id"],
+    lines: [
+      "Show a thread in the most recently focused open local Inbox window, without reloading. Returns `shown: true` and `window` when that page accepts it, otherwise `shown: false` and `url` to open. Raising the OS window stays the caller's job. Sends and decides nothing.",
+    ],
+  },
   search: {
     args: ["query", "all_projects", "limit"],
     lines: [

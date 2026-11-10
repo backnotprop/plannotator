@@ -51,9 +51,10 @@ import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 import { hintSaid, noteHintSaid, quietHint } from "./inbox-mcp-hints";
+import type { InboxShowResult } from "./inbox-show";
 import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "show_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -253,6 +254,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
+  /** Navigate a live local window, with a URL fallback when none acknowledges. */
+  showThread?: (thread: string) => Promise<InboxShowResult>;
   /** The project for a path an agent named (realpath, git toplevel, a linked worktree folding into its main repository), created on first use. */
   resolveProject: (path: string) => Promise<InboxProject>;
   /**
@@ -1365,6 +1368,24 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           ...(inside.length > 0 ? { projects_inside: inside } : {}),
         });
       }),
+  );
+
+  server.registerTool(
+    "show_thread",
+    {
+      title: "Show a thread in the Inbox",
+      description: "Show a thread in the most recently focused open local Inbox window, without reloading it. Returns shown and window after that page accepts it, or shown: false and a URL to open. Does not raise the OS window, answer questions or send messages.",
+      inputSchema: z.object({ thread_id: z.string().min(1).max(200) }).strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ thread_id }) => guarded(async () => {
+      const root = store.message(thread_id);
+      if (!root || root.thread_id !== thread_id) throw new InboxError("thread_not_found", `No thread ${thread_id}.`);
+      const result = context.showThread
+        ? await context.showThread(thread_id)
+        : { shown: false as const, url: threadUrl(context.baseUrl(), thread_id) };
+      return ok(result.shown ? `Shown in Inbox window ${result.window}.` : `No window accepted it. Open ${result.url}`, result);
+    }),
   );
 
   // The agents' read-only search over the ⌘K index (approval "inbox-agent-search"): packages/server/inbox-mcp-search.ts.
