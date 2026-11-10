@@ -270,7 +270,7 @@ export function NewCardDialog({
                 >
                   {target ? (
                     <>
-                      <HostMark host={target.host} />
+                      <HostMark host={target.host} agent={target.session} />
                       <b>{hostLabel(target.host)}</b>
                       <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
                     </>

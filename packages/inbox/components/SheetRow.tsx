@@ -8,6 +8,7 @@ import { HostMark } from '../icons';
 export function SheetRow({
   id,
   host,
+  agent,
   lead,
   title,
   detail,
@@ -23,6 +24,8 @@ export function SheetRow({
   id?: string;
   /** The agent whose mark leads the row. */
   host?: string | null;
+  /** Its session: the mark shows the face chosen for it. */
+  agent?: string | null;
   /** In the mark's place, for a row that is not an agent. */
   lead?: ReactNode;
   title: string;
@@ -58,7 +61,7 @@ export function SheetRow({
       }}
       {...attrs}
     >
-      {lead !== undefined ? <span className="ib-sheet-lead">{lead}</span> : <span className="ib-sheet-mark">{host !== undefined && <HostMark host={host} />}</span>}
+      {lead !== undefined ? <span className="ib-sheet-lead">{lead}</span> : <span className="ib-sheet-mark">{host !== undefined && <HostMark host={host} agent={agent} />}</span>}
       <span className="ib-sheet-words">
         <span className="ib-sheet-t" dir="auto">
           {title}

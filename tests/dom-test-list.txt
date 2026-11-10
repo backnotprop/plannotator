@@ -683,6 +683,7 @@ packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
+packages/inbox/agents/agentFacesEverywhere.test.tsx
 packages/inbox/starredPills.test.tsx
 packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx

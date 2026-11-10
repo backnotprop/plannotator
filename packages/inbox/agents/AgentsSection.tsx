@@ -127,7 +127,7 @@ const AgentRow = memo(
             <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
           </button>
         </Tip>
-        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} />
+        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} />
       </div>
     );
   },

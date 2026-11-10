@@ -432,6 +432,11 @@ button.ib-mut { border-radius: 6px; }
 .ib-mk > svg, .ib-mk > img { width: var(--ib-mark-16); height: var(--ib-mark-16); display: block; }
 .ib-mk.ib-big { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); background: var(--muted); }
 .ib-mk.ib-big > svg, .ib-mk.ib-big > img { width: var(--ib-mark-30-g); height: var(--ib-mark-30-g); }
+/* An agent's chosen face (icons.tsx FaceMark): a still picture filling the mark's box; a big one needs no tile of its own. */
+.ib-mk.ib-face.ib-big { background: none; }
+.ib-mk.ib-face.ib-big > img { width: var(--ib-mark-30); height: var(--ib-mark-30); }
+.ib-mk.ib-face > img.ib-face-l, :root.light .ib-mk.ib-face > img.ib-face-d { display: none; }
+:root.light .ib-mk.ib-face > img.ib-face-l { display: block; }
 /* Side in the selection bar (ask/sideButton.tsx): the thread agent's mark is the button's glyph. A block, as the
    other buttons' glyphs are: an inline box would sit on a text line and make the button taller than its neighbours.
    On a touch bar ui's theme.css draws every glyph at 20 px and sizes the mark's box; the last rule sizes the mark in it. */
@@ -1287,6 +1292,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-atile + .ib-atile { margin-left: -5px; }
 .ib-atile > .ib-mk { position: relative; }
 .ib-atile > .ib-mk, .ib-atile > .ib-mk > svg, .ib-atile > .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
+.ib-atile:has(> .ib-face) { background: none; }
+.ib-atile > .ib-mk.ib-face, .ib-atile > .ib-mk.ib-face > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 .ib-atile.ib-atmore { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; color: var(--muted-foreground); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; min-width: var(--ib-mark-20); width: auto; padding: 0 3px; }
 /* Hover and the selected row (design record "inbox-polish", item 1, variant A · Inset): a pill 3 px inside
    the row (its ::before, radius 8, no border), so the separators run on unbroken and never touch it, and the

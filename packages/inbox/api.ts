@@ -15,6 +15,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
+import type { InboxAgentFaceChange } from '@plannotator/core/inbox-agent-faces';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -2032,6 +2033,10 @@ export const inboxApi = {
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
   /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
+  agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
+  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
+  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
   setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
@@ -2309,6 +2314,8 @@ export interface InboxEventHandlers {
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
+  /** An agent icon's face was saved (`{ faces, rev }`, unparsed). */
+  onAgentFaces?: (data: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
@@ -2350,7 +2357,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2455,6 +2462,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
         handlers.onSidebar?.(data.sidebar, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'agent-faces':
+      try {
+        handlers.onAgentFaces?.(JSON.parse(frame.data));
       } catch {
         // A malformed frame changes nothing.
       }

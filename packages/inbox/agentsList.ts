@@ -42,6 +42,17 @@ export function setInboxAgents(next: unknown): void {
   current = clean === null ? null : Object.freeze(clean);
   currentJson = json;
   for (const listener of listeners) listener();
+  for (const listener of quiet) listener();
+}
+
+const quiet = new Set<() => void>();
+/**
+ * Hear each change without counting as something that draws the agents (`inboxAgentsWatched` stays as it is): the
+ * agent icons' faces (agents/agentFaces.ts) find an agent's sessions here, and must not make every list read carry them.
+ */
+export function onInboxAgentsSet(listener: () => void): () => void {
+  quiet.add(listener);
+  return () => quiet.delete(listener);
 }
 
 /** Hear each change (the hook's subscription; while one is held, `inboxAgentsWatched`). */

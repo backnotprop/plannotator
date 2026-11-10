@@ -36,6 +36,7 @@ const Chevron = () => (
 
 export function AgentPill({
   host,
+  agent,
   label,
   detail,
   ask = false,
@@ -50,6 +51,8 @@ export function AgentPill({
 }: Common & {
   /** The agent whose mark leads the words. Undefined: no mark ("Choose an agent"). */
   host?: string | null;
+  /** Its session: the mark shows the face chosen for it. */
+  agent?: string | null;
   /** The name beside the mark. Null: the mark and the chevron alone (the mark says who). */
   label: string | null;
   /** A quiet word after the name ("ended"). */
@@ -64,7 +67,7 @@ export function AgentPill({
     <button type="button" ref={buttonRef} className="ib-apill" data-agent-pill="" data-ask={ask ? '' : undefined} data-open={open ? '' : undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onMouseDown={keepFocus ? stay : undefined} onClick={onClick} {...attrs}>
       {host !== undefined && (
         <span className="ib-apill-m">
-          <HostMark host={host} />
+          <HostMark host={host} agent={agent} />
         </span>
       )}
       {label !== null && (
@@ -80,6 +83,7 @@ export function AgentPill({
 
 export function AgentMark({
   host,
+  agent,
   count,
   open,
   onClick,
@@ -90,13 +94,15 @@ export function AgentMark({
 }: Common & {
   /** The first recipient's agent. */
   host: string | null;
+  /** Its session: the mark shows the face chosen for it. */
+  agent?: string | null;
   /** How many get the words, shown at the button's corner. */
   count: number;
 }) {
   return (
     <button type="button" ref={buttonRef} className="ib-pchip ib-amark" data-agent-mark="" data-open={open ? '' : undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={ariaLabel} onMouseDown={keepFocus ? stay : undefined} onClick={onClick} {...attrs}>
       <span className="ib-amark-m">
-        <HostMark host={host} />
+        <HostMark host={host} agent={agent} />
       </span>
       <span className="ib-amark-n" data-agent-count="" aria-hidden="true">
         {count}

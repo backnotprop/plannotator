@@ -2,8 +2,51 @@
  * Moved to @plannotator/ui (packages/ui/components/inbox-thread/icons.tsx) unchanged, so a
  * host of the shared thread parts draws the same marks. This path re-exports it so every
  * existing import and test keeps working.
+ *
+ * But for `HostMark` and `AuthorMark`, which are the Inbox's own here: given an agent (a session id or an agent's id),
+ * they draw the face the person chose for it in the sidebar (agents/agentFaces.ts), a still picture, and ui's mark
+ * otherwise. Only an icon of one agent passes one; a kind of agent (Settings, the tour, "New Claude Code session")
+ * keeps its plain mark.
  */
+import type { InboxAuthor } from '@plannotator/core/inbox-types';
+import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { useAgentFace } from './agents/agentFaces';
+import { useAgentFaceSources } from './agents/faceArtLoad';
+import type { OurFace } from './agents/faceChoices';
+
 export * from '@plannotator/ui/components/inbox-thread/icons';
+
+/** The mark for an agent host; with `agent`, that agent's chosen face when it has one. */
+export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
+  const face = useAgentFace(agent);
+  return face === 'agent' ? <UiHostMark host={host} big={big} /> : <FaceMark face={face} big={big} />;
+}
+
+/** An author's mark: an agent's is its session's face when it has one. */
+export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
+  const agent = author?.kind === 'agent' ? author : null;
+  return <HostMark host={agent?.host ?? null} big={big} agent={agent?.session ?? null} />;
+}
+
+/**
+ * A face as a still picture in a mark's box (no motion: only the sidebar's Agents rows move). Until the pictures'
+ * script is in, the box stays empty: no wrong picture first, nothing moves.
+ */
+function FaceMark({ face, big }: { face: OurFace; big?: boolean }) {
+  const src = useAgentFaceSources(true)?.[face];
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''} ib-face`} data-agent-face={face}>
+      {typeof src === 'string' ? (
+        <img src={src} alt="" draggable={false} />
+      ) : src ? (
+        <>
+          <img className="ib-face-l" src={src.light} alt="" draggable={false} />
+          <img className="ib-face-d" src={src.dark} alt="" draggable={false} />
+        </>
+      ) : null}
+    </span>
+  );
+}
 
 /**
  * Plannotator's mark as a single-colour glyph: the bold P over its highlight bar, from the classic favicon
