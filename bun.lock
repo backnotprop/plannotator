@@ -286,7 +286,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.21",
+      "version": "0.25.22",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
@@ -458,7 +458,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.62.0",
+      "version": "0.63.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -480,7 +480,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.5.2",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.21",
+        "@plannotator/core": "0.25.22",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",
