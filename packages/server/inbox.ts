@@ -177,6 +177,8 @@ import {
   inboxRegistryPath,
   isOwnDataDir,
   probeInboxData,
+  inboxHome,
+  inboxSessionLineage,
   readInboxRegistry,
   writeInboxRegistry,
   type InboxRegistryEntry,
@@ -1118,6 +1120,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
+  // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
+  const home = inboxHome(dataDir);
+  const follows = inboxSessionLineage(previous, home);
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
@@ -1430,6 +1435,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     app: INBOX_APP_ID,
     version,
     serverSession,
+    // Additive: the earlier runs of this data folder (registry.ts `inboxSessionLineage`). A window that loaded from
+    // one of them, on this version, takes this run's session and keeps writing (packages/inbox/sessionAdopt.ts).
+    ...(follows.length > 0 ? { follows } : {}),
     pid: process.pid,
     update: updates.current(),
     notify_reach: windows.reach(notificationsState().enabled),
@@ -6472,6 +6480,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     token,
     serverSession,
     startedAt: new Date().toISOString(),
+    // The runs this one follows, and the folder it is written in: a window left open across the restart keeps writing.
+    ...(follows.length > 0 ? { follows } : {}),
+    ...(home ? { home } : {}),
     ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
     ...(previous?.lan ? { lan: previous.lan } : {}),
     // The mapping the last run made (its ports), so this start re-points or takes down its own.
