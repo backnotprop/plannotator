@@ -1016,7 +1016,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
 .ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
-.ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
 /* Beside a thread, off phones, the column has the sidebar's resize edge
    (shell/ListColumnEdge.tsx sets its width): never narrower than 380px, and
@@ -3313,6 +3313,21 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
 }
+/* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
+   box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
+   past: the top one by its place in the flow, the bottom one from the column's foot (above "Reconnecting…" when
+   that line shows). It rises 6 px into place, or drops at the top. `data-fading` is its end: the fade of Show's
+   light (`ib-lit`: 1800 ms, ease-in-out). A pointer on it mid-fade brings it back at once. */
+.ib-lnew { flex: none; height: 0; }
+.pn-inbox .ib-lnew > .ib-npill { position: absolute; left: 50%; z-index: 30; margin-top: 12px; transform: translateX(-50%); white-space: nowrap; }
+.pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill { margin-top: 0; bottom: 12px; }
+.pn-inbox .ib-listcol:has(> .ib-relink) > .ib-lnew[data-edge="bottom"] > .ib-npill { bottom: 48px; }
+.pn-inbox .ib-lnew > .ib-npill[data-off] { transform: translate(-50%, -6px); }
+.pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill[data-off] { transform: translate(-50%, 6px); }
+.pn-inbox .ib-lnew > .ib-npill[data-fading] { opacity: 0; transition: opacity 1800ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-lnew > .ib-npill, .pn-inbox .ib-lnew > .ib-npill[data-off], .pn-inbox .ib-lnew > .ib-npill[data-fading] { transform: translateX(-50%); transition: none; }
+}
 /* A message that arrives while its thread is open (.product/approved/inbox-new-in-open-thread/, variant A):
    a short entrance so the eye catches what changed; none under reduced motion. */
 @keyframes ib-arrive { from { opacity: 0; transform: translateY(6px); } }
@@ -3573,6 +3588,11 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-sb-trigger { width: 44px; height: 44px; }
   .ib-sb-trigger-dot { top: 11px; right: 11px; }
   .ib-lbody { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+  /* The list's pill: under the group header stuck at the top, above the bottom safe area; 44 px to hit, 32 px to see. */
+  .pn-inbox .ib-lnew > .ib-npill { margin-top: 56px; }
+  .pn-inbox .ib-lnew > .ib-npill::after { content: ""; position: absolute; inset: -6px -4px; }
+  .pn-inbox .ib-lnew[data-edge="bottom"] > .ib-npill { margin-top: 0; bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-listcol:has(> .ib-relink) > .ib-lnew[data-edge="bottom"] > .ib-npill { bottom: calc(48px + env(safe-area-inset-bottom)); }
   .ib-lbody .ib-band { position: sticky; top: 0; z-index: 2; height: 34px; padding: 0 16px; border-radius: 0; font-size: var(--ib-fs-13, 13px); }
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
