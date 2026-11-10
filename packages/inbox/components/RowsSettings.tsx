@@ -414,14 +414,18 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
               look's, and a look that matches none has none pressed. */}
           <div className="ib-rws-presets" role="group" aria-labelledby="ib-rows-preset">
             {ROWS_PRESETS.map((choice) => (
-              <button key={choice.id} type="button" className="ib-rws-pre" aria-pressed={preset === choice.id} data-preset={choice.id} onClick={() => whole(choice.look)}>
+              // The picture is the list's own rows (buttons), so it sits beside the button, not in it; the button's
+              // hit area covers the whole card (inbox.css).
+              <div key={choice.id} className="ib-rws-pre" data-on={preset === choice.id ? '' : undefined}>
                 <span className="ib-rws-pic" aria-hidden="true" inert>
                   <span className="ib-rws-pic-in">
                     <LookList rows={source.slice(0, PRESET_ROWS)} look={choice.look} phone={false} examples={!own} projectNames={projectNames} awayMachines={awayMachines} />
                   </span>
                 </span>
-                <span className="ib-rws-pre-n">{choice.label}</span>
-              </button>
+                <button type="button" className="ib-rws-pre-n" aria-pressed={preset === choice.id} data-preset={choice.id} onClick={() => whole(choice.look)}>
+                  {choice.label}
+                </button>
+              </div>
             ))}
           </div>
           <h2 id="ib-rows-choices">Choices</h2>
