@@ -204,9 +204,6 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
-/** An icon's path data (24 x 24, stroked), for a host that draws it in another frame than `Icon`'s (another stroke weight or size). */
-export const iconPath = (name: IconName): string => PATHS[name];
-
 /** Tailscale's nine dots, in the current colour (the phone path's mark). */
 export function TailscaleMark({ size = 16 }: { size?: number }) {
   const dots: [number, number, number][] = [

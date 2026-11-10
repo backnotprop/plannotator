@@ -1498,7 +1498,7 @@ const SHOW_NEW_MESSAGE_BUTTON = false;
 const REPLY_FILES_SUMMARY_FROM = 7;
 /** `/side`, the reply box's built-in command for the side chat: its name in the "/" list and the list's one line. */
 export const SIDE_COMMAND_NAME = 'side';
-export const SIDE_COMMAND_DESCRIPTION = 'Take what you typed to a side chat with the agent';
+export const SIDE_COMMAND_DESCRIPTION = 'Start a side conversation with your agent';
 /** How long "No skills are installed" stays in the reply box's row after a press on Skills with none to pick. */
 const NO_SKILLS_HINT_MS = 2000;
 

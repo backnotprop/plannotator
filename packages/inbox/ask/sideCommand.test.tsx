@@ -322,16 +322,15 @@ test.skipIf(!hasDom)("the built-ins are one group above the person's skills: one
     { name: 'write-better', at: '4', builtin: false },
   ]);
 
-  // Each built-in wears its own glyph, a skill the cube: all in one frame (no row changes size), all decorative.
+  // Every built-in wears Plannotator's mark, a skill the cube: both 16 px and decorative, so no row changes size.
   const icon = (name: string) => row(name)!.querySelector('svg')!;
-  const frame = (name: string) => ['viewBox', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'aria-hidden'].map((key) => icon(name).getAttribute(key)).join(' ') + ' ' + ['w-4', 'h-4', 'shrink-0'].filter((cls) => icon(name).classList.contains(cls)).join(' ');
-  expect(['review-walkthrough', 'shape', 'side', 'readback', 'write-better'].map((name) => icon(name).getAttribute('data-builtin-skill-icon'))).toEqual(['review-walkthrough', 'shape', 'side', null, null]);
+  expect(['review-walkthrough', 'shape', 'side', 'readback', 'write-better'].map((name) => icon(name).hasAttribute('data-plannotator-mark'))).toEqual([true, true, true, false, false]);
+  const frame = (name: string) => `${icon(name).getAttribute('viewBox')} ${icon(name).getAttribute('aria-hidden')} ${['w-4', 'h-4', 'shrink-0'].filter((cls) => icon(name).classList.contains(cls)).join(' ')}`;
   for (const name of ['review-walkthrough', 'shape', 'side', 'write-better']) expect(frame(name)).toBe(frame('readback'));
-  expect(frame('readback')).toBe('0 0 24 24 1.7 round round true w-4 h-4 shrink-0');
-  // Three different drawings, none of them the cube's.
-  const drawing = (name: string) => [...icon(name).querySelectorAll('path')].map((path) => path.getAttribute('d')).join(' ');
-  expect(new Set(['review-walkthrough', 'shape', 'side', 'readback'].map(drawing)).size).toBe(4);
-  expect(drawing('write-better')).toBe(drawing('readback'));
+  expect(frame('readback')).toBe('0 0 24 24 true w-4 h-4 shrink-0');
+  // The mark is the theme's primary colour by its token, never a colour of its own.
+  expect(icon('side').classList.contains('text-primary')).toBe(true);
+  expect(icon('side').outerHTML).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
   // The glyph adds nothing to what the option says.
   expect(row('side')!.textContent).toBe(`side${row('side')!.querySelector('[data-skill-item-part="description"]')!.textContent}Plannotator`);
 
