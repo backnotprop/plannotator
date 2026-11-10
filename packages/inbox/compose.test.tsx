@@ -702,6 +702,9 @@ test.skipIf(!hasDom)('a typed name another open thread has: refused (409) and sa
   act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
   await until(() => chipError() !== null, 'the refusal on the chip');
   expect(chipError()!.textContent).toContain('Another open thread in this project has this name.');
+  // The Inbox's refusal names the thread that has it, so the way through is offered, with that thread's own name.
+  expect(chipError()!.textContent).toContain('“Relay budget”');
+  expect(dialog()!.querySelector('[data-compose-thread-name-join]')).not.toBeNull();
   expect(chip().hasAttribute('data-invalid')).toBe(true);
   expect(dialog()!.querySelector('[data-compose-error]')).toBeNull();
   // Editing the name clears the mark and the message.
