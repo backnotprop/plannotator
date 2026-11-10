@@ -240,7 +240,7 @@ import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
-import { acceptInboxShow } from './showThread';
+import { acceptInboxShow, useInboxShowTool } from './showThread';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
@@ -1328,6 +1328,7 @@ function Inbox() {
     },
   });
   const { observe: observeEvent, flush: flushNotifications, setReach: setNotifyReach, windowReport, reportWindow } = notifications;
+  useInboxShowTool();
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
