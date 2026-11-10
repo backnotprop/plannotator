@@ -3968,7 +3968,7 @@ function Inbox() {
     void setPin(row, false).finally(() => unstarring.current.delete(row.thread_id));
   };
   /** A pinned row's menu: Unpin, Move up, Move down, Copy link. */
-  const pinAction = async (row: InboxListRow, action: PinnedAction) => {
+  const pinAction = async (row: InboxListRow, action: PinnedAction, pills = false) => {
     if (action === 'unpin') return void setPin(row, false);
     if (action === 'copy-link') return void rowAction(row, 'copy-link');
     const order = (latestRef.current?.pins ?? []).map((pin) => pin.thread_id);
@@ -3981,7 +3981,8 @@ function Inbox() {
       return;
     }
     await refreshList(false);
-    say(action === 'up' ? 'Moved up.' : 'Moved down.');
+    // The list's pills run sideways: their menu says Move left and Move right for the same two moves.
+    say(pills ? (action === 'up' ? 'Moved left.' : 'Moved right.') : action === 'up' ? 'Moved up.' : 'Moved down.');
   };
   /**
    * A pinned row opens its thread and leaves the list as it is (the project
@@ -6887,6 +6888,8 @@ function Inbox() {
           }}
           pinned={pinsOn ? pinnedIds : undefined}
           onUnstar={pinsOn ? unstarRow : undefined}
+          // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
+          starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {

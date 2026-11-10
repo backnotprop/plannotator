@@ -384,7 +384,7 @@ test.describe('iPhone 15 (WebKit)', () => {
   });
 
   for (const scheme of ['light', 'dark'] as const) {
-    test(`the sheet: 44 px pinned rows, ⋯ always shown, the menu a bottom sheet; the header menu's Star thread (${scheme})`, async () => {
+    test(`the sheet: two-line pinned rows of 44 px or more, ⋯ always shown, the menu a bottom sheet; the header menu's Star thread (${scheme})`, async () => {
       const { threads } = world;
       const context = await browser!.newContext({ ...device, colorScheme: scheme });
       try {
@@ -394,8 +394,10 @@ test.describe('iPhone 15 (WebKit)', () => {
         await page.locator('[data-sidebar="trigger"]').first().tap();
         const row = page.locator(`[data-pinned-row="${threads.apns}"]`);
         await expect(row).toBeVisible();
+        // The name, then its project and state (approval "inbox-phone-sidebar-sheet").
         const box = await row.boundingBox();
-        expect(Math.round(box!.height)).toBe(44);
+        expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
+        await expect(row.locator('.ib-pin-sub .ib-pin-proj')).toBeVisible();
         const more = page.locator(`[data-pin-more="${threads.apns}"]`);
         await expect(more).toHaveCSS('opacity', '1');
         const moreBox = await more.boundingBox();
