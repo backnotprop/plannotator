@@ -11315,6 +11315,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sbc-row { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 8px 0 2px; border-radius: var(--ib-rl-sm-s, 7px); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-sbc-row > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
 @media (hover: hover) { .ib-sbc-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
+.ib-sbc-row > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
 .ib-sbc-row[data-off] > .ib-ic, .ib-sbc-row[data-off] .ib-sbc-l { opacity: 0.45; }
 .ib-sbc-row[data-lifted] { display: none; }
 .ib-sbc-fixed { padding-left: 33px; }

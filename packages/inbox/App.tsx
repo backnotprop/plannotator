@@ -7184,6 +7184,7 @@ function Inbox() {
       {!tourOn && (
         <SidebarCustomizer
           drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
             if (!phone && routeRef.current.page === 'settings') setSettingsSidebar(true);
