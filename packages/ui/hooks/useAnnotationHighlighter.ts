@@ -625,6 +625,33 @@ const snapRangeEndBeforeSkipped = (container: Element, range: Range): boolean =>
   return true;
 };
 
+/**
+ * Pull the ends of a range that reaches outside `container` back onto the
+ * document's own first or last paintable text. A drag that starts in the
+ * document and runs past its last block (into a panel, below the card) or back
+ * past its first one selects what lies there too; the highlight is the part
+ * inside. False when the document has no text to hold an end.
+ */
+const clampRangeToContainer = (container: Element, range: Range): boolean => {
+  const startOutside = !container.contains(range.startContainer);
+  const endOutside = !container.contains(range.endContainer);
+  if (!startOutside && !endOutside) return true;
+  let first: Text | null = null;
+  let last: Text | null = null;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const text = node as Text;
+    if (!text.length || paintSkippedAncestor(container, text)) continue;
+    first ??= text;
+    last = text;
+  }
+  if (!first || !last) return false;
+  if (endOutside) range.setEnd(last, last.length);
+  if (startOutside) range.setStart(first, 0);
+  return true;
+};
+
 /** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
 interface RestoreBoundary {
   $node: Node;
@@ -1739,6 +1766,9 @@ export function useAnnotationHighlighter({
       return [start, end];
     });
 
+    /** The selection string of a drag let go outside the document, while its highlight is made. */
+    let releasedOutsideQuote: string | null = null;
+
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
       // Store positions as if a host's `belowTitle` slot were not there, so
@@ -1757,6 +1787,10 @@ export function useAnnotationHighlighter({
           // Repair the quote before anything reads it: the popover preview,
           // the comment draft key, and the annotation's own `originalText` all
           // come from `source.text`.
+          // A selection let go outside the document was painted from its
+          // range; its quote is the selection's own string, as for one let go
+          // inside.
+          if (releasedOutsideQuote !== null) source.text = releasedOutsideQuote;
           source.text = quoteWithoutExcludedText(
             pendingRangeRunsRef.current,
             source.text,
@@ -1927,6 +1961,78 @@ export function useAnnotationHighlighter({
     container.addEventListener('mouseup', handlePointerEndCapture, true);
     container.addEventListener('touchend', handlePointerEndCapture, true);
 
+    // A drag that starts in the document and is let go OUTSIDE it (left of the
+    // text, below the card, over a panel, outside the window). The library
+    // hears a release on its root only, so the selection used to stay on
+    // screen with no highlight. A press in the document is followed to its
+    // release anywhere; a release inside is the library's, as always, and one
+    // outside commits the selection here: the same checks and snaps as the
+    // guard above, then the library's `fromRange` (the same CREATE event), then
+    // the selection removed as the library's own handler does.
+    const commitReleasedOutside = () => {
+      const selection = window.getSelection();
+      if (disposed || !listening || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      // The press was in the document; so must an end of the selection be.
+      if (!container.contains(selection.anchorNode) && !container.contains(selection.focusNode)) return;
+      const range = selection.getRangeAt(0).cloneRange();
+      if (rangeInsideExcluded(container, range)) return;
+      if (!clampRangeToContainer(container, range)) return;
+      snapRangeOutOfBelowTitle(container, range);
+      snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(container, range);
+      // Nothing to quote, or a shape the library cannot serialize (#881): the
+      // selection stays the person's, as before.
+      if (range.collapsed || isBlankQuote(range.toString()) || !isSerializableRange(range)) return;
+      selection.removeAllRanges();
+      selection.addRange(range.cloneRange());
+      releasedOutsideQuote = selection.toString() || null;
+      pendingRangeRunsRef.current = rangeTextPieces(range);
+      try {
+        if (highlighter.fromRange(range)) window.getSelection()?.removeAllRanges();
+      } catch (error) {
+        pendingRangeRunsRef.current = null;
+        warnHighlighterFailure('painting a selection released outside the document', error);
+      } finally {
+        releasedOutsideQuote = null;
+      }
+    };
+    const endPress = () => {
+      document.removeEventListener('mouseup', handlePressRelease, true);
+      document.removeEventListener('mousemove', handlePressMove, true);
+    };
+    const handlePressRelease = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      endPress();
+      if (event.target instanceof Node && container.contains(event.target)) return;
+      // After every other listener of this release, like the library's own
+      // handler for a release inside: as the event ends its way up, or on the
+      // next task when something stopped it.
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('mouseup', commit);
+        commitReleasedOutside();
+      };
+      window.addEventListener('mouseup', commit);
+      window.setTimeout(commit, 0);
+    };
+    // A release the page never hears (over a frame): the first move with the
+    // button up ends the drag.
+    const handlePressMove = (event: MouseEvent) => {
+      if (event.buttons & 1) return;
+      endPress();
+      commitReleasedOutside();
+    };
+    const handlePressStart = (event: MouseEvent) => {
+      // The main button only; Ctrl+click is the context menu on a Mac.
+      if (event.button !== 0 || event.ctrlKey) return;
+      endPress();
+      document.addEventListener('mouseup', handlePressRelease, true);
+      document.addEventListener('mousemove', handlePressMove, true);
+    };
+    container.addEventListener('mousedown', handlePressStart, true);
+
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
     // touchend would end the system selection and its edit menu first.
@@ -2083,6 +2189,8 @@ export function useAnnotationHighlighter({
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       container.removeEventListener('mouseup', handlePointerEndCapture, true);
       container.removeEventListener('touchend', handlePointerEndCapture, true);
+      container.removeEventListener('mousedown', handlePressStart, true);
+      endPress();
       disposed = true;
       highlighter.dispose();
     };
