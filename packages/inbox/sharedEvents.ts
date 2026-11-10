@@ -342,8 +342,8 @@ export function subscribeSharedInboxEvents(
   let departed = false;
   const tabHandlers: InboxEventHandlers = {
     ...handlers,
-    onConnect: () => {
-      if (!departed) handlers.onConnect?.();
+    onConnect: (hello) => {
+      if (!departed) handlers.onConnect?.(hello);
     },
   };
   let closeStream: (() => void) | null = null;

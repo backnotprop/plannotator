@@ -11508,3 +11508,72 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
 .ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); align-self: flex-end; }
 @media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } }
+
+/* ── A phone's sidebar sheet, once open (approval "inbox-phone-sidebar-sheet", "Sheet 1 · Same sections, fixed") ──
+   Every rule here is under `.ib-sb-sheet-in`, which exists only while the navigation is a phone's sheet
+   (shell/sidebar.tsx), so the docked sidebar and the peek are untouched. One scroll for the whole sheet (the places
+   scroll with Starred, Agents and Projects; the head, the "Showing only" line and the foot stay); names in full on up
+   to two lines; each heading sticks while its section passes under it, folds it and shows its count; the heading's
+   own buttons sit beside its fold area; Settings, Feedback and light/dark share one foot row. 44 px targets. */
+/* 350 px at 390 (a 40 px strip of the list stays, to tap closed); a phone of 360 px or less gets the whole width and
+   closes with the head's button. */
+.ib-sb-sheet { width: calc(min(100vw - 40px, 360px) + env(safe-area-inset-left)); }
+@media (max-width: 360px) {
+  .ib-sb-sheet { width: 100vw; }
+}
+.pn-inbox .ib-sb-sheet-in > .ib-side { overflow-x: hidden; overflow-y: hidden; border-right: 0; }
+.ib-sheet-head { display: flex; align-items: center; gap: 4px; min-height: 44px; margin: 0 -4px 6px 0; padding-left: 6px; }
+.ib-sheet-head .ib-brand { flex: 1 1 auto; min-width: 0; padding: 0; overflow: hidden; white-space: nowrap; }
+/* Zoomed to 200% the words give way to the close button: "Inbox" is cut, never drawn under it. */
+.ib-sheet-head .ib-brand > :is(b, span:not(.ib-tater)) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-sheet-head .ib-brand > span:not(.ib-tater) { flex-shrink: 1000; }
+.pn-inbox .ib-sheet-close { flex: none; margin-left: auto; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: var(--muted-foreground); }
+.pn-inbox .ib-sheet-close:active { background: var(--ib-side-hover); color: var(--foreground); }
+.ib-sheet-close .ib-ic { width: 20px; height: 20px; }
+/* "Showing only": what narrows the list, in words, with Clear. A fill, as the row it names has. */
+.ib-sheet-now { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 6px 4px 6px 12px; border-radius: 12px; background: var(--ib-cur-bg); box-shadow: var(--ib-cur-shadow); }
+.ib-sheet-now-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ib-sheet-now-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-sheet-now-n { display: flex; align-items: flex-start; gap: 7px; font-size: var(--ib-fs-15, 15px); font-weight: 600; line-height: 1.34; color: var(--ib-cur-fg); }
+.ib-sheet-now-n .ib-ic { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--primary); }
+.ib-sheet-now-n bdi { min-width: 0; overflow-wrap: anywhere; }
+.pn-inbox .ib-sheet-now-c { flex: none; min-width: 44px; min-height: 44px; padding: 0 12px; border-radius: 10px; font-size: var(--ib-fs-15, 15px); font-weight: 600; color: var(--primary); }
+.pn-inbox .ib-sheet-now-c:active { background: var(--ib-side-hover); }
+/* The one scroll: edge to edge, so a stuck heading's hairline and the scrollbar reach the sheet's sides. */
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll { flex: 1 1 auto; min-height: 0; margin: 0 -10px; padding: 0 10px 12px; overscroll-behavior: contain; mask-image: none; }
+.ib-sheet-sec { display: flex; flex-direction: column; flex: none; }
+/* A heading: sticks to the top of the scroll while its own section passes under it. Its fold area is everything left
+   of its own buttons (Add agent, Add machine, the projects' order), which are in the row, never over it. */
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex: none; margin: 8px -10px 0; padding: 0 6px 0 10px; background: var(--ib-ground); }
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow[data-stuck] { box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-sb-sheet-in .ib-secrow > .ib-side-sec { flex: 1 1 auto; min-width: 0; width: auto; height: auto; min-height: 44px; margin-top: 0; padding: 4px 8px 4px 9px; gap: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.pn-inbox .ib-sb-sheet-in .ib-side-sec-l { flex: 0 1 auto; }
+.ib-side-sec-c { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-sb-sheet-in .ib-side-sec-tail { margin-left: 0; gap: 8px; min-width: 0; }
+.pn-inbox .ib-sb-sheet-in .ib-side-sec .ib-n { font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--primary); white-space: nowrap; }
+.pn-inbox .ib-sb-sheet-in .ib-side-sec svg.ib-side-sec-chev { width: 14px; height: 14px; flex: none; }
+.pn-inbox .ib-sb-sheet-in .ib-secrow .ib-proj-sort { position: static; flex: none; width: 44px; height: 44px; opacity: 1; border-radius: 10px; }
+.pn-inbox .ib-sb-sheet-in .ib-secrow .ib-proj-sort .ib-ic { width: 20px; height: 20px; }
+.pn-inbox .ib-sb-sheet-in .ib-agentsec { display: flex; flex-direction: column; flex: none; }
+/* Rows: 44 px at least, and a name in full on up to two lines. */
+.pn-inbox .ib-sb-sheet-in .ib-side :is(.ib-proj, .ib-pin) { height: auto; min-height: 44px; padding-top: 12px; padding-bottom: 12px; }
+.pn-inbox .ib-sb-sheet-in .ib-side :is(.ib-proj, .ib-pin) .ib-name { flex: 1 1 auto; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow: hidden; overflow-wrap: anywhere; line-height: 1.34; text-align: start; }
+.pn-inbox .ib-sb-sheet-in :is(.ib-projrow, .ib-pinrow) :is(.ib-pmore, .ib-pplus) { top: 50%; transform: translateY(-50%); }
+.pn-inbox .ib-sb-sheet-in .ib-proj .ib-n { flex: none; }
+/* A starred row: the agent's mark at the first line, the name, then the project and the state in words. */
+.pn-inbox .ib-sb-sheet-in .ib-side .ib-pin { min-height: 52px; padding-top: 8px; padding-bottom: 8px; gap: 10px; align-items: flex-start; }
+.pn-inbox .ib-sb-sheet-in .ib-pin > .ib-mk { margin-top: 2px; }
+.ib-pin-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-pin-sub { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 18px; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
+.ib-pin-proj { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-pin-sub > :not(.ib-pin-proj) { flex: none; white-space: nowrap; margin-left: 0; }
+.ib-pin-st[data-k="new"] { color: var(--primary); font-weight: 550; }
+.ib-pin-sub .ib-spill { height: auto; min-height: 18px; }
+/* The foot: one row for Settings, Feedback and light/dark; the notices and Usage keep their rows above it. Under a
+   large text size the row wraps instead of cutting a word. */
+.pn-inbox .ib-sb-sheet-in .ib-side-foot { margin: 0 -10px -12px; padding: 6px 10px 10px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.pn-inbox .ib-sb-sheet-in .ib-setrow { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.pn-inbox .ib-sb-sheet-in .ib-setrow > .ib-nav { flex: 1 1 auto; width: auto; min-width: max-content; padding-right: 9px; }
+.pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg { position: static; transform: none; flex: none; width: 44px; height: 44px; margin-left: auto; border-radius: 10px; }
+.pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg::after { content: none; }
+.pn-inbox .ib-sb-sheet-in .ib-theme-tg .ib-ic { width: 20px; height: 20px; }

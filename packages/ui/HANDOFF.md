@@ -3002,3 +3002,17 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
+
+## `useSkillReferenceAutocomplete` `commands` / `onCommand` (unreleased; additive, opt-in, no core change)
+
+- **`commands?: readonly SkillCatalogEntry[]`** and **`onCommand?: (command, text) => void`**. A host's own rows in the `/` list that are not skills (the Inbox's `/side`). They are listed after the catalog's leading `plannotator` rows; a catalog skill with the same name wins; `$` never lists them; the list opens for them even with an empty catalog. Picking one inserts nothing: the typed trigger leaves the text through `setText`, focus is left to the host, and `onCommand` gets the row and the text that is left. A command is never painted (`referenceTokens`) or counted (`humanOnlyReferences`), and never reaches an export. Absent: unchanged.
+
+Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.
+
+## Host-served rows as a group in the skill list (unreleased; additive, opt-in, no core change)
+
+- **`hostRowsFirst?: boolean`** on `useSkillReferenceAutocomplete`: rows with root `plannotator` stay together at the top of the list whatever was typed; within each group the filter's order stands. Absent: the filter's order alone.
+- **`groupHostRows?: boolean`** on `SkillReferenceMenu`: those rows' icon is drawn in `text-primary`, they carry `data-skill-item-host="true"`, and one hairline (`data-skill-menu-divider`, `aria-hidden`, no role) sits between the last of them and the first other row, only when both kinds are listed. The options, their ids and their order do not change. The active row is now scrolled into view by its id (it was by child position), which is the same row with the prop absent. Absent: every row alike, as before.
+- **`rowIcon?: (item) => ReactNode`** on `SkillReferenceMenu`: a host's own glyph for a row in place of the cube (the Inbox's built-ins); null or undefined keeps the cube. Absent: the cube on every row.
+
+Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.

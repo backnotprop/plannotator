@@ -181,7 +181,7 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await expect(toggle(nav)).toHaveCount(1);
 });
 
-test('a phone: the sheet always shows it, a 44 px target beside the chevron, and a tap keeps the sheet open', async () => {
+test("a phone: the sheet always shows it, a 44 px target beside the heading's fold area, and a tap keeps the sheet open", async () => {
   const { page, url } = world;
   // A browser that has not chosen, as a phone decides on its own.
   await page.context().clearCookies({ name: SORT_COOKIE });
@@ -196,8 +196,9 @@ test('a phone: the sheet always shows it, a 44 px target beside the chevron, and
   await expect(toggle(sheet)).toHaveCSS('opacity', '1');
   const box = (await toggle(sheet).boundingBox())!;
   expect([box.width, box.height]).toEqual([44, 44]);
-  const chevron = (await header(sheet).locator('.ib-side-sec-chev').boundingBox())!;
-  expect(box.x + box.width).toBeLessThanOrEqual(chevron.x);
+  // Beside the heading, never over it (approval "inbox-phone-sidebar-sheet"): a tap on the heading only folds the section.
+  const fold = (await header(sheet).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(fold.x + fold.width);
   await away();
   await shot(page, 'phone-1-default');
 
