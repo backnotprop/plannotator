@@ -9,9 +9,11 @@
  *    never finds open, and a phone has no right-click, so a phone neither shows nor claims it.
  *  - At the reveals' calm moment (reveal.ts `useRevealMoment`, the star ask's): a thread read and left, or the page
  *    idle; 60 s into the page; the list loaded and not the first-run screen; nothing typed or open, no toast.
- *  - Never with another one-time dialog, tip or the tour on this load. It lets every other reveal go first: it waits
- *    `yieldMs` at its moment and stands down, unclaimed, when one of them took it. Once it is up the others hold back
- *    for the rest of the load (`noteOneTimeDialogShown`).
+ *  - Never with another one-time dialog or tip, nor within the Inbox's 40-minute gap of one (settings report it due
+ *    only outside the gap, and its claim starts the gap: packages/server/inbox.ts `tipFree`); never on a load with
+ *    the tour or an update. It lets every other reveal go first: it waits `yieldMs` at its moment and stands down,
+ *    unclaimed, when one of them took it. Once it is up the others hold back for the gap (`noteOneTimeDialogShown`,
+ *    `REVEAL_TIMES.otherDialogMs`), not for the rest of the load: a tab left open still gets the next dialog after it.
  *  - It leaves on Got it, Escape (only the tip closes), a right-click on the sidebar (its menu is what the tip is
  *    about), the Customize panel opening, or the sidebar going away (closed, another page, something over it). No timer.
  *  - Focus never moves to it; the window's polite region says it once. No new keyboard shortcuts, no ring on the sidebar.
@@ -146,7 +148,7 @@ export function useSidebarTip(input: SidebarTipInput) {
         if (waited >= REVEAL_TIMES.momentMs) return false;
         await sleep(REVEAL_TIMES.recheckMs);
       }
-      // From here the other reveals hold back for the rest of this load: nothing opens over the tip.
+      // From here the other reveals hold back for the gap: nothing opens over the tip, and the Inbox refuses them too.
       noteOneTimeDialogShown();
       key.current ??= newUuid();
       return (await claimRevealOnce('sidebar_tip', key.current)).show;

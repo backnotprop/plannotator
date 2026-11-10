@@ -270,7 +270,9 @@ describe('the choice', () => {
     stored.set(STARRED_ABOVE_COOKIE, '1');
     const { el } = draw({ start: [] });
     expect(el.querySelector('[data-starred-pills]')).toBeNull();
-    expect(el.querySelector('.ib-lhead')!.nextElementSibling?.classList.contains('ib-lbody')).toBe(true);
+    // The list follows the header; only the list's own "N new" pill holder (ListNewPill.tsx), which takes no room, is between.
+    expect([...el.querySelectorAll('.ib-lhead ~ :not(.ib-lnew)')][0]?.classList.contains('ib-lbody')).toBe(true);
+    expect(el.querySelector<HTMLElement>('.ib-lnew [data-list-new-pill]')!.hasAttribute('data-off')).toBe(true);
     expect(el.querySelector('[data-pinned-section]')).toBeNull();
     act(() => el.querySelector<HTMLButtonElement>('[data-tidy-menu]')!.click());
     await settle();

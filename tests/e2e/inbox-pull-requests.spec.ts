@@ -923,7 +923,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const box of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
       expect(box.right).toBeLessThanOrEqual(390);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
@@ -936,6 +936,16 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
 
 /** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
 const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice input, [data-compose-send]';
+
+/**
+ * Each target's right edge and its height to the touch: its own box, or its `::after` hit area where that is taller
+ * (New review's Start on a phone is 36 px to the eye and 44 px or more to the touch).
+ */
+const touchTargets = (els: Element[]) =>
+  els.map((el) => {
+    const box = el.getBoundingClientRect();
+    return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
+  });
 
 test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
@@ -2649,7 +2659,7 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const box = page.locator('[data-review-box]');
     await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const target of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const target of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
       expect(target.right).toBeLessThanOrEqual(390);
       expect(target.height).toBeGreaterThanOrEqual(44);
     }
@@ -3505,7 +3515,7 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await shot(page, 'l-box-link');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'l-box-link-phone');
-  // No labels: the toggle takes its row, slim, as tall as the row below, with room for a third choice at 320 too.
+  // No labels: the toggle takes its row, slim, as tall as the box's other rows, with room for a third choice at 320 too.
   await box.locator('[data-review-choices="kind"]').evaluate((group) => {
     const third = group.lastElementChild!.cloneNode(true) as HTMLElement;
     third.lastChild!.textContent = 'Walkthrough';
@@ -3520,10 +3530,13 @@ test('New review, a pull request link: what was found and how it was read, a rep
       const row = group.parentElement!;
       const toggle = group.getBoundingClientRect();
       const rect = row.getBoundingClientRect();
-      return { height: rect.height, inside: toggle.right <= rect.right, toRow: row.parentElement!.querySelector('.ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
+      // A phone draws no To line (To is the pill in the foot's row): the rows to be as tall as are the box's other rows.
+      const others = [...row.parentElement!.querySelectorAll('.ib-cp-rvrow')].filter((other) => other !== row).map((other) => other.getBoundingClientRect().height);
+      return { height: rect.height, inside: toggle.right <= rect.right, otherRow: Math.min(...others), toLines: row.parentElement!.querySelectorAll('.ib-cp-to:not(.ib-cp-rvrow)').length };
     });
     expect(fit.inside).toBe(true);
-    expect(fit.height).toBeLessThanOrEqual(fit.toRow + 1);
+    expect(fit.toLines).toBe(0);
+    expect(fit.height).toBeLessThanOrEqual(fit.otherRow + 1);
   }
   await box.locator('[data-try-third]').evaluate((third) => third.remove());
   // One chosen, at each size.

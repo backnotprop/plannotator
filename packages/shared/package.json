@@ -161,6 +161,7 @@
     "./inbox/launch-tip": "./inbox/launch-tip.ts",
     "./inbox/sidebar-tip": "./inbox/sidebar-tip.ts",
     "./inbox/grill-me-tip": "./inbox/grill-me-tip.ts",
+    "./inbox/theme-chooser": "./inbox/theme-chooser.ts",
     "./inbox/card-refs": "./inbox/card-refs.ts",
     "./inbox/list": "./inbox/list.ts",
     "./inbox/tidy": "./inbox/tidy.ts",

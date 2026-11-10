@@ -42,10 +42,17 @@ interface RegisteredShell {
 
 type Subscriber = () => void;
 
-/** A file kept in place while the files around it settle: a jump's target (`jumpTo`) or what a fast scroll stopped on. */
+/**
+ * A file kept in place while the files around it settle: a jump's target (`jumpTo`) or what a fast scroll stopped on.
+ * After End it is the end of the scroll that is kept (`end`), not a file.
+ */
 interface Landing {
   element: HTMLElement;
   root: HTMLElement | null;
+  /** End's landing: the view stays at the end of the scroll while the files there draw and measure. */
+  end: boolean;
+  /** End's landing: the furthest the view scrolled at the last look. The view going up with that unchanged is the person's scroll. */
+  lastEnd: number;
   /** Where to keep it, on screen. A jump: null, its own place at the top of the view. */
   heldTop: number | null;
   lastScrollTop: number;
@@ -125,7 +132,9 @@ class GuideViewportManager {
   private lastMotion: 'rest' | 'moving' | 'passing' = 'rest';
   private fallingBehind = false;
   /** End or Home was pressed: the browser's animated scroll to the far end, if the key moves this view. */
-  private keyScroll: { moved: boolean; frames: number } | null = null;
+  private keyScroll: { moved: boolean; frames: number; end: boolean } | null = null;
+  /** End moved this view: where it comes to rest is held at the end of the scroll (`holdEnd`). */
+  private endArriving = false;
   private landing: Landing | null = null;
 
   constructor(eager = false) {
@@ -283,6 +292,7 @@ class GuideViewportManager {
     const element = this.entries.get(id)?.element;
     if (!element) return;
     this.endLanding();
+    this.endArriving = false;
     const root = this.scrollRoot ?? (this.host ? findScrollRoot(this.host) : null);
     const view = root?.getBoundingClientRect() ?? new DOMRectReadOnly(0, 0, window.innerWidth, window.innerHeight);
     const smooth = !options.instant && Math.abs(element.getBoundingClientRect().top - view.top) <= SMOOTH_JUMP_VIEWS * view.height;
@@ -292,7 +302,7 @@ class GuideViewportManager {
       const onScreen = [...this.entries].filter(([, entry]) => isOnScreen(entry.element.getBoundingClientRect(), view));
       this.setMounted(new Set([...this.mounted, ...onScreen.map(([entryId]) => entryId)]));
     }
-    this.startLanding({ element, root, heldTop: null, smooth });
+    this.startLanding({ element, root, heldTop: null, smooth, end: false });
   };
 
   /** A fast scroll just stopped: the file at the top of the view stays put while the files above it draw and measure. */
@@ -308,11 +318,31 @@ class GuideViewportManager {
         element = entry.element;
       }
     }
-    if (element) this.startLanding({ element, root: this.scrollRoot, heldTop: top, smooth: false });
+    if (element) this.startLanding({ element, root: this.scrollRoot, heldTop: top, smooth: false, end: false });
   }
 
-  private startLanding(start: Pick<Landing, 'element' | 'root' | 'heldTop' | 'smooth'>): void {
-    this.landing = { ...start, lastTop: Number.NaN, lastScrollTop: start.root ? start.root.scrollTop : window.scrollY, stillFrames: 0, startedAt: performance.now(), raf: 0 };
+  /**
+   * End just brought the view to rest. The browser aimed at the end as it was when the key went down, and the files
+   * there then draw at their measured heights, which moves the end. The view stays at it until they settle, unless
+   * the person scrolls first. Not when the view rests more than a view from the end: the key did something else.
+   */
+  private holdEnd(): boolean {
+    const host = this.host;
+    if (!host) return false;
+    const root = this.scrollRoot;
+    if (this.readScrollEnd(root) - this.readScrollTop() >= (root ? root.clientHeight : window.innerHeight)) return false;
+    this.endLanding();
+    this.startLanding({ element: host, root, heldTop: null, smooth: false, end: true });
+    return true;
+  }
+
+  /** The furthest the view scrolls. */
+  private readScrollEnd(root: HTMLElement | null): number {
+    return root ? root.scrollHeight - root.clientHeight : document.documentElement.scrollHeight - window.innerHeight;
+  }
+
+  private startLanding(start: Pick<Landing, 'element' | 'root' | 'heldTop' | 'smooth' | 'end'>): void {
+    this.landing = { ...start, lastTop: Number.NaN, lastScrollTop: start.root ? start.root.scrollTop : window.scrollY, lastEnd: Number.NaN, stillFrames: 0, startedAt: performance.now(), raf: 0 };
     for (const type of TAKE_OVER_EVENTS) window.addEventListener(type, this.endLanding, { capture: true, passive: true });
     this.landing.raf = requestAnimationFrame(this.holdLanding);
   }
@@ -322,6 +352,29 @@ class GuideViewportManager {
     if (!landing) return;
     if (!landing.element.isConnected || performance.now() - landing.startedAt > LANDING_MAX_MS) {
       this.endLanding();
+      return;
+    }
+    if (landing.end) {
+      const scrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
+      const end = this.readScrollEnd(landing.root);
+      // The view went up and the scroll is as tall as it was: the person's own scroll (a scrollbar drag has no event).
+      if (end === landing.lastEnd && scrollTop <= landing.lastScrollTop - 1) {
+        this.endLanding();
+        return;
+      }
+      const short = end - scrollTop >= 1;
+      if (short) {
+        if (landing.root) landing.root.scrollTop = end;
+        else window.scrollTo({ top: end, behavior: 'instant' });
+      }
+      landing.stillFrames = short || end !== landing.lastEnd ? 0 : landing.stillFrames + 1;
+      landing.lastEnd = end;
+      landing.lastScrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
+      if (landing.stillFrames >= LANDED_FRAMES && this.reconcileRaf == null) {
+        this.endLanding();
+        return;
+      }
+      landing.raf = requestAnimationFrame(this.holdLanding);
       return;
     }
     const top = landing.element.getBoundingClientRect().top;
@@ -375,8 +428,9 @@ class GuideViewportManager {
   };
 
   private handleKey = (event: KeyboardEvent): void => {
+    this.endArriving = false;
     if (event.key !== 'End' && event.key !== 'Home') return;
-    this.keyScroll = { moved: false, frames: 0 };
+    this.keyScroll = { moved: false, frames: 0, end: event.key === 'End' };
     this.scheduleReconcile();
   };
 
@@ -400,7 +454,10 @@ class GuideViewportManager {
       this.scheduleReconcile();
       return;
     }
-    if (arrived) this.holdInPlace();
+    if (motion === 'rest' && this.endArriving) {
+      this.endArriving = false;
+      if (!this.holdEnd() && arrived) this.holdInPlace();
+    } else if (arrived) this.holdInPlace();
 
     // With no IntersectionObserver (older embedded browsers) this reads the window itself on each scroll.
     const measuredRoot = typeof IntersectionObserver === 'undefined' ? this.getRootRect() : null;
@@ -441,7 +498,10 @@ class GuideViewportManager {
     }
     if (this.keyScroll) {
       if (moved >= 1) this.keyScroll.moved = true;
-      else if (this.keyScroll.moved || ++this.keyScroll.frames > KEY_SCROLL_START_FRAMES) this.keyScroll = null;
+      else if (this.keyScroll.moved || ++this.keyScroll.frames > KEY_SCROLL_START_FRAMES) {
+        this.endArriving = this.keyScroll.moved && this.keyScroll.end;
+        this.keyScroll = null;
+      }
       if (this.keyScroll) {
         this.passedLastFrame = true;
         return 'passing';
@@ -534,6 +594,7 @@ class GuideViewportManager {
     scrollTarget.removeEventListener('scroll', this.handleOuterScroll);
     window.removeEventListener('keydown', this.handleKey);
     this.keyScroll = null;
+    this.endArriving = false;
     this.scrollRoot = null;
     if (this.reconcileRaf != null) cancelAnimationFrame(this.reconcileRaf);
     this.reconcileRaf = null;
