@@ -3,11 +3,11 @@
  *
  * What regresses: the dialog due for someone on another theme (the owner: "they don't need to choose, we don't need to
  * show them this"), or for someone who went back to the default theme after picking one; someone who only flipped
- * light and dark losing it; the dialog not at the front of the line for a person who qualifies; the dialog on day 0,
- * ahead of Code review's "immediately" offer; a Not now accepted for it.
+ * light and dark losing it; the dialog offered before the tab icon dialog, or sooner than the line's gap after it (the
+ * owner, 2026-11-10; the gap is the line's own, 40 minutes); the dialog behind an offer, or held back on day one; a Not now accepted for it.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, revealNext, revealNotNowAllowed, revealQualifies, type RevealId, type RevealState } from "./reveals";
+import { INBOX_REVEALS, REVEAL_SPACING_MS, revealAgainAt, revealMayClaim, revealNext, revealNotNowAllowed, revealQualifies, type RevealId, type RevealState } from "./reveals";
 import { themeChooserLook, themeChooserOnDefault, themeChooserOpen } from "./theme-chooser";
 
 const AT = "2026-11-10T09:00:00.000Z";
@@ -47,29 +47,42 @@ describe("who it is for", () => {
 });
 
 describe("its place in the line", () => {
+  const MINUTE = 60_000;
   const everything = Object.fromEntries(INBOX_REVEALS.map((entry) => [entry.id, true])) as Record<RevealId, boolean>;
+  const only = (...ids: RevealId[]) => Object.fromEntries(ids.map((id) => [id, true])) as Partial<Record<RevealId, boolean>>;
   const state = (over: Partial<RevealState> = {}): RevealState => ({ release: true, firstUseAt: "2026-10-01T09:00:00.000", threads: 40, heavy: true, open: everything, ...over });
   const now = new Date("2026-11-10T15:00:00.000");
+  const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
 
-  test("at the front: next for someone who qualifies, with every other dialog of the line open too", () => {
-    expect(INBOX_REVEALS[0]!.id).toBe("theme_chooser");
-    expect(revealNext(state(), now)).toBe("theme_chooser");
+  test("right after the tab icon dialog (the owner: \"The favicon one should come first\"), ahead of every offer behind it", () => {
+    const ids = INBOX_REVEALS.map((entry) => entry.id);
+    expect(ids.indexOf("theme_chooser")).toBe(ids.indexOf("tab_icon") + 1);
+    expect(revealNext(state({ open: only("tab_icon", "theme_chooser", "snooze", "board") }), now)).toBe("tab_icon");
+    expect(revealMayClaim("theme_chooser", state({ open: only("tab_icon", "theme_chooser") }), now)).toBe(false);
+    // The tab icon dialog done (or never theirs): it is next, ahead of Snooze, the Board and the rest.
+    expect(revealNext(state({ open: only("theme_chooser", "snooze", "bro", "board", "steps", "list_view") }), now)).toBe("theme_chooser");
     // Not for them (another theme): the line is as it was.
-    expect(revealNext(state({ open: { ...everything, theme_chooser: false } }), now)).toBe("code_review");
+    expect(revealNext(state({ open: only("snooze", "board") }), now)).toBe("snooze");
   });
 
-  test("never on the first day of use: day 0 stays setup's, and Code review's offer keeps its place", () => {
-    const sameDay = state({ firstUseAt: "2026-11-10T09:00:00.000" });
-    expect(revealQualifies(INBOX_REVEALS[0]!, sameDay, now)).toBe(false);
-    expect(revealNext(sameDay, now)).toBe("code_review");
-    // First use not known yet (a fresh install, nothing in the store).
-    expect(revealNext(state({ firstUseAt: null }), now)).toBe("code_review");
-    // The next local day: it is at the front.
-    expect(revealNext(sameDay, new Date("2026-11-11T08:00:00.000"))).toBe("theme_chooser");
+  test("the line's own gap after the tab icon dialog showed, not before (the owner: \"like thirty minutes after\"; no number of its own)", () => {
+    const after = (ms: number) => revealNext(state({ open: only("theme_chooser"), lastShownAt: ago(ms), dayShownAt: ago(ms) }), now);
+    expect(after(REVEAL_SPACING_MS - 1)).toBeNull();
+    expect(after(REVEAL_SPACING_MS)).toBe("theme_chooser");
+    // The same gap from any other dialog or tip: the agent note, the star ask, the Sidebar tip.
+    expect(revealNext(state({ open: only("theme_chooser"), dayShownAt: ago(10 * MINUTE) }), now)).toBeNull();
+    expect(revealNext(state({ open: only("theme_chooser"), asideShownAt: ago(10 * MINUTE) }), now)).toBeNull();
+    expect(revealNext(state({ open: only("theme_chooser"), tipShownAt: ago(10 * MINUTE) }), now)).toBeNull();
+    // And the page is told when to ask again: the end of that gap.
+    expect(revealAgainAt(state({ open: only("theme_chooser"), lastShownAt: ago(10 * MINUTE) }), now)).toBe(now.getTime() + REVEAL_SPACING_MS - 10 * MINUTE);
   });
 
-  test("no thread minimum, and no Not now (every way out is final)", () => {
-    expect(revealNext(state({ threads: 0 }), now)).toBe("theme_chooser");
+  test("from day one: no tenure, no thread minimum, first use not known yet; and no Not now (every way out is final)", () => {
+    const entry = INBOX_REVEALS.find((e) => e.id === "theme_chooser")!;
+    expect(revealQualifies(entry, state({ firstUseAt: null, threads: 0, open: only("theme_chooser") }), now)).toBe(true);
+    expect(revealNext(state({ firstUseAt: now.toISOString(), threads: 0, open: only("theme_chooser") }), now)).toBe("theme_chooser");
+    // Code review's day-0 offer keeps its place ahead of it.
+    expect(revealNext(state({ firstUseAt: null, threads: 0, open: only("code_review", "theme_chooser") }), now)).toBe("code_review");
     expect(revealNotNowAllowed("theme_chooser")).toBe(false);
   });
 });

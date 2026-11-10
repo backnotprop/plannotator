@@ -10,7 +10,8 @@
  * still on the default theme.
  *
  * The record, decided at the first release start of the version that ships the dialog, and kept true after it:
- *  - `dueAt`: on the default theme then. The dialog is in the line for them (fresh installs too, from their second day).
+ *  - `dueAt`: on the default theme then. The dialog is in the line for them (fresh installs too, from day one), right
+ *    after the tab icon dialog and never while that one is still due.
  *  - `notNeededAt`: on another theme, then or at any later look (a start, a theme saved from the Inbox, a claim). Final:
  *    going back to the default theme later never brings the dialog up.
  */

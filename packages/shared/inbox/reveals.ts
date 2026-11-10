@@ -45,7 +45,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "theme_chooser" | "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -102,12 +102,6 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; the owner: "This dialogue should show a little bit
-  // earlier and only for users who don't already have a custom theme"): at the front of the line for someone still on
-  // the default theme (config.json `inboxThemeChooser`, theme-chooser.ts; anyone on another theme is marked as not
-  // needing it). From the second day of use (`laterDay`), so day 0 stays setup's and Code review's offer keeps its
-  // "immediately". No thread minimum; it never retires (an update-day dialog) and has no Not now.
-  { id: "theme_chooser", kind: "update", tenureMs: 0, minThreads: 0, laterDay: true, enabled: true },
   CODE_REVIEW_OFFER,
   // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), the line's gap apart
   // (40 minutes): the sound on the update day, then list options and voice, each at its moment.
@@ -119,6 +113,14 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // "Which favicon do you prefer?" (the owner, 2026-11-09: "Ship it as shown"): due for someone who used an earlier
   // Inbox and never chose a favicon (config.json `favicon` unset), decided at the release start; fresh installs never.
   { id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // The "themes" dialog (approval "inbox-theme-chooser", 2026-11-10; who: config.json `inboxThemeChooser`,
+  // theme-chooser.ts: only someone still on the default theme). Its place is the owner's (2026-11-10): "it can't compete
+  // with the favicon one… The favicon one should come first. Themes must come only after, like thirty minutes after. If
+  // favicon's already done, themes can show up fifteen seconds after opening." So: right after the tab icon dialog, never
+  // offered while that one is still due (the server keeps it closed meanwhile, so patience cannot let it pass), the
+  // line's own gap after it (`REVEAL_SPACING_MS`, unchanged: no number of its own), and from day one (no tenure, no
+  // thread minimum). It never retires and has no Not now. No other entry's rules moved.
+  { id: "theme_chooser", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use (`revealHeavyUse`:

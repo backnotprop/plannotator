@@ -5,7 +5,9 @@
  * `POST /api/inbox/settings`), as App wires them.
  *
  * What regresses: the dialog opening without the line (`reveal.next` not `theme_chooser`), for someone on another
- * theme, before the page is a minute old, or going around the line's claim; its pictures loading before it is due;
+ * theme, before the page is 15 s old, or going around the line's claim; the dialog waiting for a thread read and left,
+ * for the line's 60 s or for a page left still (what kept it from the owner, 2026-11-10: a pointer that never rests
+ * must not postpone it); its pictures loading before it is due;
  * a pick not applying at once, or not going to config.json through Settings' own write; a pick without a shuffle
  * fixing the mode, or one after a shuffle still following the system; "Keep Original" writing anything; the close
  * button, Escape or "Open Settings" saving anything or sending a Not now; the dialog showing again on the same load;
@@ -82,7 +84,9 @@ beforeEach(() => {
   // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies.
   (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
   savedTimes = { ...reveal.REVEAL_TIMES };
-  Object.assign(reveal.REVEAL_TIMES, TIMES);
+  // The dialog's own page age is `soonPageAgeMs` (15 s in the product, shrunk here); the line's 60 s is set out of reach,
+  // so a dialog that still waited for it would never open in these tests.
+  Object.assign(reveal.REVEAL_TIMES, TIMES, { soonPageAgeMs: TIMES.pageAgeMs, pageAgeMs: 600_000 });
   savedFetch = globalThis.fetch;
   savedMatchMedia = window.matchMedia;
   savedAnimate = (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
@@ -176,11 +180,10 @@ function Harness({ state }: { state: State }) {
     firstRun: false,
     thread: state.thread,
     rows: [],
-    clear: state.thread === null,
+    clear: true,
     place: state.thread ?? '',
     heldBack: () => false,
     toast: false,
-    idle: false,
     light: theme.lightTheme,
     dark: theme.darkTheme,
   });
@@ -231,27 +234,34 @@ function mount(state: State, pair: { mode: 'light' | 'dark' | 'system'; light: s
   };
 }
 
-/** The page a minute old (shrunk), then back on the list from the thread: the dialog opens. */
+/** The page 15 s old (shrunk), a thread open: the dialog opens by itself. */
 async function opened(pair?: Parameters<typeof mount>[1]) {
   const set = mount(READING, pair);
-  await wait(TIMES.pageAgeMs + 20);
-  set({ thread: null });
   await until(() => dialog() !== null);
   expect(dialog() !== null).toBe(true);
   return set;
 }
 
 describe.skipIf(!hasDom)('the "themes" dialog', () => {
-  test('at the calm moment only, through the line: one theme_chooser claim, and no picture asked for before it', async () => {
-    const set = mount(READING);
-    await wait(TIMES.pageAgeMs + 20);
-    // Reading a thread, a minute in: nothing yet, and nothing of the pictures.
-    expect(dialog() === null).toBe(true);
-    expect(claims()).toEqual([]);
-    expect(artLoads).toEqual([]);
-    expect(document.querySelector('img')).toBeNull();
-    set({ thread: null });
-    await until(() => dialog() !== null);
+  test('15 s into the page with the pointer never at rest and a thread open: it opens, through the line, and no picture is asked for before', async () => {
+    mount(READING);
+    // A person looking around: the pointer moves and the page scrolls, the whole time. No thread is left.
+    const moving = setInterval(() => {
+      window.dispatchEvent(new Event('pointermove'));
+      window.dispatchEvent(new Event('scroll'));
+    }, 15);
+    try {
+      await wait(TIMES.pageAgeMs / 2);
+      // Too young: nothing yet, and nothing of the pictures.
+      expect(dialog() === null).toBe(true);
+      expect(claims()).toEqual([]);
+      expect(artLoads).toEqual([]);
+      expect(document.querySelector('img')).toBeNull();
+      await until(() => dialog() !== null);
+      expect(dialog() !== null).toBe(true);
+    } finally {
+      clearInterval(moving);
+    }
     expect(claims().map((c) => c.body)).toEqual([{ id: 'theme_chooser', key: expect.any(String) }]);
     // The fan's pictures, once, for this layout.
     expect(artLoads).toEqual([false]);

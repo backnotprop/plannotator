@@ -2538,8 +2538,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The "themes" dialog (approval "inbox-theme-chooser"; `theme_chooser` in shared/inbox/reveals.ts, who it is for in
    * shared/inbox/theme-chooser.ts): decided at the first release start of the version that ships it, as the tab icon's
-   * is. Someone on the default theme gets it due (config.json `inboxThemeChooser.dueAt`), a fresh install too (the line
-   * holds it until their second day). Anyone on another theme is marked as not needing it (`notNeededAt`), then or at
+   * is. Someone on the default theme gets it due (config.json `inboxThemeChooser.dueAt`), a fresh install too, from its
+   * first day. Anyone on another theme is marked as not needing it (`notNeededAt`), then or at
    * any later look (each start, a theme saved from the Inbox, a claim), and going back to the default theme never
    * brings it up. A dev build decides nothing.
    */
@@ -2917,8 +2917,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
-    // The "themes" dialog: due since the release start and still on the default theme, read live.
-    theme_chooser: themeChooserUndecided,
+    // The "themes" dialog: due since the release start and still on the default theme, read live. Never while the tab
+    // icon dialog is still due (the owner, 2026-11-10: "it can't compete with the favicon one… The favicon one should
+    // come first"): closed until that one is shown or a favicon is chosen, so patience cannot let it pass.
+    theme_chooser: () => themeChooserUndecided() && !(tabIconUndecided() && !lineOfferSaved("tab_icon")?.shownAt),
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];

@@ -1,11 +1,13 @@
 /**
  * The one-time "themes" dialog on the page (approval "inbox-theme-chooser", 2026-11-10; the approved mock and its
  * build notes are in `.product/approved/inbox-theme-chooser/`). A dialog of the line (`theme_chooser`,
- * packages/shared/inbox/reveals.ts), at its front: the Inbox makes it due for someone still on the default theme and
- * names it in `reveal.next`. The page arms it from there (`useLineReveal`) at the line's calm moment, as the tab icon
- * dialog: back on the list from a thread, or the page idle (idleClock.ts), 60 s into the page, the list loaded, nothing
- * typed or open, no question waiting in the open thread, no toast. A palette picked on this page before then drops it
- * (`holds`); one picked elsewhere makes the Inbox refuse the claim.
+ * packages/shared/inbox/reveals.ts), right after the tab icon dialog: the Inbox makes it due for someone still on the
+ * default theme and names it in `reveal.next` once the tab icon dialog is no longer due and the line's gap has passed.
+ * The page arms it from there (`useLineReveal`) and opens it soon after the page does, as the tab icon dialog (the
+ * owner, 2026-11-10: "themes can show up fifteen seconds after opening"; reveal.ts `soonMayClaim`, `atOnce`): the page
+ * 15 s old and visible, the list loaded, with no thread to read and leave and no stillness to wait for. It still never
+ * opens over something typed or open, a question waiting in the open thread, or a toast: it waits for that to end. A
+ * palette picked on this page before then drops it (`holds`); one picked elsewhere makes the Inbox refuse the claim.
  *
  * Every way out is final (the claim stamped it): a card's button saves the theme and the mode as Settings does
  * (theme.ts), "Open Settings" goes to Settings' Colors row, the close button, Escape and a click outside change
@@ -17,7 +19,7 @@
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { useRef } from 'react';
 import type { Mode } from '@plannotator/ui/theme-modes';
-import { REVEAL_TIMES, useLineReveal } from './reveal';
+import { soonMayClaim, useLineReveal } from './reveal';
 
 /** The default theme: both halves hold it until the person picks another (packages/shared/inbox/theme-chooser.ts). */
 export const THEME_CHOOSER_DEFAULT = 'plannotator';
@@ -32,21 +34,19 @@ export interface ThemeChooserInput {
   firstRun: boolean;
   thread: string | null;
   rows: readonly InboxListRow[];
-  /** The Inbox page with nothing over it, on the list itself, or over a thread while the page is idle. */
+  /** The Inbox page with nothing over it: the list, with or without a thread open. */
   clear: boolean;
   place: string;
   heldBack: () => boolean;
   toast: boolean;
-  /** The page is idle (idleClock.ts). */
-  idle: boolean;
   /** The palettes on this page now (ThemeProvider): the dialog is only for the default theme on both halves. */
   light: string;
   dark: string;
 }
 
-/** Its need at a settled moment: the list loaded, not the first-run screen, the page 60 s old. */
+/** Its need at a settled moment: the list loaded, not the first-run screen, the page 15 s old and visible. */
 export function themeChooserMayClaim(gate: Pick<ThemeChooserInput, 'listLoaded' | 'firstRun'>, pageAge: number): boolean {
-  return gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.pageAgeMs;
+  return soonMayClaim(gate, pageAge);
 }
 
 /** Both halves still hold the default theme. */
@@ -67,9 +67,9 @@ export function useThemeChooser(input: ThemeChooserInput) {
     place: input.place,
     heldBack: input.heldBack,
     toast: input.toast,
-    // Back on the list from a thread (not on to another one).
-    leaveCounts: (_visit, _now, _row, next) => next === null,
-    idle: input.idle,
+    // The moment is now (`atOnce`), never a leave.
+    leaveCounts: () => false,
+    atOnce: true,
     mayClaim: (pageAge) => themeChooserMayClaim(latest.current, pageAge),
     // A palette picked on this page meanwhile (Settings' Colors row): nothing left to offer.
     holds: () => themeChooserOnDefault(latest.current),
