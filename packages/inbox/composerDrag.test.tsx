@@ -6,7 +6,9 @@
  * again; a press on a tab still picks the tab and never moves the card; where it was put holds through a tab switch,
  * typing, the tools gathered and brought back, and the card folded to its pill and opened again; another file puts it
  * home; a double click on the tray puts it home; a press on the tray leaves focus where it was; a phone's card does
- * not move.
+ * not move. Resizing: a card at home has no corners, a moved one has four; a corner moves and the opposite one
+ * stays; never under the card's own size, never past the view's margin; the size holds through a tab switch and the
+ * tools gathered; another file and the double click give the card's own size back; a smaller window limits it.
  *
  * happy-dom lays nothing out, so the card's and its view's boxes are given here (`layout`).
  *
@@ -15,7 +17,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { clampOffset, DRAG_MARGIN } from './composerDrag';
+import { clampOffset, DRAG_MARGIN, resizeBox } from './composerDrag';
 import type { FullScreenComposerValue } from './components/FullScreenComposer';
 
 const hasDom = typeof document !== 'undefined';
@@ -48,11 +50,19 @@ function fakeLayout(): void {
   const isCard = (el: HTMLElement) => el.hasAttribute('data-fcomp');
   const proto = HTMLElement.prototype;
   define(proto, 'offsetParent', function () { return isCard(this) ? host : null; });
-  define(proto, 'offsetWidth', function () { return isCard(this) ? Math.min(600, layout.width - 32) : 0; });
-  define(proto, 'offsetHeight', function () { return isCard(this) ? layout.card : 0; });
+  // The size the person gave the card wins over its own, as inbox.css draws it (`data-fcomp-sized`).
+  const given = (el: HTMLElement, name: string) => (el.hasAttribute('data-fcomp-sized') ? parseFloat(el.style.getPropertyValue(name)) : NaN);
+  const cardHeight = (el: HTMLElement) => given(el, '--ib-fcomp-rh') || layout.card;
+  define(proto, 'offsetWidth', function () { return isCard(this) ? given(this, '--ib-fcomp-rw') || Math.min(600, layout.width - 32) : 0; });
+  // The field takes what the tray and the row of buttons (114 px) leave.
+  define(proto, 'offsetHeight', function () {
+    if (isCard(this)) return cardHeight(this);
+    const within = this.tagName === 'TEXTAREA' ? this.closest<HTMLElement>('[data-fcomp]') : null;
+    return within ? cardHeight(within) - 114 : 0;
+  });
   // `left: 50%`: the card's layout box starts at the view's middle (its transform centres it).
   define(proto, 'offsetLeft', function () { return isCard(this) ? layout.width / 2 : 0; });
-  define(proto, 'offsetTop', function () { return isCard(this) ? layout.height - 20 - layout.card : 0; });
+  define(proto, 'offsetTop', function () { return isCard(this) ? layout.height - 20 - cardHeight(this) : 0; });
   define(proto, 'clientWidth', function () { return this === host ? layout.width : 0; });
   define(proto, 'clientHeight', function () { return this === host ? layout.height : 0; });
 }
@@ -101,7 +111,7 @@ function Harness({ first }: { first: Partial<FullScreenComposerValue> }) {
   setValue = (next) => setPatch((had) => ({ ...had, ...next }));
   const value = valueOf(patch, words);
   value.reply.onChange = setWords;
-  return <FullScreenComposer value={value} noun="page" comment={<textarea aria-label="Comment on this page" data-page-row="" />} />;
+  return <FullScreenComposer value={value} noun="page" comment={<textarea aria-label="Comment on this page" data-page-row="" style={{ minHeight: 36 }} />} />;
 }
 
 async function settle(): Promise<void> {
@@ -337,4 +347,141 @@ test.skipIf(!hasDom)('a phone’s card is docked: no handle, and a drag on its t
   expect(tray().hasAttribute('data-fcomp-drag')).toBe(false);
   dragBy(tray(), -100, -200);
   expect(at()).toEqual({ x: 0, y: 0 });
+});
+
+// ── Resizing by the corners ──────────────────────────────────────────────────────────────────────────────────────────
+
+test('a corner moves and the opposite one stays, never under the least size, never past the margin', () => {
+  const from = { left: 100, top: 200, right: 700, bottom: 320 };
+  const min = { w: 600, h: 120 };
+  const view = { width: 1200, height: 800 };
+  expect(resizeBox(from, 'se', 100, 80, min, view)).toEqual({ left: 100, top: 200, right: 800, bottom: 400 });
+  expect(resizeBox(from, 'nw', -60, -100, min, view)).toEqual({ left: 40, top: 100, right: 700, bottom: 320 });
+  // Smaller than the card is by itself: held at its least, the opposite corner still where it was.
+  expect(resizeBox(from, 'se', -300, -300, min, view)).toEqual(from);
+  expect(resizeBox(from, 'nw', 300, 300, min, view)).toEqual(from);
+  // Past the view: held a margin in.
+  expect(resizeBox(from, 'se', 5000, 5000, min, view)).toEqual({ left: 100, top: 200, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
+  expect(resizeBox(from, 'nw', -5000, -5000, min, view)).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 700, bottom: 320 });
+  // An odd width is made even on the moving edge, so the centre is on a whole pixel.
+  expect(resizeBox(from, 'ne', 51, 0, min, view).right).toBe(750);
+});
+
+const corners = () => [...host!.querySelectorAll<HTMLElement>('[data-fcomp-resize]')];
+const cornerAt = (which: string) => host!.querySelector<HTMLElement>(`[data-fcomp-resize="${which}"]`)!;
+/** The card's box in its view, as drawn: its layout box (centred on `left`, on its foot) moved by its transform. */
+const boxNow = () => {
+  const el = card();
+  const left = el.offsetLeft - el.offsetWidth / 2 + at().x;
+  const top = el.offsetTop + at().y;
+  return { left, top, right: left + el.offsetWidth, bottom: top + el.offsetHeight };
+};
+const sizeNow = () => ({ w: card().offsetWidth, h: card().offsetHeight });
+
+test.skipIf(!hasDom)('a card at home has no corners; a moved one has four, and they go when it is home again', async () => {
+  await draw();
+  expect(corners()).toHaveLength(0);
+  expect(card().hasAttribute('data-fcomp-sized')).toBe(false);
+  dragBy(tray(), 100, -300);
+  await settle();
+  expect(corners().map((el) => el.getAttribute('data-fcomp-resize')).sort()).toEqual(['ne', 'nw', 'se', 'sw']);
+  act(() => {
+    tray().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(corners()).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('a corner resizes the card and the opposite corner stays where it was', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  // 400..1000 across, 330..480 down.
+  expect(boxNow()).toEqual({ left: 400, top: 330, right: 1000, bottom: 480 });
+  dragBy(cornerAt('se'), 100, 120);
+  expect(sizeNow()).toEqual({ w: 700, h: 270 });
+  expect(boxNow()).toEqual({ left: 400, top: 330, right: 1100, bottom: 600 });
+  dragBy(cornerAt('nw'), -60, -100);
+  expect(boxNow()).toEqual({ left: 340, top: 230, right: 1100, bottom: 600 });
+  dragBy(cornerAt('ne'), -20, 40);
+  expect(boxNow()).toEqual({ left: 340, top: 270, right: 1080, bottom: 600 });
+  dragBy(cornerAt('sw'), 40, -30);
+  expect(boxNow()).toEqual({ left: 380, top: 270, right: 1080, bottom: 570 });
+  expect(card().hasAttribute('data-fcomp-resizing')).toBe(false);
+  expect(card().hasAttribute('data-fcomp-dragging')).toBe(false);
+});
+
+test.skipIf(!hasDom)('never smaller than the card is by itself, never past the view’s margin', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  dragBy(cornerAt('se'), -400, -400);
+  expect(sizeNow()).toEqual({ w: 600, h: 150 });
+  expect(boxNow()).toEqual({ left: 400, top: 330, right: 1000, bottom: 480 });
+  dragBy(cornerAt('se'), 5000, 5000);
+  expect(boxNow()).toEqual({ left: 400, top: 330, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
+  dragBy(cornerAt('nw'), -5000, -5000);
+  expect(boxNow()).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
+  // Back down from the largest: its own width again, not less.
+  dragBy(cornerAt('nw'), 5000, 5000);
+  expect(sizeNow()).toEqual({ w: 600, h: 150 });
+  // A smaller window limits the size as it limits the place.
+  dragBy(cornerAt('nw'), -5000, -5000);
+  layout.width = 900;
+  layout.height = 600;
+  act(() => {
+    window.dispatchEvent(new Event('resize'));
+  });
+  expect(sizeNow()).toEqual({ w: 900 - 2 * DRAG_MARGIN, h: 600 - 2 * DRAG_MARGIN });
+  expect(boxNow()).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 900 - DRAG_MARGIN, bottom: 600 - DRAG_MARGIN });
+});
+
+test.skipIf(!hasDom)('the size holds through a tab switch, typing and the tools gathered; the card can still be dragged', async () => {
+  await draw();
+  dragBy(tray(), 0, -400);
+  await settle();
+  dragBy(cornerAt('se'), 80, 100);
+  const size = { w: 680, h: 250 };
+  expect(sizeNow()).toEqual(size);
+  act(() => tab('reply').click());
+  await settle();
+  expect(sizeNow()).toEqual(size);
+  act(() => setValue({ tucked: true }));
+  await settle();
+  act(() => setValue({ tucked: false }));
+  await settle();
+  expect(sizeNow()).toEqual(size);
+  const before = boxNow();
+  dragBy(tray(), -50, 60);
+  expect(sizeNow()).toEqual(size);
+  expect(boxNow()).toEqual({ left: before.left - 50, top: before.top + 60, right: before.right - 50, bottom: before.bottom + 60 });
+});
+
+test.skipIf(!hasDom)('another file gives the card its own size and home back; so does a double click on the tray', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  dragBy(cornerAt('se'), 100, 120);
+  expect(card().hasAttribute('data-fcomp-sized')).toBe(true);
+  act(() => setValue({ fileKey: 'att_b:current' }));
+  await settle();
+  expect(card().hasAttribute('data-fcomp-sized')).toBe(false);
+  expect(sizeNow()).toEqual({ w: 600, h: 150 });
+  expect(at()).toEqual({ x: 0, y: 0 });
+  expect(corners()).toHaveLength(0);
+  dragBy(tray(), 100, -300);
+  await settle();
+  dragBy(cornerAt('nw'), -100, -120);
+  // A double click on a corner is the corner's, not the tray's under it.
+  act(() => {
+    cornerAt('nw').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+  });
+  expect(card().hasAttribute('data-fcomp-sized')).toBe(true);
+  act(() => {
+    tray().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(card().hasAttribute('data-fcomp-sized')).toBe(false);
+  expect(at()).toEqual({ x: 0, y: 0 });
+  expect(corners()).toHaveLength(0);
 });

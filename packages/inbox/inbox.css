@@ -7836,6 +7836,38 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp[data-fcomp-dragging] [data-fcomp-drag], .pn-inbox .ib-fcomp[data-fcomp-dragging] [data-fcomp-drag] * { cursor: grabbing; }
 .ib-fcomp[data-fcomp-homing] { transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .ib-fcomp[data-fcomp-homing] { transition: none; } }
+/* A size the person gave it (the corners, shown once the card is off its home): the card is a column, the field
+   takes what the height leaves and scrolls inside, the row of buttons stays at the foot. */
+.ib-fcomp[data-fcomp-sized]:not(.ib-phone) { display: flex; flex-direction: column; width: var(--ib-fcomp-rw); height: var(--ib-fcomp-rh); }
+.ib-fcomp[data-fcomp-sized] > * { flex: none; }
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; min-height: 0; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rmirror { max-height: none; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-ccard > .ib-ta { align-self: stretch; height: 100%; max-height: none; field-sizing: fixed; }
+/* The corners: 18 px to press (28 for a finger), 4 px out past the card's edge. The mark is a 2 px arc 3 px inside the
+   card's own corner, in the muted text colour. */
+.ib-fcomp-corner { position: absolute; z-index: 3; width: 18px; height: 18px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp-corner[data-fcomp-resize^="n"] { top: -4px; }
+.ib-fcomp-corner[data-fcomp-resize^="s"] { bottom: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="w"] { left: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="e"] { right: -4px; }
+.ib-fcomp-corner:is([data-fcomp-resize="nw"], [data-fcomp-resize="se"]) { cursor: nwse-resize; }
+.ib-fcomp-corner:is([data-fcomp-resize="ne"], [data-fcomp-resize="sw"]) { cursor: nesw-resize; }
+.ib-fcomp-corner::after { content: ''; position: absolute; box-sizing: border-box; width: 10px; height: 10px; border: 0 solid color-mix(in oklch, var(--muted-foreground) 85%, transparent); opacity: 0; }
+.ib-fcomp-corner[data-fcomp-resize="nw"]::after { left: 7px; top: 7px; border-width: 2px 0 0 2px; border-top-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="ne"]::after { right: 7px; top: 7px; border-width: 2px 2px 0 0; border-top-right-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="sw"]::after { left: 7px; bottom: 7px; border-width: 0 0 2px 2px; border-bottom-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="se"]::after { right: 7px; bottom: 7px; border-width: 0 2px 2px 0; border-bottom-right-radius: 11px; }
+.ib-fcomp-corner:hover::after,
+.ib-fcomp[data-fcomp-resizing="nw"] .ib-fcomp-corner[data-fcomp-resize="nw"]::after,
+.ib-fcomp[data-fcomp-resizing="ne"] .ib-fcomp-corner[data-fcomp-resize="ne"]::after,
+.ib-fcomp[data-fcomp-resizing="sw"] .ib-fcomp-corner[data-fcomp-resize="sw"]::after,
+.ib-fcomp[data-fcomp-resizing="se"] .ib-fcomp-corner[data-fcomp-resize="se"]::after { opacity: 1; }
+/* Treatment b (proposal): the bottom right mark stays, quieter, once the card is off its home. */
+.ib-fcomp[data-fcomp-corners="b"] .ib-fcomp-corner[data-fcomp-resize="se"]:not(:hover)::after { opacity: 0.55; }
+@media (pointer: coarse) { .ib-fcomp-corner { width: 28px; height: 28px; } }
 
 /* The tray and its tabs (one radio group), the chevron at its end. */
 .ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }

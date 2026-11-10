@@ -50,7 +50,7 @@ import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } fr
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
-import { useComposerDrag } from '../composerDrag';
+import { CORNERS, useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
 import { markFullScreenComposer } from '../pageMarks';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
@@ -267,6 +267,12 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
   );
 }
 
+/**
+ * PROPOSAL, to be removed once the owner picks: how the resize corners show. `a`: the cursor, and a faint tick on the
+ * corner under the pointer. `b`: as `a`, plus a tick that stays at the bottom right. `?fcorners=b` in the address.
+ */
+const cornerTreatment = typeof location !== 'undefined' && new URLSearchParams(location.search).get('fcorners') === 'b' ? 'b' : 'a';
+
 export function FullScreenComposer({
   value,
   noun,
@@ -291,7 +297,7 @@ export function FullScreenComposer({
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
   // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
-  const { attach: attachDrag, handle: dragHandle } = useComposerDrag(!phone, value.fileKey);
+  const { attach: attachDrag, handle: dragHandle, resizable, corner } = useComposerDrag(!phone, value.fileKey);
   // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
@@ -581,6 +587,7 @@ export function FullScreenComposer({
       inert={value.tucked || undefined}
       data-fcomp=""
       data-fcomp-mode-on={mode}
+      data-fcomp-corners={cornerTreatment}
       data-file-foot=""
       data-drop-over={drop.over ? '' : undefined}
       onInput={readCommentWords}
@@ -693,6 +700,8 @@ export function FullScreenComposer({
           {reply.errorActions}
         </p>
       )}
+      {/* Off its home, the card's corners resize it (composerDrag.ts). Pointer only, as the app's other resize handles. */}
+      {resizable && CORNERS.map((which) => <span key={which} className="ib-fcomp-corner" aria-hidden="true" {...corner(which)} />)}
       {drop.over && (
         <div className="ib-rdrop ib-fcomp-drop" aria-hidden="true" data-fcomp-drop="">
           <Icon name="clip" size={18} />

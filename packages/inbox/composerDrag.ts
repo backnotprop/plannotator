@@ -13,8 +13,15 @@
  *   no render per pointer move, no layout change. Measured from layout boxes (`offsetLeft` …), which no transform
  *   changes, so a card in flight to the corner control measures the same as one at rest.
  * - A phone's card is docked across the width: no drag there (`enabled` false).
+ *
+ * Resizing (the owner, 2026-11-09: "after I move it, if some like resized corner panels show up"). Once the card is
+ * off its home, its four corners resize it (`resizable`, `corner()`): the corner under the pointer moves and the
+ * opposite one stays. Never smaller than the card is by itself (its own width; its height with the field at its
+ * least), never past the view's margin. The size is two more variables (`--ib-fcomp-rw`, `--ib-fcomp-rh`, with
+ * `data-fcomp-sized`), kept and dropped with the place: another file or the double click gives the card's own size
+ * back. A card at home has no corners. Pointer only: the app's resize handles (ResizeHandle) take no keys either.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 /** How far a press must move before it is a drag (px). */
 export const DRAG_SLOP = 4;
@@ -22,6 +29,38 @@ export const DRAG_SLOP = 4;
 export const DRAG_MARGIN = 8;
 /** The longest the ease home can take (the transition's end clears it sooner). */
 const HOMING_MS = 260;
+
+export type Corner = 'nw' | 'ne' | 'sw' | 'se';
+export const CORNERS: readonly Corner[] = ['nw', 'ne', 'sw', 'se'];
+export interface Size {
+  w: number;
+  h: number;
+}
+interface Edges {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * The card's box after `corner` is dragged by (dx, dy) from `from`: that corner moves, the opposite one stays. Never
+ * under `min`, never past `margin` inside the view. The width stays even, so the card's centre (what its transform
+ * moves) lands on a whole pixel and the fixed edge does not shimmer.
+ */
+export function resizeBox(from: Edges, corner: Corner, dx: number, dy: number, min: Size, view: { width: number; height: number }, margin = DRAG_MARGIN): Edges {
+  const next = { ...from };
+  const hold = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
+  if (corner.endsWith('e')) next.right = hold(Math.round(from.right + dx), from.left + min.w, Math.max(from.left + min.w, view.width - margin));
+  else next.left = hold(Math.round(from.left + dx), Math.min(margin, from.right - min.w), from.right - min.w);
+  if (corner.startsWith('s')) next.bottom = hold(Math.round(from.bottom + dy), from.top + min.h, Math.max(from.top + min.h, view.height - margin));
+  else next.top = hold(Math.round(from.top + dy), Math.min(margin, from.bottom - min.h), from.bottom - min.h);
+  if ((next.right - next.left) % 2 !== 0) {
+    if (corner.endsWith('e')) next.right += next.right - next.left > min.w ? -1 : 1;
+    else next.left += next.right - next.left > min.w ? 1 : -1;
+  }
+  return next;
+}
 
 export interface Offset {
   x: number;
@@ -60,6 +99,32 @@ function measure(card: HTMLElement): { home: Box; view: { width: number; height:
 const CONTROLS = 'button, a, input, textarea, select, label, [role="radio"], [contenteditable="true"]';
 const onControl = (target: EventTarget | null) => target instanceof Element && target.closest(CONTROLS) !== null;
 
+/** The size the person gave the card, or its own (`null`). */
+function writeSize(el: HTMLElement, size: Size | null): void {
+  if (!size) {
+    el.removeAttribute('data-fcomp-sized');
+    el.style.removeProperty('--ib-fcomp-rw');
+    el.style.removeProperty('--ib-fcomp-rh');
+    return;
+  }
+  el.style.setProperty('--ib-fcomp-rw', `${size.w}px`);
+  el.style.setProperty('--ib-fcomp-rh', `${size.h}px`);
+  el.setAttribute('data-fcomp-sized', '');
+}
+
+/** The least the card can be: its own width, and its height with the field on screen at its least. */
+function leastSize(card: HTMLElement): Size {
+  const sized = card.hasAttribute('data-fcomp-sized');
+  // Its own width is read with the person's size off for the moment (nothing is painted in between).
+  if (sized) card.removeAttribute('data-fcomp-sized');
+  const w = card.offsetWidth;
+  if (sized) card.setAttribute('data-fcomp-sized', '');
+  const field = [...card.querySelectorAll<HTMLTextAreaElement>('[data-fcomp-body] textarea')].find((el) => el.offsetHeight > 0);
+  const least = field ? parseFloat(getComputedStyle(field).minHeight) || 0 : 0;
+  const h = field ? card.offsetHeight - field.offsetHeight + Math.min(field.offsetHeight, least) : card.offsetHeight;
+  return { w: Math.ceil(w / 2) * 2, h: Math.ceil(h) };
+}
+
 function write(el: HTMLElement, at: Offset): void {
   if (at.x === 0 && at.y === 0) {
     el.style.removeProperty('--ib-fcomp-dx');
@@ -76,6 +141,11 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
   const want = useRef<Offset>({ x: 0, y: 0 });
   const shown = useRef<Offset>({ x: 0, y: 0 });
   const drag = useRef<{ id: number; x: number; y: number; from: Offset; moving: boolean } | null>(null);
+  /** The size the person gave the card (null: its own), and the corner being dragged. */
+  const size = useRef<Size | null>(null);
+  const sizing = useRef<{ id: number; x: number; y: number; corner: Corner; from: Edges; min: Size; centre: number; foot: number; view: { width: number; height: number } } | null>(null);
+  /** The card is off its home or has a size of its own: its corners resize it. */
+  const [resizable, setResizable] = useState(false);
   const homing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const endHoming = useCallback(() => {
@@ -93,6 +163,15 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
     (how: 'live' | 'ease' | 'instant') => {
       const card = cardRef.current;
       if (!card) return;
+      // The size first: the card's home box is read with it on.
+      const parent = card.offsetParent as HTMLElement | null;
+      const wanted = enabled ? size.current : null;
+      const sized = wanted && parent ? { w: Math.min(wanted.w, Math.max(0, parent.clientWidth - 2 * DRAG_MARGIN)), h: Math.min(wanted.h, Math.max(0, parent.clientHeight - 2 * DRAG_MARGIN)) } : wanted;
+      writeSize(card, sized);
+      // More in the card than the height holds (files on the reply, an error line): it grows to hold it.
+      // Read on the body, which takes what the height leaves: the corners hang past the card's own edge.
+      const body = sized ? card.querySelector<HTMLElement>('[data-fcomp-body]') : null;
+      if (sized && body && body.scrollHeight > body.clientHeight + 1) writeSize(card, { w: sized.w, h: sized.h + body.scrollHeight - body.clientHeight });
       const measured = enabled ? measure(card) : null;
       const next = !enabled ? { x: 0, y: 0 } : measured ? clampOffset(want.current, measured.home, measured.view) : shown.current;
       const moved = next.x !== shown.current.x || next.y !== shown.current.y || (next.x !== 0 || next.y !== 0) !== card.hasAttribute('data-fcomp-moved');
@@ -113,6 +192,8 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
           card.style.removeProperty('transition');
         }
       }
+      const can = enabled && (next.x !== 0 || next.y !== 0 || sized !== null);
+      setResizable((had) => (had === can ? had : can));
       // The comments list opens just above the card (its sibling): it goes where the card is, kept under the view's top.
       const list = card.previousElementSibling;
       if (list instanceof HTMLElement && list.classList.contains('ib-anncard')) {
@@ -139,18 +220,20 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
     if (lastKey.current !== fileKey) {
       lastKey.current = fileKey;
       want.current = { x: 0, y: 0 };
+      size.current = null;
       drag.current = null;
+      sizing.current = null;
       cardRef.current?.removeAttribute('data-fcomp-dragging');
     }
     // Every render: the card may have grown (words, a tab), and the comments list may have opened.
-    draw(drag.current?.moving ? 'live' : 'instant');
+    draw(drag.current?.moving || sizing.current ? 'live' : 'instant');
   });
 
   // The view or the card changed size with no render (the window, a side panel, a field growing by itself).
   useEffect(() => {
     if (!enabled) return;
     const card = cardRef.current;
-    const again = () => draw(drag.current?.moving ? 'live' : 'instant');
+    const again = () => draw(drag.current?.moving || sizing.current ? 'live' : 'instant');
     window.addEventListener('resize', again);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(again);
     if (card) {
@@ -174,6 +257,19 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     } catch {
       // Already released (the pointer was cancelled).
+    }
+  }, []);
+
+  const endSizing = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const now = sizing.current;
+    if (!now || now.id !== event.pointerId) return;
+    sizing.current = null;
+    cardRef.current?.removeAttribute('data-fcomp-dragging');
+    cardRef.current?.removeAttribute('data-fcomp-resizing');
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Already released.
     }
   }, []);
 
@@ -218,10 +314,61 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
       onDoubleClick: (event: ReactMouseEvent<HTMLElement>) => {
         if (onControl(event.target)) return;
         want.current = { x: 0, y: 0 };
+        size.current = null;
         draw('ease');
       },
     };
   }, [enabled, draw, end, endHoming]);
 
-  return { attach, handle };
+  /** One corner's handlers (FullScreenComposer draws the four while `resizable`). */
+  const corner = useCallback(
+    (which: Corner) => ({
+      'data-fcomp-resize': which,
+      onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
+        const card = cardRef.current;
+        const measured = card ? measure(card) : null;
+        if (!card || !measured || sizing.current || drag.current || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        event.stopPropagation();
+        const { home, view } = measured;
+        const left = home.left + shown.current.x;
+        const top = home.top + shown.current.y;
+        sizing.current = {
+          id: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          corner: which,
+          from: { left, top, right: left + home.width, bottom: top + home.height },
+          min: leastSize(card),
+          // What the card's transform is counted from: its centre across, its foot down. Neither moves as it resizes.
+          centre: home.left + home.width / 2,
+          foot: home.top + home.height,
+          view,
+        };
+        endHoming();
+        card.setAttribute('data-fcomp-dragging', '');
+        card.setAttribute('data-fcomp-resizing', which);
+        try {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        } catch {
+          // No such pointer any more.
+        }
+      },
+      onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
+        const now = sizing.current;
+        if (!now || now.id !== event.pointerId) return;
+        const box = resizeBox(now.from, now.corner, event.clientX - now.x, event.clientY - now.y, now.min, now.view);
+        size.current = { w: box.right - box.left, h: box.bottom - box.top };
+        want.current = { x: (box.left + box.right) / 2 - now.centre, y: box.bottom - now.foot };
+        draw('live');
+      },
+      onPointerUp: endSizing,
+      onPointerCancel: endSizing,
+      onLostPointerCapture: endSizing,
+      onMouseDown: (event: ReactMouseEvent<HTMLElement>) => event.preventDefault(),
+      onDoubleClick: (event: ReactMouseEvent<HTMLElement>) => event.stopPropagation(),
+    }),
+    [draw, endHoming, endSizing],
+  );
+
+  return { attach, handle, resizable, corner };
 }
