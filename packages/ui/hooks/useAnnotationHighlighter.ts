@@ -1860,11 +1860,36 @@ export function useAnnotationHighlighter({
     // the range it paints and quotes has to be corrected before that handler
     // runs: registered on the capture phase of the same element, and before
     // `run()` so registration order settles the at-target case too.
-    const handlePointerEndCapture = () => {
+    // The library's pointer-end handler sits one event out (a listener removed
+    // during dispatch never runs) and listens again on the next task. It
+    // paints nothing for a selection it should not take and then removes the
+    // DOM selection anyway; sitting out leaves the selection to the person.
+    const sitOutThisPointerEnd = () => {
+      if (!listening) return;
+      highlighter.stop();
+      listening = false;
+      window.setTimeout(() => {
+        if (disposed) return;
+        highlighter.run();
+        listening = true;
+      }, 0);
+    };
+
+    const handlePointerEndCapture = (event: Event) => {
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
         pendingRangeRunsRef.current = null;
+        return;
+      }
+      // Only the main button ends a selection gesture. The library handles
+      // every `mouseup`, so a context click on selected words (or on a word
+      // the browser selects for its menu) became a highlight, and in redline
+      // mode a deletion; the selection stays for the menu's Copy instead.
+      const button = (event as MouseEvent).button;
+      if (event.type === 'mouseup' && typeof button === 'number' && button !== 0) {
+        pendingRangeRunsRef.current = null;
+        sitOutThisPointerEnd();
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
@@ -1884,20 +1909,9 @@ export function useAnnotationHighlighter({
       if (rangeInsideExcluded(container, range)) {
         // Nothing here can be annotated (an Inbox action item or question
         // card under text comments, a diagram): the selection is the
-        // person's to copy. The library's own pointer-end handler paints
-        // nothing for it and then removes the DOM selection anyway, so it
-        // sits this one event out (a listener removed during dispatch never
-        // runs) and listens again on the next task.
+        // person's to copy, so the library sits this one event out.
         pendingRangeRunsRef.current = null;
-        if (listening) {
-          highlighter.stop();
-          listening = false;
-          window.setTimeout(() => {
-            if (disposed) return;
-            highlighter.run();
-            listening = true;
-          }, 0);
-        }
+        sitOutThisPointerEnd();
         return;
       }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
