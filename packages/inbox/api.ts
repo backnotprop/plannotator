@@ -874,6 +874,8 @@ export class InboxApiError extends Error {
     readonly field: string | null = null,
     /** When a held read may be asked again (ms since the epoch), when the answer says. */
     readonly retryAt: number | null = null,
+    /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
+    readonly threadId: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -889,6 +891,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
       typeof body.retry_at === 'number' ? body.retry_at : null,
+      typeof body.thread_id === 'string' ? body.thread_id : null,
     );
   }
   return body as T;

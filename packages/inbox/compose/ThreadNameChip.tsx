@@ -9,7 +9,9 @@
  * While it follows the message its words are muted and a small "auto"
  * follows them; a screen reader hears the same through aria-describedby.
  * Nothing to suggest yet: an empty dashed chip saying "Name this thread".
- * `error` (the name is taken, or not a valid name) is said beside it.
+ * `error` (the name is taken, or not a valid name) is said beside it, and
+ * `action` (the name is another open thread's: send there instead) is a
+ * button after those words, outside the alert so it is read once.
  * Enter moves to the message; Escape is the dialog's (close or ask).
  *
  * Text pasted into it that is not a name (a line break, longer than a name
@@ -17,8 +19,8 @@
  * is never cut short: it goes to the message instead (`onOverflow`), and the
  * chip says so.
  *
- * Room left for later: joining an existing thread would be a ⌄ after the
- * chip, the way To has one.
+ * Room left for later: picking an existing thread before Send would be a ⌄
+ * after the chip, the way To has one.
  */
 import { useRef, useState } from 'react';
 import { INBOX_THREAD_NAME_MAX } from '@plannotator/core/inbox-types';
@@ -71,9 +73,11 @@ export function ThreadNameChip(props: {
   /** Text pasted into the chip that cannot be a name: the caller puts it in the message (and may say how, in the note). */
   onOverflow: (text: string) => string | void;
   error?: string | null;
+  /** A way through `error` besides changing the name. `name` is its full name for a screen reader. */
+  action?: { label: string; name: string; onPress: () => void; disabled?: boolean } | null;
   idBase: string;
 }) {
-  const { state, suggested, hint, onChange, onDone, onOverflow, error = null, idBase } = props;
+  const { state, suggested, hint, onChange, onDone, onOverflow, error = null, action = null, idBase } = props;
   const [note, setNote] = useState<string | null>(null);
   // Emptied while focused: show it empty until focus leaves, then follow the message again.
   const [clearing, setClearing] = useState(false);
@@ -153,8 +157,15 @@ export function ThreadNameChip(props: {
         </span>
       )}
       {error && (
-        <span className="ib-cp-tname-err" id={errorId} role="alert" data-compose-thread-name-error="">
-          {error}
+        <span className="ib-cp-tname-err">
+          <span id={errorId} role="alert" data-compose-thread-name-error="">
+            {error}
+          </span>
+          {action && (
+            <button type="button" className="ib-lnk ib-cp-tname-go" aria-label={action.name} disabled={action.disabled} onClick={action.onPress} data-compose-thread-name-join="">
+              {action.label}
+            </button>
+          )}
         </span>
       )}
     </span>

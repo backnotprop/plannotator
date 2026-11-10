@@ -51,7 +51,8 @@ import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
 import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { wordsMessage } from '../sendTargets';
 import { registerReloadFlush } from '../stalePage';
 import {
   DRAFT_TOO_LONG,
@@ -141,6 +142,43 @@ export interface ComposeRequest {
   launch?: { agent: string | null } | null;
 }
 
+/** What the chip says when another open thread of the project has the typed name. */
+const THREAD_NAME_TAKEN = 'Another open thread in this project has this name.';
+
+/** The open thread that has the name the person typed, and the message a reply typed in it answers. */
+interface ThreadNameHolder {
+  threadId: string;
+  messageId: string;
+  /** Its name as that thread has it (the typed one may differ in case or spaces). */
+  name: string;
+  /** Who a reply typed in it reaches: "Claude Code". */
+  agent: string;
+}
+
+/** Read the thread that has the name; null when it can't be read (the notice then offers nothing). */
+async function threadNameHolder(threadId: string): Promise<ThreadNameHolder | null> {
+  try {
+    const { thread } = await inboxApi.thread(threadId, 5000);
+    if (thread.resolved_at !== null || thread.thread_name === null) return null;
+    const target = wordsMessage(thread);
+    const host = target.author.kind === 'agent' ? target.author.host : (target.to?.host ?? null);
+    const agent = (target.author.kind === 'agent' ? target.author.name : null) ?? (host ? hostLabel(host) : 'That thread’s agent');
+    return { threadId, messageId: target.id, name: thread.thread_name, agent };
+  } catch {
+    return null;
+  }
+}
+
+/** Compose's message went into an open thread instead of starting one ("Send to that thread"). */
+export interface ComposeJoined {
+  threadId: string;
+  threadName: string;
+  /** Who got it: "Claude Code". */
+  agent: string;
+  /** The draft it was written in (deleted), or null. */
+  draftId: string | null;
+}
+
 export interface ComposeSent {
   threadId: string;
   session: string;
@@ -204,6 +242,11 @@ export interface ComposeDialogProps {
   lastSent: string | null;
   home: string | null;
   onSent: (sent: ComposeSent) => void;
+  /**
+   * The message went into the open thread that already had the typed name. Absent: compose never offers it (the
+   * tour), and the taken name is only said.
+   */
+  onJoined?: (joined: ComposeJoined) => void;
   onSaved: (draft: DraftView) => void;
   onDeleted: (draft: DraftView) => void;
   onClose: () => void;
@@ -588,6 +631,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
+  // The one open thread that has the typed name (the 409 names it): the chip's notice offers to send there instead.
+  const [nameHolder, setNameHolder] = useState<ThreadNameHolder | null>(null);
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
@@ -758,6 +803,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   // ── sending ──
+  // "Send to that thread" is a plain message into a thread of this computer: never a review, a Board card's thread, a
+  // PR hand-off or another machine's project, whose Sends carry more than a reply can.
+  const joinsThreads = !!props.onJoined && !transport && !box && !card && !pulls && !start?.machine;
+  // Another To may be another project: the thread read for the old one is not offered for it.
+  useEffect(() => {
+    setNameHolder(null);
+  }, [chosen, start?.agent, start?.project.id, start?.machine]);
   const send = async () => {
     leaveTip();
     // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
@@ -912,11 +964,53 @@ export function ComposeDialog(props: ComposeDialogProps) {
         setTrustInfo(true);
         setError(cause.message);
       } else if (cause instanceof InboxApiError && cause.code === 'thread_name_taken') {
-        setNameError('Another open thread in this project has this name.');
+        // Read before the notice shows, so it says at once whose thread it is; unread, the notice is the plain one.
+        const holder = joinsThreads && cause.threadId ? await threadNameHolder(cause.threadId) : null;
+        setNameHolder(holder);
+        setNameError(THREAD_NAME_TAKEN);
       } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
         // git did not answer in time (#1919): the server's words are for an agent; the person presses Send again.
         setError('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
       } else setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * "Send to that thread": the message, with its files, goes into the open thread that has the typed name, as a reply
+   * typed in that thread would (`wordsMessage`, `POST …/reply`), so to that thread's agent, whatever To says. Nothing
+   * is started and no thread is made. A failure leaves compose as it was.
+   */
+  const sendToHolder = async () => {
+    const holder = nameHolder;
+    if (!holder || busy !== null) return;
+    if (!body.trim() && !files.files.some((file) => file.state !== 'refused')) {
+      setError('Write a message first.');
+      textRef.current?.focus();
+      return;
+    }
+    if (files.uploading) {
+      setError('Wait for the files to finish uploading.');
+      return;
+    }
+    setBusy('send');
+    setError(null);
+    try {
+      const words = body.trim();
+      const feedback = withSkillsBlock('', await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE));
+      await inboxApi.reply(holder.messageId, {
+        idempotency_key: sendKey.current,
+        words,
+        questions: [],
+        ...(feedback ? { feedback } : {}),
+        ...(uploadIds.length > 0 ? { uploads: uploadIds } : {}),
+      });
+      // The draft it was written in is done, as after a Send.
+      if (draft) await inboxApi.deleteDraft(draft.id).catch(() => {});
+      props.onJoined?.({ threadId: holder.threadId, threadName: holder.name, agent: holder.agent, draftId: draft?.id ?? null });
+    } catch (cause) {
+      setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
     } finally {
       setBusy(null);
     }
@@ -1485,10 +1579,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
           state={nameState}
           suggested={reviewName ?? suggested}
           hint={box ? 'Named from what it reviews until you type here.' : undefined}
-          error={nameError}
+          error={nameError && nameHolder ? `${THREAD_NAME_TAKEN.slice(0, -1)}: “${nameHolder.name}”. ${nameHolder.agent} gets what you send there.` : nameError}
+          action={
+            nameHolder
+              ? { label: 'Send to that thread', name: `Send this message to the thread “${nameHolder.name}”, to ${nameHolder.agent}`, onPress: () => void sendToHolder(), disabled: busy !== null || voice.busy }
+              : null
+          }
           onChange={(next) => {
             setNameState(next);
             setNameError(null);
+            setNameHolder(null);
           }}
           onDone={() => textRef.current?.focus()}
           onOverflow={(text) => {
