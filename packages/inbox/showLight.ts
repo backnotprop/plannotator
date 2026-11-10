@@ -25,7 +25,7 @@ const NONE: ReadonlySet<string> = new Set();
 const NO_ROWS: readonly UnseenRow[] = [];
 /** The share of a row that must show in the list for it to be in view. */
 const IN_VIEW = 0.6;
-/** `go` holds the count back while the list scrolls to its row, at most this long. */
+/** `go` holds the count back until its scroll ends (`scrollend`), at most this long (a browser without that event, or no scroll needed). */
 const GO_MS = 1200;
 
 interface Run {
@@ -58,8 +58,8 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
   const find = (id: string) => [...body.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`)].find((el) => el.getClientRects().length > 0) ?? null;
   /** The rows not yet in view, with the edge each is past. */
   const waiting = new Map<string, { el: HTMLElement; edge: ListEdge }>();
-  /** The row `go` scrolls to: the count is held back until it is in view, so the pill does not flash on the way. */
-  let going: HTMLElement | null = null;
+  /** `go` is scrolling the list: the count is held back until the scroll ends, so the pill does not flash on the way. */
+  let going = false;
   let started = false;
   const publish = () => {
     if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));
@@ -84,7 +84,6 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
       if (view.height === 0 || showing >= rect.height * IN_VIEW) {
         waiting.delete(id);
         seen.push(id);
-        if (going === row.el) going = null;
       } else row.edge = rect.top + rect.height / 2 < view.top + view.height / 2 ? 'top' : 'bottom';
     }
     if (seen.length > 0) turnOn(seen);
@@ -127,11 +126,16 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
         el?.focus({ preventScroll: true });
       }
       if (!el) return;
-      going = el;
-      later(() => {
-        going = null;
-        publish();
-      }, GO_MS);
+      going = true;
+      const arrived = () => {
+        if (!going) return;
+        going = false;
+        clearTimeout(limit);
+        body.removeEventListener('scrollend', arrived);
+        measure();
+      };
+      const limit = later(arrived, GO_MS);
+      body.addEventListener('scrollend', arrived);
       el.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     },
   };

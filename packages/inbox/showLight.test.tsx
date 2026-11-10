@@ -142,10 +142,12 @@ test.skipIf(!hasDom)('go scrolls to the nearest row past that edge, to the middl
   // On the way there the count does not change under the reader.
   scroll(200);
   expect(show.unseen).toHaveLength(2);
-  // There: both are in view and lit, and nothing is left.
-  scroll(400);
-  expect(litRows()).toEqual(['t_a', 't_b', 't_c']);
-  expect(show.unseen).toEqual([]);
+  // The scroll ends with one of the two in view: it is lit, and only now is the count told, the one that is left.
+  scroll(150);
+  expect(litRows()).toEqual(['t_a', 't_b']);
+  expect(show.unseen).toHaveLength(2);
+  act(() => void body().dispatchEvent(new Event('scrollend')));
+  expect(show.unseen).toEqual([{ id: 't_c', edge: 'bottom' }]);
 });
 
 test.skipIf(!hasDom)('a row whose group is closed is no longer waited for', async () => {
