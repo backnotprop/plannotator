@@ -220,6 +220,7 @@ packages/inbox/ask/askWindow.test.tsx
 packages/inbox/ask/askReadsOnce.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
+packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
@@ -668,3 +669,5 @@ packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
+packages/inbox/starredPills.test.tsx
+packages/inbox/phoneSidebarSheet.test.tsx
