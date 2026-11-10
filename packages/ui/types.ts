@@ -25,13 +25,7 @@ export enum AnnotationType {
 
 export type EditorMode = 'selection' | 'comment' | 'redline' | 'quickLabel';
 
-/**
- * How a pointer marks text in a document. `drag`: select text. `pinpoint`:
- * click a block or part. `word`: as `drag`, and one click on a word selects
- * that word and a drag selects whole words (the Viewer's markdown only; every
- * other surface treats it as `drag`).
- */
-export type InputMethod = 'drag' | 'pinpoint' | 'word';
+export type InputMethod = 'drag' | 'pinpoint';
 
 /**
  * Compactness of the Viewer action button labels (Image / Comment / Copy).
