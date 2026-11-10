@@ -15,6 +15,7 @@ import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-a
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
+import { savedConfig } from "../../../tests/helpers/saved-config";
 
 const entry = resolve(import.meta.dir, "index.ts");
 let stubs: string[] = [];
@@ -182,7 +183,7 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
   expect(existsSync(join(w.home, ".cursor"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
-  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini", "cursor"] });
+  expect(savedConfig(join(w.home, ".plannotator")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini", "cursor"] });
 
   const bad = await cli(w, ["inbox", "--notes", "vscode"]);
   expect(bad.code).toBe(1);

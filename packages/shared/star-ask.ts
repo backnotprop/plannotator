@@ -3,7 +3,7 @@
  * people who already use Plannotator, on whichever surface comes first (the Inbox's corner card, or the done screen of
  * plan review, code review and annotate).
  *
- * Shown once, everywhere: one config.json record, `starAsk` (`StarAskRecord`), read and written only here. The first
+ * Shown once, everywhere: one local-state.json record, `starAsk` (`StarAskRecord`), read and written only here. The first
  * surface that shows the ask stamps `shownAt`, right before it draws it; no surface shows it again. A check alone
  * (`checkedAt`, a done-screen page that loaded but never reached its done screen) uses nothing up. Ignoring a shown
  * ask or closing the tab counts as an answer. `answer` says how it ended: `starred` (gh starred it on the click), `opened` (the GitHub page opened),
@@ -41,7 +41,7 @@ export const STAR_ASK_MIN_AGE_WEEK = 2;
 export type StarAskAnswer = "starred" | "opened" | "not-now" | "already";
 export type StarAskSurface = "inbox" | "plan" | "review" | "annotate";
 
-/** config.json `starAsk`. */
+/** local-state.json `starAsk`. */
 export interface StarAskRecord {
   /** When a surface showed the ask (absent: never shown). */
   shownAt?: string;
@@ -59,7 +59,7 @@ export interface StarAskRecord {
 const ANSWERS: readonly StarAskAnswer[] = ["starred", "opened", "not-now", "already"];
 const SURFACES: readonly StarAskSurface[] = ["inbox", "plan", "review", "annotate"];
 
-/** The record as config.json holds it, keeping only the fields this module writes (a hand edit may hold anything). */
+/** The record as local-state.json holds it, keeping only the fields this module writes (a hand edit may hold anything). */
 export function readStarAskRecord(config: Pick<PlannotatorConfig, "starAsk"> | undefined): StarAskRecord | undefined {
   const raw = config?.starAsk as unknown;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -74,7 +74,7 @@ export function readStarAskRecord(config: Pick<PlannotatorConfig, "starAsk"> | u
   return out;
 }
 
-/** Never shown and never answered: a surface may still ask. Any other value in config.json (a hand edit) is closed. */
+/** Never shown and never answered: a surface may still ask. Any other value there (a hand edit) is closed. */
 export function starAskOpen(record: StarAskRecord | undefined, raw: unknown = record): boolean {
   if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) return false;
   return !record?.shownAt && !record?.answer;

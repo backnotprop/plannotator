@@ -10,11 +10,11 @@
  * (`canStart`): it claims only when To offers a new session. It stands outside the order of the line of one-time dialogs
  * (packages/shared/inbox/reveals.ts), but keeps its 40-minute gap both ways since 2026-11-09, as the Sidebar tip does
  * (the server: `tipFree`, `RevealState.tipShownAt`): never within the gap of a dialog, and no dialog within the gap of it. The
- * claim stamps only config.json `inboxReveals.launch_tip`, when it shows (every way out is final), with the page's
+ * claim stamps only local-state.json `inboxReveals.launch_tip`, when it shows (every way out is final), with the page's
  * key so that page's retry after a lost answer is shown it again and no other window or phone is.
  */
 
-/** What config.json keeps: `inboxReveals.launch_tip`. */
+/** What local-state.json keeps: `inboxReveals.launch_tip`. */
 export interface LaunchTipSaved {
   shownAt?: string;
   key?: string;

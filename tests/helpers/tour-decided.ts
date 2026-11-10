@@ -13,7 +13,9 @@ import { refuseRealDataDir } from './real-data-dir';
 export function markTourDecided(dataDir: string): void {
   refuseRealDataDir(dataDir, 'markTourDecided');
   mkdirSync(dataDir, { recursive: true });
-  const file = join(dataDir, 'config.json');
+  // This computer's state (local-state.json, #2852) once there is one; before that config.json, which the first save moves over.
+  const state = join(dataDir, 'local-state.json');
+  const file = existsSync(state) ? state : join(dataDir, 'config.json');
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
   config.inboxTour = { version: 1, seen_at: null, finished_at: null, skipped_at: '2026-10-24T00:00:00.000Z', notify_again: false };
   writeFileSync(file, JSON.stringify(config));

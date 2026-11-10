@@ -28,11 +28,12 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'list-intro');
@@ -144,12 +145,8 @@ interface SavedIntro {
   before?: { dueAt?: string; shownAt?: string };
 }
 
-function savedConfig(w: World): Record<string, unknown> {
-  const path = join(w.dataDir, 'config.json');
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-}
-const saved = (w: World) => savedConfig(w).inboxListIntro as SavedIntro | undefined;
-const savedRows = (w: World) => savedConfig(w).inboxRows as string[] | undefined;
+const saved = (w: World) => savedConfig(w.dataDir).inboxListIntro as SavedIntro | undefined;
+const savedRows = (w: World) => savedConfig(w.dataDir).inboxRows as string[] | undefined;
 
 async function context(browser: Browser, options: { phone?: boolean; dark?: boolean; reduce?: boolean; video?: boolean } = {}): Promise<BrowserContext> {
   const viewport = options.phone ? { width: 390, height: 844 } : { width: 1440, height: 900 };

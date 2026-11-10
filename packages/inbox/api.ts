@@ -642,7 +642,7 @@ export interface SettingsModel {
    * and from an older Inbox.
    */
   cookie_host?: InboxCookieHost;
-  /** The onboarding tour (config.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
+  /** The onboarding tour (local-state.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;

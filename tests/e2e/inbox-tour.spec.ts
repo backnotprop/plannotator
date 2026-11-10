@@ -33,6 +33,7 @@ import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -87,8 +88,7 @@ async function agentWrites(w: World, body: string, subject: string): Promise<str
 }
 
 function config(w: World): Record<string, any> {
-  const file = join(w.dataDir, 'config.json');
-  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  return savedConfig(w.dataDir);
 }
 
 /** The person's list as the server holds it, without what moves on its own. */

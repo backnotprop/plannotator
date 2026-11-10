@@ -943,7 +943,9 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
       // With it: the look from before (never saved reads as the defaults) and who saved (no one: the window), for Undo.
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames"], inboxRowsBy: null });
+      // The look is a setting (config.json); the Undo record is this computer's state (local-state.json, #2852).
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
+      expect(JSON.parse(readFileSync(join(dataDir, "local-state.json"), "utf8"))).toEqual({ inboxRowsPrev: ["smallNames"], inboxRowsBy: null });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -1022,7 +1024,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       // An agent's command: who made it rides with the save, to the file, the answer and every window.
       const by = { host: "claude-code", session: "ses_rows" };
       expect((await save({ rows: ["compact", "smallNames"], rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 5, rows_prev: ["smallNames", "roomy"], rows_by: by });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "smallNames"], inboxRowsRev: 5, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: by });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "smallNames"], inboxRowsRev: 5, inboxRowsDefaults: 2 });
+      expect(JSON.parse(readFileSync(join(dataDir, "local-state.json"), "utf8"))).toEqual({ inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: by });
       expect(await heard(5)).toEqual({ rows: ["compact", "smallNames"], rev: 5, prev: ["smallNames", "roomy"], by });
 
       // Undo is one save of the look from before, by whoever asked (here the window: no one); undo again is a redo.

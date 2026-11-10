@@ -163,6 +163,11 @@ function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfi
   return withoutUndefined(merged) as PromptConfig["inbox"];
 }
 
+/**
+ * Plannotator's settings, as loadConfig returns them. The keys in LOCAL_STATE_KEYS, and inboxSound's dialog marks,
+ * are this computer's state rather than settings: they are read from and written to local-state.json in the data
+ * dir, never config.json (#2852).
+ */
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
@@ -639,7 +644,7 @@ export interface PlannotatorConfig {
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
     grill_me_tip?: { shownAt?: string; key?: string };
-    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    /** The "Star the repo" ask's claim in the line (local-state.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
     /**
@@ -647,7 +652,7 @@ export interface PlannotatorConfig {
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
      */
     tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
-    /** The "themes" dialog's claim in the line (who it is for: config.json `inboxThemeChooser`). */
+    /** The "themes" dialog's claim in the line (who it is for: local-state.json `inboxThemeChooser`). */
     theme_chooser?: { shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
@@ -910,25 +915,150 @@ function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
 }
 
+// --- local-state.json: what Plannotator itself writes (#2852) ------------------
+//
+// config.json is the person's settings, and some keep it in a dotfiles repo
+// shared by several computers. The one-time dialogs, what was asked and when
+// were written there too, so every computer kept rewriting it with its own
+// times. That state lives in `local-state.json` in the data dir instead.
+// `loadConfig` and `saveConfig` route these keys by themselves, so readers
+// and writers keep using one PlannotatorConfig.
+//
+// Moving over: until local-state.json exists, these keys are read from
+// config.json as an earlier version left them (so nobody sees a dialog
+// again). The first save of any of them writes local-state.json with them
+// all; from then on config.json's copies are ignored. config.json itself is
+// never rewritten for this: its old keys stay as they are until the person
+// removes them.
+
+export const LOCAL_STATE_FILE = "local-state.json";
+
+/** config.json keys that are this computer's state, kept whole in local-state.json. */
+export const LOCAL_STATE_KEYS = [
+  "inboxListIntro",
+  "inboxVoiceIntro",
+  "inboxSnoozeIntro",
+  "inboxBoardIntro",
+  "inboxReveals",
+  "inboxTour",
+  "starAsk",
+  "inboxAgentNotes",
+  "inboxThemeChooser",
+  // The list look's Undo: the look before the last save and who made it. Rewritten with every list-look save, so
+  // they would keep changing config.json; the look itself (`inboxRows`, `inboxRowsRev`) is a setting and stays.
+  "inboxRowsPrev",
+  "inboxRowsBy",
+] as const satisfies readonly (keyof PlannotatorConfig)[];
+
+/** Settings that carry a few state fields: those fields go to local-state.json, the rest stays in config.json. */
+const LOCAL_STATE_FIELDS = {
+  inboxSound: ["dialogDueFor", "dialogShownFor"],
+} as const satisfies Partial<Record<keyof PlannotatorConfig, readonly string[]>>;
+
+type SplitKey = keyof typeof LOCAL_STATE_FIELDS;
+const SPLIT_KEYS = Object.keys(LOCAL_STATE_FIELDS) as SplitKey[];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function pickFields(value: Record<string, unknown>, fields: readonly string[], keep: boolean): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([field]) => fields.includes(field) === keep));
+}
+
+function getLocalStatePath(dir: string = getConfigDir()): string {
+  return join(dir, LOCAL_STATE_FILE);
+}
+
+/** The state an earlier version kept in config.json: what a first local-state.json starts from. */
+function legacyLocalState(config: Record<string, unknown>): Record<string, unknown> {
+  const state: Record<string, unknown> = {};
+  for (const key of LOCAL_STATE_KEYS) if (config[key] !== undefined) state[key] = config[key];
+  for (const key of SPLIT_KEYS) {
+    const value = config[key];
+    if (!isPlainObject(value)) continue;
+    const fields = pickFields(value, LOCAL_STATE_FIELDS[key], true);
+    if (Object.keys(fields).length > 0) state[key] = fields;
+  }
+  return state;
+}
+
+/** local-state.json, or null when there is none yet (or it is not a JSON object). */
+function readLocalStateFile(path: string = getLocalStatePath()): Record<string, unknown> | null {
+  try {
+    if (!existsSync(path)) return null;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8").replace(/^\uFEFF/, ""));
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** config.json's settings with this computer's state laid over them: the one PlannotatorConfig every reader sees. */
+function withLocalState(config: Record<string, unknown>, state: Record<string, unknown>): PlannotatorConfig {
+  const result: Record<string, unknown> = { ...config };
+  for (const key of LOCAL_STATE_KEYS) delete result[key];
+  for (const key of LOCAL_STATE_KEYS) if (state[key] !== undefined) result[key] = state[key];
+  for (const key of SPLIT_KEYS) {
+    const setting = config[key];
+    if (setting !== undefined && !isPlainObject(setting)) continue;
+    const merged = {
+      ...(isPlainObject(setting) ? pickFields(setting, LOCAL_STATE_FIELDS[key], false) : {}),
+      ...(isPlainObject(state[key]) ? pickFields(state[key] as Record<string, unknown>, LOCAL_STATE_FIELDS[key], true) : {}),
+    };
+    if (Object.keys(merged).length > 0) result[key] = merged;
+    else delete result[key];
+  }
+  return result as PlannotatorConfig;
+}
+
+/** A save, split into what goes to config.json and what goes to local-state.json. */
+function splitLocalState(partial: Partial<PlannotatorConfig>): { settings: Record<string, unknown>; state: Record<string, unknown> } {
+  const settings: Record<string, unknown> = { ...(partial as Record<string, unknown>) };
+  const state: Record<string, unknown> = {};
+  for (const key of LOCAL_STATE_KEYS) {
+    if (!(key in settings)) continue;
+    state[key] = settings[key];
+    delete settings[key];
+  }
+  for (const key of SPLIT_KEYS) {
+    const value = settings[key];
+    if (!isPlainObject(value)) continue;
+    state[key] = pickFields(value, LOCAL_STATE_FIELDS[key], true);
+    settings[key] = pickFields(value, LOCAL_STATE_FIELDS[key], false);
+  }
+  return { settings, state };
+}
+
 /** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
 export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
   return config.inboxChapterDiagrams !== false;
 }
 
 /**
- * Load config from ~/.plannotator/config.json.
+ * Load config from ~/.plannotator/config.json, with this computer's state
+ * from local-state.json laid over it (LOCAL_STATE_KEYS).
  * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
  * malformed file (a read that must not add a line to what a command printed
  * before it existed: a later read in the same command still warns).
  */
 export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
+  return loadConfigAt(getConfigDir(), options);
+}
+
+/** loadConfig for the data dir named (a test or tool reading another Plannotator's data dir). */
+export function loadConfigAt(dataDir: string, options: { quiet?: boolean } = {}): PlannotatorConfig {
+  const config = readConfigFile(join(dataDir, "config.json"), options);
+  return withLocalState(config, readLocalStateFile(getLocalStatePath(dataDir)) ?? legacyLocalState(config));
+}
+
+function readConfigFile(configPath: string, options: { quiet?: boolean }): Record<string, unknown> {
   try {
-    const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
     const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    return isPlainObject(parsed) ? parsed : {};
   } catch (e) {
     if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
@@ -1115,7 +1245,9 @@ function writeConfigAtomic(configPath: string, contents: string): void {
 
 /**
  * Save config by merging partial values into the existing file.
- * Creates ~/.plannotator/ directory if needed.
+ * Creates ~/.plannotator/ directory if needed. This computer's state
+ * (LOCAL_STATE_KEYS, and inboxSound's dialog marks) goes to local-state.json
+ * instead, and a save of only that state never writes config.json.
  *
  * The read-merge-write runs under an advisory lockfile so concurrent writers
  * (in this process or another one sharing the data dir) cannot drop each
@@ -1144,40 +1276,75 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     }
 
     const read = readConfigForSave(getConfigPath());
-    if (!read.ok) {
+    const { settings, state } = splitLocalState(partial);
+    const current = read.ok ? (read.config as Record<string, unknown>) : null;
+    // A split setting (inboxSound) whose settings fields are what config.json already holds leaves config.json
+    // alone: marking a dialog shown is not a settings change.
+    const sorted = (value: Record<string, unknown>) => JSON.stringify(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    for (const key of SPLIT_KEYS) {
+      const par = settings[key];
+      if (!isPlainObject(par)) continue;
+      const stored = current?.[key];
+      if (sorted(par) === sorted(isPlainObject(stored) ? pickFields(stored, LOCAL_STATE_FIELDS[key], false) : {})) delete settings[key];
+    }
+    const writesSettings = Object.keys(settings).length > 0;
+    const writesState = Object.keys(state).length > 0;
+    const stateFile = writesState ? readLocalStateFile() : null;
+    // A first local-state.json starts from config.json's old copies: refuse while config.json can't be read
+    // rather than start without them (every dialog would be due again once it is fixed).
+    if ((writesSettings || (writesState && stateFile === null && existsSync(getConfigPath()))) && !read.ok) {
       process.stderr.write(
         `[plannotator] Warning: not saving config.json because ${read.reason}; `
         + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
       );
       return false;
     }
-    const current = read.config;
     configSaveMergeWindowHook?.();
-    // The nested settings merge key by key (one experimental switch saved keeps the others), but a
-    // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
-    // whatever it holds; one it names merges only when both sides are plain objects, else the write's
-    // value replaces it (a string `theme` is never spread into characters).
-    const plain = (value: unknown): value is Record<string, unknown> =>
-      !!value && typeof value === "object" && !Array.isArray(value);
-    const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
-      const cur = (current as Record<string, unknown>)[key];
-      const par = (partial as Record<string, unknown>)[key];
-      if (par === undefined) {
-        if (cur !== undefined) merged[key] = cur;
-        return;
+    // config.json first: when it can't be written (a read-only dotfiles or Nix file), a save that also holds state
+    // writes nothing, as before local-state.json, rather than half of itself (a list-look save's Undo record
+    // pointing at a look that was never saved).
+    if (writesSettings && current) {
+      // The nested settings merge key by key (one experimental switch saved keeps the others), but a
+      // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
+      // whatever it holds; one it names merges only when both sides are plain objects, else the write's
+      // value replaces it (a string `theme` is never spread into characters).
+      const merged: Record<string, unknown> = { ...current, ...settings };
+      const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
+        const cur = current[key];
+        const par = settings[key];
+        if (par === undefined) {
+          if (cur !== undefined) merged[key] = cur;
+          return;
+        }
+        if (!isPlainObject(cur) || !isPlainObject(par)) {
+          merged[key] = par;
+          return;
+        }
+        merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
+      };
+      for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
+      // A split setting keeps the old state fields an earlier version left beside it, as they are.
+      for (const key of SPLIT_KEYS) {
+        const par = settings[key];
+        if (!isPlainObject(par)) continue;
+        const cur = current[key];
+        const value = { ...(isPlainObject(cur) ? pickFields(cur, LOCAL_STATE_FIELDS[key], true) : {}), ...par };
+        if (Object.keys(value).length > 0) merged[key] = value;
+        else delete merged[key];
       }
-      if (!plain(cur) || !plain(par)) {
-        merged[key] = par;
-        return;
+      writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    }
+    if (writesState) {
+      const base = stateFile ?? legacyLocalState(current ?? {});
+      const next: Record<string, unknown> = { ...base, ...state };
+      for (const [key, value] of Object.entries(next)) {
+        if (value === undefined || (SPLIT_KEYS.includes(key as SplitKey) && isPlainObject(value) && Object.keys(value).length === 0)) delete next[key];
       }
-      merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
-    };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
-    writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+      writeConfigAtomic(getLocalStatePath(), JSON.stringify(next, null, 2) + "\n");
+    }
     saved = true;
   } catch (e) {
-    process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
+    process.stderr.write(`[plannotator] Warning: failed to write config.json or ${LOCAL_STATE_FILE}: ${e}\n`);
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }

@@ -9,7 +9,7 @@
  * ending it, a dev build deciding it, first use read from the wrong end of the log.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -17,6 +17,7 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { SNOOZE_INTRO_TENURE_MS, snoozeIntroDue, snoozeIntroFirstUse } from "./inbox-snooze-intro";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const DAY = 24 * 60 * 60 * 1000;
 const MAGIC = "macbook-pro.tail0000.ts.net";
@@ -158,7 +159,7 @@ async function world(options: Options = {}) {
     });
   };
   const due = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { snooze_intro: { due: boolean } }).snooze_intro.due;
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSnoozeIntro as { firstUseAt?: string; snoozedAt?: string; shownAt?: string } | undefined;
+  const saved = () => savedConfig(dataDir).inboxSnoozeIntro as { firstUseAt?: string; snoozedAt?: string; shownAt?: string } | undefined;
   const claim = async () => ((await (await post("/api/inbox/snooze-intro")).json()) as { show: boolean }).show;
   return { server, base, post, viaTailnet, due, saved, claim, thread, dataDir };
 }

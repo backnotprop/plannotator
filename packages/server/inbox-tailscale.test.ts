@@ -19,6 +19,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { inboxLiveSiteId } from "./inbox-live";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 type Json = Record<string, any>;
 
@@ -965,7 +966,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
     expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
+    expect(savedConfig(dataDir).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -2,7 +2,7 @@
  * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser", 2026-11-10; the owner: "only for users who
  * don't already have a custom theme. I mean, by custom, anybody who's not using the default theme ... they don't need to
  * choose, we don't need to show them this"). Pure, so a test can read every case; the Inbox server
- * (packages/server/inbox.ts) keeps the record in config.json `inboxThemeChooser` and gives the line its answer
+ * (packages/server/inbox.ts) keeps the record in local-state.json `inboxThemeChooser` and gives the line its answer
  * (`theme_chooser` in reveals.ts).
  *
  * The default theme is Plannotator Original on both halves: config.json `theme` with no `light` and no `dark` palette,
@@ -20,7 +20,7 @@ import type { ThemeConfig } from "@plannotator/core/config-types";
 /** The palette both halves hold until the person picks another (packages/ui/utils/themeRegistry.ts `DEFAULT_COLOR_THEME`). */
 export const THEME_CHOOSER_DEFAULT_THEME = "plannotator";
 
-/** config.json `inboxThemeChooser`. */
+/** local-state.json `inboxThemeChooser`. */
 export interface ThemeChooserSaved {
   dueAt?: string;
   notNeededAt?: string;

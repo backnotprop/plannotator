@@ -1,5 +1,5 @@
 /**
- * Who gets the one-time "Choose how your list looks" dialog (config.json `inboxListIntro`). Pure, so a test needs no
+ * Who gets the one-time "Choose how your list looks" dialog (local-state.json `inboxListIntro`). Pure, so a test needs no
  * Inbox.
  *
  * Version 2 is the rows dialog with three looks (approval "inbox-rows-dialog", round 7b). It is due once for everyone

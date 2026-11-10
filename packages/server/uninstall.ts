@@ -148,6 +148,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "semantic-diff",
   "migrations",
   "config.json",
+  "local-state.json",
   "install-prefs",
   "review-skills.json",
   "vscode-ipc.json",

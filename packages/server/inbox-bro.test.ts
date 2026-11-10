@@ -8,7 +8,7 @@
  * only, never on day 0 or 1, the 40-minute spacing, Not now's gap); a dev build meeting the offer.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -16,6 +16,7 @@ import { inboxAgentTool, INBOX_BRO_LINE, parseInboxToolList } from "@plannotator
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { SEND_BODY_DESCRIPTION } from "./inbox-mcp";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const DAY = 24 * 3_600_000;
 
@@ -104,7 +105,7 @@ async function world(options: WorldOptions = {}) {
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings?store=0`)).json()) as Json;
   const next = async () => (await settings()).reveal.next as string | null;
   const claim = async (key?: string) => (await (await post("/api/inbox/reveal", { id: "bro", ...(key ? { key } : {}) })).json()) as Json;
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
+  const saved = () => savedConfig(dataDir) as Json;
   let rpcId = 0;
   const rpc = async (method: string, params: Record<string, unknown>) => {
     const response = await fetch(`${base}/mcp`, {

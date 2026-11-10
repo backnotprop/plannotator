@@ -19,6 +19,7 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_VOICE_MAX_CLIP_BYTES } from "@plannotator/core/inbox-types";
 import { installFakeCodex, type FakeCodex, type FakeCodexState } from "../../tests/helpers/fake-codex-app-server";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const FIRST_TOKEN = "tok-first-secret-value";
 const FRESH_TOKEN = "tok-fresh-secret-value";
@@ -152,7 +153,7 @@ async function world(options: WorldOptions = {}) {
   const transcribe = (clip: Uint8Array<ArrayBuffer> = wav(), init: RequestInit = {}) =>
     fetch(`${base}/api/inbox/voice/transcribe?serverSession=${session}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: clip, ...init });
   const status = async (query = "") => (await (await fetch(`${base}/api/inbox/voice/status${query}`)).json()) as { state: string; plan: string | null };
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string } };
+  const saved = () => savedConfig(dataDir) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string } };
   return { root, dataDir, codex: codex as FakeCodex, server, base, session, json, settings, turnOn, transcribe, status, saved };
 }
 

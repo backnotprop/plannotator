@@ -14,6 +14,7 @@ import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agen
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_NOTE_START } from "./inbox-agent-notes";
 import { claudePluginStateFromScopes, createAgentEnvironmentFor } from "./inbox-agents";
+import { writeSavedConfig } from "../../tests/helpers/saved-config";
 
 let fake: FakeAgents;
 let server: InboxServer | null = null;
@@ -471,7 +472,7 @@ test("a config from 0.28.18 (offered, no list): the agents that could take a not
   writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
   const s = await start();
   await s.connectAgents();
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  writeSavedConfig(dataDir, { inboxAgentNotes: { offered: true } });
   const migrated = (await get(s)) as Asked;
   expect(migrated.notes_asked).toEqual(["claude-code", "codex"]);
   expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["claude-code", "codex"] });
@@ -492,7 +493,7 @@ test("a config from 0.28.18 whose person said yes: an agent with the note counts
   await s.connectAgents();
   // 0.28.18: the card's Add wrote Codex's note and saved only `offered`.
   await post(s, "/api/inbox/agents/notes", { add: ["codex"], asked: ["codex"] });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  writeSavedConfig(dataDir, { inboxAgentNotes: { offered: true } });
   const migrated = (await get(s)) as Asked;
   expect(migrated.notes_asked).toEqual(["codex", "gemini"]);
   const removed = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: false })).json()) as Asked;

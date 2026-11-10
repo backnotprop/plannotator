@@ -10,6 +10,8 @@ import {
   readFileSync,
   readdirSync,
   chmodSync,
+  symlinkSync,
+  lstatSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +48,7 @@ import {
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
+  LOCAL_STATE_KEYS,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -1192,5 +1195,207 @@ describe("experimental features", () => {
       warn.mockRestore();
     }
     expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"))).toMatchObject({ usageCounts: false, usageCountsNotice: { decisionMode: 1 }, inboxTextSize: 13 });
+  });
+});
+
+// #2852: config.json is the person's settings (some keep it in a dotfiles repo); what Plannotator writes by itself
+// (the one-time dialogs, what was asked) goes to local-state.json in the data dir.
+describe("this computer's state lives in local-state.json, never config.json", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+  let savedWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-local-state-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+    savedWrite = process.stderr.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = savedWrite;
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const configPath = () => join(tempDir, "config.json");
+  const statePath = () => join(tempDir, "local-state.json");
+  const state = () => JSON.parse(readFileSync(statePath(), "utf-8")) as Record<string, any>;
+  /** What an earlier version left in config.json (the issue's own example), beside two settings. */
+  const LEGACY = {
+    displayName: "me",
+    inboxSound: { enabled: false, dialogShownFor: "0.28.35" },
+    inboxListIntro: { dueAt: "2026-11-05T23:20:55.875Z", shownAt: "2026-11-06T21:33:54.486Z" },
+    inboxSnoozeIntro: { firstUseAt: "2026-10-29T10:43:40.606Z" },
+    inboxVoiceIntro: { dueAt: "2026-11-05T23:20:55.878Z" },
+    inboxReveals: { waitingSince: { snooze: "2026-11-06T00:01:16.236Z" }, lastShownAt: "2026-11-06T21:33:54.486Z" },
+  };
+
+  test("a dialog marked shown, a reveal stamped, the star ask recorded: config.json is never written", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "me", inboxSound: { volume: 30 } }, null, 2));
+    const before = readFileSync(configPath(), "utf-8");
+    expect(saveConfig({ inboxListIntro: { dueAt: "2026-11-01T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: "2026-11-02T00:00:00.000Z" }, starAsk: { shownAt: "2026-11-02T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, dialogShownFor: "0.30.0" } })).toBe(true);
+    expect(saveConfig({ inboxTour: { version: 2, seen_at: "2026-11-02T00:00:00.000Z" }, inboxAgentNotes: { offered: true, asked: ["codex"] }, inboxBoardIntro: { shownAt: "x" }, inboxVoiceIntro: { skippedAt: "y" }, inboxSnoozeIntro: { snoozedAt: "z" } })).toBe(true);
+    expect(readFileSync(configPath(), "utf-8")).toBe(before);
+    expect(loadConfig()).toMatchObject({
+      displayName: "me",
+      inboxSound: { volume: 30, dialogShownFor: "0.30.0" },
+      inboxListIntro: { dueAt: "2026-11-01T00:00:00.000Z" },
+      inboxReveals: { lastShownAt: "2026-11-02T00:00:00.000Z" },
+      starAsk: { shownAt: "2026-11-02T00:00:00.000Z" },
+      inboxTour: { version: 2 },
+      inboxAgentNotes: { offered: true, asked: ["codex"] },
+    });
+    expect(state()).toMatchObject({ inboxSound: { dialogShownFor: "0.30.0" }, inboxListIntro: { dueAt: "2026-11-01T00:00:00.000Z" } });
+    expect(state().inboxSound.volume).toBeUndefined();
+    expect(state().displayName).toBeUndefined();
+  });
+
+  test("with no config.json, a state save creates only local-state.json", () => {
+    expect(saveConfig({ inboxListIntro: { dueAt: "2026-11-01T00:00:00.000Z" } })).toBe(true);
+    expect(existsSync(configPath())).toBe(false);
+    expect(loadConfig().inboxListIntro).toEqual({ dueAt: "2026-11-01T00:00:00.000Z" });
+  });
+
+  test("moving over: config.json's old state is read until the first save, which carries all of it over; config.json stays as it was", () => {
+    writeFileSync(configPath(), JSON.stringify(LEGACY, null, 2));
+    const before = readFileSync(configPath(), "utf-8");
+    // Before any save: read from config.json, so nothing shows again.
+    expect(loadConfig()).toEqual(LEGACY);
+    expect(existsSync(statePath())).toBe(false);
+    // The first save of any state key brings every one over.
+    expect(saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, notNowAt: "2026-11-07T00:00:00.000Z" } })).toBe(true);
+    expect(readFileSync(configPath(), "utf-8")).toBe(before);
+    expect(state()).toEqual({
+      inboxSound: { dialogShownFor: "0.28.35" },
+      inboxListIntro: LEGACY.inboxListIntro,
+      inboxSnoozeIntro: LEGACY.inboxSnoozeIntro,
+      inboxVoiceIntro: LEGACY.inboxVoiceIntro,
+      inboxReveals: { ...LEGACY.inboxReveals, notNowAt: "2026-11-07T00:00:00.000Z" },
+    });
+    expect(loadConfig()).toEqual({ ...LEGACY, inboxReveals: { ...LEGACY.inboxReveals, notNowAt: "2026-11-07T00:00:00.000Z" } });
+    // From then on config.json's copies are ignored: another computer's times pulled in from a dotfiles repo change nothing here.
+    writeFileSync(configPath(), JSON.stringify({ ...LEGACY, inboxListIntro: { dueAt: "2030-01-01T00:00:00.000Z" }, inboxSound: { enabled: false, dialogDueFor: "9.9.9" } }));
+    expect(loadConfig().inboxListIntro).toEqual(LEGACY.inboxListIntro);
+    expect(loadConfig().inboxSound).toEqual({ enabled: false, dialogShownFor: "0.28.35" });
+  });
+
+  test("a settings save goes to config.json without the state, and keeps the old state fields it found there", () => {
+    writeFileSync(configPath(), JSON.stringify(LEGACY, null, 2));
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, volume: 50 }, displayName: "you" })).toBe(true);
+    const config = JSON.parse(readFileSync(configPath(), "utf-8"));
+    expect(config.inboxSound).toEqual({ dialogShownFor: "0.28.35", enabled: false, volume: 50 });
+    expect(config.displayName).toBe("you");
+    expect(config.inboxListIntro).toEqual(LEGACY.inboxListIntro);
+    expect(loadConfig().inboxSound).toEqual({ enabled: false, volume: 50, dialogShownFor: "0.28.35" });
+  });
+
+  test("one save holding both splits them", () => {
+    expect(saveConfig({ inboxSound: { enabled: true, volume: 40, dialogDueFor: "0.30.0" }, inboxVoice: { on: true }, inboxVoiceIntro: { shownAt: "t" } })).toBe(true);
+    expect(JSON.parse(readFileSync(configPath(), "utf-8"))).toEqual({ inboxSound: { enabled: true, volume: 40 }, inboxVoice: { on: true } });
+    expect(state()).toEqual({ inboxSound: { dialogDueFor: "0.30.0" }, inboxVoiceIntro: { shownAt: "t" } });
+  });
+
+  test("a config.json that can't be read: the first local-state.json waits for it (its old state would be lost); later ones don't", () => {
+    writeFileSync(configPath(), "{ broken");
+    expect(saveConfig({ inboxListIntro: { shownAt: "a" } })).toBe(false);
+    expect(existsSync(statePath())).toBe(false);
+    writeFileSync(configPath(), "{}");
+    expect(saveConfig({ inboxListIntro: { shownAt: "a" } })).toBe(true);
+    writeFileSync(configPath(), "{ broken");
+    expect(saveConfig({ inboxListIntro: { shownAt: "b" } })).toBe(true);
+    expect(loadConfig().inboxListIntro).toEqual({ shownAt: "b" });
+    expect(readFileSync(configPath(), "utf-8")).toBe("{ broken");
+  });
+
+  test("a config.json symlink (a dotfiles repo) is not touched by state saves", () => {
+    const dotfiles = join(tempDir, "dotfiles-config.json");
+    writeFileSync(dotfiles, JSON.stringify({ displayName: "me" }, null, 2));
+    symlinkSync(dotfiles, configPath());
+    const before = readFileSync(dotfiles, "utf-8");
+    expect(saveConfig({ starAsk: { shownAt: "s" }, inboxSound: { dialogShownFor: "0.30.0" } })).toBe(true);
+    expect(readFileSync(dotfiles, "utf-8")).toBe(before);
+    expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+  });
+
+  // The list look's Undo (`plannotator inbox rows undo`, the Rows page's "<agent> changed … Undo"): the server saves the
+  // look, its count and the Undo record in one save. The look is a setting; the Undo record is this computer's.
+  test("a list-look save writes the look to config.json and its Undo record to local-state.json; an old config.json's record still undoes", () => {
+    // Upgrade: an older Inbox left the Undo record in config.json. Before any save it is still read, so Undo works.
+    const old = { displayName: "me", inboxRows: ["compact", "smallNames"], inboxRowsRev: 7, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: { host: "claude-code", session: "ses_a" } };
+    writeFileSync(configPath(), JSON.stringify(old, null, 2));
+    expect(loadConfig()).toMatchObject({ inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: { host: "claude-code", session: "ses_a" } });
+    // The next save, as the server's saveRows makes it.
+    expect(saveConfig({ inboxRows: ["roomy"], inboxRowsRev: 8, inboxRowsDefaults: 2, inboxRowsPrev: ["compact", "smallNames"], inboxRowsBy: null })).toBe(true);
+    const config = JSON.parse(readFileSync(configPath(), "utf-8"));
+    expect(config).toMatchObject({ displayName: "me", inboxRows: ["roomy"], inboxRowsRev: 8 });
+    expect(config.inboxRowsPrev).toEqual(old.inboxRowsPrev); // the old copy is left as it was, and no longer read
+    expect(state()).toMatchObject({ inboxRowsPrev: ["compact", "smallNames"], inboxRowsBy: null });
+    expect(loadConfig()).toMatchObject({ inboxRows: ["roomy"], inboxRowsRev: 8, inboxRowsPrev: ["compact", "smallNames"], inboxRowsBy: null });
+    // A new-style config.json never gets the Undo record.
+    rmSync(statePath());
+    writeFileSync(configPath(), JSON.stringify({ inboxRows: ["compact"], inboxRowsRev: 1 }, null, 2));
+    expect(saveConfig({ inboxRows: ["roomy"], inboxRowsRev: 2, inboxRowsPrev: ["compact"], inboxRowsBy: { host: "pi", session: "s" } })).toBe(true);
+    expect(JSON.parse(readFileSync(configPath(), "utf-8"))).toEqual({ inboxRows: ["roomy"], inboxRowsRev: 2 });
+  });
+
+  test("after moving over, saving any of this computer's state leaves config.json's bytes as they were", () => {
+    writeFileSync(configPath(), JSON.stringify({ ...LEGACY, inboxRows: ["compact"], inboxRowsRev: 1, inboxRowsPrev: ["roomy"] }, null, 2));
+    expect(saveConfig({ inboxBoardIntro: { shownAt: "first" } })).toBe(true); // moves over
+    const before = readFileSync(configPath(), "utf-8");
+    const values: Record<(typeof LOCAL_STATE_KEYS)[number], unknown> = {
+      inboxListIntro: { shownAt: "a" }, inboxVoiceIntro: { skippedAt: "b" }, inboxSnoozeIntro: { snoozedAt: "c" }, inboxBoardIntro: { shownAt: "d" },
+      inboxReveals: { lastShownAt: "e" }, inboxTour: { version: 3, skipped_at: "f" }, starAsk: { answer: "starred" }, inboxAgentNotes: { offered: true },
+      inboxThemeChooser: { dueAt: "g" }, inboxRowsPrev: ["hidePreview"], inboxRowsBy: { host: "pi", session: "h" },
+    };
+    for (const key of LOCAL_STATE_KEYS) {
+      expect(saveConfig({ [key]: values[key] })).toBe(true);
+      expect(readFileSync(configPath(), "utf-8")).toBe(before);
+      expect(loadConfig()[key]).toEqual(values[key] as never);
+    }
+    // An ordinary setting still goes to config.json, and brings none of the state with it.
+    expect(saveConfig({ inboxTextSize: 15 })).toBe(true);
+    const config = JSON.parse(readFileSync(configPath(), "utf-8"));
+    expect(config.inboxTextSize).toBe(15);
+    expect(config.inboxBoardIntro).toBeUndefined();
+    expect(config.inboxRowsPrev).toEqual(["roomy"]);
+  });
+
+  // A dotfiles or Nix setup: config.json is a link into a folder Plannotator can't write.
+  test("a config.json that can't be written: state saves still land; a save holding a setting writes neither file", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const store = join(tempDir, "store");
+    mkdirSync(store);
+    writeFileSync(join(store, "config.json"), JSON.stringify({ displayName: "me", inboxRows: ["compact"], inboxRowsRev: 1 }, null, 2));
+    symlinkSync(join(store, "config.json"), configPath());
+    chmodSync(join(store, "config.json"), 0o444);
+    chmodSync(store, 0o555);
+    try {
+      expect(saveConfig({ inboxRowsPrev: ["roomy"], inboxRowsBy: null, inboxTour: { version: 2 } })).toBe(true);
+      const stateBefore = readFileSync(statePath(), "utf-8");
+      // A list-look save: refused whole, so the Undo record never names a look that was not saved.
+      expect(saveConfig({ inboxRows: ["roomy"], inboxRowsRev: 2, inboxRowsPrev: ["compact"], inboxRowsBy: { host: "pi", session: "s" } })).toBe(false);
+      expect(readFileSync(statePath(), "utf-8")).toBe(stateBefore);
+      expect(loadConfig()).toMatchObject({ inboxRows: ["compact"], inboxRowsRev: 1, inboxRowsPrev: ["roomy"], inboxRowsBy: null });
+    } finally {
+      chmodSync(store, 0o755);
+    }
+  });
+
+  test("a local-state.json that is empty or not JSON: nothing throws, config.json's old copies are read, the next save repairs it", () => {
+    for (const bad of ["", "{ broken", "[]", "null"]) {
+      writeFileSync(configPath(), JSON.stringify(LEGACY, null, 2));
+      writeFileSync(statePath(), bad);
+      const before = readFileSync(configPath(), "utf-8");
+      expect(loadConfig()).toEqual(LEGACY);
+      expect(saveConfig({ inboxBoardIntro: { shownAt: "now" } })).toBe(true);
+      expect(readFileSync(configPath(), "utf-8")).toBe(before);
+      expect(state()).toMatchObject({ inboxListIntro: LEGACY.inboxListIntro, inboxBoardIntro: { shownAt: "now" } });
+      expect(saveConfig({ displayName: "you" })).toBe(true);
+      expect(JSON.parse(readFileSync(configPath(), "utf-8"))).toMatchObject({ displayName: "you", inboxSound: LEGACY.inboxSound });
+    }
   });
 });
