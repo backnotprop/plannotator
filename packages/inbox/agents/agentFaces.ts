@@ -9,8 +9,8 @@
  * is an agent's id (a launch's, else its session's) with every session it was or is, so an icon finds it by any of
  * them; the agents' list adds the sessions a live agent is now (a launch that started, a conversation that went on).
  *
- * This page: what the server said last (kept in `plannotator-inbox-agent-faces-v2`, so a reload paints the faces
- * before the read answers; never the truth), this page's own changes until the server answers them, and the agents'
+ * This page: what the server said last (kept with this page's changes in `plannotator-inbox-agent-faces-v2`, so a
+ * reload paints the faces before the read answers; never the truth), this page's own changes until the server answers them, and the agents'
  * list. Folded into one map of id → face, rebuilt on each change (a few hundred entries at most); only the icons whose
  * face changed hear of it (one listener set per id), so a choice redraws its agent's icons and nothing else.
  *
@@ -76,9 +76,9 @@ function boot(): void {
 }
 
 /** The entries as this page shows them: the server's, then this browser's old ones it lacks, then this page's changes. */
-function entries(): Entries {
+function entries(withLegacy = true): Entries {
   const out = Object.assign(Object.create(null), server?.faces ?? {}) as Entries;
-  for (const [key, face] of Object.entries(legacy ?? {})) if (!out[key]) out[key] = { face, sessions: [] };
+  if (withLegacy) for (const [key, face] of Object.entries(legacy ?? {})) if (!out[key]) out[key] = { face, sessions: [] };
   for (const [key, change] of pending) {
     const before = out[key];
     delete out[key];
@@ -112,9 +112,10 @@ function rebuild(): void {
   for (const id of changed) for (const listener of [...(listeners.get(id) ?? [])]) listener();
 }
 
+/** The paint copy: the server's faces with this page's changes on them, so a reload shows a choice even before it is saved. */
 function keepPaint(): void {
   try {
-    if (server) window.localStorage.setItem(AGENT_FACES_PAINT_KEY, JSON.stringify({ faces: server.faces, rev: server.rev }));
+    if (server || pending.size > 0) window.localStorage.setItem(AGENT_FACES_PAINT_KEY, JSON.stringify({ faces: entries(false), rev: server?.rev ?? 0 }));
   } catch {
     // Storage full or off: a reload paints the plain marks until the read answers.
   }
@@ -162,6 +163,7 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
   const sessions = [...new Set(chainOf(ref).filter((id) => id !== ref.id))];
   pending.delete(ref.id);
   pending.set(ref.id, { face, sessions });
+  keepPaint();
   rebuild();
   sending ??= send().finally(() => {
     sending = null;
