@@ -2990,6 +2990,16 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **Unchanged either way:** a caller that passes `githubRepo` (its `repoHost` decides), bare `#123` and `@user` (they still need `githubRepo`), and link labels.
 - **A host that passes nothing sees no change**, apart from one subscription per mounted `InlineMarkdown`. The Plannotator Inbox passes `true` at start and then `{ host }` with the host most of its projects use (`packages/inbox/defaultRefHost.ts`). Workspaces needs it only where it renders agent text with `InlineMarkdown` and no repo. Its own native renderers are not affected.
 
+## The comment card: its skill list shows, and its words drag it (unreleased; opt-in hosts only, no core change)
+
+Only for a host that turned the card on (`configurePlannotatorUI({ commentCard })`); the popover every other host draws is the same, pixel for pixel.
+
+- **The skill list was clipped away.** In the card, `SkillReferenceMenu` was a child of `.pn-cbox-field`, which scrolls (`overflow-y: auto`), so `/` and `$` drew the whole list where nothing shows. It is now a child of the card (`.pn-cbox`), on the side away from the words the comment is about (`prefer` below a card that sits under them, above one over them or docked), and flips when there is no room.
+- **The quoted words are a drag handle** (`[data-comment-card-handle]`, `useDraggable`'s `dragHandleProps`), as the popover's header is. A dragged card stays where it was put (`data-dragged`) until other words are picked or it is opened to full, which docks it again. Not on a phone, where it is docked. A press on the handle keeps the caret in the field and starts no selection of the page (which closed the card as a draft).
+- **`useDraggable(ref, { keepInside?: boolean })`**: with `keepInside`, the whole element stays inside the window. Absent: at least 50 px stays on screen, as before. The card passes it; the popover does not.
+
+Pinned by `components/CommentPopover.card.test.tsx` ("/" lists the skills, and its words drag it).
+
 ## `ImageLightbox` `at`: which of two images with the same URL opens (unreleased; additive, opt-in, no core change)
 
 `ImageLightbox` with `images` opened on the first image whose `src` is `src`. When two entries share a URL (the Plannotator Inbox's decision mode shows one picture for two choices, each named for its choice), the second could never open as itself.
@@ -3002,6 +3012,20 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
+
+## `useSkillReferenceAutocomplete` `commands` / `onCommand` (unreleased; additive, opt-in, no core change)
+
+- **`commands?: readonly SkillCatalogEntry[]`** and **`onCommand?: (command, text) => void`**. A host's own rows in the `/` list that are not skills (the Inbox's `/side`). They are listed after the catalog's leading `plannotator` rows; a catalog skill with the same name wins; `$` never lists them; the list opens for them even with an empty catalog. Picking one inserts nothing: the typed trigger leaves the text through `setText`, focus is left to the host, and `onCommand` gets the row and the text that is left. A command is never painted (`referenceTokens`) or counted (`humanOnlyReferences`), and never reaches an export. Absent: unchanged.
+
+Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.
+
+## Host-served rows as a group in the skill list (unreleased; additive, opt-in, no core change)
+
+- **`hostRowsFirst?: boolean`** on `useSkillReferenceAutocomplete`: rows with root `plannotator` stay together at the top of the list whatever was typed; within each group the filter's order stands. Absent: the filter's order alone.
+- **`groupHostRows?: boolean`** on `SkillReferenceMenu`: those rows' icon is drawn in `text-primary`, they carry `data-skill-item-host="true"`, and one hairline (`data-skill-menu-divider`, `aria-hidden`, no role) sits between the last of them and the first other row, only when both kinds are listed. The options, their ids and their order do not change. The active row is now scrolled into view by its id (it was by child position), which is the same row with the prop absent. Absent: every row alike, as before.
+- **`rowIcon?: (item) => ReactNode`** on `SkillReferenceMenu`: a host's own glyph for a row in place of the cube (the Inbox's built-ins); null or undefined keeps the cube. Absent: the cube on every row.
+
+Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.
 
 ## `useAnnotationHighlighter`: selection fixes (unreleased; every host, no opt-in, no core change)
 

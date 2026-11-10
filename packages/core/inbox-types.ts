@@ -2021,6 +2021,8 @@ export interface InboxHealth {
   peek?: true;
   /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
   inbox_id?: string;
+  /** The earlier runs of this Inbox's data folder, newest first (additive; packages/shared/inbox/registry.ts `inboxSessionLineage`). */
+  follows?: string[];
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
   /** Additive: this Inbox's door takes `update`, so a linked machine can update it. */
@@ -3222,6 +3224,11 @@ export interface InboxAgent {
   id: string;
   /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
   session: string;
+  /**
+   * The session ids its conversation had before (a poll's `continues`, nearest first; additive, absent when none):
+   * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
+   */
+  continues?: string[];
   /** Set when the Inbox launched it: the launch's id and its thread. */
   launch?: { id: string; thread_id: string };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */

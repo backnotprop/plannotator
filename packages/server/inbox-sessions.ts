@@ -38,11 +38,12 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { createInboxContinuations, parseInboxContinues } from "./inbox-continuations";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -445,7 +446,7 @@ export function createInboxLiveSessions(options: {
       return;
     }
     if (entry.busy !== true && !clocks) return;
-    const pending = store.pendingReplies(session, { tags: entry.tags });
+    const pending = pendingOf(session, { tags: entry.tags }).map((item) => item.message);
     if (clocks) {
       const ids = new Set(pending.map((item) => item.id));
       for (const id of [...clocks.keys()]) if (!ids.has(id)) clocks.delete(id);
@@ -468,7 +469,7 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) trackWaitsOf(session, entry, t);
   };
   /** The clock of an item waiting on `session` (ms), or null. */
-  const waitClockOf = (session: string, itemId: string): WaitClock | null => waits.get(session)?.get(itemId) ?? null;
+  const waitClockOf = (session: string, itemId: string): WaitClock | null => waits.get(standInOf(session)?.session ?? session)?.get(itemId) ?? null;
   /** The same, as the rows read it (ISO). */
   const waitOf = (session: string, itemId: string): { since: string; autoSince: string | null } | null => {
     const clock = waitClockOf(session, itemId);
@@ -528,6 +529,8 @@ export function createInboxLiveSessions(options: {
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    // Sent on every poll, so the latest stands: a poll without it withdraws the claim.
+    continuations.claim(session, parseInboxContinues(body[INBOX_CONTINUES_POLL_FIELD], session));
     // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
     const label = cleanInboxSessionLabel(body.label);
     if ((entry.label ?? null) !== label) labelChanges += 1;
@@ -576,6 +579,51 @@ export function createInboxLiveSessions(options: {
     entry.wakeOnly !== undefined
       ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
       : entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
+
+  /**
+   * A conversation that goes on under a new session id (inbox-continuations.ts): a poll's `continues` names the
+   * ids it continues, and while one of those does not poll, the continuing session stands in for it.
+   */
+  const continuations = createInboxContinuations({
+    isLive: (session) => {
+      const entry = sessions.get(session);
+      return !!entry && isLive(entry);
+    },
+  });
+  /** The entry that answers for `session` now: its own while it is live, else that of the live session continuing it. */
+  const standInOf = (session: string): { session: string; entry: SeenSession } | null => {
+    const own = sessions.get(session);
+    if (own && isLive(own)) return { session, entry: own };
+    const heir = continuations.heirOf(session);
+    const entry = heir === null ? undefined : sessions.get(heir);
+    return heir !== null && entry ? { session: heir, entry } : null;
+  };
+  /**
+   * What waits for `session`'s connection: its own items, then those of the sessions it stands in for, oldest
+   * first. `as` is the session an item waits for (the one its delivery is recorded for).
+   */
+  const pendingOf = (session: string, options: { tags?: boolean } = {}): { message: InboxMessage; as: string }[] => {
+    const own = store.pendingReplies(session, options).map((message) => ({ message, as: session }));
+    const inherited = continuations.inheritedBy(session);
+    if (inherited.length === 0) return own;
+    const seen = new Set(own.map((item) => item.message.id));
+    const out = [...own];
+    for (const [as, list] of store.pendingRepliesFor(new Set(inherited), options)) {
+      for (const message of list) {
+        if (seen.has(message.id)) continue;
+        seen.add(message.id);
+        out.push({ message, as });
+      }
+    }
+    const seqOf = (id: string) => store.messageCursor(id) ?? 0;
+    return out.sort((a, b) => seqOf(a.message.id) - seqOf(b.message.id));
+  };
+  /** The session `session`'s connection acts as for item `itemId`: itself, or the session it stands in for that the item goes to. */
+  const actingFor = (session: string, itemId: string): string => {
+    const message = store.message(itemId);
+    if (!message || store.isFor(message, session)) return session;
+    return continuations.inheritedBy(session).find((old) => store.isFor(message, old)) ?? session;
+  };
 
   /**
    * A session the Inbox wakes itself (Codex) called an Inbox tool: it is live
@@ -642,6 +690,8 @@ export function createInboxLiveSessions(options: {
     const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
       !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
+    // Its conversation goes on under another session id, and that one polls.
+    if (continuations.heirOf(session) !== null) return true;
     const steered = steering.get(session);
     if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
     return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
@@ -799,8 +849,9 @@ export function createInboxLiveSessions(options: {
    */
   const agentsSignature = (since: number): string =>
     agentSessions(since)
-      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}`)
-      .join("|");
+      // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
+      .join("|") + `#${continuations.signature()}`;
 
   /**
    * The agents that read the Inbox through MCP only, newest first: every
@@ -925,9 +976,11 @@ export function createInboxLiveSessions(options: {
   };
 
   /** How a session is connected now (live, no grace), or null when its connection does not poll. */
-  const connectionOf = (session: string): InboxRecipientConnection | null => {
-    const entry = sessions.get(session);
-    if (!entry || !isLive(entry)) return options.wakeOnlyStatus?.(session) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(session) } : null;
+  const connectionOf = (asked: string): InboxRecipientConnection | null => {
+    // A session whose conversation goes on under another id is connected as that one is.
+    const stand = standInOf(asked);
+    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked) } : null;
+    const { session, entry } = stand;
     return {
       busy: entry.busy,
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
@@ -962,8 +1015,8 @@ export function createInboxLiveSessions(options: {
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
   const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true } | null => {
-    const entry = sessions.get(session);
-    if (!entry || !isLive(entry)) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
+    const entry = standInOf(session)?.entry;
+    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
     return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}) };
   };
 
@@ -973,7 +1026,7 @@ export function createInboxLiveSessions(options: {
    * (`sessions` on `event: deliveries`). A turn starting, an MCP call or its window running out does not change it.
    */
   const presenceSignature = (): string => {
-    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys()]);
+    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys(), ...continuations.claimed()]);
     const there = [...known].filter((session) => options.store.hasWakingMessage(session) && askerLive(session)).sort();
     return [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", ...there].join("|");
   };
@@ -988,7 +1041,7 @@ export function createInboxLiveSessions(options: {
    */
   const deliverySignature = (): string => {
     const t = now();
-    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges)];
+    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges), `c:${continuations.signature()}`];
     for (const [id, entry] of sessions) {
       const recent = entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS;
       if (!recent) continue;
@@ -1277,6 +1330,14 @@ export function createInboxLiveSessions(options: {
     seenWakeOnly,
     liveFor,
     askerLive,
+    pendingOf,
+    actingFor,
+    /** The sessions `session` stands in for now (its conversation continues them, and they do not poll). */
+    inheritedBy: continuations.inheritedBy,
+    /** The live session standing in for `session` now, or null (the Agents list: one agent for one conversation). */
+    continuedBy: continuations.heirOf,
+    /** Every session id `session`'s conversation continues, nearest first. */
+    continuesOf: continuations.lineOf,
     stuck,
     replyTarget,
     seenOverMcp,

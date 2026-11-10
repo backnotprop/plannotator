@@ -177,6 +177,8 @@ import {
   inboxRegistryPath,
   isOwnDataDir,
   probeInboxData,
+  inboxHome,
+  inboxSessionLineage,
   readInboxRegistry,
   writeInboxRegistry,
   type InboxRegistryEntry,
@@ -1118,6 +1120,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
+  // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
+  const home = inboxHome(dataDir);
+  const follows = inboxSessionLineage(previous, home);
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
@@ -1430,6 +1435,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     app: INBOX_APP_ID,
     version,
     serverSession,
+    // Additive: the earlier runs of this data folder (registry.ts `inboxSessionLineage`). A window that loaded from
+    // one of them, on this version, takes this run's session and keeps writing (packages/inbox/sessionAdopt.ts).
+    ...(follows.length > 0 ? { follows } : {}),
     pid: process.pid,
     update: updates.current(),
     notify_reach: windows.reach(notificationsState().enabled),
@@ -1679,6 +1687,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       },
       projectById,
       lastHeardOf: live.lastHeardOf,
+      continuedBy: live.continuedBy,
+      continuesOf: live.continuesOf,
       labels: true,
     });
   };
@@ -3748,11 +3758,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A busy session that can take an item mid-turn: what has waited long enough goes in now.
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
+    // What waits for this session, and for the sessions its conversation continues that no longer poll
+    // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
     const commands = () => {
-      const list = store
-        .pendingReplies(session, { tags })
-        .filter((reply) => !withdrawnTidy(reply))
-        .map((reply) => replyCommand(reply, sendNow, session));
+      const list = live
+        .pendingOf(session, { tags })
+        .filter((item) => !withdrawnTidy(item.message))
+        .map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -3781,7 +3793,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
-        if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session, { tags }).length > 0) finish();
+        if (line.kind === "message" && line.record.author.kind === "person" && live.pendingOf(session, { tags }).length > 0) finish();
       });
       const stopAskWaits = ask.onWaits((waiting) => {
         if (waiting === session) finish();
@@ -3805,10 +3817,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       live.stateChanged(session, host, body);
       return json({ ok: true });
     }
+    // An item this session took for a session its conversation continues is recorded for that one, the session
+    // the thread knows (`continues`, inbox-continuations.ts).
+    const acting = typeof body.id === "string" ? live.actingFor(session, body.id) : session;
     // Send now could not go into the running turn: the reply reads as queued again and waits for idle.
     if (body.type === "send_now_failed" && typeof body.id === "string") {
       live.steerDone(session);
-      store.clearDeliverNow(body.id, session);
+      store.clearDeliverNow(body.id, acting);
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {
@@ -3819,11 +3834,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
     const markedAt = marked
-      ? marked.tags?.find((tag) => tag.session === session && tag.deliver_now_by === "auto")?.deliver_now_at ??
+      ? marked.tags?.find((tag) => tag.session === acting && tag.deliver_now_by === "auto")?.deliver_now_at ??
         (marked.deliver_now_by === "auto" ? marked.deliver_now_at : null)
       : null;
     const intoTurn = markedAt ? live.deliveredIntoTurn(session, markedAt) : undefined;
-    const reply = store.recordDelivery(body.id, { host, session, ...(intoTurn !== undefined ? { intoTurn } : {}) });
+    const reply = store.recordDelivery(body.id, { host, session: acting, ...(intoTurn !== undefined ? { intoTurn } : {}) });
     return json({ ok: true, delivery: reply.delivery });
   };
 
@@ -4008,7 +4023,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // (`deliver_now_by: "auto"`); the mark is a store line, which answers the session's held poll with `now: true`.
   const autoSendFor = (session: string, tags: boolean) => {
     try {
-      store.autoSendDue(session, { afterMs: live.autoSendAfterMs, tags, clockOf: (id) => live.waitClockOf(session, id) });
+      // Its own items, and those of the sessions its conversation continues: their clocks run under this session.
+      for (const owed of [session, ...live.inheritedBy(session)]) {
+        store.autoSendDue(owed, { afterMs: live.autoSendAfterMs, tags, clockOf: (id) => live.waitClockOf(session, id) });
+      }
     } catch (error) {
       process.stderr.write(`Inbox: a reply did not go in by itself: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -6472,6 +6490,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     token,
     serverSession,
     startedAt: new Date().toISOString(),
+    // The runs this one follows, and the folder it is written in: a window left open across the restart keeps writing.
+    ...(follows.length > 0 ? { follows } : {}),
+    ...(home ? { home } : {}),
     ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
     ...(previous?.lan ? { lan: previous.lan } : {}),
     // The mapping the last run made (its ports), so this start re-points or takes down its own.

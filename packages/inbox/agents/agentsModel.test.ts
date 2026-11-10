@@ -105,3 +105,30 @@ test('a sidebar cookie from before Agents keeps its choice: Machines closed is A
   expect([...parseClosedSections('pinned,machines')].sort()).toEqual(['agents', 'pinned']);
   expect([...parseClosedSections('agents,projects')].sort()).toEqual(['agents', 'projects']);
 });
+
+// One conversation under two session ids (`InboxAgent.continues`): one row, opening the conversation's thread.
+test('an agent finds its thread under the session id its conversation had before', () => {
+  const rows = [row('msg_old', 'ses_old', { subject: 'better-pierre' })];
+  const [flat] = agentsGroups([group([agent('ses_new', { continues: ['ses_old'] })])], machinesModel(null), rows);
+  expect(flat!.agents.map((e) => [e.agent.id, e.name, e.thread?.id])).toEqual([['ses_new', 'better-pierre', 'msg_old']]);
+});
+
+test('an old session id that still polls is not a second row when both open the same thread', () => {
+  const rows = [row('msg_t', 'ses_old', { subject: 'better-pierre', participants: [{ session: 'ses_old' }, { session: 'ses_new' }] as InboxListRow['participants'] })];
+  const agents = [agent('ses_old'), agent('ses_new', { continues: ['ses_old'] })];
+  const [flat] = agentsGroups([group(agents)], machinesModel(null), rows);
+  expect(flat!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_new', 'msg_t']]);
+  // The same for a launched one: its launch's row gives way to the session that continues it.
+  const launched = [agent('lch_1', { session: 'ses_old', launch: { id: 'lch_1', thread_id: 'msg_t' } }), agent('ses_new', { continues: ['ses_old'] })];
+  expect(agentsGroups([group(launched)], machinesModel(null), rows)[0]!.agents.map((e) => e.agent.id)).toEqual(['ses_new']);
+});
+
+test('two rows stay two: a branch that works in its own thread, and two agents that share a thread', () => {
+  const branch = [row('msg_a', 'ses_old'), row('msg_b', 'ses_new')];
+  const forked = agentsGroups([group([agent('ses_old'), agent('ses_new', { continues: ['ses_old'] })])], machinesModel(null), branch);
+  // The branch keeps to its own thread: the old session's is not its own while that session is listed.
+  expect(forked[0]!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_old', 'msg_a'], ['ses_new', 'msg_b']]);
+  const shared = [row('msg_t', 'ses_one', { participants: [{ session: 'ses_one' }, { session: 'ses_two' }] as InboxListRow['participants'] })];
+  const two = agentsGroups([group([agent('ses_one'), agent('ses_two')])], machinesModel(null), shared);
+  expect(two[0]!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_one', 'msg_t'], ['ses_two', 'msg_t']]);
+});
