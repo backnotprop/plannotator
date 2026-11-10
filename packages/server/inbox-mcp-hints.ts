@@ -99,7 +99,7 @@ export function pullsNotAttached(store: InboxStore, threadId: string, body: stri
   return named.filter((ref) => !known.has(ref.key));
 }
 
-/** The attach line (DRAFT words, not yet approved). */
+/** The attach line (the approved words). */
 export function attachPullText(refs: readonly InboxThreadPullRef[]): string {
   const names = refs.slice(0, HINT_PULLS_MAX).map((ref) => JSON.stringify(inboxThreadPullText({ pull: ref.key, url: ref.url })));
   const one = refs.length === 1;
@@ -126,7 +126,7 @@ export function questionWithBareOptions(body: string): boolean {
   return !asked.some((q) => q.parsed.prototype || q.parsed.choices.some((c) => (c.pros?.length ?? 0) > 0 || (c.cons?.length ?? 0) > 0 || c.prototype));
 }
 
-/** The options line (DRAFT words, not yet approved). */
+/** The options line (the approved words). */
 export const QUESTION_OPTIONS_HINT =
   "If it helps the person choose, options can carry pros and cons, and a prototype they can try: `Pros:`, `Cons:` and `Prototype:` lines indented under a choice (send_message's body says how).";
 
