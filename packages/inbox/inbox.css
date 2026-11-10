@@ -7838,16 +7838,26 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 @media (prefers-reduced-motion: reduce) { .ib-fcomp[data-fcomp-homing] { transition: none; } }
 /* A size the person gave it (the corners, shown once the card is off its home): the card is a column, the field
    takes what the height leaves and scrolls inside, the row of buttons stays at the foot. */
-.ib-fcomp[data-fcomp-sized]:not(.ib-phone) { display: flex; flex-direction: column; width: var(--ib-fcomp-rw); height: var(--ib-fcomp-rh); }
+/* The second selector outweighs the width the card has beside the open comments panel (`.ib-drawer`, below). */
+.ib-fcomp[data-fcomp-sized]:not(.ib-phone),
+.ib-view.ib-fullview:not(.ib-phone) .ib-fcomp[data-fcomp-sized]:not(.ib-phone) { display: flex; flex-direction: column; width: var(--ib-fcomp-rw); height: var(--ib-fcomp-rh); }
+/* Made narrow (under 480 px): the tabs read "Comment" and "Reply", as a phone's; their whole names stay for a screen
+   reader and as tooltips. The reply's chips keep their words rather than run under the link. */
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short] { font-size: 0; }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short]::after { content: attr(data-short); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabs { gap: 4px; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-chips { flex-wrap: nowrap; min-width: min-content; }
 .ib-fcomp[data-fcomp-sized] > * { flex: none; }
-.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; }
-.ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; min-height: 0; }
-.ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; }
+/* The field's row never goes under the field's own least (one line): a card too low for its parts shows as the body
+   overflowing, which composerDrag.ts reads to grow it. */
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(min-content, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; }
 .pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
 .pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rmirror { max-height: none; }
 .pn-inbox .ib-fcomp[data-fcomp-sized] .ib-ccard > .ib-ta { align-self: stretch; height: 100%; max-height: none; field-sizing: fixed; }
-/* The corners: 18 px to press (28 for a finger), 4 px out past the card's edge. The mark is a 2 px arc 3 px inside the
-   card's own corner, in the muted text colour. */
+/* The corners: 18 px to press (28 for a finger), 4 px out past the card's edge. No mark at rest (the owner's pick): the
+   cursor, and under the pointer a 2 px arc 3 px inside the card's own corner, in the muted text colour. */
 .ib-fcomp-corner { position: absolute; z-index: 3; width: 18px; height: 18px; touch-action: none; -webkit-user-select: none; user-select: none; }
 .ib-fcomp-corner[data-fcomp-resize^="n"] { top: -4px; }
 .ib-fcomp-corner[data-fcomp-resize^="s"] { bottom: -4px; }
@@ -7865,8 +7875,6 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp[data-fcomp-resizing="ne"] .ib-fcomp-corner[data-fcomp-resize="ne"]::after,
 .ib-fcomp[data-fcomp-resizing="sw"] .ib-fcomp-corner[data-fcomp-resize="sw"]::after,
 .ib-fcomp[data-fcomp-resizing="se"] .ib-fcomp-corner[data-fcomp-resize="se"]::after { opacity: 1; }
-/* Treatment b (proposal): the bottom right mark stays, quieter, once the card is off its home. */
-.ib-fcomp[data-fcomp-corners="b"] .ib-fcomp-corner[data-fcomp-resize="se"]:not(:hover)::after { opacity: 0.55; }
 @media (pointer: coarse) { .ib-fcomp-corner { width: 28px; height: 28px; } }
 
 /* The tray and its tabs (one radio group), the chevron at its end. */

@@ -8,7 +8,8 @@
  * home; a double click on the tray puts it home; a press on the tray leaves focus where it was; a phone's card does
  * not move. Resizing: a card at home has no corners, a moved one has four; a corner moves and the opposite one
  * stays; never under the card's own size, never past the view's margin; the size holds through a tab switch and the
- * tools gathered; another file and the double click give the card's own size back; a smaller window limits it.
+ * tools gathered; another file and the double click give the card's own size back; a smaller window limits it; it
+ * goes narrower than it starts, down to a floor, where the tabs take short names; every corner reaches the margin.
  *
  * happy-dom lays nothing out, so the card's and its view's boxes are given here (`layout`).
  *
@@ -17,7 +18,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { clampOffset, DRAG_MARGIN, resizeBox } from './composerDrag';
+import { clampOffset, DRAG_MARGIN, MIN_WIDTH, resizeBox } from './composerDrag';
 import type { FullScreenComposerValue } from './components/FullScreenComposer';
 
 const hasDom = typeof document !== 'undefined';
@@ -415,16 +416,20 @@ test.skipIf(!hasDom)('never smaller than the card is by itself, never past the v
   await draw();
   dragBy(tray(), 100, -300);
   await settle();
+  // Narrower than it starts (600), down to the floor; no lower than its tray, one line and its buttons (150 here).
+  dragBy(cornerAt('se'), -180, -400);
+  expect(sizeNow()).toEqual({ w: 420, h: 150 });
   dragBy(cornerAt('se'), -400, -400);
-  expect(sizeNow()).toEqual({ w: 600, h: 150 });
-  expect(boxNow()).toEqual({ left: 400, top: 330, right: 1000, bottom: 480 });
+  expect(sizeNow()).toEqual({ w: MIN_WIDTH, h: 150 });
+  expect(boxNow()).toEqual({ left: 400, top: 330, right: 400 + MIN_WIDTH, bottom: 480 });
   dragBy(cornerAt('se'), 5000, 5000);
   expect(boxNow()).toEqual({ left: 400, top: 330, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
   dragBy(cornerAt('nw'), -5000, -5000);
   expect(boxNow()).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
-  // Back down from the largest: its own width again, not less.
+  // Back down from the largest: the floor again, not less, the bottom right corner still at the margin.
   dragBy(cornerAt('nw'), 5000, 5000);
-  expect(sizeNow()).toEqual({ w: 600, h: 150 });
+  expect(sizeNow()).toEqual({ w: MIN_WIDTH, h: 150 });
+  expect(boxNow()).toEqual({ left: 1200 - DRAG_MARGIN - MIN_WIDTH, top: 800 - DRAG_MARGIN - 150, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
   // A smaller window limits the size as it limits the place.
   dragBy(cornerAt('nw'), -5000, -5000);
   layout.width = 900;
@@ -467,6 +472,7 @@ test.skipIf(!hasDom)('another file gives the card its own size and home back; so
   await settle();
   expect(card().hasAttribute('data-fcomp-sized')).toBe(false);
   expect(sizeNow()).toEqual({ w: 600, h: 150 });
+  expect(card().hasAttribute('data-fcomp-narrow')).toBe(false);
   expect(at()).toEqual({ x: 0, y: 0 });
   expect(corners()).toHaveLength(0);
   dragBy(tray(), 100, -300);
@@ -484,4 +490,86 @@ test.skipIf(!hasDom)('another file gives the card its own size and home back; so
   expect(card().hasAttribute('data-fcomp-sized')).toBe(false);
   expect(at()).toEqual({ x: 0, y: 0 });
   expect(corners()).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('every corner grows the card to the view’s margin on its two sides, wherever the card sits', async () => {
+  const far: Record<string, [number, number]> = { nw: [-5000, -5000], ne: [5000, -5000], sw: [-5000, 5000], se: [5000, 5000] };
+  // Near the left edge, near the right edge, and in the middle: the keep-inside rule never stops a corner early.
+  for (const [dx, dy] of [[-5000, -300], [5000, -300], [0, -300]] as const) {
+    await draw();
+    dragBy(tray(), dx, dy);
+    await settle();
+    for (const which of ['nw', 'ne', 'sw', 'se']) {
+      const before = boxNow();
+      dragBy(cornerAt(which), ...far[which]!);
+      const now = boxNow();
+      expect(now).toEqual({
+        left: which.endsWith('w') ? DRAG_MARGIN : before.left,
+        right: which.endsWith('e') ? 1200 - DRAG_MARGIN : before.right,
+        top: which.startsWith('n') ? DRAG_MARGIN : before.top,
+        bottom: which.startsWith('s') ? 800 - DRAG_MARGIN : before.bottom,
+      });
+    }
+    expect(sizeNow()).toEqual({ w: 1200 - 2 * DRAG_MARGIN, h: 800 - 2 * DRAG_MARGIN });
+    act(() => root?.unmount());
+    root = null;
+  }
+});
+
+test.skipIf(!hasDom)('made narrow, the tabs take their short names and keep their whole ones; every control is still there', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  const label = (which: 'comment' | 'reply') => tab(which).querySelector<HTMLElement>('.ib-fcomp-tabl')!;
+  expect(card().hasAttribute('data-fcomp-narrow')).toBe(false);
+  expect(tab('reply').getAttribute('title')).toBeNull();
+  dragBy(cornerAt('se'), -400, 0);
+  await settle();
+  expect(sizeNow().w).toBe(MIN_WIDTH);
+  expect(card().hasAttribute('data-fcomp-narrow')).toBe(true);
+  // What the tab draws, and what it is still called.
+  expect(label('comment').getAttribute('data-short')).toBe('Comment');
+  expect(label('reply').getAttribute('data-short')).toBe('Reply');
+  expect(label('comment').textContent).toBe('Comment on this page');
+  expect(tab('reply').getAttribute('title')).toBe('Reply to Claude Code');
+  expect(host!.querySelector('[data-fcomp-minimize]')).not.toBeNull();
+  // The tab still switches, and the reply's row is all there.
+  act(() => tab('reply').click());
+  await settle();
+  expect(card().getAttribute('data-fcomp-mode-on')).toBe('reply');
+  for (const part of ['[data-fcomp-send]', '[data-fcomp-attach]', '[data-fcomp-open-thread]', '[data-fcomp-bin]']) expect(card().querySelector(part)).not.toBeNull();
+  // Wide again: the whole names are drawn, with no tooltip.
+  dragBy(cornerAt('se'), 400, 0);
+  await settle();
+  expect(card().hasAttribute('data-fcomp-narrow')).toBe(false);
+  expect(tab('comment').getAttribute('title')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a row of buttons that needs more than the floor sets the least width', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  // The reply's row runs 46 px out of the card at the floor (its chips): the least width is that much more.
+  const body = card().querySelector<HTMLElement>('[data-fcomp-body]')!;
+  Object.defineProperty(body, 'scrollWidth', { configurable: true, get: () => (card().style.getPropertyValue('--ib-fcomp-rw') === `${MIN_WIDTH}px` ? 46 : 0) });
+  dragBy(cornerAt('se'), -5000, 0);
+  expect(sizeNow().w).toBe(MIN_WIDTH + 46);
+});
+
+test.skipIf(!hasDom)('a tab whose row needs more than the card’s width widens the card when it is picked', async () => {
+  await draw();
+  dragBy(tray(), 100, -300);
+  await settle();
+  dragBy(cornerAt('se'), -5000, 0);
+  expect(sizeNow().w).toBe(MIN_WIDTH);
+  // The Reply tab's row runs 46 px out of a card this narrow.
+  const body = card().querySelector<HTMLElement>('[data-fcomp-body]')!;
+  Object.defineProperty(body, 'scrollWidth', { configurable: true, get: () => (card().getAttribute('data-fcomp-mode-on') === 'reply' && card().style.getPropertyValue('--ib-fcomp-rw') === `${MIN_WIDTH}px` ? 46 : 0) });
+  act(() => tab('reply').click());
+  await settle();
+  expect(sizeNow().w).toBe(MIN_WIDTH + 46);
+  // Back on Comment, the width the person set is the card's again.
+  act(() => tab('comment').click());
+  await settle();
+  expect(sizeNow().w).toBe(MIN_WIDTH);
 });

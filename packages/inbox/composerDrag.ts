@@ -16,8 +16,9 @@
  *
  * Resizing (the owner, 2026-11-09: "after I move it, if some like resized corner panels show up"). Once the card is
  * off its home, its four corners resize it (`resizable`, `corner()`): the corner under the pointer moves and the
- * opposite one stays. Never smaller than the card is by itself (its own width; its height with the field at its
- * least), never past the view's margin. The size is two more variables (`--ib-fcomp-rw`, `--ib-fcomp-rh`, with
+ * opposite one stays. As narrow as `MIN_WIDTH` (more when the row of buttons needs it) and as low as one line of text
+ * with the tray and the buttons; as large as the view less its margin. Under `NARROW_WIDTH` the tabs read "Comment"
+ * and "Reply" as on a phone (`data-fcomp-narrow`, `narrow`: their whole names stay, and show as tooltips). The size is two more variables (`--ib-fcomp-rw`, `--ib-fcomp-rh`, with
  * `data-fcomp-sized`), kept and dropped with the place: another file or the double click gives the card's own size
  * back. A card at home has no corners. Pointer only: the app's resize handles (ResizeHandle) take no keys either.
  */
@@ -112,17 +113,34 @@ function writeSize(el: HTMLElement, size: Size | null): void {
   el.setAttribute('data-fcomp-sized', '');
 }
 
-/** The least the card can be: its own width, and its height with the field on screen at its least. */
+/** The narrowest the corners make the card: its tabs as "Comment" and "Reply", the chevron, the bin and the button. */
+export const MIN_WIDTH = 320;
+/** Under this width the tabs take their short names. */
+export const NARROW_WIDTH = 480;
+
+/**
+ * The least the card can be. Its width: `MIN_WIDTH`, more when the tray or the row of buttons would run out of the
+ * card there (the reply's chips). Its height: what it has with the field on screen at its least, one line. Read with
+ * the card set to that width for the moment; nothing is painted in between.
+ */
 function leastSize(card: HTMLElement): Size {
-  const sized = card.hasAttribute('data-fcomp-sized');
-  // Its own width is read with the person's size off for the moment (nothing is painted in between).
-  if (sized) card.removeAttribute('data-fcomp-sized');
-  const w = card.offsetWidth;
-  if (sized) card.setAttribute('data-fcomp-sized', '');
+  const had = { sized: card.hasAttribute('data-fcomp-sized'), narrow: card.hasAttribute('data-fcomp-narrow'), w: card.style.getPropertyValue('--ib-fcomp-rw'), h: card.style.getPropertyValue('--ib-fcomp-rh') };
+  card.setAttribute('data-fcomp-sized', '');
+  card.setAttribute('data-fcomp-narrow', '');
+  card.style.setProperty('--ib-fcomp-rw', `${MIN_WIDTH}px`);
+  // No height given: the card is as tall as it needs at that width.
+  card.style.removeProperty('--ib-fcomp-rh');
+  let over = 0;
+  for (const part of card.querySelectorAll<HTMLElement>(':scope > .ib-fcomp-top, :scope > [data-fcomp-body]')) over = Math.max(over, part.scrollWidth - part.clientWidth);
   const field = [...card.querySelectorAll<HTMLTextAreaElement>('[data-fcomp-body] textarea')].find((el) => el.offsetHeight > 0);
   const least = field ? parseFloat(getComputedStyle(field).minHeight) || 0 : 0;
   const h = field ? card.offsetHeight - field.offsetHeight + Math.min(field.offsetHeight, least) : card.offsetHeight;
-  return { w: Math.ceil(w / 2) * 2, h: Math.ceil(h) };
+  card.toggleAttribute('data-fcomp-sized', had.sized);
+  card.toggleAttribute('data-fcomp-narrow', had.narrow);
+  if (had.w) card.style.setProperty('--ib-fcomp-rw', had.w);
+  else card.style.removeProperty('--ib-fcomp-rw');
+  if (had.h) card.style.setProperty('--ib-fcomp-rh', had.h);
+  return { w: Math.ceil((MIN_WIDTH + over) / 2) * 2, h: Math.ceil(h) };
 }
 
 function write(el: HTMLElement, at: Offset): void {
@@ -146,6 +164,8 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
   const sizing = useRef<{ id: number; x: number; y: number; corner: Corner; from: Edges; min: Size; centre: number; foot: number; view: { width: number; height: number } } | null>(null);
   /** The card is off its home or has a size of its own: its corners resize it. */
   const [resizable, setResizable] = useState(false);
+  /** The card is narrow enough for the tabs' short names. */
+  const [narrow, setNarrow] = useState(false);
   const homing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const endHoming = useCallback(() => {
@@ -168,10 +188,22 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
       const wanted = enabled ? size.current : null;
       const sized = wanted && parent ? { w: Math.min(wanted.w, Math.max(0, parent.clientWidth - 2 * DRAG_MARGIN)), h: Math.min(wanted.h, Math.max(0, parent.clientHeight - 2 * DRAG_MARGIN)) } : wanted;
       writeSize(card, sized);
-      // More in the card than the height holds (files on the reply, an error line): it grows to hold it.
-      // Read on the body, which takes what the height leaves: the corners hang past the card's own edge.
-      const body = sized ? card.querySelector<HTMLElement>('[data-fcomp-body]') : null;
-      if (sized && body && body.scrollHeight > body.clientHeight + 1) writeSize(card, { w: sized.w, h: sized.h + body.scrollHeight - body.clientHeight });
+      const slim = sized !== null && sized.w < NARROW_WIDTH;
+      card.toggleAttribute('data-fcomp-narrow', slim);
+      setNarrow((had) => (had === slim ? had : slim));
+      // More in the card than the size holds (another tab's row of buttons, files on the reply, an error line): it
+      // grows to hold it, across first. Read on the tray and the body: the corners hang past the card's own edge.
+      if (sized) {
+        const body = card.querySelector<HTMLElement>(':scope > [data-fcomp-body]');
+        const tray = card.querySelector<HTMLElement>(':scope > .ib-fcomp-top');
+        const across = Math.max(body ? body.scrollWidth - body.clientWidth : 0, tray ? tray.scrollWidth - tray.clientWidth : 0);
+        let fit = sized;
+        if (across > 1) {
+          fit = { w: fit.w + Math.ceil(across / 2) * 2, h: fit.h };
+          writeSize(card, fit);
+        }
+        if (body && body.scrollHeight > body.clientHeight + 1) writeSize(card, { w: fit.w, h: fit.h + body.scrollHeight - body.clientHeight });
+      }
       const measured = enabled ? measure(card) : null;
       const next = !enabled ? { x: 0, y: 0 } : measured ? clampOffset(want.current, measured.home, measured.view) : shown.current;
       const moved = next.x !== shown.current.x || next.y !== shown.current.y || (next.x !== 0 || next.y !== 0) !== card.hasAttribute('data-fcomp-moved');
@@ -370,5 +402,5 @@ export function useComposerDrag(enabled: boolean, fileKey: string | undefined) {
     [draw, endHoming, endSizing],
   );
 
-  return { attach, handle, resizable, corner };
+  return { attach, handle, resizable, narrow, corner };
 }

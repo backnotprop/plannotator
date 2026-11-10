@@ -267,12 +267,6 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
   );
 }
 
-/**
- * PROPOSAL, to be removed once the owner picks: how the resize corners show. `a`: the cursor, and a faint tick on the
- * corner under the pointer. `b`: as `a`, plus a tick that stays at the bottom right. `?fcorners=b` in the address.
- */
-const cornerTreatment = typeof location !== 'undefined' && new URLSearchParams(location.search).get('fcorners') === 'b' ? 'b' : 'a';
-
 export function FullScreenComposer({
   value,
   noun,
@@ -297,7 +291,7 @@ export function FullScreenComposer({
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
   // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
-  const { attach: attachDrag, handle: dragHandle, resizable, corner } = useComposerDrag(!phone, value.fileKey);
+  const { attach: attachDrag, handle: dragHandle, resizable, narrow, corner } = useComposerDrag(!phone, value.fileKey);
   // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
@@ -459,7 +453,8 @@ export function FullScreenComposer({
       <path d="M11 0V10H0V9.5A10.5 9.5 0 0 0 10.5 0Z" />
     </svg>
   );
-  const tab = (which: ComposerMode, icon: 'comment' | 'reply', text: string, words: boolean) => {
+  // `short`: what the tab reads on a card the person made narrow (composerDrag.ts), as a phone's. Its name stays whole.
+  const tab = (which: ComposerMode, icon: 'comment' | 'reply', text: string, words: boolean, short?: string) => {
     const on = mode === which;
     return (
       <button
@@ -471,12 +466,12 @@ export function FullScreenComposer({
         onClick={() => pick(which)}
         onKeyDown={onTabKey}
         data-fcomp-mode={which}
-        title={!on && words ? `${text} (has words)` : undefined}
+        title={!on && words ? `${text} (has words)` : narrow && short ? text : undefined}
       >
         {on && flare('l')}
         {on && flare('r')}
         <Icon name={icon} size={phone ? 16 : 13} />
-        <span className="ib-fcomp-tabl">{text}</span>
+        <span className="ib-fcomp-tabl" data-short={short}>{text}</span>
         {!on && words && <span className="ib-fcomp-tabdot" aria-hidden="true" data-fcomp-tab-dot="" />}
         {!on && words && <span className="ib-sr">, has words</span>}
       </button>
@@ -587,7 +582,6 @@ export function FullScreenComposer({
       inert={value.tucked || undefined}
       data-fcomp=""
       data-fcomp-mode-on={mode}
-      data-fcomp-corners={cornerTreatment}
       data-file-foot=""
       data-drop-over={drop.over ? '' : undefined}
       onInput={readCommentWords}
@@ -605,8 +599,8 @@ export function FullScreenComposer({
       <div className="ib-fcomp-top" {...dragHandle}>
         {takesComments ? (
           <div className="ib-fcomp-tabs" role="radiogroup" aria-label="Write" ref={tabsRef}>
-            {tab('comment', 'comment', phone ? 'Comment' : commentLabel, commentWords)}
-            {tab('reply', 'reply', phone ? 'Reply' : replyLabel, hasDraft)}
+            {tab('comment', 'comment', phone ? 'Comment' : commentLabel, commentWords, phone ? undefined : 'Comment')}
+            {tab('reply', 'reply', phone ? 'Reply' : replyLabel, hasDraft, phone ? undefined : 'Reply')}
           </div>
         ) : (
           <span className="ib-fcomp-solo">
@@ -700,7 +694,7 @@ export function FullScreenComposer({
           {reply.errorActions}
         </p>
       )}
-      {/* Off its home, the card's corners resize it (composerDrag.ts). Pointer only, as the app's other resize handles. */}
+      {/* Off its home, the card's corners resize it (composerDrag.ts). No mark at rest: the cursor, and a faint arc under the pointer. Pointer only. */}
       {resizable && CORNERS.map((which) => <span key={which} className="ib-fcomp-corner" aria-hidden="true" {...corner(which)} />)}
       {drop.over && (
         <div className="ib-rdrop ib-fcomp-drop" aria-hidden="true" data-fcomp-drop="">
