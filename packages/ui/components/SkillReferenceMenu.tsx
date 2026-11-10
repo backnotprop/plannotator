@@ -26,6 +26,14 @@ interface SkillReferenceMenuProps {
   prefer?: 'above' | 'below';
   /** Upper bound on the list's height, in px. Default: 256. */
   maxListHeight?: number;
+  /**
+   * Draw the host-served rows (root `plannotator`) as their own group (opt-in; the Inbox's "/" list): their icon in
+   * the theme's primary colour, and one hairline between the last of them and the first other row, only when both
+   * kinds are listed. The hairline is presentational (no role, hidden from assistive tech): the options, their ids
+   * and their order are the same with or without it. The caller lists those rows first (the hook's `hostRowsFirst`).
+   * Absent: every row alike, as before.
+   */
+  groupHostRows?: boolean;
 }
 
 /** Vertical gap between the composer wrapper and the menu (mb-1.5 / mt-1.5 = 6px). */
@@ -106,6 +114,7 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   boundary,
   prefer,
   maxListHeight,
+  groupHostRows = false,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -166,7 +175,8 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   useEffect(() => {
     if (activeIndex === null) return;
     const list = listRef.current;
-    const row = list?.children[activeIndex] as HTMLElement | undefined;
+    // By id, not by position: a group's hairline is a child of the list too.
+    const row = list?.querySelector<HTMLElement>(`[id="${id}-option-${activeIndex}"]`);
     row?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
@@ -188,9 +198,14 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
         className="overflow-y-auto p-1.5 flex flex-col gap-px"
         style={{ maxHeight: placement.maxListHeight }}
       >
-        {items.map((item, index) => (
+        {items.map((item, index) => {
+          const hostRow = groupHostRows && item.root === 'plannotator';
+          // The one hairline: under the last host-served row, when a row of another kind follows it.
+          const next = items[index + 1];
+          const dividerAfter = hostRow && next !== undefined && next.root !== 'plannotator';
+          return (
+          <React.Fragment key={item.name}>
           <button
-            key={item.name}
             type="button"
             id={`${id}-option-${index}`}
             role="option"
@@ -198,6 +213,7 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
             tabIndex={-1}
             data-skill-item={item.name}
             data-skill-item-active={index === activeIndex ? 'true' : undefined}
+            data-skill-item-host={hostRow ? 'true' : undefined}
             // Insert on pointerdown so the textarea never loses focus. A
             // click is explicit selection; hover deliberately does NOT
             // activate the row (see the component docblock), and its only
@@ -211,7 +227,7 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
               index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'
             }`}
           >
-            <SkillIcon />
+            <SkillIcon className={hostRow ? 'text-primary' : undefined} />
             {/* data-skill-item-part: a host's styling hook (the Inbox lays a row out in two lines on a phone). */}
             <span data-skill-item-part="name" className="shrink-0 font-semibold text-foreground">{item.name}</span>
             <span data-skill-item-part="description" className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -221,15 +237,18 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
               {ROOT_LABELS[item.root]}
             </span>
           </button>
-        ))}
+          {dividerAfter && <div aria-hidden="true" data-skill-menu-divider="true" className="mx-2.5 my-1 h-px shrink-0 bg-border" />}
+          </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );
 };
 
-const SkillIcon: React.FC = () => (
+const SkillIcon: React.FC<{ className?: string }> = ({ className = 'text-muted-foreground' }) => (
   <svg
-    className="w-4 h-4 shrink-0 text-muted-foreground"
+    className={`w-4 h-4 shrink-0 ${className}`}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"

@@ -54,7 +54,7 @@ const MESSAGE = {
 const THREAD: InboxThread = { thread_id: ROOT, project: PROJECT, subject: 'Retry budget', thread_name: null, resolved_at: null, messages: [MESSAGE] } as unknown as InboxThread;
 
 const CURATE: SkillCatalogEntry = { name: 'review-curate', root: 'plannotator', description: 'A review of only the parts of the change that need you', humanOnly: true };
-const SHAPE: SkillCatalogEntry = { name: 'shape', root: 'plannotator', description: 'Ask the agent to draw this thread as a Shape board it keeps current.', humanOnly: true };
+const SHAPE: SkillCatalogEntry = { name: 'shape', root: 'plannotator', description: 'Ask the agent to picture this thread.', humanOnly: true };
 const READBACK: SkillCatalogEntry = { name: 'readback', root: 'claude', description: 'State the request back.', humanOnly: true };
 const OWN_SIDE: SkillCatalogEntry = { name: 'side', root: 'claude', description: 'The B side of the record.', humanOnly: false };
 
@@ -293,4 +293,69 @@ test.skipIf(!hasDom)("a skill of the person's own named side wins: it is inserte
   await press(row('side')!);
   await until(() => replyBox()!.value === 'play /side ', 'the reference in the reply');
   expect(askBox()).toBeNull();
+});
+
+/** The list's children in order: an option's name, or "|" for the hairline between the groups. */
+const listChildren = () =>
+  [...document.querySelector('[data-skill-menu] [data-skill-menu-list]')!.children].map((el) => ((el as HTMLElement).dataset.skillMenuDivider ? '|' : (el as HTMLElement).dataset.skillItem));
+/** The options as assistive tech meets them: role, id by position, and whether the row is drawn as a built-in. */
+const options = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-skill-menu] [role="option"]')].map((el) => ({ name: el.dataset.skillItem, at: el.id.split('-option-')[1], builtin: el.dataset.skillItemHost === 'true' }));
+
+test.skipIf(!hasDom)("the built-ins are one group above the person's skills: one hairline between two groups that both have rows, never otherwise, and the options are as before", async () => {
+  const WALK: SkillCatalogEntry = { name: 'review-walkthrough', root: 'plannotator', description: 'A walkthrough of how something works', humanOnly: true };
+  const WRITE: SkillCatalogEntry = { name: 'write-better', root: 'claude', description: 'Make the words clear.', humanOnly: false };
+  await openReply(true, [WALK, SHAPE, READBACK, WRITE]);
+  await type(replyBox()!, '/');
+  await until(() => listed().length > 0, 'the "/" list');
+  expect(listChildren()).toEqual(['review-walkthrough', 'shape', 'side', '|', 'readback', 'write-better']);
+  // The hairline is no option and nothing a screen reader meets; the options keep their count and positions.
+  const divider = document.querySelector<HTMLElement>('[data-skill-menu-divider]')!;
+  expect(divider.getAttribute('aria-hidden')).toBe('true');
+  expect(divider.getAttribute('role')).toBeNull();
+  expect(divider.closest('[role="option"]')).toBeNull();
+  expect(options()).toEqual([
+    { name: 'review-walkthrough', at: '0', builtin: true },
+    { name: 'shape', at: '1', builtin: true },
+    { name: 'side', at: '2', builtin: true },
+    { name: 'readback', at: '3', builtin: false },
+    { name: 'write-better', at: '4', builtin: false },
+  ]);
+
+  // Typing keeps the built-ins on top, whatever the match ("w" starts write-better, and is only inside review-walkthrough and side's line).
+  await type(replyBox()!, '/w');
+  await type(replyBox()!, '/w');
+  await until(() => listed().length === 3, 'the filtered list');
+  expect(listChildren()).toEqual(['review-walkthrough', 'side', '|', 'write-better']);
+  // The arrows run through the hairline as if it were not there.
+  await key(replyBox()!, 'ArrowDown');
+  await key(replyBox()!, 'ArrowDown');
+  expect(replyBox()!.getAttribute('aria-activedescendant')).toBe(row('side')!.id);
+  await key(replyBox()!, 'ArrowDown');
+  expect(replyBox()!.getAttribute('aria-activedescendant')).toBe(row('write-better')!.id);
+  await key(replyBox()!, 'ArrowDown');
+  expect(replyBox()!.getAttribute('aria-activedescendant')).toBe(row('review-walkthrough')!.id);
+
+  // One group only: no hairline, above or below.
+  await type(replyBox()!, '/si');
+  await until(() => listed().length === 1, 'only side');
+  expect(listChildren()).toEqual(['side']);
+  await type(replyBox()!, '/readb');
+  await until(() => listed()[0] === 'readback', 'only a skill');
+  expect(listChildren()).toEqual(['readback']);
+});
+
+test.skipIf(!hasDom)("only built-ins, or only the person's skills: no hairline", async () => {
+  await openReply(true, [SHAPE]);
+  await type(replyBox()!, '/');
+  await until(() => listed().length > 0, 'the "/" list');
+  expect(listChildren()).toEqual(['shape', 'side']);
+  await act(async () => root?.unmount());
+  host?.remove();
+  root = null;
+  await openReply(false, [READBACK]);
+  await type(replyBox()!, '/');
+  await until(() => listed().length > 0, 'the "/" list');
+  expect(listChildren()).toEqual(['readback']);
+  expect(options()).toEqual([{ name: 'readback', at: '0', builtin: false }]);
 });

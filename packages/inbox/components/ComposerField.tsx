@@ -166,6 +166,8 @@ export function InboxComposerField({
     catalogFilter: skillFilter,
     commands: commandRows,
     onCommand: runCommand,
+    // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
+    hostRowsFirst: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -246,6 +248,7 @@ export function InboxComposerField({
               items={skills.menu!.items}
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
+              groupHostRows
               boundary={boundary}
               prefer={caretMenu?.prefer ?? 'above'}
               maxListHeight={maxListHeight}

@@ -84,8 +84,14 @@ export function useSkillReferenceAutocomplete(options: {
    */
   commands?: readonly SkillCatalogEntry[];
   onCommand?: (command: SkillCatalogEntry, text: string) => void;
+  /**
+   * Keep the host-served rows (root `plannotator`) together at the top of the list whatever was typed (opt-in; pairs
+   * with SkillReferenceMenu's `groupHostRows`, which draws them as their own group). Within each group the filter's
+   * order stands. Absent: the filter's order alone, as before.
+   */
+  hostRowsFirst?: boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
   const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
@@ -127,10 +133,11 @@ export function useSkillReferenceAutocomplete(options: {
     return [...catalog.slice(0, at), ...offered, ...catalog.slice(at)];
   }, [catalog, commands]);
 
-  const items = useMemo(
-    () => (trigger ? filterSkillCatalog(trigger.trigger === '/' ? slashList : catalog, trigger.query) : []),
-    [catalog, slashList, trigger],
-  );
+  const items = useMemo(() => {
+    if (!trigger) return [];
+    const found = filterSkillCatalog(trigger.trigger === '/' ? slashList : catalog, trigger.query);
+    return hostRowsFirst ? [...found.filter((row) => row.root === 'plannotator'), ...found.filter((row) => row.root !== 'plannotator')] : found;
+  }, [catalog, hostRowsFirst, slashList, trigger]);
 
   const open = trigger !== null && items.length > 0 && trigger.start !== dismissedStart;
 
