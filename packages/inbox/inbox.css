@@ -4273,8 +4273,27 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* What's new's Update on the narrowest phones: the button's name keeps the version. */
 @media (max-width: 379px) { .ib-wn-to { display: none; } }
 
-/* A tall screenshot in a message shows its top at its own width (images.ts markTallImage), as the gallery does. */
-.ib-body img[data-ib-tall]:not([data-question-picture]) { width: min(100%, var(--ib-nw, 100%)); max-height: min(480px, 60vh); object-fit: cover; object-position: top center; }
+/* A picture in a message is drawn whole (approval "inbox-inline-image-fit"; images.ts fitMessageImage): at most the
+   column wide, its own width and 70% of the window high (never under 320 px), its shape kept, left-aligned. Its box
+   comes from its recorded size (`--ib-nw`, `--ib-nh`), so it is held before the picture loads. `vh`, not the visual
+   viewport: a phone's keyboard does not resize it. A question card's pictures keep their own box. */
+.ib-body img[data-ib-fit]:not([data-question-picture]) { --ib-cap: max(320px, 70vh); width: min(100%, calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); height: auto; aspect-ratio: var(--ib-nw) / var(--ib-nh); }
+/* A table sizes its cells from what is in them: no share of the cell's width there. */
+.ib-body :is(td, th) img[data-ib-fit]:not([data-question-picture]) { width: min(calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); }
+/* The one shape that is cut: more than three times as tall as wide. It keeps the column's width and shows its top
+   down to the same cap; "Show all" (Thread.tsx) opens it in place. */
+.ib-body img[data-ib-fit="long"]:not([data-question-picture]) { width: min(100%, calc(var(--ib-nw) * 1px)); max-height: var(--ib-cap); object-fit: cover; object-position: top center; }
+.ib-body img[data-ib-fit="long"]:is([data-ib-cut], [data-ib-open]):not([data-question-picture]) { display: block; margin-bottom: 0; }
+.ib-body img[data-ib-fit="long"][data-ib-cut]:not([data-ib-open], [data-question-picture]) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); }
+.ib-body img[data-ib-fit="long"][data-ib-open]:not([data-question-picture]) { max-height: none; }
+/* "Show all" sits over the fade; once open, "Show less" stands under the picture. Its words are drawn from
+   `data-label`, so the body's text is what the agent wrote. */
+.ib-body .ib-imgmore { display: block; position: relative; height: 0; width: min(100%, calc(var(--ib-nw) * 1px)); margin: 0 0 8px; user-select: none; -webkit-user-select: none; }
+.ib-body .ib-imgmore > button { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-body .ib-imgmore > button::after { content: attr(data-label); }
+.ib-body .ib-imgmore > button::before { content: ""; position: absolute; inset: -8px; }
+.ib-body .ib-imgmore[data-open] { height: auto; margin-top: 6px; }
+.ib-body .ib-imgmore[data-open] > button { position: relative; left: auto; bottom: auto; transform: none; box-shadow: none; }
 
 /* The thread on a phone (PHONE_QUERY in phone.ts). */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -4764,6 +4783,34 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-tname-auto { flex: none; margin-left: 6px; padding: 0 4px; border-radius: 3px; font-family: var(--font-sans, inherit); font-size: var(--ib-fs-10, 10px); font-style: normal; line-height: 15px; letter-spacing: 0.02em; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 80%, transparent); }
 .ib-cp-tname-note { font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; padding-top: 4px; color: var(--muted-foreground); min-width: 0; flex: 1 1 200px; }
 .ib-cp-tname-err { font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; padding-top: 4px; color: var(--destructive); min-width: 0; flex: 1 1 200px; }
+/* A taken name's way through: under the notice, the thread it would go to as a pill, then "Send to that thread".
+   With it the notice is an offer: muted words, and the chip marked in the focus ring's colour, not the error's. */
+.ib-cp-tname-err[data-offer] { color: var(--muted-foreground); display: flex; flex-direction: column; gap: 7px; padding-bottom: 2px; flex-basis: 400px; }
+.ib-key.ib-cp-tname[data-offer] { border-color: var(--ring); border-style: solid; }
+/* One line while both fit; else the action goes under the pill, so the pill's name is cut only when the pill alone is wider than the row. */
+.ib-cp-tname-to { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; max-width: 100%; }
+.pn-inbox .ib-cp-tname-go { flex: none; margin-top: 0; font-size: inherit; white-space: nowrap; }
+.pn-inbox .ib-cp-tname-go:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+.pn-inbox .ib-cp-tname-go:disabled { opacity: 0.55; cursor: default; }
+/* The thread pill (compose/ThreadPill.tsx): the starred pills' raised pill (approval "inbox-starred-pills", PR #3038),
+   an agent's mark where their star is. The three --ib-pill-* tokens below are that PR's, same names and values, so
+   this block of tokens goes once it merges and both read one set. Never wraps: the name is cut. */
+.pn-inbox {
+  --ib-pill-top: var(--card);
+  --ib-pill-bot: color-mix(in oklch, var(--card) 93%, var(--muted));
+  --ib-pill-shadow: inset 0 1px 0 var(--card), 0 0 0 0.5px color-mix(in oklch, var(--foreground) 13%, transparent), 0 1px 1px color-mix(in oklch, var(--ib-shadow-ink) 9%, transparent), 0 2px 4px -2px color-mix(in oklch, var(--ib-shadow-ink) 16%, transparent);
+}
+:root:not(.light) .pn-inbox {
+  --ib-pill-top: color-mix(in oklch, var(--card) 86%, var(--foreground));
+  --ib-pill-bot: color-mix(in oklch, var(--card) 92%, var(--foreground));
+  --ib-pill-shadow: inset 0 1px 0 color-mix(in oklch, var(--foreground) 13%, transparent), 0 0 0 0.5px color-mix(in oklch, var(--ib-shadow-ink) 90%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink) 85%, transparent), 0 2px 5px -2px color-mix(in oklch, var(--ib-shadow-ink) 80%, transparent);
+}
+.ib-tpill { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 26px; padding: 0 10px 0 7px; border-radius: 999px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; white-space: nowrap; color: var(--foreground); background: linear-gradient(to bottom, var(--ib-pill-top), var(--ib-pill-bot)); box-shadow: var(--ib-pill-shadow); cursor: default; user-select: none; }
+.ib-tpill > .ib-mk { flex: none; }
+.ib-tpill-n { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+.ib-tpill > .ib-spill { margin-left: 0; height: 17px; padding: 0 5px; }
+.ib-tpill-q { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 17px; padding: 0 5px 0 4px; border-radius: 999px; background: var(--ib-wait-bg); color: var(--ib-wait-fg); font-size: var(--ib-fs-11-5, 11.5px); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-tpill-q svg.ib-ic { width: 12px; height: 12px; stroke-width: 2; }
 .ib-cp-error { padding: 0 16px 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); flex: none; }
 .ib-cp-conflict { display: inline-flex; gap: 12px; margin-left: 10px; }
 .pn-inbox .ib-cp-conflict .ib-lnk { margin-top: 0; }
@@ -4871,6 +4918,9 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   .ib-cp-thread .ib-cp-tol { line-height: 34px; }
   .pn-inbox .ib-cp-board { margin-top: 4px; }
   .ib-cp-tname-err, .ib-cp-tname-note { padding-top: 0; flex-basis: 100%; }
+  /* 44 px to touch, the words where they were. */
+  .pn-inbox .ib-cp-tname-go { position: relative; min-height: 32px; }
+  .pn-inbox .ib-cp-tname-go::after { content: ''; position: absolute; inset: -6px -8px; }
   .ib-cp-tname-auto { font-size: var(--ib-fs-11, 11px); line-height: 17px; }
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }
   .ib-key.ib-cp-tname::after { content: ''; position: absolute; inset: -5px -2px; }
@@ -7917,6 +7967,55 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 }
 :root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 11%, transparent); --fc-tray: color-mix(in oklch, var(--foreground) 4.5%, var(--popover)); box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 12px 30px -14px rgb(20 20 30 / 0.22); }
 .pn-inbox .ib-fcomp :is(button, .ib-btn, .ib-fvb) { transition: none !important; }
+/* The card moves out of the way (composerDrag.ts): dragged by its tray, drawn as a transform from its home. No
+   transition while it is dragged; a short ease on the way home (a double click on the tray), none under reduced
+   motion. The cursor is the affordance. A phone's card is docked: none of this. */
+.ib-fcomp:not(.ib-phone) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
+.ib-fcomp:not(.ib-phone) [data-fcomp-drag] { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp[data-fcomp-dragging] { transition: none; }
+.ib-fcomp[data-fcomp-dragging] [data-fcomp-drag], .pn-inbox .ib-fcomp[data-fcomp-dragging] [data-fcomp-drag] * { cursor: grabbing; }
+.ib-fcomp[data-fcomp-homing] { transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .ib-fcomp[data-fcomp-homing] { transition: none; } }
+/* A size the person gave it (the corners, shown once the card is off its home): the card is a column, the field
+   takes what the height leaves and scrolls inside, the row of buttons stays at the foot. */
+/* The second selector outweighs the width the card has beside the open comments panel (`.ib-drawer`, below). */
+.ib-fcomp[data-fcomp-sized]:not(.ib-phone),
+.ib-view.ib-fullview:not(.ib-phone) .ib-fcomp[data-fcomp-sized]:not(.ib-phone) { display: flex; flex-direction: column; width: var(--ib-fcomp-rw); height: var(--ib-fcomp-rh); }
+/* Made narrow (under 480 px): the tabs read "Comment" and "Reply", as a phone's; their whole names stay for a screen
+   reader and as tooltips. The reply's chips keep their words rather than run under the link. */
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short] { font-size: 0; }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabl[data-short]::after { content: attr(data-short); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-fcomp[data-fcomp-narrow] .ib-fcomp-tabs { gap: 4px; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-chips { flex-wrap: nowrap; min-width: min-content; }
+.ib-fcomp[data-fcomp-sized] > * { flex: none; }
+/* The field's row never goes under the field's own least (one line): a card too low for its parts shows as the body
+   overflowing, which composerDrag.ts reads to grow it. */
+.ib-fcomp[data-fcomp-sized] > .ib-fcomp-body { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(min-content, 1fr) auto; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field { align-self: stretch; display: flex; flex-direction: column; }
+.ib-fcomp[data-fcomp-sized] .ib-fcomp-field :is(.ib-cfield, .ib-cfield > .relative) { flex: 1 1 0; display: flex; flex-direction: column; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rtext { flex: 1 1 0; max-height: none; field-sizing: fixed; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-fcomp-field .ib-rmirror { max-height: none; }
+.pn-inbox .ib-fcomp[data-fcomp-sized] .ib-ccard > .ib-ta { align-self: stretch; height: 100%; max-height: none; field-sizing: fixed; }
+/* The corners: 18 px to press (28 for a finger), 4 px out past the card's edge. No mark at rest (the owner's pick): the
+   cursor, and under the pointer a 2 px arc 3 px inside the card's own corner, in the muted text colour. */
+.ib-fcomp-corner { position: absolute; z-index: 3; width: 18px; height: 18px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp-corner[data-fcomp-resize^="n"] { top: -4px; }
+.ib-fcomp-corner[data-fcomp-resize^="s"] { bottom: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="w"] { left: -4px; }
+.ib-fcomp-corner[data-fcomp-resize$="e"] { right: -4px; }
+.ib-fcomp-corner:is([data-fcomp-resize="nw"], [data-fcomp-resize="se"]) { cursor: nwse-resize; }
+.ib-fcomp-corner:is([data-fcomp-resize="ne"], [data-fcomp-resize="sw"]) { cursor: nesw-resize; }
+.ib-fcomp-corner::after { content: ''; position: absolute; box-sizing: border-box; width: 10px; height: 10px; border: 0 solid color-mix(in oklch, var(--muted-foreground) 85%, transparent); opacity: 0; }
+.ib-fcomp-corner[data-fcomp-resize="nw"]::after { left: 7px; top: 7px; border-width: 2px 0 0 2px; border-top-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="ne"]::after { right: 7px; top: 7px; border-width: 2px 2px 0 0; border-top-right-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="sw"]::after { left: 7px; bottom: 7px; border-width: 0 0 2px 2px; border-bottom-left-radius: 11px; }
+.ib-fcomp-corner[data-fcomp-resize="se"]::after { right: 7px; bottom: 7px; border-width: 0 2px 2px 0; border-bottom-right-radius: 11px; }
+.ib-fcomp-corner:hover::after,
+.ib-fcomp[data-fcomp-resizing="nw"] .ib-fcomp-corner[data-fcomp-resize="nw"]::after,
+.ib-fcomp[data-fcomp-resizing="ne"] .ib-fcomp-corner[data-fcomp-resize="ne"]::after,
+.ib-fcomp[data-fcomp-resizing="sw"] .ib-fcomp-corner[data-fcomp-resize="sw"]::after,
+.ib-fcomp[data-fcomp-resizing="se"] .ib-fcomp-corner[data-fcomp-resize="se"]::after { opacity: 1; }
+@media (pointer: coarse) { .ib-fcomp-corner { width: 28px; height: 28px; } }
 
 /* The tray and its tabs (one radio group), the chevron at its end. */
 .ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }
@@ -8073,13 +8172,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
 .ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transition: var(--ib-gather-back); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px) + var(--ib-gx, 0px)), calc(var(--ib-fcomp-dy, 0px) + var(--ib-gy, 0px))) scale(var(--ib-gs, 0.92)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transform: none; }
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
 }
 
 /* Phone: the card spans the width above the home bar and the toolbar sits above it (the pane measures the card as the
@@ -8825,7 +8924,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat-in { position: relative; }
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
-.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); width: min(540px, calc(100% - 32px)); }
 /* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card
    (the card's own centre, --ib-fcomp-c). */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-fcomp-c); width: min(540px, var(--ib-foot-w)); }
@@ -11284,6 +11383,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sbc-row { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 8px 0 2px; border-radius: var(--ib-rl-sm-s, 7px); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-sbc-row > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
 @media (hover: hover) { .ib-sbc-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
+.ib-sbc-row > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
 .ib-sbc-row[data-off] > .ib-ic, .ib-sbc-row[data-off] .ib-sbc-l { opacity: 0.45; }
 .ib-sbc-row[data-lifted] { display: none; }
 .ib-sbc-fixed { padding-left: 33px; }

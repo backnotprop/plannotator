@@ -71,7 +71,7 @@ import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
-import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
+import { inboxMessageImageBase, inlineImageRefFromSrc, syncMessageImages, toggleMessageImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../images';
 import { ArmScope, createMessageArms } from '../messageArming';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
@@ -662,8 +662,8 @@ export function MessageBody({
     },
     [imageBaseDir, widths],
   );
-  // A tall screenshot in the body shows its top, cropped like the gallery's
-  // (inbox.css); a click still opens it whole.
+  // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
+  // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
   const bodyRef = useRef<HTMLDivElement>(null);
   const pressSelected = useRef(false);
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
@@ -686,17 +686,6 @@ export function MessageBody({
   );
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const onLoad = (event: Event) => {
-      if (event.target instanceof HTMLImageElement) markTallImage(event.target);
-    };
-    for (const img of body.querySelectorAll('img')) if (img.complete) markTallImage(img);
-    // Load does not bubble: a capture listener on the body hears every image in it.
-    body.addEventListener('load', onLoad, true);
-    return () => body.removeEventListener('load', onLoad, true);
-  }, []);
   // Images the body shows open in the thread's one viewer (approval "inbox-image-viewer"): a
   // click, or Enter / Space on one (every image the window loads from the message is a button).
   // Until the store has captured it (a later read of the thread does, in the background), the
@@ -735,6 +724,44 @@ export function MessageBody({
     return image?.width && image.height ? { width: image.width, height: image.height } : null;
     // A new identity when the records change (an older message's pictures are captured on its first open).
   }, [imageOf, message.inline_images]);
+  // Each picture's box, from its recorded size before it loads (no jump as the thread fills in), and the
+  // "Show all" of a very long one. Before paint on every render; again when a picture loads, the body's
+  // column changes width or the window changes height.
+  const openPictures = useRef(new Set<string>());
+  const fitImages = useCallback(() => {
+    const body = bodyRef.current;
+    if (body) syncMessageImages(body, (img) => imageOf(img.getAttribute('src')), openPictures.current);
+  }, [imageOf]);
+  useLayoutEffect(fitImages);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLImageElement) fitImages();
+    };
+    // Load does not bubble: a capture listener on the body hears every image in it.
+    body.addEventListener('load', onLoad, true);
+    const onMore = (event: MouseEvent) => {
+      const img = toggleMessageImage(event.target, openPictures.current);
+      if (!img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const closing = img.hasAttribute('data-ib-open');
+      fitImages();
+      // Closed from the bottom of a long picture: its top comes back into view rather than the thread jumping past it.
+      if (closing) img.scrollIntoView?.({ block: 'nearest' });
+    };
+    body.addEventListener('click', onMore);
+    window.addEventListener('resize', fitImages);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitImages);
+    observer?.observe(body);
+    return () => {
+      body.removeEventListener('load', onLoad, true);
+      body.removeEventListener('click', onMore);
+      window.removeEventListener('resize', fitImages);
+      observer?.disconnect();
+    };
+  }, [fitImages]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);

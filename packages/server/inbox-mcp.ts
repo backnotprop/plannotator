@@ -50,6 +50,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { hintSaid, noteHintSaid, quietHint } from "./inbox-mcp-hints";
 import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
@@ -1202,6 +1203,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.actions > 0 ? `${sent.questions > 0 ? " and" : " with"} ${sent.actions} action item${sent.actions === 1 ? "" : "s"}` : "") +
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
+        // The picture-choices advice, once per session (a send with no session hears it each time, as before).
+        const pictureChoices = hintSaid(store, input.agent_session, "picture_choices") ? "" : choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures);
+        if (pictureChoices) noteHintSaid(store, input.agent_session, "picture_choices");
         // The hints after the sent line, in this order, each "" when it has nothing to say.
         // The ones that start with a space join the sent line; the question-opener warnings
         // follow them, each a line of its own (so no hint is glued onto a warning).
@@ -1211,10 +1215,16 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
           questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck),
-          choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures),
+          pictureChoices,
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
+        // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
+        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock() });
+        if (quiet) {
+          hints.push(`\n${quiet.line}`);
+          sent.structured.hint = quiet.line;
+        }
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,

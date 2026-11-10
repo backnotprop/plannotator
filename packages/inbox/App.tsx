@@ -57,6 +57,7 @@ import {
   type WhatsNewModel,
   type WhatsNewReleasesModel,
 } from './api';
+import { listReadRefused, readFirstList } from './firstListRead';
 import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
 import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
 import { createOwnSaves } from './ownSaves';
@@ -146,7 +147,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
@@ -193,7 +194,7 @@ import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadge
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
-import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
@@ -1157,24 +1158,26 @@ function Inbox() {
   /**
    * The one-time list options dialog (approval "inbox-list-options-intro") on this load: not shown, claimed (the
    * Inbox gave it to this page; it opens once the page is free), open, or closed. `listIntroDecided`: this load
-   * asked the Inbox and has its answer. `listIntroLatch`: what decides whether this load wants it, read once when
-   * the first list and settings are in (a list that grows later never brings it up mid-session).
+   * asked the Inbox and has its answer. `listIntroLatch`: the list as this load began with it, read once when
+   * the first list and settings are in (a list that grows later never brings it up mid-session); whether the Inbox has
+   * it due for this load follows the line (`lineLatch`).
    * `tourThisLoad`: the tour was on screen in this load, so the dialog never shows on it. `listIntroSettled`: the
    * Inbox page (the list, a thread open or not) has been clear for `LIST_INTRO_SETTLED_MS` since it last came back.
    */
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
-  const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
+  const listIntroLatch = useRef<{ local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
-  const voiceIntroDueAtLoad = useRef(false);
   /**
-   * The reveals for returning users (reveal.ts; approval "inbox-feature-reveal"): the one this page may arm, read once
-   * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed, and beside it the
-   * `ahead` offers (settings `reveal.ahead`, List view once registered), which go at their own moment; the Inbox's
-   * claim lets only one of them show (one a day).
+   * A one-time dialog of the line is claimed or open now (a reveal's, voice's, the star ask's, Code review's offer):
+   * with the dialogs App keeps itself, the load arms nothing else meanwhile (`lineLatch`). Set from the hooks' stages.
    */
-  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[]; aside: readonly InboxRevealId[] } | null>(null);
+  const [lineStagesBusy, setLineStagesBusy] = useState(false);
+  /** The Sidebar tip is claimed or up now (its hook comes after the others'). */
+  const [lineTipBusy, setLineTipBusy] = useState(false);
+  /** When a date can next change the line, on this page's clock (settings `reveal.again_in` at its read), or null. */
+  const [lineAgainAt, setLineAgainAt] = useState<number | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
@@ -1439,6 +1442,8 @@ function Inbox() {
   // `.pn-inbox` in the page: html and body carry `data-pn-inbox` (pageMarks.ts). The root is drawn on every render.
   useLayoutEffect(() => markInboxPage(rootRef.current), []);
   const latestRef = useRef(latest);
+  /** Why the last list read failed (null: it landed): the first read is tried again unless the Inbox refused it (firstListRead.ts). */
+  const listReadFailure = useRef<unknown>(null);
   latestRef.current = latest;
   /**
    * The threads opened in this tab (a row, a link, a notification, Settings'
@@ -1547,6 +1552,7 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      listReadFailure.current = null;
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
       const held = latestRef.current;
@@ -1606,6 +1612,7 @@ function Inbox() {
       setLoadError(null);
       return next;
     } catch (cause) {
+      listReadFailure.current = cause;
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
@@ -1794,6 +1801,35 @@ function Inbox() {
     }
   }, [setThreadLoad, stopLiveThreadRetry]);
 
+  /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
+  const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
+    setLineAgainAt(typeof reveal?.again_in === 'number' ? Date.now() + reveal.again_in : null);
+  }, []);
+  /**
+   * The line of one-time dialogs, read again (reveal.ts `useLineLatch`: once, at the moment the Inbox named, and after
+   * a dialog of this load is claimed): only what the line says moves (which dialog is next, the list options and voice
+   * dialogs' `due`), so nothing else on the page changes. Quiet: a read that fails waits for the next settings read.
+   */
+  const rereadLine = useCallback(() => {
+    void inboxApi
+      .settings()
+      .then((next) => {
+        noteLineAgain(next.reveal);
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                reveal: next.reveal,
+                list_intro: next.list_intro,
+                snooze_intro: next.snooze_intro,
+                voice: current.voice && next.voice ? { ...current.voice, intro_due: next.voice.intro_due } : current.voice,
+              }
+            : current,
+        );
+      })
+      .catch(() => {});
+  }, [noteLineAgain]);
+
   const refreshSettings = useCallback(async () => {
     try {
       const mark = listLookReadMark();
@@ -1811,6 +1847,7 @@ function Inbox() {
       // carries it. Only with Code review on: off, every comment reads as on main.
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
+      noteLineAgain(next.reveal);
       setSettings(next);
       setSettingsReadFailed(false);
     } catch (cause) {
@@ -2247,11 +2284,30 @@ function Inbox() {
     };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
+    let settingsAsked = false;
+    let firstListTimer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
-      const first = await refreshList(true);
-      void refreshSettings();
+      // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
+      const first = await readFirstList({
+        read: async () => {
+          const next = await refreshList(true);
+          // As before, right after the first try, landed or not.
+          if (!settingsAsked) void refreshSettings();
+          settingsAsked = true;
+          return next;
+        },
+        landed: () => latestRef.current,
+        refused: () => listReadRefused(listReadFailure.current),
+        cancelled: () => cancelled,
+        wait: (ms) =>
+          new Promise<void>((done) => {
+            firstListTimer = setTimeout(done, ms);
+          }),
+        // The settings read went out with the read that failed, and most likely failed with it.
+        onLateLanding: () => void refreshSettings(),
+      });
       if (cancelled || !first) {
-        // No subscription follows (the effect ended, or the first read failed): close the early channel.
+        // No subscription follows (the effect ended, or the Inbox refused the first read): close the early channel.
         discardPreparedInboxEvents();
         return;
       }
@@ -2478,6 +2534,7 @@ function Inbox() {
       pickSaves.current.read = () => {};
       pickSaves.current.readOwn = () => {};
       pickSaves.current.readHeld = () => {};
+      if (firstListTimer) clearTimeout(firstListTimer);
       discardPreparedInboxEvents();
       unsubscribe();
       if (timer) clearTimeout(timer);
@@ -3018,6 +3075,15 @@ function Inbox() {
       },
       7000,
     );
+  };
+  /** "Send to that thread": compose's message went into the open thread that had the typed name; that thread opens. */
+  const composeJoined = (joined: ComposeJoined) => {
+    if (joined.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== joined.draftId));
+    closeCompose(joined.draftId ? draftNeighbour(joined.draftId) : null);
+    void refreshList(false);
+    if (joined.draftId) void refreshDrafts();
+    go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: joined.threadId });
+    showToast({ icon: 'check', lead: `Sent to ${joined.agent}`, detail: `in ${joined.threadName}`, speech: `Sent to ${joined.agent} in the thread ${joined.threadName}.` }, 5000);
   };
   /**
    * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
@@ -4966,16 +5032,40 @@ function Inbox() {
   // full size or a pinned reference card is over the page (listIntroHeldBack), then claims it from the Inbox (only
   // the first claim ever shows it).
   if (route.page === 'tour') tourThisLoad.current = true;
+  if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
-      due: settings.list_intro?.due === true && lineArms('list_intro'),
       local: (settings.via ?? 'local') === 'local',
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
-    voiceIntroDueAtLoad.current = settings.voice?.intro_due === true && lineArms('voice');
   }
   const listIntroAtLoad = listIntroLatch.current;
+  // What this load arms of the line (reveal.ts `useLineLatch`): the dialog that is next (settings `reveal.next`), the
+  // `ahead` offers and the ones beside it, and whether the list options and voice dialogs are due and next, as the
+  // newest settings read has them. Held as it is while a one-time dialog of this load is claimed or open (the others
+  // are blocked meanwhile, `revealBlocked`; the Inbox's gap starts with the claim, and the line is read again then, so
+  // what follows is armed only once the Inbox names it). A load that had the tour or an update keeps its first read. A tab left loaded since before the line was free used
+  // to arm nothing for the rest of its life; and since 2026-11-09 the same tab may show the next dialog once the gap
+  // has passed (the owner: "after 40 minutes, the same tab (or a fresh load) can show the next one").
+  /** The Inbox keeps a line (a release build): its gap, not the page load, paces the dialogs. */
+  const lineKept = settings?.reveal?.line === true;
+  const lineBusy =
+    soundDialog === 'open' || typeof agentNote === 'object' || listIntro === 'claimed' || listIntro === 'open' || (listIntroAsked.current && !listIntroDecided) || lineStagesBusy || lineTipBusy;
+  const lineLatch = useLineLatch({
+    read:
+      settings && latest !== null
+        ? { ...revealArmed(settings), listIntroDue: settings.list_intro?.due === true && lineArms('list_intro'), voiceDue: settings.voice?.intro_due === true && lineArms('voice') }
+        : null,
+    // With no line, a load that showed or claimed a dialog keeps what it held, as before.
+    frozen: tourThisLoad.current || updatingThisLoad.current || lineBusy || (!lineKept && (soundDialog !== 'none' || agentNote !== 'none' || listIntro !== 'none' || listIntroAsked.current)),
+    againAt: lineKept ? lineAgainAt : null,
+    reread: rereadLine,
+  });
+  // A dialog of this load was just claimed: the line as the Inbox has it now (nothing next, and when to ask again).
+  useEffect(() => {
+    if (lineBusy) rereadLine();
+  }, [lineBusy, rereadLine]);
   const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
   // Every one-time dialog's hold: something typed or open over the page, or a question waiting in the open thread.
   const oneTimeHeldBack = () => listIntroHeldBack() || openQuestionHere();
@@ -4994,7 +5084,7 @@ function Inbox() {
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
   const listOptionsClear = listIntroClear && (!route.thread || pageIdle);
   const listIntroLoad: ListIntroLoad = {
-    due: listIntroAtLoad?.due ?? false,
+    due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true,
     local: listIntroAtLoad?.local ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
@@ -5002,7 +5092,9 @@ function Inbox() {
     // Read with the page as it is now: the wait's flag clears an effect later, never a render late.
     settled: listIntroSettled && listOptionsClear,
     tourThisLoad: tourThisLoad.current,
-    otherDialogThisLoad: soundDialog !== 'none' || agentNote !== 'none',
+    // With a line: on screen now (one that closed no longer holds this load; the gap is the Inbox's). An Inbox that
+    // keeps no line (a dev build, an older one) has no gap, so there a load that showed one still shows no other.
+    otherDialogThisLoad: lineKept ? soundDialog === 'open' || typeof agentNote === 'object' || lineStagesBusy : soundDialog !== 'none' || agentNote !== 'none',
     othersSettled: soundSettled && agentNoteSettled,
     updating: updateDialog !== null || restarting,
   };
@@ -5058,7 +5150,7 @@ function Inbox() {
   // The one-time voice announcement (voiceIntro.ts): last in the queue, so voice waits a load if another is due.
   const voiceIntro = useVoiceIntro(
     {
-      due: voiceIntroDueAtLoad.current,
+      due: lineLatch?.voiceDue === true,
       local: listIntroLoad.local,
       listLoaded: listIntroLoad.listLoaded,
       firstRun: listIntroLoad.firstRun,
@@ -5075,28 +5167,27 @@ function Inbox() {
   );
   // The one-time Snooze announcement (snoozeIntro.ts): never at load, never with another one-time dialog, the tour or
   // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
-  if (updateDialog !== null || restarting) updatingThisLoad.current = true;
-  if (snoozeIntroLatch.current === null && settings && latest !== null) {
-    // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
-    const armed = revealArmed(settings);
-    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead, aside: armed.aside };
-  }
+  // Only `reveal.next` is armed (`lineLatch`); an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   oneTimeRows.current = snoozeIntroRows;
   const revealBlocked = snoozeIntroBlockedBy({
     tour: tourThisLoad.current,
     updating: updatingThisLoad.current,
-    sound: soundDialog,
-    agentNote,
-    listIntroWant,
-    listIntro,
-    voiceWanted: voiceIntro.wanted,
-    voiceStage: voiceIntro.stage,
-    board: oneTimeDialogShownThisLoad(),
+    // With a line, each as it is now: a dialog that closed ('shown') no longer holds the rest of the load (the gap is
+    // the Inbox's). With no line (no gap), a load that showed one still shows no other.
+    sound: lineKept && soundDialog === 'shown' ? 'none' : soundDialog,
+    agentNote: lineKept && agentNote === 'shown' ? 'none' : agentNote,
+    listIntroWant: listIntroWant && !(lineKept && listIntro === 'shown'),
+    listIntro: lineKept && listIntro === 'shown' ? 'none' : listIntro,
+    voiceWanted: voiceIntro.wanted && !(lineKept && voiceIntro.stage === 'shown'),
+    voiceStage: lineKept && voiceIntro.stage === 'shown' ? 'none' : voiceIntro.stage,
+    // Another dialog of the line is claimed or open now, or one outside its hooks (the Board's welcome, the star
+    // ask's card, the Sidebar tip) showed within the gap.
+    board: oneTimeDialogShownThisLoad() || lineStagesBusy || lineTipBusy,
   });
   const snoozeIntro = useSnoozeIntro({
-    due: snoozeIntroLatch.current?.due ?? false,
-    listLoaded: snoozeIntroLatch.current !== null,
+    due: lineLatch?.snoozeDue ?? false,
+    listLoaded: lineLatch !== null,
     firstRun,
     blocked: revealBlocked,
     snoozedHere: snoozedThisLoad.current,
@@ -5110,8 +5201,8 @@ function Inbox() {
   // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim only stamps it, and the Board's own
   // first-visit dialog (BoardIntro) offers it: "Turn it on" turns it on (its sidebar row appears), "Not now" leaves it.
   const boardReveal = useBoardReveal({
-    due: snoozeIntroLatch.current?.next === 'board',
-    listLoaded: snoozeIntroLatch.current !== null,
+    due: lineLatch?.next === 'board',
+    listLoaded: lineLatch !== null,
     firstRun,
     blocked: revealBlocked,
     rows: snoozeIntroRows,
@@ -5127,8 +5218,8 @@ function Inbox() {
   // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim only stamps it, then
   // ChecklistIntro offers it.
   const stepsReveal = useStepsReveal({
-    due: snoozeIntroLatch.current?.next === 'steps',
-    listLoaded: snoozeIntroLatch.current !== null,
+    due: lineLatch?.next === 'steps',
+    listLoaded: lineLatch !== null,
     firstRun,
     blocked: revealBlocked,
     rows: snoozeIntroRows,
@@ -5147,7 +5238,7 @@ function Inbox() {
   // only stamps it; BroIntro offers it.
   const broReveal = useLineReveal({
     id: 'bro',
-    due: snoozeIntroLatch.current?.next === 'bro',
+    due: lineLatch?.next === 'bro',
     blocked: revealBlocked,
     rows: snoozeIntroRows,
     toast: toast !== null,
@@ -5170,7 +5261,7 @@ function Inbox() {
   // turn on: the claim stamps it and GrillMeTip says it once.
   const grillMeTipReveal = useLineReveal({
     id: 'grill_me_tip',
-    due: snoozeIntroLatch.current?.aside.includes('grill_me_tip') === true,
+    due: lineLatch?.aside.includes('grill_me_tip') === true,
     blocked: revealBlocked,
     rows: snoozeIntroRows,
     toast: toast !== null,
@@ -5192,7 +5283,7 @@ function Inbox() {
   const listViewThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const listViewReveal = useLineReveal({
     id: 'list_view',
-    due: snoozeIntroLatch.current?.next === 'list_view' || (snoozeIntroLatch.current?.ahead.includes('list_view') ?? false),
+    due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
     blocked: revealBlocked,
     rows: snoozeIntroRows,
     toast: toast !== null,
@@ -5206,7 +5297,7 @@ function Inbox() {
     mayClaim: (pageAge) =>
       listViewRevealMayClaim(
         {
-          listLoaded: snoozeIntroLatch.current !== null,
+          listLoaded: lineLatch !== null,
           firstRun,
           grouped: listView === 'grouped',
           taller: listTallerThanScreen(listBody(rootRef.current)),
@@ -5225,9 +5316,9 @@ function Inbox() {
   // while it is `reveal.next`, at the line's calm moment (back on the list, or the page idle), 60 s into the page.
   const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const tabIconChoice = useTabIconChoice({
-    due: snoozeIntroLatch.current?.next === 'tab_icon',
+    due: lineLatch?.next === 'tab_icon',
     blocked: revealBlocked,
-    listLoaded: snoozeIntroLatch.current !== null,
+    listLoaded: lineLatch !== null,
     firstRun,
     thread: tabIconThread,
     rows: snoozeIntroRows,
@@ -5242,8 +5333,8 @@ function Inbox() {
   // claim runs the already-starred check, then the corner card shows.
   const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
-    due: snoozeIntroLatch.current?.aside.includes('star') === true,
-    listLoaded: snoozeIntroLatch.current !== null,
+    due: lineLatch?.aside.includes('star') === true,
+    listLoaded: lineLatch !== null,
     firstRun,
     blocked: revealBlocked || otherRevealActive,
     rows: snoozeIntroRows,
@@ -5846,8 +5937,8 @@ function Inbox() {
   // Code review's one-time offer (approval "code-review-offer-card"; codeReviewOffer.ts): the line's day-0 slot, armed
   // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
   const codeReviewOffer = useCodeReviewOffer({
-    due: snoozeIntroLatch.current?.next === 'code_review',
-    blocked: updatingThisLoad.current || soundDialog !== 'none' || agentNote !== 'none' || oneTimeDialogShownThisLoad(),
+    due: lineLatch?.next === 'code_review',
+    blocked: updatingThisLoad.current || (lineKept ? soundDialog === 'open' || typeof agentNote === 'object' : soundDialog !== 'none' || agentNote !== 'none') || oneTimeDialogShownThisLoad(),
     tourScreen: showTourEntry || tourIntroShown || tourOn,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     rows: snoozeIntroRows,
@@ -5858,9 +5949,14 @@ function Inbox() {
     on: settings?.code_review?.on === true,
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
+  // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, starReveal.stage, codeReviewOffer.stage].some(
+    (stage) => stage === 'claimed' || stage === 'open',
+  );
+  useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
   // The agent-note dialog's moment (approval "inbox-one-time-dialogs": day 0 is setup, one after another): once the
   // tour's screens are gone (the entry screen, its intro, the tour itself), and only when the Inbox's line says this
-  // load may (`reveal.setup`: never on a day that had another dialog, nor on the load right after one). Then the
+  // load may (`reveal.setup`: never within the gap of another dialog). Then the
   // claim (`POST /api/inbox/reveal` `agent_note`) stamps the day, so two tabs never both show it; an older Inbox
   // without the line answers with an error, and the dialog shows as before.
   const agentNoteReady =
@@ -5884,7 +5980,7 @@ function Inbox() {
       agentNoteDecided.current = true;
       const model = settings?.via === 'tailnet' ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
-      // Not on this load (the line's day or load rule): decided, so the notification lines need not wait for it.
+      // Not on this load (the line's gap): decided, so the notification lines need not wait for it.
       if (rows.length === 0 || !model || settingsRef.current?.reveal?.setup === false) {
         setAgentNoteSettled(true);
         return true;
@@ -5986,10 +6082,10 @@ function Inbox() {
   const sidebarDocked = !phone && route.page === 'inbox' && sidebarOpen && !fileOpen && !sidebarHeld && !full;
   const sidebarCustomizing = useSidebarCustomizerOpen();
   const sidebarTip = useSidebarTip({
-    due: !phone && !tourOn && sidebarTipDue(settings) && snoozeIntroLatch.current !== null && !snoozeIntroLatch.current.aside.includes('star'),
+    due: !phone && !tourOn && sidebarTipDue(settings) && lineLatch !== null && !lineLatch.aside.includes('star'),
     blocked: revealBlocked || otherRevealActive || starReveal.stage === 'open' || starReveal.stage === 'claimed' || sidebarCustomizing,
     sidebar: sidebarDocked,
-    listLoaded: snoozeIntroLatch.current !== null,
+    listLoaded: lineLatch !== null,
     firstRun,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     rows: snoozeIntroRows,
@@ -6000,6 +6096,9 @@ function Inbox() {
     idle: pageIdle,
   });
   if (sidebarTip.stage !== 'none') sidebarTipSpent.current = true;
+  // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
+  const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
+  useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
   threadFullRef.current = full;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
@@ -7175,6 +7274,7 @@ function Inbox() {
       {!tourOn && (
         <SidebarCustomizer
           drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
             if (!phone && routeRef.current.page === 'settings') setSettingsSidebar(true);
@@ -7743,6 +7843,7 @@ function Inbox() {
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           launchTip={!tourOn && !launchTipSpent.current && launchTipDue(settings) ? launchTip : null}
+          onJoined={composeJoined}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);

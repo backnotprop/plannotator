@@ -7,8 +7,9 @@
  * Who: the owner's pages (never a tailnet guest's), on an Inbox where no agent was ever started (a launched thread root
  * in the store, or `launchedAt`, kept once one was seen, so deleting that thread never brings the tip back), until it
  * was shown once. Whether To can start an agent (Launch on here, or a linked machine's) is compose's own check
- * (`canStart`): it claims only when To offers a new session. It stands outside the line of one-time dialogs
- * (packages/shared/inbox/reveals.ts): it is not a dialog, so it neither waits for the line's day nor stamps it. The
+ * (`canStart`): it claims only when To offers a new session. It stands outside the order of the line of one-time dialogs
+ * (packages/shared/inbox/reveals.ts), but keeps its 40-minute gap both ways since 2026-11-09, as the Sidebar tip does
+ * (the server: `tipFree`, `RevealState.tipShownAt`): never within the gap of a dialog, and no dialog within the gap of it. The
  * claim stamps only config.json `inboxReveals.launch_tip`, when it shows (every way out is final), with the page's
  * key so that page's retry after a lost answer is shown it again and no other window or phone is.
  */
