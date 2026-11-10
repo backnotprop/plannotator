@@ -1579,9 +1579,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
           state={nameState}
           suggested={reviewName ?? suggested}
           hint={box ? 'Named from what it reviews until you type here.' : undefined}
-          error={nameError && nameHolder ? `${THREAD_NAME_TAKEN} ${nameHolder.agent} gets what you send to “${nameHolder.name}”.` : nameError}
+          error={nameError === THREAD_NAME_TAKEN && nameHolder ? `${THREAD_NAME_TAKEN} ${nameHolder.agent} gets what you send to “${nameHolder.name}”.` : nameError}
           action={
-            nameHolder
+            nameError === THREAD_NAME_TAKEN && nameHolder
               ? { label: 'Send to that thread', name: `Send this message to the thread “${nameHolder.name}”, to ${nameHolder.agent}`, onPress: () => void sendToHolder(), disabled: busy !== null || voice.busy }
               : null
           }
