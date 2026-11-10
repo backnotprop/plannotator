@@ -1834,10 +1834,27 @@ print_claude_plugin_marketplace_readd() {
     echo "  claude plugin update ${CLAUDE_PLUGIN_ID} --scope user"
 }
 
+# The claude CLI: on PATH, else in Claude Code's own install folders (its
+# native installer's ~/.local/bin, the older ~/.claude/local), the folders the
+# Inbox's launcher also looks in. An update the Inbox or a review window starts
+# runs with that process's PATH, which often lacks ~/.local/bin (an Inbox
+# started outside a login shell), and the plugin was then never updated.
+find_claude_cli() {
+    command -v claude 2>/dev/null && return 0
+    for _fc_dir in "$HOME/.local/bin" "$HOME/.claude/local"; do
+        if [ -f "$_fc_dir/claude" ] && [ -x "$_fc_dir/claude" ]; then
+            printf '%s\n' "$_fc_dir/claude"
+            return 0
+        fi
+    done
+    return 1
+}
+
 update_claude_plugin_if_installed() {
     _cp_record=$(claude_plugin_user_record)
     [ -n "$_cp_record" ] || return 0
-    if ! command -v claude >/dev/null 2>&1; then
+    _cp_claude=$(find_claude_cli) || _cp_claude=""
+    if [ -z "$_cp_claude" ]; then
         claude_plugin_state="manual"
         return 0
     fi
@@ -1878,9 +1895,9 @@ update_claude_plugin_if_installed() {
     for _cp_step in marketplace plugin; do
         _cp_rc=0
         if [ "$_cp_step" = "marketplace" ]; then
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE "$_cp_claude" plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
         else
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE "$_cp_claude" plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
         fi
         if [ "$_cp_rc" -eq 124 ]; then
             _cp_failed="timed out after ${_cp_secs}s"

@@ -1178,6 +1178,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastDailyPingCheck = at;
       scheduleDailyPing({ version, dataDir, tool: "inbox" });
     },
+    // Update now's installer also gets the last login shell's PATH (claude, nvm's node), once launch has read it.
+    installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
       for (const listener of statusListeners) listener();

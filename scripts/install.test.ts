@@ -4282,6 +4282,26 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       );
     });
 
+    // An update the Inbox or a review window starts runs with that process's
+    // PATH, which often lacks ~/.local/bin (Claude Code's native installer's
+    // folder): the plugin must still be updated, from the folder Claude Code
+    // installed itself into, as the Inbox's launcher finds it.
+    for (const folder of [".local/bin", ".claude/local"]) {
+      test(`claude only in ~/${folder} (not on PATH): both update commands still run`, () => {
+        const s = setupClaudePluginSandbox({ claude: false });
+        mkdirSync(join(s.sandbox.home, folder), { recursive: true });
+        writeFileSync(join(s.sandbox.home, folder, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          FAKE_CLAUDE_NEW_VERSION: "0.28.11",
+        });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(out).toContain("Claude Code plugin: updated to 0.28.11 (restart Claude Code to load it).");
+        expect(out).not.toContain(MANUAL_PLUGIN_COMMANDS);
+      });
+    }
+
     test("--skip-claude-plugin is remembered in install-flags.json", () => {
       const s = setupClaudePluginSandbox({});
       const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--skip-claude-plugin"], s.env);
@@ -4889,6 +4909,19 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expect(s.calls()).toEqual([]);
         expect(r.out).not.toContain("Updating the Claude Code plugin");
       }, PWSH_SCANNER_TIMEOUT_MS);
+
+      // An update the Inbox starts runs with its PATH, which can lack Claude
+      // Code's own install folders: the plugin is still updated from there.
+      for (const folder of [".local/bin", ".claude/local"]) {
+        test(`${runner}: claude only in the profile's ${folder} (not on PATH) - both commands still run`, () => {
+          const s = setupClaudePluginSandbox({ claude: false });
+          mkdirSync(join(s.sandbox.home, folder), { recursive: true });
+          writeFileSync(join(s.sandbox.home, folder, "claude"), FAKE_CLAUDE, { mode: 0o755 });
+          const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_NEW_VERSION: "0.28.11" } });
+          expectState(runner, r, "updated");
+          expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        }, PWSH_SCANNER_TIMEOUT_MS);
+      }
     }
   },
 );

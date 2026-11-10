@@ -1511,6 +1511,8 @@ ${result.text}`);
     warm(): void {
       warmLogin();
     },
+    /** The last login shell's PATH folders (empty until it was read, and on Windows): the installer's extra PATH on Update now. */
+    loginPath: (): string[] => [...loginPath],
     route,
     sweep,
     stop: () => {

@@ -1037,6 +1037,16 @@ function Update-ClaudePluginIfInstalled {
     $record = Get-ClaudePluginUserRecord
     if ($null -eq $record) { return }
     $claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Not on PATH: Claude Code's own install folders (its native installer's
+    # .local\bin, the older .claude\local), as the Inbox's launcher looks. An
+    # update started by the Inbox or a review window runs with that process's
+    # PATH, which can lack them.
+    foreach ($dir in @(@('.local', 'bin'), @('.claude', 'local'))) {
+        if (-not $claude -and $env:USERPROFILE) {
+            $candidate = [System.IO.Path]::Combine($env:USERPROFILE, $dir[0], $dir[1], 'claude')
+            $claude = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+    }
     if (-not $claude) {
         $script:claudePluginState = "manual"
         return
