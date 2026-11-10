@@ -29,7 +29,7 @@ export interface AskChatProps {
   /** Moves with each press that asks for the box's focus; `takeFocus` says whether it was for this chat. */
   focusRequest: number;
   /** Words to put in the box (a new token each time): after the words already there. `source`: where a Side's quote came from. */
-  seed?: { words: string; token: number; source?: string } | null;
+  seed?: { words: string; token: number; source?: string; taken?: () => void } | null;
   takeFocus: () => boolean;
   onPick: (chat: InboxAskChat) => void;
   onLeave: () => void;
@@ -93,6 +93,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
       saveAskSources(threadId, sources.current);
     }
     setWords((box) => (box.trim() ? `${box.trimEnd()}\n${seed.words}` : seed.words));
+    // The box has them now (and keeps them per thread, askWords.ts): whoever handed them over may let go of its copy.
+    seed.taken?.();
   }, [seed?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The stream ended here: read what the Inbox kept, whether or not its event came first.
