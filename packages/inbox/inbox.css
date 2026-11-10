@@ -4183,8 +4183,27 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* What's new's Update on the narrowest phones: the button's name keeps the version. */
 @media (max-width: 379px) { .ib-wn-to { display: none; } }
 
-/* A tall screenshot in a message shows its top at its own width (images.ts markTallImage), as the gallery does. */
-.ib-body img[data-ib-tall]:not([data-question-picture]) { width: min(100%, var(--ib-nw, 100%)); max-height: min(480px, 60vh); object-fit: cover; object-position: top center; }
+/* A picture in a message is drawn whole (approval "inbox-inline-image-fit"; images.ts fitMessageImage): at most the
+   column wide, its own width and 70% of the window high (never under 320 px), its shape kept, left-aligned. Its box
+   comes from its recorded size (`--ib-nw`, `--ib-nh`), so it is held before the picture loads. `vh`, not the visual
+   viewport: a phone's keyboard does not resize it. A question card's pictures keep their own box. */
+.ib-body img[data-ib-fit]:not([data-question-picture]) { --ib-cap: max(320px, 70vh); width: min(100%, calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); height: auto; aspect-ratio: var(--ib-nw) / var(--ib-nh); }
+/* A table sizes its cells from what is in them: no share of the cell's width there. */
+.ib-body :is(td, th) img[data-ib-fit]:not([data-question-picture]) { width: min(calc(var(--ib-nw) * 1px), calc(var(--ib-cap) * var(--ib-nw) / var(--ib-nh))); }
+/* The one shape that is cut: more than three times as tall as wide. It keeps the column's width and shows its top
+   down to the same cap; "Show all" (Thread.tsx) opens it in place. */
+.ib-body img[data-ib-fit="long"]:not([data-question-picture]) { width: min(100%, calc(var(--ib-nw) * 1px)); max-height: var(--ib-cap); object-fit: cover; object-position: top center; }
+.ib-body img[data-ib-fit="long"]:is([data-ib-cut], [data-ib-open]):not([data-question-picture]) { display: block; margin-bottom: 0; }
+.ib-body img[data-ib-fit="long"][data-ib-cut]:not([data-ib-open], [data-question-picture]) { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 88px), transparent); }
+.ib-body img[data-ib-fit="long"][data-ib-open]:not([data-question-picture]) { max-height: none; }
+/* "Show all" sits over the fade; once open, "Show less" stands under the picture. Its words are drawn from
+   `data-label`, so the body's text is what the agent wrote. */
+.ib-body .ib-imgmore { display: block; position: relative; height: 0; width: min(100%, calc(var(--ib-nw) * 1px)); margin: 0 0 8px; user-select: none; -webkit-user-select: none; }
+.ib-body .ib-imgmore > button { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-body .ib-imgmore > button::after { content: attr(data-label); }
+.ib-body .ib-imgmore > button::before { content: ""; position: absolute; inset: -8px; }
+.ib-body .ib-imgmore[data-open] { height: auto; margin-top: 6px; }
+.ib-body .ib-imgmore[data-open] > button { position: relative; left: auto; bottom: auto; transform: none; box-shadow: none; }
 
 /* The thread on a phone (PHONE_QUERY in phone.ts). */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
