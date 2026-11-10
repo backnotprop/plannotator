@@ -339,6 +339,9 @@ test.skipIf(!hasDom)('it points to where the row will land: below the view, else
   expect(edge()).toBe('bottom');
   expect(pill().getAttribute('aria-label')).toBe('1 new message below, show and go there');
 
+  // Its header in view: the row lands under it, so still down.
+  see('out of view', 'in view');
+  expect(edge()).toBe('bottom');
   // The reader scrolls on past the group's header: the same pill, now at the top edge.
   see('out of view', 'above');
   expect(pillOn()).toBe(true);

@@ -44,7 +44,7 @@ type Edge = ListEdge;
 interface Where {
   /** The "N new · Show" line is in view. */
   sign: boolean;
-  /** For each group news lands in, the list's edge its rows will land past (top also when they land in view). */
+  /** For each group news lands in: top when its header is scrolled away above, else bottom (the rows land under a header in view, or further down). */
   edges: Record<string, Edge>;
 }
 
@@ -88,8 +88,8 @@ function useWhere(body: RefObject<HTMLElement | null>, lands: string, order: str
         for (const entry of entries) {
           const inView = entry.intersectionRatio >= IN_VIEW;
           if (entry.target === sign) now.sign = inView;
-          // Below the view, or only its top edge showing at the bottom: the rows land below.
-          else for (const group of bands.get(entry.target) ?? []) now.edges[group] = !inView && entry.boundingClientRect.top > (entry.rootBounds?.top ?? 0) ? 'bottom' : 'top';
+          // Scrolled away above: the rows land above. Else below: under a header in view, or one further down.
+          else for (const group of bands.get(entry.target) ?? []) now.edges[group] = inView || entry.boundingClientRect.top > (entry.rootBounds?.top ?? 0) ? 'bottom' : 'top';
         }
         setWhere({ sign: now.sign, edges: { ...now.edges } });
       },
