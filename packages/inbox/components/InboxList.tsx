@@ -37,6 +37,9 @@ import { ListFilterButton, type ListFilterSource } from './ListFilter';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
+import { useStarredAbove } from '../starredPills';
+import { StarredPills } from './StarredPills';
+import type { PinnedAction } from './PinnedRow';
 import { useListGroups } from '../listGroups';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -169,6 +172,12 @@ export interface InboxListProps {
    * as the tour's sidebar ignores its closed sections.
    */
   rememberLook?: boolean;
+  /**
+   * The starred threads, in star order (the list model's `pins`), for "Keep starred above the list"
+   * (starredPills.ts): with the choice on they are pills above the first section. Absent (an Inbox that keeps no
+   * stars, the tour): no pills and no menu item.
+   */
+  starred?: { rows: readonly InboxListRow[]; onOpen: (row: InboxListRow) => void; onAction: (row: InboxListRow, action: PinnedAction) => void };
   /**
    * The list's filter (listFilter.ts): the funnel in the header, left of Search, New message and ⋮. App filters the
    * sections it hands the list; this is the menu's source. Absent (the tour): no funnel.
@@ -304,8 +313,11 @@ function subjectOf(row: InboxListRow): string {
   return row.subject ?? '(no subject)';
 }
 
-/** The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none. */
-function titleOf(row: InboxListRow): string {
+/**
+ * The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none.
+ * A starred pill is labelled with it too (StarredPills.tsx), so a pill and its row never name a thread differently.
+ */
+export function titleOf(row: InboxListRow): string {
   return row.thread_name?.trim() ? row.thread_name : subjectOf(row);
 }
 
@@ -1292,6 +1304,8 @@ export function InboxList(props: InboxListProps) {
   // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
   const [view, setView] = useListView(props.rememberLook !== false);
   const asList = view === 'list';
+  // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
+  const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
@@ -1643,9 +1657,20 @@ export function InboxList(props: InboxListProps) {
             threadPanel={props.threadPanel}
             onCustomize={props.onCustomizeRows}
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
+            starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
           />
         )}
       </div>
+      {starredAbove && props.starred && (
+        <StarredPills
+          rows={props.starred.rows}
+          projectNames={props.projectNames}
+          openThreadId={props.selectedThreadId}
+          phone={props.phone === true}
+          onOpen={props.starred.onOpen}
+          onAction={props.starred.onAction}
+        />
+      )}
       {pulls && (
         // The ↻ a pull reveals under the header, behind the list (pullRefresh.ts moves it). Not for a screen reader:
         // the title is the accessible way, and the live region says the refresh.

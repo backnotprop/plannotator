@@ -3,7 +3,8 @@
  * sidebar (a bottom sheet on a phone) that lists the sidebar's items in two groups, Top and Bottom, as they stand.
  * Each row: a grip, the item's icon and name, and a switch (a lock for Inbox and Settings, which never hide). The
  * logo heads Top and the keyboard and light/dark buttons sit under Settings: they hide, they do not move. Between
- * the groups, a fixed band says where Starred and Projects scroll.
+ * the groups, a fixed band says where Starred and Projects scroll, and under it Agents, which scrolls with them:
+ * it hides, it does not move.
  *
  * Moving: drag a grip (within a group or across), or press it (a click, Enter, Space) for Move up, Move down and
  * Move to top / bottom; no arrow keys, no new shortcut. "Start from" applies Default, All at top or Minimal ("Custom"
@@ -34,6 +35,8 @@ import {
   type InboxSidebarLayout,
   type InboxSidebarStack,
 } from '@plannotator/core/inbox-sidebar';
+import { GogglesMark } from '../agents/AgentsSection';
+import { useInboxAgents } from '../agentsList';
 import { Icon } from '../icons';
 import { usePhone } from '../phone';
 import { SIDEBAR_ITEM_ICON } from '../sidebarItems';
@@ -50,6 +53,11 @@ function Grip() {
       ))}
     </svg>
   );
+}
+
+/** An item's icon; Agents draws the section's own goggles. */
+function ItemIcon({ item }: { item: InboxSidebarItem }) {
+  return item === 'agents' ? <GogglesMark /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
 }
 
 type Drop = { stack: InboxSidebarStack; index: number };
@@ -72,7 +80,16 @@ function dropAt(root: HTMLElement | null, layout: InboxSidebarLayout, item: Inbo
   return null;
 }
 
-export function SidebarCustomizer({ drawn, onOpen }: { drawn: ReadonlySet<InboxSidebarItem>; onOpen?: () => void }) {
+export function SidebarCustomizer({
+  drawn,
+  machines,
+  onOpen,
+}: {
+  drawn: ReadonlySet<InboxSidebarItem>;
+  /** A machine is linked: the sidebar draws Agents even on an Inbox whose list names none. */
+  machines?: boolean;
+  onOpen?: () => void;
+}) {
   const open = useSidebarCustomizerOpen();
   const phone = usePhone();
   const layout = useSidebarLayout();
@@ -208,6 +225,7 @@ export function SidebarCustomizer({ drawn, onOpen }: { drawn: ReadonlySet<InboxS
             <Icon name="folder" />
             Starred and Projects
           </div>
+          {drawn.has('agents') && <AgentsRow layout={layout} machines={machines === true} />}
           {group('bottom')}
         </div>
         <div className="ib-sbc-foot">
@@ -226,7 +244,7 @@ export function SidebarCustomizer({ drawn, onOpen }: { drawn: ReadonlySet<InboxS
           style={{ top: drag.y - drag.dy, left: (panel.current?.getBoundingClientRect().left ?? left) + 10, width: (panel.current?.getBoundingClientRect().width ?? 300) - 20 }}
         >
           <Grip />
-          <Icon name={SIDEBAR_ITEM_ICON[drag.item]} />
+          <ItemIcon item={drag.item} />
           {inboxSidebarSpec(drag.item).label}
         </div>
       )}
@@ -257,11 +275,17 @@ function ShowSwitch({ item, layout }: { item: InboxSidebarItem; layout: InboxSid
   );
 }
 
-/** The logo (heads Top) and the Settings row's buttons: they hide, they do not move. */
+/** Agents, while the sidebar draws the section (as Sidebar.tsx decides: the list names agents, or a machine is linked). */
+function AgentsRow({ layout, machines }: { layout: InboxSidebarLayout; machines: boolean }) {
+  const agents = useInboxAgents();
+  return agents !== null || machines ? <FixedRow item="agents" layout={layout} /> : null;
+}
+
+/** The logo (heads Top), Agents (between the groups) and the Settings row's buttons: they hide, they do not move. */
 function FixedRow({ item, layout, sub }: { item: InboxSidebarItem; layout: InboxSidebarLayout; sub?: boolean }) {
   return (
     <div className={`ib-sbc-row${sub ? ' ib-sbc-sub' : ' ib-sbc-fixed'}`} data-off={inboxSidebarShown(layout, item) ? undefined : ''} data-sbc-fixed={item}>
-      <Icon name={SIDEBAR_ITEM_ICON[item]} />
+      <ItemIcon item={item} />
       <span className="ib-sbc-l" id={`ib-sbc-l-${item}`}>
         {inboxSidebarSpec(item).label}
       </span>
@@ -344,7 +368,7 @@ function ItemRow({
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
-        <Icon name={SIDEBAR_ITEM_ICON[item]} />
+        <ItemIcon item={item} />
         <span className="ib-sbc-l" id={`ib-sbc-l-${item}`}>
           {name}
         </span>

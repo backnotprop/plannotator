@@ -661,6 +661,15 @@ for (const engine of ENGINES) {
       await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
       await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
       await expect(sheet.locator('[data-compose-thread-name-error]')).toBeVisible();
+      // The thread that has the name, as a pill, and the way through: one line, inside the sheet, whatever the name's length.
+      const pill = sheet.locator('[data-compose-thread-pill]');
+      const join = sheet.locator('[data-compose-thread-name-join]');
+      await expect(pill).toBeVisible();
+      await expect(join).toBeVisible();
+      const pillBox = (await pill.boundingBox())!;
+      const joinBox = (await join.boundingBox())!;
+      expect(pillBox.height, 'the pill never wraps').toBeLessThanOrEqual(30);
+      expect(joinBox.x + joinBox.width, 'Send to that thread stays on screen').toBeLessThanOrEqual(size.width);
       const refused = await read(page);
       sendInReach(refused, 'a name refused');
       toOnScreen(refused, 'a name refused');

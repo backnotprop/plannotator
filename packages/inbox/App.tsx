@@ -193,7 +193,7 @@ import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadge
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
-import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
@@ -3053,6 +3053,15 @@ function Inbox() {
       7000,
     );
   };
+  /** "Send to that thread": compose's message went into the open thread that had the typed name; that thread opens. */
+  const composeJoined = (joined: ComposeJoined) => {
+    if (joined.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== joined.draftId));
+    closeCompose(joined.draftId ? draftNeighbour(joined.draftId) : null);
+    void refreshList(false);
+    if (joined.draftId) void refreshDrafts();
+    go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: joined.threadId });
+    showToast({ icon: 'check', lead: `Sent to ${joined.agent}`, detail: `in ${joined.threadName}`, speech: `Sent to ${joined.agent} in the thread ${joined.threadName}.` }, 5000);
+  };
   /**
    * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
    * answer). Compose has closed; the toast says it starts when that machine is back, and Cancel takes it back while it
@@ -3993,7 +4002,7 @@ function Inbox() {
     void setPin(row, false).finally(() => unstarring.current.delete(row.thread_id));
   };
   /** A pinned row's menu: Unpin, Move up, Move down, Copy link. */
-  const pinAction = async (row: InboxListRow, action: PinnedAction) => {
+  const pinAction = async (row: InboxListRow, action: PinnedAction, pills = false) => {
     if (action === 'unpin') return void setPin(row, false);
     if (action === 'copy-link') return void rowAction(row, 'copy-link');
     const order = (latestRef.current?.pins ?? []).map((pin) => pin.thread_id);
@@ -4006,7 +4015,8 @@ function Inbox() {
       return;
     }
     await refreshList(false);
-    say(action === 'up' ? 'Moved up.' : 'Moved down.');
+    // The list's pills run sideways: their menu says Move left and Move right for the same two moves.
+    say(pills ? (action === 'up' ? 'Moved left.' : 'Moved right.') : action === 'up' ? 'Moved up.' : 'Moved down.');
   };
   /**
    * A pinned row opens its thread and leaves the list as it is (the project
@@ -6971,6 +6981,8 @@ function Inbox() {
           }}
           pinned={pinsOn ? pinnedIds : undefined}
           onUnstar={pinsOn ? unstarRow : undefined}
+          // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
+          starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -7265,6 +7277,7 @@ function Inbox() {
       {!tourOn && (
         <SidebarCustomizer
           drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
             if (!phone && routeRef.current.page === 'settings') setSettingsSidebar(true);
@@ -7849,6 +7862,7 @@ function Inbox() {
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           launchTip={!tourOn && !launchTipSpent.current && launchTipDue(settings) ? launchTip : null}
+          onJoined={composeJoined}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
