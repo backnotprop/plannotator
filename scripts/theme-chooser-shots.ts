@@ -43,6 +43,8 @@ async function serve(root: string): Promise<void> {
   const dataDir = join(root, 'data');
   refuseRealDataDir(dataDir, 'theme-chooser-shots');
   refuseRealHome(process.env.HOME, 'theme-chooser-shots');
+  // config.json follows the env: the child was started with it, and it is named here too so nothing else can be read.
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const { InboxStore } = await import('../packages/shared/inbox/store');
   const { startInboxServer } = await import('../packages/server/inbox');
   const past = '2026-10-01T10:00:00.000Z';
