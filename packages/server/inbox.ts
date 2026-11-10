@@ -1686,6 +1686,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       },
       projectById,
       lastHeardOf: live.lastHeardOf,
+      continuedBy: live.continuedBy,
+      continuesOf: live.continuesOf,
       labels: true,
     });
   };

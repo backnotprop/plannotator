@@ -87,6 +87,9 @@ async function world(): Promise<World> {
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // The Sidebar tip: shown long ago. Since the tips keep the line's 40-minute gap both ways, a tip claimed by a tab
+      // left idle (the second tab here, a minute into the page) would hold Snooze's dialog back for the gap.
+      inboxReveals: { sidebar_tip: { shownAt: past } },
     }),
   );
   const env = {
