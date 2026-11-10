@@ -50,6 +50,7 @@ import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } fr
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
+import { useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
 import { markFullScreenComposer } from '../pageMarks';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
@@ -120,6 +121,11 @@ export interface FullScreenComposerValue {
   covered?: boolean;
   /** The card's ⌄: gather every floating tool into the corner control, as » does. Set by the pane. */
   onGather?: () => void;
+  /**
+   * The file on screen (the pane's draft key: the attachment and which version of it shows). Where the person dragged
+   * the card holds for this file only: another key puts it back home (composerDrag.ts). Set by the pane.
+   */
+  fileKey?: string;
 }
 
 /** Given by the pane in full screen (image, film and HTML only): the views draw the composer from it. */
@@ -284,15 +290,19 @@ export function FullScreenComposer({
   const state = useComposerState(threadId, hasDraft, takesComments, foldedByDefault);
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
+  // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
+  const { attach: attachDrag, handle: dragHandle } = useComposerDrag(!phone, value.fileKey);
   // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
+    attachDrag(el);
     const release = markFullScreenComposer(el);
     return () => {
       cardRef.current = null;
+      attachDrag(null);
       release?.();
     };
-  }, []);
+  }, [attachDrag]);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const commentsRef = useRef<HTMLButtonElement | null>(null);
@@ -585,7 +595,7 @@ export function FullScreenComposer({
         reply.onSend();
       }}
     >
-      <div className="ib-fcomp-top">
+      <div className="ib-fcomp-top" {...dragHandle}>
         {takesComments ? (
           <div className="ib-fcomp-tabs" role="radiogroup" aria-label="Write" ref={tabsRef}>
             {tab('comment', 'comment', phone ? 'Comment' : commentLabel, commentWords)}

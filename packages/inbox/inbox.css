@@ -7827,6 +7827,15 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 }
 :root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 11%, transparent); --fc-tray: color-mix(in oklch, var(--foreground) 4.5%, var(--popover)); box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 12px 30px -14px rgb(20 20 30 / 0.22); }
 .pn-inbox .ib-fcomp :is(button, .ib-btn, .ib-fvb) { transition: none !important; }
+/* The card moves out of the way (composerDrag.ts): dragged by its tray, drawn as a transform from its home. No
+   transition while it is dragged; a short ease on the way home (a double click on the tray), none under reduced
+   motion. The cursor is the affordance. A phone's card is docked: none of this. */
+.ib-fcomp:not(.ib-phone) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
+.ib-fcomp:not(.ib-phone) [data-fcomp-drag] { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.ib-fcomp[data-fcomp-dragging] { transition: none; }
+.ib-fcomp[data-fcomp-dragging] [data-fcomp-drag], .pn-inbox .ib-fcomp[data-fcomp-dragging] [data-fcomp-drag] * { cursor: grabbing; }
+.ib-fcomp[data-fcomp-homing] { transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .ib-fcomp[data-fcomp-homing] { transition: none; } }
 
 /* The tray and its tabs (one radio group), the chevron at its end. */
 .ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }
@@ -7983,13 +7992,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
 .ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transition: var(--ib-gather-back); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px) + var(--ib-gx, 0px)), calc(var(--ib-fcomp-dy, 0px) + var(--ib-gy, 0px))) scale(var(--ib-gs, 0.92)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transform: none; }
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); }
 }
 
 /* Phone: the card spans the width above the home bar and the toolbar sits above it (the pane measures the card as the
@@ -8735,7 +8744,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat-in { position: relative; }
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
-.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translate(calc(-50% + var(--ib-fcomp-dx, 0px)), var(--ib-fcomp-dy, 0px)); width: min(540px, calc(100% - 32px)); }
 /* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card
    (the card's own centre, --ib-fcomp-c). */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-fcomp-c); width: min(540px, var(--ib-foot-w)); }
