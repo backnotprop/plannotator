@@ -1459,7 +1459,7 @@ function Inbox() {
    * Only Show lights rows: not a thread's close, not the first load.
    */
   const showFrom = useRef<InboxListSection[] | null>(null);
-  const { lit, light } = useShowLight();
+  const { lit, unseen: unseenNew, light, go: goToNew } = useShowLight();
   /** The thread a compose send just started, to light once its row is drawn (see the layout effect on the list order). One-shot: taken on the next commit, found or not. */
   const [sentLight, setSentLight] = useState<{ thread: string } | null>(null);
   /** Clicking Inbox with a thread open: the close adopts the refresh's read instead of settling (refreshInbox). */
@@ -6130,8 +6130,8 @@ function Inbox() {
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
-  /** Show was pressed: the list's next draw scrolls the first row it brought in into view, or to the middle (the pill's press). */
-  const scrollAfterShow = useRef<false | 'nearest' | 'center'>(false);
+  /** The list's pill was pressed (Show, and "take me there"): the list's next draw scrolls to the first row it brought in. Show's own line never scrolls. */
+  const goAfterShow = useRef(false);
   /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
   const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -6142,17 +6142,20 @@ function Inbox() {
     if (body && from) playSettle(body, from);
     const showBefore = showFrom.current;
     showFrom.current = null;
-    const pressedShow = scrollAfterShow.current;
-    scrollAfterShow.current = false;
+    const pressedPill = goAfterShow.current;
+    goAfterShow.current = false;
     // The rows Show (or a refresh) brought in, in the order they are drawn, their groups opened with the press.
     let brought: HTMLElement[] = [];
     if (showBefore && shown) {
       const ids = showBroughtIn(showBefore, shown);
       if (body) brought = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')].filter((el) => ids.has(el.getAttribute('data-thread-id')!) && el.getClientRects().length > 0);
       // A read that brings nothing in (Show again, a second refresh) leaves the light already on as it is.
-      // The pill's press scrolls to the first of them, perhaps from far: the light waits for it to be in view, so
-      // its whole time runs in front of the reader (showLight.ts).
-      if (ids.size > 0) light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, pressedShow === 'center' ? brought[0] : null);
+      // Each lights when it is in view in the list (showLight.ts): Show never scrolls, and the rows out of view
+      // wait for the reader, counted by the list's pill. Only that pill's press goes to them.
+      if (ids.size > 0) {
+        light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, body);
+        if (pressedPill && brought[0]) goToNew(brought[0]);
+      }
     }
     const shownAll = focusAfterShow.current;
     focusAfterShow.current = false;
@@ -6176,10 +6179,6 @@ function Inbox() {
       const target = next ? rowElement(body, next) : ([...body.querySelectorAll<HTMLElement>('button.ib-band')].find((el) => el.getClientRects().length > 0) ?? null);
       target?.focus({ preventScroll: true });
     }
-    // Show scrolls the first row it brought in into view (no further than that), in one jump under reduced motion.
-    // The pill's press brings it to the middle instead: at the edge it would land under the pointer that pressed,
-    // whose hover paints over the light.
-    if (pressedShow) brought[0]?.scrollIntoView?.({ block: pressedShow, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     listOrder.current = body ? [...body.querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!) : [];
     const open = routeRef.current.thread;
     if (open && order.includes(open) && !listOrder.current.includes(open)) openSlot.current = { thread: open, order };
@@ -6780,6 +6779,8 @@ function Inbox() {
           lit={lit}
           notice={notice}
           covered={route.thread !== null && (phone || stack.thread || full)}
+          unseenNew={unseenNew}
+          onGoNew={goToNew}
           stale={staleNotice}
           ask={
             <>
@@ -6805,13 +6806,13 @@ function Inbox() {
           // A phone's pull down from the list's top does the same, its ↻ spinning until the read lands (pullRefresh.ts).
           onPullRefresh={() => refreshInbox(route.project, false)}
           refreshSpin={refreshSpin && refreshSpin.scope === route.project ? refreshSpin.key : null}
-          onShowNew={(centre) => {
+          onShowNew={(fromPill) => {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
             focusAfterShow.current = lastInput() === 'keyboard';
             listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
             if (latestRef.current) {
               showFrom.current = shown;
-              scrollAfterShow.current = centre ? 'center' : 'nearest';
+              goAfterShow.current = fromPill === true;
             }
             settleList('all', true);
           }}

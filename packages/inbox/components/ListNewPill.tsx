@@ -1,26 +1,34 @@
 /**
- * The list's own "↓ N new" pill (the owner's pick, variant "A · Pill" of the design "new below"): the list holds
- * still, so the only sign of news is the "N new · Show" line at its top, and a reader scrolled down sees nothing
- * arrive. While that line is out of view, news shows the thread's pill (`.ib-npill`, Thread.tsx `NewPill`) at the
- * list's edge: the bottom edge when the row will land below the view, else the top edge. A press is Show.
+ * The list's own "↓ N new" pill (the owner's pick, variant "A · Pill" of the design "new below"): the thread's
+ * pill (`.ib-npill`, Thread.tsx `NewPill`) at the list's edge, for news the reader cannot see. Two cases, one pill:
  *
- * It counts the news of one burst, not everything that waits: it stays `LIST_NEW_PILL_MS`, each further arrival
- * adding to its count and starting that time again, then fades and is over; news after that starts a pill at its
- * own count (the owner: "show for five seconds and it would like queue up. If more appear below, it would just add
- * up to it"). The pointer or focus on it holds it. It leaves at once when the reader scrolls the line into view.
- * News that lands in Quiet or Sent shows none. The list never moves by itself.
+ *  - Held: news came while the "N new · Show" line at the list's top is out of view. The pill is at the bottom
+ *    edge when the row will land below the view, else the top edge. A press is Show, and goes to the row.
+ *  - Shown: Show brought rows in and some are out of view (Show never scrolls). The pill counts those past the
+ *    bottom edge, or with none there those past the top. A press goes to the nearest.
  *
- * State: what waits is the held list's (`heldNews`, the threads "N new" counts); the only thing kept here is which
- * of those the reader has already been shown (`seen`). Where things are comes from one IntersectionObserver on the
- * list's scroll box, never from a timer.
+ * How long it stays is `LIST_NEW_PILL_STAYS`: until it is pressed or the reader scrolls there (the default), or,
+ * set to false, `LIST_NEW_PILL_MS` after the last arrival and then a fade (the owner's first ask: "show for five
+ * seconds and it would like queue up. If more appear below, it would just add up to it"). The pointer or focus on
+ * it holds the fade. News that lands in Quiet or Sent shows none. The list never moves by itself.
+ *
+ * State: what waits is the held list's (`heldNews`) and the light's (`unseen`, showLight.ts); the only thing kept
+ * here is what the reader has already had a sign of (`seen`). Where the line is comes from one
+ * IntersectionObserver on the list's scroll box, never from a timer.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { InboxListGroupId } from '@plannotator/core/inbox-types';
 import type { HeldNews } from '../held';
+import type { ListEdge, UnseenRow } from '../showLight';
 import { Icon } from '../icons';
 import { prefersReducedMotion } from '../settle';
 
-/** How long the pill stays whole after the last arrival, and how long its fade then takes (inbox.css `data-fading`). */
+/**
+ * The pill stays until it is pressed or the reader scrolls there. False: it stays `LIST_NEW_PILL_MS` after the
+ * last arrival, then fades (an open question with the owner; this is the one place to change it).
+ */
+export const LIST_NEW_PILL_STAYS: boolean = true;
+/** With `LIST_NEW_PILL_STAYS` false: how long the pill stays whole after the last arrival, and how long its fade then takes (inbox.css `data-fading`). */
 export const LIST_NEW_PILL_MS = 5000;
 export const LIST_NEW_PILL_FADE_MS = 1800;
 
@@ -30,7 +38,7 @@ const NO_PILL: ReadonlySet<InboxListGroupId> = new Set(['quiet', 'sent']);
 const IN_VIEW = 0.6;
 const NONE: ReadonlySet<string> = new Set();
 
-type Edge = 'top' | 'bottom';
+type Edge = ListEdge;
 interface Where {
   /** The "N new · Show" line is in view. */
   sign: boolean;
@@ -100,6 +108,8 @@ function usePageShown(): boolean {
 export interface ListNewPillProps {
   /** The threads behind "N new" (held.ts `heldNews`); none while nothing waits. */
   news: readonly HeldNews[];
+  /** The rows Show brought in that are not in view yet (showLight.ts). */
+  unseen: readonly UnseenRow[];
   /** The list's scroll box. */
   body: RefObject<HTMLElement | null>;
   /** The list's groups in its order, the empty ones too. */
@@ -108,42 +118,60 @@ export interface ListNewPillProps {
   layout: string;
   /** The list is drawn but out of sight (a thread covers it): the pill waits for the list to be back. */
   covered: boolean;
-  /** Show, as the "N new" line's press. */
+  /** Show, as the "N new" line's press, and on to the first row it brings in. */
   onShow: () => void;
+  /** On to the nearest unseen row past that edge. */
+  onGo: (edge: Edge) => void;
+  /** `LIST_NEW_PILL_STAYS`, for the tests of the other answer. */
+  stays?: boolean;
 }
 
-export function ListNewPill({ news, body, order, layout, covered, onShow }: ListNewPillProps) {
+const shownKey = (row: UnseenRow) => `shown ${row.id}`;
+
+export function ListNewPill({ news, unseen, body, order, layout, covered, onShow, onGo, stays = LIST_NEW_PILL_STAYS }: ListNewPillProps) {
   const loud = news.filter((item) => !NO_PILL.has(item.lands));
-  /** The news the reader has had a sign of: the pill ran its time, or the "N new" line was in view. */
+  /** What the reader has had a sign of: the "N new" line was in view, or (when the pill fades) the pill ran its time. */
   const [seen, setSeen] = useState(NONE);
   const fresh = loud.filter((item) => !seen.has(item.key));
-  const burst = fresh.map((item) => item.key).join('\n');
   const where = useWhere(body, fresh[0]?.lands ?? null, order.join(','), layout);
   const watching = usePageShown() && !covered;
-  const on = watching && fresh.length > 0 && where !== null && !where.sign;
-  // Every new thread is in `burst`, so an effect that follows `burst` always holds the news as it is.
-  const sawAll = () => setSeen(new Set(loud.map((item) => item.key)));
+  // Held news first; else the rows Show brought in, those below before those above.
+  const held = watching && fresh.length > 0 && where !== null && !where.sign;
+  const rest = unseen.filter((row) => !seen.has(shownKey(row)));
+  const restEdge: Edge = rest.some((row) => row.edge === 'bottom') ? 'bottom' : 'top';
+  const count = held ? fresh.length : rest.filter((row) => row.edge === restEdge).length;
+  const on = held || (watching && count > 0);
+  const edge = held ? where.edge : restEdge;
+  const burst = held ? fresh.map((item) => item.key).join('\n') : rest.map(shownKey).join('\n');
+  // Everything that could show is in `burst`, so an effect that follows `burst` always holds it as it is.
+  const sawAll = () => setSeen(new Set([...loud.map((item) => item.key), ...unseen.map(shownKey)]));
 
-  // The line is in view: the reader has their sign, and a pill on screen leaves at once.
+  // The line is in view: the reader has their sign, and a pill on screen for it leaves at once.
   const signInView = watching && where?.sign === true && fresh.length > 0;
   useEffect(() => {
     if (signInView) sawAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sawAll` is a fresh closure each render; see above.
   }, [signInView, burst]);
+  // A row seen is no longer `unseen`; once none is, a later Show's rows start with nothing dismissed.
+  const noneUnseen = unseen.length === 0;
+  useEffect(() => {
+    if (noneUnseen) setSeen((last) => ([...last].some((key) => key.startsWith('shown ')) ? new Set([...last].filter((key) => !key.startsWith('shown '))) : last));
+  }, [noneUnseen]);
 
-  // Its time: whole, then the fade, then seen. Another arrival (`burst`) starts it again. The pointer or focus on it
-  // holds it, and leaving it goes straight to the fade. Reduced motion has no fade: it is there, then it is not.
-  const [held, setHeld] = useState(false);
+  // Only when the pill fades (`stays` false). Its time: whole, then the fade, then seen. Another arrival (`burst`)
+  // starts it again. The pointer or focus on it holds it, and leaving it goes straight to the fade. Reduced motion
+  // has no fade: it is there, then it is not.
+  const [holding, setHolding] = useState(false);
   const [fading, setFading] = useState(false);
   const letGo = useRef(false);
   useEffect(() => {
     if (!on) {
       // Gone (its time, the line in view, a press) with the pointer still where it was: the next pill starts whole.
       letGo.current = false;
-      setHeld(false);
+      setHolding(false);
       return;
     }
-    if (held) return;
+    if (stays || holding) return;
     const fade = prefersReducedMotion() ? 0 : LIST_NEW_PILL_FADE_MS;
     const whole = letGo.current ? 0 : LIST_NEW_PILL_MS;
     letGo.current = false;
@@ -157,24 +185,24 @@ export function ListNewPill({ news, body, order, layout, covered, onShow }: List
       setFading(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sawAll` is a fresh closure each render; see above.
-  }, [on, held, burst]);
+  }, [on, holding, burst, stays]);
   const hold = (next: boolean) => {
-    if (!next && held) letGo.current = true;
-    setHeld(next);
+    if (!next && holding) letGo.current = true;
+    setHolding(next);
   };
 
   // What the pill shows; as it leaves it keeps what it last showed.
   const last = useRef<{ count: number; edge: Edge }>({ count: 1, edge: 'bottom' });
-  const drawn = on ? { count: fresh.length, edge: where.edge } : last.current;
+  const drawn = on ? { count, edge } : last.current;
   useLayoutEffect(() => {
     if (on) last.current = drawn;
   });
   const words = `${drawn.count} new ${drawn.count === 1 ? 'message' : 'messages'} ${drawn.edge === 'bottom' ? 'below' : 'above'}`;
-  // Said once as the pill comes, not again as its count grows.
+  // Said once as the pill comes, not again as its count changes.
   const [said, setSaid] = useState('');
   useEffect(() => {
     setSaid(on ? words : '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the pill coming and going: its count growing is not said again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the pill coming and going: its count changing is not said again.
   }, [on]);
 
   return (
@@ -195,7 +223,8 @@ export function ListNewPill({ news, body, order, layout, covered, onShow }: List
         onClick={(event) => {
           // The pill goes with the press: focus is the list's to place, as after the line's Show.
           event.currentTarget.blur();
-          onShow();
+          if (held) onShow();
+          else onGo(drawn.edge);
         }}
       >
         <Icon name={drawn.edge === 'bottom' ? 'arrowDown' : 'arrowUp'} size={15} />

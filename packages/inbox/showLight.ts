@@ -1,67 +1,172 @@
 /**
  * Show's light (design record "inbox-polish", item 6; inbox.css `data-lit`, `ib-lit`): the rows Show brought in
- * light up where they landed, for `SHOW_LIT_MS`, and the light is then taken off. One light at a time: a new one
+ * light up where they landed, for `SHOW_LIT_MS`, and the light is then taken off. One run at a time: a new one
  * takes the last one's place.
  *
- * `arrive`: the row the list is scrolling to (the press on the list's pill, ListNewPill.tsx, which may be far
- * from the rows). The light then waits until that row is in view, so its whole time runs in front of the reader
- * (the owner, on the pill: "if I hit the pill, then the timer should reset so I can still see the new one"). The
- * same light and the same time; only its start waits.
+ * Show never scrolls the list (the owner: "instead of scrolling me down all over the … place"). So each row's
+ * light waits until that row is in view in the list, and then runs its whole time in front of the reader. The
+ * rows still out of view are `unseen`, each with the edge of the list it is past: the list's pill counts them
+ * (components/ListNewPill.tsx), and its press is `go`, the only thing here that scrolls.
+ *
+ * Where the rows are is measured when something can have moved them: the list scrolls, changes size, or is drawn
+ * again. Never on a timer.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SHOW_LIT_MS } from './settle';
+import { prefersReducedMotion, SHOW_LIT_MS } from './settle';
+
+export type ListEdge = 'top' | 'bottom';
+/** A row Show brought in that the reader has not had in view yet, and the edge of the list it is past. */
+export interface UnseenRow {
+  id: string;
+  edge: ListEdge;
+}
 
 const NONE: ReadonlySet<string> = new Set();
-/** The share of the row that must show in the list for it to have arrived. */
-const ARRIVED = 0.9;
+const NO_ROWS: readonly UnseenRow[] = [];
+/** The share of a row that must show in the list for it to be in view. */
+const IN_VIEW = 0.6;
+/** `go` holds the count back while the list scrolls to its row, at most this long. */
+const GO_MS = 1200;
 
-/** Runs `then` once, when `row` is in view in its list (at once when it is, or where the browser cannot say). Returns its cancel. */
-function whenInView(row: HTMLElement, then: () => void): () => void {
-  const root = row.closest('.ib-lbody');
-  if (!root || typeof IntersectionObserver === 'undefined') {
-    then();
-    return () => {};
+interface Run {
+  stop: () => void;
+  go: (target: ListEdge | HTMLElement) => void;
+}
+
+type SetLit = (change: (lit: ReadonlySet<string>) => ReadonlySet<string>) => void;
+
+function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | null, setLit: SetLit, setUnseen: (rows: readonly UnseenRow[]) => void): Run {
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const later = (fn: () => void, ms: number) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      fn();
+    }, ms);
+    timers.add(timer);
+    return timer;
+  };
+  const turnOn = (rows: readonly string[]) => {
+    setLit((lit) => new Set([...lit, ...rows]));
+    later(() => setLit((lit) => new Set([...lit].filter((id) => !rows.includes(id)))), SHOW_LIT_MS);
+  };
+  // No list to measure in (a compose send's own row, lit where it is drawn): every row at once.
+  if (!body) {
+    later(() => turnOn([...ids]), after);
+    return { stop: () => timers.forEach(clearTimeout), go: () => {} };
   }
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (!entries.some((entry) => entry.intersectionRatio >= ARRIVED)) return;
-      observer.disconnect();
-      then();
+
+  const find = (id: string) => [...body.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`)].find((el) => el.getClientRects().length > 0) ?? null;
+  /** The rows not yet in view, with the edge each is past. */
+  const waiting = new Map<string, { el: HTMLElement; edge: ListEdge }>();
+  /** The row `go` scrolls to: the count is held back until it is in view, so the pill does not flash on the way. */
+  let going: HTMLElement | null = null;
+  let started = false;
+  const publish = () => {
+    if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));
+  };
+  const measure = () => {
+    if (!started) return;
+    const view = body.getBoundingClientRect();
+    const seen: string[] = [];
+    for (const [id, row] of [...waiting]) {
+      // Drawn again (another shape), or gone (its group was closed): the row on screen now, or none.
+      if (!row.el.isConnected || row.el.getClientRects().length === 0) {
+        const next = find(id);
+        if (!next) {
+          waiting.delete(id);
+          continue;
+        }
+        row.el = next;
+      }
+      const rect = row.el.getBoundingClientRect();
+      const showing = Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top);
+      // A list with no height cannot say (no layout): the row counts as in view.
+      if (view.height === 0 || showing >= rect.height * IN_VIEW) {
+        waiting.delete(id);
+        seen.push(id);
+        if (going === row.el) going = null;
+      } else row.edge = rect.top + rect.height / 2 < view.top + view.height / 2 ? 'top' : 'bottom';
+    }
+    if (seen.length > 0) turnOn(seen);
+    if (waiting.size === 0) unwatch();
+    publish();
+  };
+  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+  const redraw = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
+  const unwatch = () => {
+    body.removeEventListener('scroll', measure);
+    resize?.disconnect();
+    redraw?.disconnect();
+  };
+  // Once the rows have slid into place.
+  later(() => {
+    for (const id of ids) {
+      const el = find(id);
+      if (el) waiting.set(id, { el, edge: 'bottom' });
+    }
+    started = true;
+    body.addEventListener('scroll', measure, { passive: true });
+    resize?.observe(body);
+    redraw?.observe(body, { childList: true, subtree: true });
+    measure();
+  }, after);
+
+  return {
+    stop: () => {
+      timers.forEach(clearTimeout);
+      unwatch();
     },
-    { root, threshold: [ARRIVED] },
-  );
-  observer.observe(row);
-  return () => observer.disconnect();
+    go: (target) => {
+      let el: HTMLElement | null = null;
+      if (typeof target !== 'string') el = target;
+      else {
+        // The nearest of the rows past that edge; focus follows the reader there.
+        const rows = [...waiting.values()].filter((row) => row.edge === target).map((row) => ({ el: row.el, top: row.el.getBoundingClientRect().top }));
+        rows.sort((a, b) => (target === 'bottom' ? a.top - b.top : b.top - a.top));
+        el = rows[0]?.el ?? null;
+        el?.focus({ preventScroll: true });
+      }
+      if (!el) return;
+      going = el;
+      later(() => {
+        going = null;
+        publish();
+      }, GO_MS);
+      el.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    },
+  };
 }
 
 export function useShowLight(): {
   /** The rows lit now (`data-lit`). */
   lit: ReadonlySet<string>;
-  /** Light `ids` after `after` ms (the rows' slide into place), and no sooner than `arrive` is in view. */
-  light: (ids: ReadonlySet<string>, after: number, arrive?: HTMLElement | null) => void;
+  /** The rows of this run not yet in view. */
+  unseen: readonly UnseenRow[];
+  /**
+   * Light `ids` no sooner than `after` ms (the rows' slide into place). With `body`, the list's scroll box, each
+   * row is lit when it is in view there; without it, all at once.
+   */
+  light: (ids: ReadonlySet<string>, after: number, body?: HTMLElement | null) => void;
+  /** Scroll the list to the nearest unseen row past `target`'s edge, or to that row, bringing it to the middle. */
+  go: (target: ListEdge | HTMLElement) => void;
 } {
   const [lit, setLit] = useState(NONE);
-  const pending = useRef<(() => void)[]>([]);
+  const [unseen, setUnseen] = useState(NO_ROWS);
+  const run = useRef<Run | null>(null);
   const cancel = useCallback(() => {
-    for (const stop of pending.current) stop();
-    pending.current = [];
+    run.current?.stop();
+    run.current = null;
   }, []);
   useEffect(() => cancel, [cancel]);
   const light = useCallback(
-    (ids: ReadonlySet<string>, after: number, arrive?: HTMLElement | null) => {
+    (ids: ReadonlySet<string>, after: number, body?: HTMLElement | null) => {
       cancel();
       setLit(NONE);
-      const ready = Date.now() + after;
-      const start = () => {
-        const wait = Math.max(0, ready - Date.now());
-        const on = setTimeout(() => setLit(ids), wait);
-        const off = setTimeout(() => setLit(NONE), wait + SHOW_LIT_MS);
-        pending.current.push(() => clearTimeout(on), () => clearTimeout(off));
-      };
-      if (arrive) pending.current.push(whenInView(arrive, start));
-      else start();
+      setUnseen(NO_ROWS);
+      run.current = startRun(ids, after, body ?? null, setLit, (rows) => setUnseen(rows.length === 0 ? NO_ROWS : rows));
     },
     [cancel],
   );
-  return { lit, light };
+  const go = useCallback((target: ListEdge | HTMLElement) => run.current?.go(target), []);
+  return { lit, unseen, light, go };
 }

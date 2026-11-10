@@ -39,6 +39,7 @@ import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useListGroups } from '../listGroups';
 import type { HeldNews } from '../held';
+import type { ListEdge, UnseenRow } from '../showLight';
 import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -87,8 +88,11 @@ export interface InboxListProps {
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
-  /** Show. `centre`: the first row it brings in comes to the middle of the list (the pill's press, at the list's edge), not only into view. */
-  onShowNew: (centre?: boolean) => void;
+  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the first row it brings in. */
+  onShowNew: (fromPill?: boolean) => void;
+  /** The rows Show brought in that are not in view yet (showLight.ts): the pill counts them, and its press is `onGoNew`. */
+  unseenNew?: readonly UnseenRow[];
+  onGoNew?: (edge: ListEdge) => void;
   /**
    * The title, pressed, refreshes the list it names (click Inbox to refresh):
    * ↻ beside it on hover with the tooltip, one turn on a click. Absent: a plain heading.
@@ -1285,6 +1289,7 @@ function newSince(rows: readonly InboxListRow[], since: number): boolean {
 }
 
 const NO_NEWS: readonly HeldNews[] = [];
+const NO_UNSEEN: readonly UnseenRow[] = [];
 
 export function InboxList(props: InboxListProps) {
   // Every group closes by a click on its header, this browser's choice (listGroups.ts). Quiet and the Snoozed band
@@ -1679,6 +1684,8 @@ export function InboxList(props: InboxListProps) {
         layout={`${asList}|${visible.map((section) => section.id).join(',')}`}
         covered={props.covered === true}
         onShow={() => showNew(true)}
+        unseen={props.unseenNew ?? NO_UNSEEN}
+        onGo={(edge) => props.onGoNew?.(edge)}
       />
         <ThreadRowMenu
           ref={bodyRef}
