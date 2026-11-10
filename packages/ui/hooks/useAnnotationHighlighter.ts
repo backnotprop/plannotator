@@ -306,6 +306,27 @@ const isSerializableRange = (range: Range): boolean =>
   && boundaryResolves(range.endContainer, range.endOffset);
 
 /**
+ * Whether a range that reaches outside `container` carries words from there.
+ *
+ * web-highlighter does not check containment. A drag that starts in a panel
+ * AFTER the document and ends in the document is, in document order, a range
+ * from the release point to the panel: the painter never meets its end and
+ * paints to the end of the document, and the quote ends with the panel's
+ * words. One that starts BEFORE the document paints only its last text node.
+ * Neither is a selection of the document.
+ *
+ * Not plain containment: a triple-click on the LAST block ends at offset 0 of
+ * the element after the document, so its common ancestor is outside too, yet
+ * every word in it is the document's and it highlights correctly.
+ */
+const carriesTextFromOutside = (container: HTMLElement, range: Range): boolean => {
+  const inside = range.cloneRange();
+  if (!container.contains(inside.startContainer)) inside.setStart(container, 0);
+  if (!container.contains(inside.endContainer)) inside.setEnd(container, container.childNodes.length);
+  return compactText(inside.toString()) !== compactText(range.toString());
+};
+
+/**
  * One line per page load: a highlighter failure is degraded UX (the selection
  * is ignored), not something to flood the console — or the user — over.
  */
@@ -1886,6 +1907,10 @@ export function useAnnotationHighlighter({
       }
       if (!container.contains(range.commonAncestorContainer)) {
         pendingRangeRunsRef.current = null;
+        // Collapsed for the same reason as the blank quote above: the
+        // library's handler paints whatever selection it finds, and then
+        // removes it either way.
+        if (carriesTextFromOutside(container, range)) selection.removeAllRanges();
         return;
       }
       const snappedOutOfSlot = snapRangeOutOfBelowTitle(container, range);

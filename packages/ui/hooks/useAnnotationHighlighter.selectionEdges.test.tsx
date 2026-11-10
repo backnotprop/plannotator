@@ -245,3 +245,46 @@ describe('useAnnotationHighlighter: an end the painter cannot reach', () => {
     expect(paintedText(container)).toBe('words here ' + TAIL.slice(0, 5));
   });
 });
+
+describe('useAnnotationHighlighter: a selection that reaches outside the document', () => {
+  test.skipIf(!hasDom)('a drag from a panel after the document into it makes no highlight', async () => {
+    const { container, panel, second, added, hook, uncaught } = await mount('selection');
+    // Pressed in the panel, released in the second paragraph: in document
+    // order the range runs from the release point to the press point.
+    const panelText = panel.querySelector('p')!.firstChild!;
+    select(second.firstChild!, 7, panelText, 5);
+
+    await pointerEnd(second);
+
+    expect(container.querySelectorAll('mark').length).toBe(0);
+    expect(hook.current!.toolbarState).toBeNull();
+    expect(added).toEqual([]);
+    expect(uncaught).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('the same drag in redline mode deletes nothing', async () => {
+    const { container, panel, second, added } = await mount('redline');
+    select(second.firstChild!, 7, panel.querySelector('p')!.firstChild!, 5);
+
+    await pointerEnd(second);
+
+    expect(added).toEqual([]);
+    expect(container.querySelectorAll('mark').length).toBe(0);
+  });
+
+  test.skipIf(!hasDom)('a triple-click on the last block, which ends in the next element, still highlights it', async () => {
+    // Chromium ends a triple-click at offset 0 of whatever follows the block.
+    // After the LAST block that is an element outside the document, so the
+    // range's common ancestor is outside too; it carries no words from there
+    // and must keep working.
+    const { container, panel, third, added } = await mount('redline');
+    select(third.firstChild!, 0, panel, 0);
+
+    await pointerEnd(third);
+
+    expect(added.length).toBe(1);
+    expect(added[0]!.originalText.trim()).toBe(THIRD);
+    expect(added[0]!.type).toBe(AnnotationType.DELETION);
+    expect(paintedText(container)).toBe(THIRD);
+  });
+});
