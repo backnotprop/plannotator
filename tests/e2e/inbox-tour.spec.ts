@@ -803,7 +803,8 @@ test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and 
       // The pick: focus on To, never on the message, so nothing raises a keyboard.
       await expect(page.locator('[data-compose] [data-compose-to]')).toBeFocused();
       await expect(field).not.toBeFocused();
-      expect(await sendFree(), `${width}: Send is free with the keyboard down`).toBe(true);
+      // To's sheet takes about a quarter of a second to leave the bottom of the screen, where Send is.
+      await expect.poll(sendFree, { message: `${width}: Send is free with the keyboard down` }).toBe(true);
       await expect(coach(page)).toBeVisible();
 
       // A tap on the message raises it all the same: the card gives way, Send and Exit stay.

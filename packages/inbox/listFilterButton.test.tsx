@@ -13,7 +13,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act } from 'react';
@@ -33,12 +33,14 @@ let host: HTMLElement | null = null;
 let sheet: HTMLStyleElement | null = null;
 
 beforeEach(() => {
+  setSystemTime(NOW);
   stored.clear();
   setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
   resetListFilterForTests();
 });
 
 afterEach(() => {
+  setSystemTime();
   if (hasDom) act(() => root?.unmount());
   setListFilterPullsForTests(null);
   resetStorageBackend();
@@ -53,7 +55,12 @@ afterEach(() => {
   sheet = null;
 });
 
-const recent = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+/**
+ * The page's clock for every test here: an afternoon, local time. The rows are a few hours old and "Today" starts at
+ * local midnight, so on the real clock the Today cases failed for the first three hours of every day.
+ */
+const NOW = new Date(2026, 10, 5, 15, 0, 0);
+const recent = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
 
 function row(id: string, project: string, hoursAgo: number, agent: string, section: InboxListRow['section'], pull?: 'open' | 'merged'): InboxListRow {
   return {

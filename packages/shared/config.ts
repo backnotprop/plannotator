@@ -437,6 +437,13 @@ export interface PlannotatorConfig {
    */
   inboxRowsDefaults?: number;
   /**
+   * The look before the last save of `inboxRows` (null: none was saved before it), so the last change can be undone
+   * (`plannotator inbox rows undo`, the Rows page's Undo after an agent's change). Written with every save.
+   */
+  inboxRowsPrev?: string[] | null;
+  /** Who made the last save of `inboxRows`, when an agent's command did (`{ host, session }`); null for the person's own. */
+  inboxRowsBy?: { host: string; session: string } | null;
+  /**
    * The Inbox sidebar's layout (approval "inbox-sidebar-customize"): `{ top, bottom, hidden }`, lists of item names
    * (core `INBOX_SIDEBAR_ITEMS`): the order of the top and bottom stacks, and the items hidden. Unset: today's
    * sidebar. Written by the sidebar's right-click menu and its Customize panel through POST /api/inbox/settings
@@ -566,6 +573,13 @@ export interface PlannotatorConfig {
    */
   inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
   /**
+   * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
+   * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
+   * text names one, and a guide that still has one draws it folded under its Diagram header. Written by
+   * `POST /api/inbox/settings` `{ chapter_diagrams: { on } }`, read on every request (`inboxChapterDiagramsOn`).
+   */
+  inboxChapterDiagrams?: boolean;
+  /**
    * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
    * agent draws and keeps current. Off unless the person turns it on. On: the
    * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
@@ -582,6 +596,15 @@ export interface PlannotatorConfig {
    */
   inboxSystem?: boolean;
   /**
+   * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
+   * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
+   * at the first release start of the version that ships the dialog: `dueAt`
+   * for someone on the default theme (Plannotator Original on both halves),
+   * `notNeededAt` for anyone on another theme, then or later (final). Its
+   * claim is the line's (`inboxReveals.theme_chooser`).
+   */
+  inboxThemeChooser?: { dueAt?: string; notNeededAt?: string };
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
@@ -593,10 +616,10 @@ export interface PlannotatorConfig {
    * the claiming page's own key, so that page's retry after a lost answer is
    * shown it again (any other key is not). The schedule (approval
    * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
-   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * any kind (the agent note included: the 40-minute gap counts from it); `notNowAt`, the last offer
    * closed with Not now (three days before the next); `shownLoad`, the page
-   * load that showed the last dialog (never on two loads in a row; the loads
-   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * load that showed the last dialog (a record only since 2026-11-09:
+   * nothing reads it). `agentNote.shownFor`: the agents the
    * agent note was shown for (once each, so an unanswered note never takes
    * another day). `waitingSince` also counts the 14 days after which an offer
    * retires (an update-day dialog never does).
@@ -607,7 +630,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -619,8 +642,17 @@ export interface PlannotatorConfig {
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
+    /**
+     * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
+     * install (never due), both written at the first release start of the version that ships it; then claimed once.
+     */
+    tab_icon?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
+    /** The "themes" dialog's claim in the line (who it is for: config.json `inboxThemeChooser`). */
+    theme_chooser?: { shownAt?: string; key?: string };
     /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
+    /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
+    sidebar_tip?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -876,6 +908,11 @@ function getConfigDir(): string {
 }
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
+}
+
+/** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
+export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
+  return config.inboxChapterDiagrams !== false;
 }
 
 /**

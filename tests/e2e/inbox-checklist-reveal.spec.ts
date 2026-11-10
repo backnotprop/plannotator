@@ -88,10 +88,15 @@ async function world(steps?: boolean): Promise<World> {
       inboxSound: { dialogShownFor: VERSION },
       inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
-      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown } },
+      // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.
+      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown } },
       ...(steps === undefined ? {} : { inboxSteps: steps }),
     }),
   );

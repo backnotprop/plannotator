@@ -102,6 +102,10 @@ async function world(options: Options = {}) {
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
     inboxListIntro: { shownAt: settledAt, version: 2 },
     inboxVoiceIntro: { shownAt: settledAt },
+    // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+    favicon: "glass",
+    // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+    inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
   if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });

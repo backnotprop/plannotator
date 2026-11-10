@@ -701,7 +701,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.mouse.move(1, 1);
 
       // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
-      await page.locator('section.ib-pane [data-ask-open]').click();
+      // Side on the message's words reopens the thread's chat (no Ask icon in the top bar, no row in the corner: the owner, 2026-11-09).
+      await sideOpensChat(page, message);
       const ask = page.locator('[data-chat-window]');
       await expect(ask).toContainText('from the table in');
       // Read once, the review's message is folded in the thread: the review opens by its address too.
@@ -740,7 +741,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     }
   });
 
-  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread and in Ask AI`, async ({ browser }) => {
+  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread, and no Ask`, async ({ browser }) => {
     await world.handPull(world.prReviewThread);
     const { context, page } = await windowAt(browser, 390, 844, colorScheme);
     try {
@@ -754,22 +755,40 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, `33-phone-review-thread-${colorScheme}`);
       await sheet.locator('[data-code-hover-close]').tap();
       await expect(sheet).toHaveCount(0);
-      await page.locator('[data-ask-open]').first().tap();
-      const ask = page.locator('[data-chat-window]');
-      // Ask AI's window on a phone is the whole screen, as it is with Code review off.
-      await expect(ask).toBeVisible();
-      await expect.poll(async () => JSON.stringify(await ask.boundingBox())).toBe(JSON.stringify({ x: 0, y: 0, width: 390, height: 844 }));
-      await ask.locator('code', { hasText: 'src/retry.ts:1-3' }).tap();
-      await expect(sheet).toContainText('BACKOFF_MS');
-      await page.waitForTimeout(250);
-      await shot(page, `34-phone-review-ask-${colorScheme}`);
-      await sheet.locator('[data-code-hover-close]').tap();
-      await expect(sheet).toHaveCount(0);
-      await expect(ask).toBeVisible();
+      // No Ask on a phone for now (the owner, 2026-11-09): no round button, so nothing opens Ask's window here.
+      await expect(page.locator('button[data-rf-corner], [data-rf-card="ask"], [data-ask-open]')).toHaveCount(0);
     } finally {
       await context.close();
     }
   });
+}
+
+/** Side on a message's words opens (or reopens) the thread's chat: a drag inside the words themselves, never from the margin. */
+async function sideOpensChat(page: Page, message: Locator, words = 'The schedule is in'): Promise<void> {
+  const side = page.locator('.annotation-toolbar [data-annotation-side]');
+  await expect(async () => {
+    const at = await message.first().evaluate((root, needle) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.textContent?.indexOf(needle) ?? -1;
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + needle.length);
+        const r = range.getClientRects()[0]!;
+        return { x1: r.left + 1, x2: r.right - 1, y: r.top + r.height / 2 };
+      }
+      return null;
+    }, words);
+    expect(at, `"${words}" is on screen`).not.toBeNull();
+    await page.mouse.move(at!.x1, at!.y);
+    await page.mouse.down();
+    await page.mouse.move((at!.x1 + at!.x2) / 2, at!.y, { steps: 6 });
+    await page.mouse.move(at!.x2, at!.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(side).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await side.click();
 }
 
 /** Press in the text before `words`, and drag past them into the text after. */
@@ -884,17 +903,18 @@ test('a saved comment across a link to a missing file: learning it is missing le
 
 test('Ask AI\'s window in a small window keeps its place, and a code span in it shows its code over it', async ({ browser }) => {
   await world.handPull(world.prReviewThread);
-  const { context, page } = await windowAt(browser, 700, 500, 'dark');
+  // 800 x 500: the smallest desktop layout (PHONE_QUERY is 767 px and under), where Side opens the chat.
+  const { context, page } = await windowAt(browser, 800, 500, 'dark');
   try {
     await page.goto(`${world.url}#thread=${world.prReviewThread}`);
-    await page.locator('section.ib-pane [data-ask-open]').click();
+    await sideOpensChat(page, page.locator('.ib-body', { hasText: 'Start at' }));
     const ask = page.locator('[data-chat-window]');
     await expect(ask).toContainText('from the table in');
     const box = (await ask.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(500);
-    expect(box.x + box.width).toBeLessThanOrEqual(700);
+    expect(box.x + box.width).toBeLessThanOrEqual(800);
     await expect(ask.getByRole('button').first()).toBeInViewport();
     const inAsk = await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
     // Over Ask AI's window: the window's own header is under it, not over it.

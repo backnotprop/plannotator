@@ -10,7 +10,7 @@ import {
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_PNG_BYTES, P_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -432,16 +432,35 @@ describe("handleFavicon", () => {
     expect(bytes).toEqual(FAVICON_PNG_BYTES);
   });
 
-  test("serves each persisted style's own PNG: glass, totman (Face), classic (P)", async () => {
+  test("serves each persisted style's own PNG: glass, yellow, totman (Face); classic (the removed P) the default", async () => {
     for (const [style, expected] of [
       ["glass", FAVICON_PNG_BYTES],
+      ["yellow", YELLOW_FAVICON_PNG_BYTES],
       ["totman", FACE_FAVICON_PNG_BYTES],
-      ["classic", P_FAVICON_PNG_BYTES],
+      ["classic", FAVICON_PNG_BYTES],
     ] as const) {
-      saveConfig({ favicon: style });
+      saveConfig({ favicon: style as never });
       const response = handleFavicon();
       // The entry HTML's <link> declares no type, so the header is all the browser has.
       expect(response.headers.get("content-type"), style).toBe("image/png");
+      expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
+    }
+  });
+
+  test("/favicon.ico, what every page links: Glass's and Yellow's multi-size .ico, Face its PNG", async () => {
+    const glass = handleFavicon("/favicon.ico");
+    expect(glass.headers.get("content-type")).toBe("image/x-icon");
+    expect(glass.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await glass.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+    for (const [style, expected] of [
+      ["glass", FAVICON_ICO_BYTES],
+      ["yellow", YELLOW_FAVICON_ICO_BYTES],
+      ["totman", FACE_FAVICON_PNG_BYTES],
+      ["classic", FAVICON_ICO_BYTES],
+    ] as const) {
+      saveConfig({ favicon: style as never });
+      const response = handleFavicon("/favicon.ico");
+      expect(response.headers.get("content-type"), style).toBe(style === "totman" ? "image/png" : "image/x-icon");
       expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
     }
   });
@@ -456,7 +475,7 @@ describe("handleFavicon", () => {
   // on the next session after a switch.
   test("does not let either payload be cached under the shared URL", () => {
     expect(handleFavicon().headers.get("cache-control")).toBe("no-cache");
-    saveConfig({ favicon: "classic" });
+    saveConfig({ favicon: "totman" });
     expect(handleFavicon().headers.get("cache-control")).toBe("no-cache");
   });
 });

@@ -33,7 +33,7 @@ export function resolveInboxDebug(config: { inboxDebug?: unknown }, env: Record<
 
 const ROUTE_WORDS = new Set(
   (
-    "api inbox ack actions agents annotations apps archived assets attachments board bridge cards check checks combine " +
+    "api inbox ack actions agents annotations apps archived assets attachments audio board bridge cards check checks combine " +
     "connect content control debug decisions delete device devices dialog dismiss download draft drafts dropped embeds " +
     "event events feedback fixture.json guide handoff health image intro key lan link linked-page list-intro log m " +
     "machines mark-unread markdown-image marks markups message messages name none notes offer open-in outbox page " +

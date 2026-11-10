@@ -230,6 +230,8 @@ export function createInboxCompose(options: {
         board_request: body.board_request === true && boardOn(),
         // Settings -> Decision data's Ask: the agent also receives how to answer it (INBOX_DECISION_ASK_BLOCK).
         decision_ask: body.decision_ask === true,
+        // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
+        rows_ask: body.rows_ask === true,
         ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });

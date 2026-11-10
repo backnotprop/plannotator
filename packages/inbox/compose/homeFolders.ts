@@ -131,6 +131,10 @@ export interface FolderRead {
   writable?: boolean;
   nearest?: { path: string; folders: readonly string[] } | null;
   blocked?: { path: string; state: 'file' | 'locked' } | null;
+  /** The folder itself is never started in (home, a folder above it, `/`, the folder drives are in). */
+  start?: false;
+  /** Of `folders`, the ones listed but never started in. */
+  nostart?: readonly string[];
 }
 
 /** One row of the folder browser (approval "launch-create-clone", A1-A12). */
@@ -182,8 +186,52 @@ const BAD_NAME = /[\\:]/;
 /** The browser's words for a refused read: the server's code, in the prototype's words. */
 export function folderRefusalWords(code: string | null, message: string): string {
   if (code === 'folder_hidden') return "Hidden folders aren't offered.";
+  if (code === 'folder_system') return "System folders aren't offered.";
+  // An older Inbox on a linked machine offers home only.
   if (code === 'folder_outside_home') return 'Only folders inside your home folder.';
   return message;
+}
+
+/** A drive the machine has mounted (its launch block's `drives`): `/Volumes/Studio SSD`, its name, a network one. */
+export interface FolderDrive {
+  path: string;
+  name: string;
+  network?: true;
+}
+
+/** Where a typed path is: one of the drives (the longest that holds it), else home (`null`). */
+export function placeOf(path: string, drives: readonly FolderDrive[]): FolderDrive | null {
+  const clean = path.replace(/\/+$/, '');
+  return drives.filter((d) => clean === d.path || clean.startsWith(`${d.path}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+}
+
+/**
+ * A project whose folder is gone because its drive isn't plugged in: that drive's name (`/Volumes/Archive/old-site`
+ * with no Archive mounted → "Archive"), else null. Only for a folder in a drives folder (`/Volumes`, `/mnt`, `/media`,
+ * `/run/media/<user>`), and only when the machine said which drives it has.
+ */
+export function unpluggedDrive(root: string, drives: readonly FolderDrive[] | null | undefined): string | null {
+  if (!drives) return null;
+  const parts = root.split('/').filter(Boolean);
+  const at = parts[0] === 'Volumes' || parts[0] === 'mnt' ? 1 : parts[0] === 'run' && parts[1] === 'media' ? 3 : parts[0] === 'media' ? (parts.length > 3 ? 2 : 1) : -1;
+  const name = at > 0 ? parts[at] : undefined;
+  if (!name || placeOf(root, drives)) return null;
+  return name;
+}
+
+/**
+ * A folder on a drive as the folder menu says it: the drive's name, then the folders under it
+ * (`/Volumes/Studio SSD/clients/acme` → "Studio SSD", ["clients", "acme"]). A drive that isn't plugged in is named by
+ * its folder in the drives folder. Null for a folder on no drive.
+ */
+export function drivePathOf(root: string, drives: readonly FolderDrive[] | null | undefined): { name: string; folders: string[] } | null {
+  if (!drives) return null;
+  const parts = root.split('/').filter(Boolean);
+  const mounted = placeOf(root, drives);
+  if (mounted) return { name: mounted.name, folders: parts.slice(mounted.path.split('/').filter(Boolean).length) };
+  const name = unpluggedDrive(root, drives);
+  if (!name) return null;
+  return { name, folders: parts.slice(parts.indexOf(name) + 1) };
 }
 
 /**
@@ -215,7 +263,8 @@ export function folderBrowserView(input: {
   };
   const path = normalizeFolderPath(input.typed);
   const { parent, tail } = splitFolderPath(path);
-  if (!parent.startsWith('~')) return { ...view, note: 'Only folders inside your home folder.' };
+  // Any folder but a hidden or system one (approval "inbox-launch-any-folder"): a hidden one is said without a read;
+  // a system one is the server's to say.
   if ([...parent.split('/').slice(1), tail].some((segment) => segment.startsWith('.'))) return { ...view, note: "Hidden folders aren't offered." };
   if (input.error) return { ...view, note: input.error };
   const read = input.read;
@@ -229,9 +278,10 @@ export function folderBrowserView(input: {
     const names = folderSuggestions(read.folders, tail);
     const near = (n: number) => closestFirst(open, tail).slice(0, n).map(row);
     if (tail === '') {
-      // Home itself is never started in (A1): its first folder leads instead. A clone may go in home.
+      // Home itself is never started in (A1), nor a folder above it, `/` or the folder drives are in (`start: false`):
+      // its first folder leads instead. A clone may go in home.
       if (clone) cloneLead(parent);
-      else if (parent !== '~') view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
+      else if (parent !== '~' && read.start !== false) view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       view.rows.push(...names.map(row));
       if (view.rows.length === 0) view.note = `${parent} has no folders.`;
       return view;
@@ -241,7 +291,7 @@ export function folderBrowserView(input: {
     if (exact) {
       if (locked.has(exact)) view.note = `Can't open ${typedPath}: no permission.`;
       else if (clone) cloneLead(typedPath);
-      else view.rows.push({ kind: 'start', path: typedPath, name: tail });
+      else if (!(read.nostart ?? []).includes(exact)) view.rows.push({ kind: 'start', path: typedPath, name: tail });
       view.rows.push(...names.map(row));
       return view;
     }
@@ -249,7 +299,7 @@ export function folderBrowserView(input: {
     if (named === 'folder') {
       // A folder the listing spells another way (a case-blind disk): it is there, so it leads.
       if (clone) cloneLead(typedPath);
-      else view.rows.push({ kind: 'start', path: typedPath, name: tail });
+      else if (input.nameRead!.start !== false) view.rows.push({ kind: 'start', path: typedPath, name: tail });
       view.rows.push(...names.map(row));
       return view;
     }
@@ -259,7 +309,7 @@ export function folderBrowserView(input: {
     }
     if (named === 'file') {
       // A path to a file (A7): its folder leads. A name a file has (A8): pick another.
-      if (/\.\w+$/.test(tail) && parent !== '~' && !clone) {
+      if (/\.\w+$/.test(tail) && parent !== '~' && read.start !== false && !clone) {
         view.note = `${tail} is a file.`;
         view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       } else view.note = `There's already a file named ${tail}. Pick another name.`;

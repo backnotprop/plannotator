@@ -1,7 +1,7 @@
 /**
  * Whether the mod is switched on. It is ON BY DEFAULT wherever Claude Code
  * runs hooks modules (register.ts still stands down in `-p` / SDK sessions
- * and where there is no `/bin/sh`). The user turns it off with:
+ * and where it finds no shell for its scripts). The user turns it off with:
  *
  *   PLANNOTATOR_CLAUDE_MOD=0            (env; also false/off/disabled; wins over the config file)
  *   { "claudeCodeMod": false }          (config.json in the data dir)

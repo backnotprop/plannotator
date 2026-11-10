@@ -5,7 +5,7 @@
  * What regresses: Bro mode off or undecided changing a byte of what an agent reads; on, the line reaching anything but
  * send_message's `body`; the switch needing a restart; the offer turning anything on, showing twice, or overriding a
  * person's own setting; the offer leaving the line of one-time dialogs (approval "inbox-one-time-dialogs": heavy use
- * only, never on day 0 or 1, the one-day spacing, Not now's gap); a dev build meeting the offer.
+ * only, never on day 0 or 1, the 40-minute spacing, Not now's gap); a dev build meeting the offer.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -72,6 +72,10 @@ async function world(options: WorldOptions = {}) {
       inboxSound: { dialogShownFor: options.version ?? "0.30.0" },
       inboxListIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString(), version: 2 },
       inboxVoiceIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: "glass",
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
       ...options.config,
     }),
   );
@@ -188,7 +192,7 @@ describe("the offer", () => {
     ["nine threads read", { read: 9 }],
     ["ten threads read, all on one day", { read: 10, oneDay: true }],
     ["day 1 of use", { ...HEAVY, firstUseDays: 1 }],
-    ["a dialog of the line less than a day ago", { ...HEAVY, config: { inboxReveals: { lastShownAt: new Date(Date.now() - 3_600_000).toISOString() } } }],
+    ["a dialog of the line less than 40 minutes ago", { ...HEAVY, config: { inboxReveals: { lastShownAt: new Date(Date.now() - 10 * 60_000).toISOString() } } }],
   ] as const) {
     test(`never for ${name}`, async () => {
       const w = await world(options);

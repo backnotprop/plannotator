@@ -3,7 +3,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
-import { FAVICON_PNG_BYTES } from '../../packages/core/favicon';
+import { FAVICON_ICO_BYTES, FAVICON_PNG_BYTES } from '../../packages/core/favicon';
 
 function faviconPlugin(): Plugin {
   return {
@@ -11,14 +11,22 @@ function faviconPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
-        if (pathname !== '/favicon.png') return next();
+        if (pathname !== '/favicon.png' && pathname !== '/favicon.ico') return next();
 
-        res.setHeader('Content-Type', 'image/png');
+        const ico = pathname === '/favicon.ico';
+        res.setHeader('Content-Type', ico ? 'image/x-icon' : 'image/png');
         res.setHeader('Cache-Control', 'no-cache');
-        res.end(FAVICON_PNG_BYTES);
+        res.end(ico ? FAVICON_ICO_BYTES : FAVICON_PNG_BYTES);
       });
     },
     generateBundle() {
+      // The .ico is what the page links (the tab takes its hand-pixelled 16 or
+      // 32 frame); favicon.png stays for anything that still links that URL.
+      this.emitFile({
+        type: 'asset',
+        fileName: 'favicon.ico',
+        source: FAVICON_ICO_BYTES,
+      });
       this.emitFile({
         type: 'asset',
         fileName: 'favicon.png',

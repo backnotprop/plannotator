@@ -4,7 +4,8 @@
  * and ResizeHandle). What this catches: the separator losing its keyboard
  * contract or its announced range, the width escaping [380, room - 480], the
  * width not persisting, the edge showing where it must not (the full list, a
- * phone), and the rows not following the column across the wide rows' width
+ * phone), a click on it not hiding the list beside a thread (or a drag
+ * hiding it), and the rows not following the column across the wide rows' width
  * (or swapping on every resize instead of once at the boundary). Pixel drags
  * on the compiled binary are proved in tests/e2e/inbox-list-resize.spec.ts.
  *
@@ -117,7 +118,7 @@ afterEach(() => {
   if (clientWidthOf) Object.defineProperty(Element.prototype, 'clientWidth', clientWidthOf);
 });
 
-function render(narrow: boolean): HTMLElement {
+function render(narrow: boolean, onHide?: () => void): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -132,6 +133,7 @@ function render(narrow: boolean): HTMLElement {
             sections={SECTIONS}
             filtered={false}
             narrow={narrow}
+            onHide={onHide}
             selectedThreadId={narrow ? 'msg_a' : null}
             notice={null}
             onShowNew={() => {}}
@@ -157,6 +159,25 @@ function press(sep: HTMLElement, key: string) {
 }
 
 const column = (el: HTMLElement) => el.querySelector<HTMLElement>('.ib-listcol')!;
+
+const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+/** A pointer gesture on the edge's hit area: down at the edge, a move by `dx` (a frame drawn), up. */
+async function gesture(el: HTMLElement, dx: number) {
+  const hit = el.querySelector<HTMLElement>('.ib-handle-hit')!;
+  const x = LIST_COLUMN_MIN;
+  act(() => {
+    hit.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: x, bubbles: true, cancelable: true }));
+  });
+  if (dx !== 0) {
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: x + dx, bubbles: true }));
+    });
+    await act(frame);
+  }
+  act(() => {
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: x + dx, bubbles: true }));
+  });
+}
 const max = () => ROOM - READING_PANE_MIN;
 
 describe.if(hasDom)('the list column beside an open thread', () => {
@@ -260,6 +281,46 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     press(sep, 'Home');
     act(reportListWidth);
     expect(el.querySelectorAll('.ib-nrow').length).toBe(2);
+  });
+
+  test('beside a thread a click on the edge hides the list; a drag resizes and never hides', async () => {
+    let hides = 0;
+    const el = render(true, () => hides++);
+    // A click, and a wiggle within the 4px threshold: each hides, and the width is left as it was. The click focuses
+    // the edge, as a press would (the thread then moves focus off the hidden list).
+    await gesture(el, 0);
+    expect(hides).toBe(1);
+    expect(document.activeElement === separator(el)).toBe(true);
+    await gesture(el, 3);
+    expect(hides).toBe(2);
+    expect(column(el).style.width).toBe(`${LIST_COLUMN_MIN}px`);
+    expect(separator(el).getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
+    expect(stored.has(LIST_COLUMN_WIDTH_KEY)).toBe(false);
+    // A drag past the threshold: it resizes, and the list stays.
+    await gesture(el, 100);
+    expect(hides).toBe(2);
+    expect(separator(el).getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN + 100));
+    expect(stored.get(LIST_COLUMN_WIDTH_KEY)).toBe(String(LIST_COLUMN_MIN + 100));
+    // Enter and Space on the focused edge hide it too.
+    press(separator(el), 'Enter');
+    press(separator(el), ' ');
+    expect(hides).toBe(4);
+  });
+
+  test('a window with no room to widen keeps the edge beside a thread, to hide the list; a drag there keeps the stored width', async () => {
+    stored.set(LIST_COLUMN_WIDTH_KEY, '600');
+    room = LIST_COLUMN_MIN + READING_PANE_MIN;
+    let hides = 0;
+    const el = render(true, () => hides++);
+    const sep = separator(el);
+    expect(sep.getAttribute('aria-valuemax')).toBe(String(LIST_COLUMN_MIN));
+    expect(sep.getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
+    await gesture(el, 100);
+    expect(hides).toBe(0);
+    expect(stored.get(LIST_COLUMN_WIDTH_KEY)).toBe('600');
+    await gesture(el, 0);
+    expect(hides).toBe(1);
+    expect(stored.get(LIST_COLUMN_WIDTH_KEY)).toBe('600');
   });
 
   test('no edge on the full list, and none on a phone', () => {
