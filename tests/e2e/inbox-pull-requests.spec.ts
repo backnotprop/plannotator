@@ -525,7 +525,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
             ghPull(billingRepo, 413, { title: 'Jitter on the retry backoff', headRefName: 'retry/backoff', baseRefName: 'retry/schedule', updatedAt: ago(8), ...stats(layer413) }),
             ghPull(billingRepo, 414, { title: 'Dunning emails for the last attempts', headRefName: 'retry/dunning', baseRefName: 'retry/backoff', isDraft: true, updatedAt: ago(7), ...stats(layer414), commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING' } } }] } }),
             ghPull(webRepo, 872, { title: 'Upgrade to Vite 8', headRefName: 'codex/vite-8', reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'APPROVED', author: { login: 'priya' } }] }, updatedAt: ago(52), ...stats(vite) }),
-            ghPull(webRepo, 869, { title: 'Fall back to English for missing strings', headRefName: 'locale-fallback', reviewRequests: { nodes: [{ requestedReviewer: { login: 'jun' } }] }, updatedAt: ago(180), ...stats(locale) }),
+            ghPull(webRepo, 869, { title: 'Fall back to English for missing strings', headRefName: 'locale-fallback', reviewRequests: { nodes: [{ requestedReviewer: { login: 'jun', avatarUrl: avatarOf('jun') } }] }, updatedAt: ago(180), ...stats(locale) }),
           ],
         },
         merged: { nodes: [ghPull(billingRepo, 411, { title: 'Idempotency keys on the charge client', state: 'MERGED', headRefName: 'retry/charge-client', mergedAt: ago(26 * 60), updatedAt: ago(26 * 60) })] },
@@ -801,6 +801,19 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
+  // A face by every name, but not twice in a row: tomas is pictured at the row's left, so his name in the words has none.
+  const asked = list.locator('[data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-status]');
+  await expect(asked).toHaveText("Review requested · tomas's PR");
+  await expect(asked.locator('[data-person="tomas"]')).toHaveCount(1);
+  await expect(asked.locator('[data-face]')).toHaveCount(0);
+  // The board's popover: who it waits on, with their picture, read through the Inbox's own route like the authors'.
+  await page.locator('[data-prs-page] [data-pr-tile="github.com/northwind/web-app#869"]').hover();
+  const waits = page.locator('[data-pr-pop="github.com/northwind/web-app#869"] .ib-prpop-status');
+  await expect(waits).toHaveText('Waits on jun');
+  const jun = waits.locator('[data-person="jun"] [data-face="jun"]');
+  await expect(jun).toHaveAttribute('data-face-state', 'shown');
+  expect(new URL((await jun.locator('img').getAttribute('src'))!, world.url).pathname).toBe('/api/inbox/pulls/avatar');
+  await page.mouse.move(0, 0);
   const fold = list.locator('[data-reviews-fold="not_reviewed"]');
   await expect(fold).toHaveAttribute('aria-expanded', 'false');
   await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);
@@ -2537,6 +2550,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
+    // With his face by his name (the owner, q-331c0466).
+    await expect(note.locator('[data-person="tomas"] [data-face="tomas"]')).toHaveCount(1);
     // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
     // gives way before the title does: the title's tip names the author as well.
     for (const width of [1040, 1280, 1440]) {

@@ -191,8 +191,8 @@ function shaOf(value: unknown): string | null {
 
 const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
       repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
-      reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
-      latestReviews(first: 5) { nodes { state author { login } } }
+      reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { slug } } } }
+      latestReviews(first: 5) { nodes { state author { login avatarUrl } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 /** One query per GitHub host: the viewer, the rate limit, and the person's own searches (the open ones with their full count). */
@@ -252,7 +252,7 @@ export function githubOthersQuery(n: number): string {
 const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch diffHeadSha approved detailedMergeStatus conflicts
       diffStatsSummary { additions deletions fileCount } headPipeline { status }
       project { fullPath repository { rootRef } } sourceProject { fullPath } author { username avatarUrl }
-      approvedBy(first: 3) { nodes { username } } reviewers(first: 5) { nodes { username } }`;
+      approvedBy(first: 3) { nodes { username avatarUrl } } reviewers(first: 5) { nodes { username avatarUrl } }`;
 
 /** A GitLab query asks this many projects' open MRs at most: GitLab refuses a query past its complexity limit (250). */
 export const GITLAB_PROJECTS_PER_QUERY = 4;
@@ -471,6 +471,12 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
       const review: InboxPullReview | null =
         item.reviewDecision === "APPROVED" ? "approved" : item.reviewDecision === "CHANGES_REQUESTED" ? "changes_requested" : item.reviewDecision === "REVIEW_REQUIRED" ? "review_required" : null;
       const approver = nodes(item.latestReviews).find((r) => r.state === "APPROVED");
+      // The reviewers' and approvers' pictures too: their names show with a face (the owner, q-331c0466). A team has none.
+      for (const who of [...nodes(item.reviewRequests).map((n) => obj(n.requestedReviewer)), ...nodes(item.latestReviews).map((n) => obj(n.author))]) {
+        const name = str(who.login);
+        const url = name ? avatarOf(who.avatarUrl, host) : "";
+        if (name && url) avatars[name] ??= url;
+      }
       const reviewers = nodes(item.reviewRequests)
         .map((r) => obj(r.requestedReviewer))
         .map((r) => str(r.login) || str(r.slug))
@@ -569,6 +575,11 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
       const review: InboxPullReview | null = merge === "REQUESTED_CHANGES" ? "changes_requested" : item.approved === true ? "approved" : merge === "NOT_APPROVED" ? "review_required" : null;
       const stats = obj(item.diffStatsSummary);
       const approvers = nodes(item.approvedBy).map((n) => str(n.username)).filter(Boolean);
+      for (const who of [...nodes(item.approvedBy), ...nodes(item.reviewers)]) {
+        const name = str(who.username);
+        const url = name ? avatarOf(who.avatarUrl, host) : "";
+        if (name && url) avatars[name] ??= url;
+      }
       const earlier = out.get(key);
       out.set(key, {
         key,
@@ -1472,14 +1483,18 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         known = new Map(pulls.map((p) => [p.key, p]));
         lastRepos = wanted;
       }
-      // Only the authors of PRs this list shows: the window may ask for their pictures, no one else's.
+      // Only the people this list names (a PR's author, its reviewers, who approved it): the window may ask for their
+      // pictures, no one else's.
       const nextAvatars = new Map<string, Record<string, string>>();
       for (const { host, state, own } of asked) {
         const urls: Record<string, string> = {};
         for (const pull of pulls) {
-          if (pull.host.toLowerCase() !== host || !pull.author) continue;
-          const url = own.answer?.avatars[pull.author] ?? state.others.answer?.avatars[pull.author];
-          if (url) urls[pull.author] = url;
+          if (pull.host.toLowerCase() !== host) continue;
+          for (const who of [pull.author, ...pull.reviewers, pull.approved_by]) {
+            if (!who || urls[who]) continue;
+            const url = own.answer?.avatars[who] ?? state.others.answer?.avatars[who];
+            if (url) urls[who] = url;
+          }
         }
         // Both pages read in turn (the sidebar's count, the Pull requests page): an everywhere list keeps the other's.
         nextAvatars.set(host, everywhere ? { ...(avatars.get(host) ?? {}), ...urls } : urls);
