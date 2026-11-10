@@ -146,7 +146,8 @@ function rowShows(control: RowsControlId, row: InboxListRow): boolean {
 }
 
 /**
- * Where a choice shows on a row: the parts to tint, first one found wins; none found (or none named), the whole rows.
+ * Where a choice shows on a row: the parts to tint; none found (or none named), the whole rows. Letter badges are
+ * not named: a badge's colour is its meaning, and the tint would paint over it.
  * The selectors are the list's own classes (InboxList.tsx, letterMarks.tsx, threadPulls/ThreadPulls.tsx).
  */
 const FLASH_PARTS: Partial<Record<RowsControlId, readonly string[]>> = {
@@ -161,10 +162,6 @@ const FLASH_PARTS: Partial<Record<RowsControlId, readonly string[]>> = {
   newer: ['.ib-title', '.ib-m-title'],
   boldAll: ['.ib-title', '.ib-m-title'],
   pill: ['.ib-title', '.ib-m-title'],
-  badges: ['.ib-lm'],
-  shape: ['.ib-lm'],
-  logo: ['.ib-lm'],
-  github: ['.ib-lm'],
 };
 const FLASH_ROWS = '.ib-nrow, .ib-mrow';
 
@@ -339,7 +336,16 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
     const found: Element[] = [];
     for (const id of flash.ids) {
       const parts = FLASH_PARTS[id]?.flatMap((selector) => [...el.querySelectorAll(selector)]) ?? [];
-      found.push(...(parts.length > 0 ? parts : el.querySelectorAll(FLASH_ROWS)));
+      if (parts.length > 0) found.push(...parts);
+      // A part that just went (Pull requests off): the last line of the rows that had it, where it was.
+      else if (id === 'pulls') {
+        for (const { row } of shown) {
+          if (!row.pulls) continue;
+          const scope = el.querySelector(`[data-thread-id="${row.thread_id}"]`);
+          const line = [...(scope?.querySelectorAll('.ib-l3, .ib-l4, .ib-m3') ?? [])].at(-1) ?? [...(scope?.querySelectorAll('.ib-l2-lead, .ib-m1-lead, .ib-l1') ?? [])].at(-1);
+          if (line) found.push(line);
+        }
+      } else found.push(...el.querySelectorAll(FLASH_ROWS));
     }
     // Two names for one animation: a second change while the first still fades starts it again.
     const name = `ib-rws-flash-${flash.n % 2 ? 'a' : 'b'}`;
@@ -351,6 +357,7 @@ export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines
       clearTimeout(timer);
       for (const part of found) delete (part as HTMLElement).dataset.rowsFlash;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per change, on the rows that change drew.
   }, [flash]);
 
   // Under the list's title, a phone's pinned list casts a soft shadow once the page has scrolled under it.

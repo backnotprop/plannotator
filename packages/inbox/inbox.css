@@ -8370,7 +8370,8 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-rws :is(.ib-rws-pvhead, .ib-rws-ctl) > h2 { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; }
 .ib-rws-ctl > h2 { margin-bottom: 8px; }
 .ib-rws-last { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.5; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.pn-inbox .ib-rws-last .ib-lnk { margin-top: 0; font-size: inherit; align-self: center; }
+.pn-inbox .ib-rws .ib-rws-last .ib-lnk { display: inline-flex; margin-top: 0; font-size: inherit; align-self: center; flex: none; white-space: nowrap; }
+.pn-inbox .ib-rws-last .ib-lnk svg.ib-ic { flex: none; }
 .ib-rws-ctl { min-width: 0; }
 .ib-rws-frame { overflow: hidden auto; max-height: calc(100vh - 200px); min-height: 120px; border: 1px solid var(--ib-line); border-radius: 10px; background: var(--card); }
 .ib-rws .ib-listcol.ib-rws-list { position: relative; inset: auto; visibility: visible; width: auto; border-right: 0; }
@@ -8416,10 +8417,13 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
   .ib-rws-grid { display: block; margin-top: 12px; }
   .ib-rws-sentinel { display: block; height: 1px; margin-bottom: -1px; }
   /* Pinned: the title, the change line and two rows, edge to edge on the page's own ground. */
-  .ib-rws-pv { top: 0; z-index: 5; margin: 0 -16px 14px; padding: 6px 16px 8px; background: var(--ib-page, var(--background)); }
+  .ib-rws-pv { top: 0; z-index: 5; margin: 0 -16px 12px; padding: 4px 16px 6px; background: var(--ib-rws-ground, var(--background)); }
   .ib-rws-pv[data-stuck] { box-shadow: 0 8px 12px -10px rgb(0 0 0 / 0.25); }
-  .ib-rws-pvhead { margin-bottom: 6px; }
+  .ib-rws-pvhead { margin-bottom: 4px; min-height: 20px; }
   .ib-rws-frame { max-height: none; min-height: 0; overflow: hidden; }
+  /* The pinned rows at seven eighths, so two of them and the change line leave the choices most of the screen. */
+  .ib-rws-pv .ib-rws-list { zoom: 0.875; }
+  .pn-inbox .ib-rws .ib-rws-pv .ib-rws-list .ib-lbody { padding-top: 0; padding-bottom: 0; }
   .ib-rws-empty { padding: 6px 2px 0; }
   .ib-rws-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ib-rws-ctl .ib-prow { min-height: 56px; }

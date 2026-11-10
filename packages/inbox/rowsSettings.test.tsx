@@ -284,6 +284,8 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(list.querySelectorAll('.ib-prmark').length).toBe(1);
     await flip(el, 'pulls');
     expect(list.querySelectorAll('.ib-prmark').length).toBe(0);
+    // Only the row that had one says so, on its last line.
+    expect([...list.querySelectorAll('[data-rows-flash]')].map((part) => [part.closest('[data-thread-id]')!.getAttribute('data-thread-id'), part.className])).toEqual([['t3', 'ib-l3']]);
     await flip(el, 'pulls');
     expect([...list.querySelectorAll('[data-rows-flash]')].map((part) => part.className)).toEqual(['ib-prmark']);
   });
