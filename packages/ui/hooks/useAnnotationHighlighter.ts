@@ -10,6 +10,7 @@ import Highlighter from '@plannotator/web-highlighter';
 import type { Annotation, EditorMode, HostDraft, ImageAttachment } from '../types';
 import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } from '../utils/belowTitleSlot';
 import { AnnotationType } from '../types';
+import { getPressAndDrag } from '../utils/pressAndDragPolicy';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
   dropEmptyNodes,
@@ -567,6 +568,26 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
   }
   return false;
 };
+
+/**
+ * web-highlighter's press-and-drag options, for a host that turned them on.
+ * They are not in the installed 0.8.2's option type, which is why this is a
+ * function and not two keys in the constructor's literal; a library without
+ * them ignores unknown options.
+ */
+const pressAndDragOptions = (threshold: number | undefined): object => ({
+  pressAndDrag: true,
+  ...(threshold !== undefined ? { pressAndDragThreshold: threshold } : {}),
+});
+
+/**
+ * Whether this web-highlighter build has press and drag. The library exposes
+ * no version or capability at run time, so this reads the field its
+ * press-and-drag controller lives in. Only needed while `@plannotator/ui` can
+ * still be installed with a library that lacks the option.
+ */
+const libraryHasPressAndDrag = (highlighter: Highlighter): boolean =>
+  (highlighter as unknown as { _drag?: unknown })._drag != null;
 
 /** The outermost element around `node`, inside `container`, that the painter skips. */
 const paintSkippedAncestor = (container: Element, node: Node | null): Element | null => {
@@ -1701,12 +1722,23 @@ export function useAnnotationHighlighter({
   useEffect(() => {
     if (!containerRef.current || !enabled) return;
 
+    // Press and drag (`configurePlannotatorUI({ pressAndDrag })`, default
+    // off): the library's two options ride along only when the host asked, so
+    // without it the options object is today's.
+    const pressAndDrag = getPressAndDrag();
     const highlighter = new Highlighter({
       $root: containerRef.current,
       exceptSelectors: PAINT_SKIPPED_SELECTORS,
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
+      ...(pressAndDrag.on ? pressAndDragOptions(pressAndDrag.threshold) : {}),
     });
+    // With it, the library makes the highlight for a release OUTSIDE the
+    // document too, on the next task after that release. The guard below then
+    // listens on the document, so it still runs first. Only with a library
+    // that has the option: an older one ignores it, and the guard stays where
+    // it is.
+    const releaseAnywhere = pressAndDrag.on && libraryHasPressAndDrag(highlighter);
 
     // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
     // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
@@ -1882,6 +1914,16 @@ export function useAnnotationHighlighter({
         pendingRangeRunsRef.current = null;
         return;
       }
+      // Listening on the document (press and drag): a release elsewhere on
+      // the page with a selection that is not this document's is not ours.
+      if (
+        releaseAnywhere
+        && !(event.target instanceof Node && container.contains(event.target))
+        && !container.contains(selection.anchorNode)
+        && !container.contains(selection.focusNode)
+      ) {
+        return;
+      }
       // Only the main button ends a selection gesture. The library handles
       // every `mouseup`, so a context click on selected words (or on a word
       // the browser selects for its menu) became a highlight, and in redline
@@ -1938,8 +1980,9 @@ export function useAnnotationHighlighter({
     };
 
     const container = containerRef.current;
-    container.addEventListener('mouseup', handlePointerEndCapture, true);
-    container.addEventListener('touchend', handlePointerEndCapture, true);
+    const pointerEndTarget: Document | HTMLElement = releaseAnywhere ? document : container;
+    pointerEndTarget.addEventListener('mouseup', handlePointerEndCapture, true);
+    pointerEndTarget.addEventListener('touchend', handlePointerEndCapture, true);
 
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
@@ -2095,8 +2138,8 @@ export function useAnnotationHighlighter({
       }
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
-      container.removeEventListener('mouseup', handlePointerEndCapture, true);
-      container.removeEventListener('touchend', handlePointerEndCapture, true);
+      pointerEndTarget.removeEventListener('mouseup', handlePointerEndCapture, true);
+      pointerEndTarget.removeEventListener('touchend', handlePointerEndCapture, true);
       disposed = true;
       highlighter.dispose();
     };

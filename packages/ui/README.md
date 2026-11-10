@@ -46,6 +46,8 @@ configurePlannotatorUI({
   codeHighlightWorker,         // { html(code, lang, theme) }: with deferOffscreenCodeHighlight, a waiting fence's markup made off the main thread (default: none)
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
   pageMarks,                   // true: <body data-pn-popout> while a PopoutDialog is open, <html data-pn-selection-chooser> while the code review's selection chooser shows, so a host's build can key theme.css's / comments.css's html:has(…) / body:has(…) on them (default false)
+  pressAndDrag,                // true: a text selection released outside the document (a side panel, a toolbar, outside the window) still becomes a highlight; web-highlighter's own option, so it needs a web-highlighter that has it and does nothing on 0.8.2 (default false)
+  pressAndDragThreshold,       // CSS px a press must move to count as a drag, with pressAndDrag (default: the library's, 4)
 });
 ```
 
