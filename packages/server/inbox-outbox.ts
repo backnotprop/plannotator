@@ -152,7 +152,9 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   end that one. The owner's door answers a key it has seen without running it.
  * - `file` is an upload or a drawing: never held, sent only while online.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
- *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
+ *   forward answers 404. A phone reaches it at this Inbox's own door. A star
+ *   (`threads/:id/pin`, `pins`) is window furniture of the computer that
+ *   holds it, never another machine's. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
  *   one answers 202 with no id, so the file never reaches the reply, and is
  *   later run for nobody, perhaps on bytes the person never saw. A second copy
@@ -167,6 +169,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
   "POST threads/:id/snooze": "set",
+  // Stars stay on the computer whose window shows them (inbox-machines.md): a phone writes them at this Inbox's own
+  // door, and they are never forwarded to a linked machine.
+  "POST threads/:id/pin": "local",
+  "POST pins": "local",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",
