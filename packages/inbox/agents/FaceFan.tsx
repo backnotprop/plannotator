@@ -22,6 +22,14 @@ import { fanLayout, type FanOptions, type FanSpot } from './fanLayout';
 
 /** How long the pointer rests on a mark before the fan opens. */
 export const FAN_DWELL_MS = 350;
+
+/**
+ * The plate's look (agents.css): '0' flat, '1' glass (the default), '2' stronger glass. Prototype until the owner picks
+ * one: `?fan-glass=0|1|2` in the window's address chooses.
+ */
+export type FanGlass = '0' | '1' | '2';
+const glassAsked = typeof location !== 'undefined' ? /[?&]fan-glass=([012])\b/.exec(location.search)?.[1] : undefined;
+export const fanOptions: { glass: FanGlass } = { glass: (glassAsked as FanGlass | undefined) ?? '1' };
 /** How long a touch is held before the fan opens. */
 export const FAN_PRESS_MS = 450;
 /** How long the pointer may be outside the mark and the fan before it closes. */
@@ -193,6 +201,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             data-still={still ? '' : undefined}
             data-opening={opening ? '' : undefined}
             data-touch={touch ? '' : undefined}
+            data-glass={fanOptions.glass === '0' ? undefined : fanOptions.glass}
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(face))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? { current: anchor } : false}

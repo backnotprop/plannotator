@@ -127,6 +127,65 @@
 .am-fan[data-touch] .am-fan-dial { --o: 24px; }
 .am-fan[data-touch] .am-fan-plate { --hole: 25px; }
 .am-fan[data-touch] .am-fan-plate[data-shade] { --hole: 40px; }
+/* The plate as glass (FaceFan.tsx `fanOptions.glass`; 1 subtle, 2 stronger): the theme's surface, translucent over a
+   blur of what is behind, lit from the top, the choices set into it and the face shown raised. One blurred layer (the
+   plate), none per choice. Nothing above the plate is a filter or a fade while it shows (either would stop the blur):
+   its shadow is a sibling's box-shadow, and the open and close fade the plate itself. */
+.am-fan[data-glass] {
+  --gl-tint: 74%; --gl-blur: 14px; --gl-sat: 1.35;
+  --gl-hi: color-mix(in oklch, var(--foreground) 20%, transparent);
+  --gl-lo: color-mix(in oklch, #000 42%, transparent);
+  --gl-pit: color-mix(in oklch, #000 38%, transparent);
+  --gl-rim: color-mix(in oklch, var(--foreground) 16%, transparent);
+  --gl-up: color-mix(in oklch, var(--popover) 68%, #fff);
+}
+:root.light .am-fan[data-glass] {
+  --gl-hi: color-mix(in oklch, #fff 92%, transparent);
+  --gl-lo: color-mix(in oklch, var(--foreground) 16%, transparent);
+  --gl-pit: color-mix(in oklch, var(--foreground) 13%, transparent);
+  --gl-rim: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --gl-up: color-mix(in oklch, var(--popover) 86%, #fff);
+}
+.am-fan[data-glass="2"] { --gl-tint: 56%; --gl-blur: 22px; --gl-sat: 1.6; }
+.am-fan[data-glass] .am-fan-shade, .am-fan[data-glass] .am-fan-edge { filter: none; }
+.am-fan[data-glass] .am-fan-plate { transition: opacity 120ms linear; }
+.am-fan[data-glass] .am-fan-plate[data-shade] { background: none; -webkit-mask: none; mask: none; box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 1px 3px color-mix(in oklch, #000 10%, transparent); }
+.am-fan[data-glass] .am-fan-edge > .am-fan-plate {
+  background:
+    radial-gradient(circle at var(--o) 50%, transparent calc(var(--hole) + 0.25px), var(--gl-hi) calc(var(--hole) + 0.75px), transparent calc(var(--hole) + 2px)),
+    color-mix(in oklch, var(--popover) var(--gl-tint), transparent);
+  box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 0 0 0.5px var(--gl-rim);
+  -webkit-backdrop-filter: blur(var(--gl-blur)) saturate(var(--gl-sat));
+  backdrop-filter: blur(var(--gl-blur)) saturate(var(--gl-sat));
+}
+/* Stronger: a bevelled rim (light from the top left, shade to the bottom right) and a soft sweep of light. */
+.am-fan[data-glass="2"] .am-fan-edge > .am-fan-plate {
+  background:
+    radial-gradient(circle at var(--o) 50%, transparent calc(var(--hole) + 0.25px), var(--gl-hi) calc(var(--hole) + 1px), transparent calc(var(--hole) + 3px)),
+    linear-gradient(118deg, transparent 18%, color-mix(in oklch, #fff 13%, transparent) 36%, transparent 54%),
+    linear-gradient(180deg, color-mix(in oklch, #fff 7%, transparent), transparent 40%),
+    color-mix(in oklch, var(--popover) var(--gl-tint), transparent);
+  box-shadow: inset 1px 1.5px 0 var(--gl-hi), inset -1px -1.5px 0 var(--gl-lo), inset 4px 5px 12px -6px var(--gl-hi), inset -5px -7px 16px -8px var(--gl-lo), inset 0 0 0 0.5px var(--gl-rim);
+}
+.am-fan[data-glass][data-starting-style] .am-fan-dial, .am-fan[data-glass][data-ending-style] .am-fan-dial { opacity: 1; }
+.am-fan[data-glass][data-starting-style] .am-fan-plate, .am-fan[data-glass][data-ending-style] .am-fan-plate { opacity: 0; }
+.am-fan[data-glass][data-ending-style] .am-fan-plate { transition: opacity 120ms linear 50ms; }
+/* The popup's own fade (Base UI waits for it) comes last, once the plate and the choices are gone. */
+.am-fan[data-glass][data-ending-style] { transition: opacity 30ms linear 150ms; }
+/* Each choice set into the glass; the face shown raised and lit (a fill and a lift, no outline). */
+.am-fan[data-glass] .am-fan-i { background: color-mix(in oklch, var(--foreground) 4%, transparent); box-shadow: inset 0 1px 2px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); transition: transform 160ms cubic-bezier(0.3, 1.4, 0.6, 1) var(--d), opacity 100ms linear var(--d), background-color 120ms, box-shadow 120ms; }
+.am-fan[data-glass="2"] .am-fan-i { background: color-mix(in oklch, var(--foreground) 6%, transparent); box-shadow: inset 0 1.5px 3.5px var(--gl-pit), inset 0 -1px 0 var(--gl-hi); }
+.am-fan[data-glass] .am-fan-i:hover { background: color-mix(in oklch, var(--foreground) 10%, transparent); }
+.am-fan[data-glass] .am-fan-i[aria-checked="true"] { background: var(--gl-up); box-shadow: 0 1px 2px color-mix(in oklch, #000 28%, transparent), 0 5px 12px -3px color-mix(in oklch, #000 32%, transparent), inset 0 1px 0 color-mix(in oklch, #fff 40%, transparent); }
+.am-fan[data-glass][data-ending-style] .am-fan-i { transition: transform 140ms cubic-bezier(0.4, 0, 1, 1) var(--dr), opacity 120ms linear var(--dr); }
+/* No blur to be had (an engine without backdrop-filter, or reduced transparency asked for): the solid surface. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root .am-fan[data-glass] { --gl-tint: 100%; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root .am-fan[data-glass] { --gl-tint: 100%; }
+  :root .am-fan[data-glass] .am-fan-edge > .am-fan-plate { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
 /* Reduced motion: no travel, a plain fade. */
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear, background-color 120ms; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }
