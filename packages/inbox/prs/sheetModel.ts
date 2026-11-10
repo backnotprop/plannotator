@@ -22,6 +22,7 @@ import {
   type InboxPullsAnswer,
 } from '@plannotator/core/inbox-types';
 import { repoLabels } from '../pulls/labels';
+import { person, wordsText, type Words } from '../pulls/words';
 
 /** A stack folds to one strip on the Sheet past this many PRs (the owner's answer, q-f1451f8d). */
 export const FOLD_OVER = 8;
@@ -245,6 +246,16 @@ export function stackCounts(stack: Pick<InboxPullStack, 'layers'>): { open: numb
 
 /** A PR's state in a word or two, as the popover and the stack view say it. */
 export function statusWords(pull: InboxPull, now: number): string {
+  return wordsText(statusParts(pull, now));
+}
+
+/** `statusWords` in parts: "Waits on " then the reviewer, drawn with their face (`words.ts`). */
+export function statusParts(pull: InboxPull, now: number): Words {
+  const said = statusLine(pull, now);
+  return typeof said === 'string' ? [said] : said;
+}
+
+function statusLine(pull: InboxPull, now: number): string | Words {
   if (pull.state === 'merged') return pull.merged_at ? `Merged ${agoWords(pull.merged_at, now)}` : 'Merged';
   if (pull.state === 'closed') return 'Closed';
   const you = needsYou(pull);
@@ -257,7 +268,7 @@ export function statusWords(pull: InboxPull, now: number): string {
   if (readyToLand(pull)) return 'Approved · ready to land';
   if (pull.review === 'approved') return pull.checks === 'pending' ? 'Approved · checks running' : 'Approved';
   if (pull.checks === 'pending') return 'Checks running';
-  if (pull.reviewers.length > 0) return `Waits on ${pull.reviewers[0]}${pull.reviewers.length > 1 ? ` and ${pull.reviewers.length - 1} more` : ''}`;
+  if (pull.reviewers.length > 0) return ['Waits on ', person(pull.reviewers[0]!), ...(pull.reviewers.length > 1 ? [` and ${pull.reviewers.length - 1} more`] : [])];
   return 'Waiting on review';
 }
 

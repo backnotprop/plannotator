@@ -9,6 +9,11 @@ declare module '*.png' {
   export default src;
 }
 
+declare module '*.svg' {
+  const src: string;
+  export default src;
+}
+
 /** A file as one string (Vite and Bun). */
 declare module '*?raw' {
   const text: string;

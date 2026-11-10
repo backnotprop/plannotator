@@ -47,6 +47,7 @@ import {
   checkInboxDrawing,
   INBOX_GUIDE_FIELD_DESCRIPTION,
   INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES,
+  INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM,
   INBOX_REVIEW_FIELD_DESCRIPTION,
   INBOX_REVIEW_NOTES_RULE,
   inboxReviewChapterDiagramDoc,
@@ -572,8 +573,9 @@ export async function inboxGuideRoute(
  * drawing: `kind: "html"` with source, css, width and height, tall; or
  * `kind: "mermaid"` with source; with Shape off, Mermaid only). The overview's
  * diagram is no longer offered (approval "guide-chapter-diagrams"); submit_guide still takes one.
+ * `diagrams` false (Chapter diagrams off): no `diagram` on a chapter either; submit_guide still takes one.
  */
-function guideSchemaWithOverview(shapeOn: boolean): Record<string, unknown> {
+function guideSchemaWithOverview(shapeOn: boolean, diagrams = true): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -587,7 +589,7 @@ function guideSchemaWithOverview(shapeOn: boolean): Record<string, unknown> {
     },
   };
   const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
-  (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
+  if (diagrams) (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
     type: "object",
     // The html kind (a drawing by Shape's rules) only while Shape is on; Mermaid always (see inboxReviewChapterDiagramDoc).
     properties: shapeOn
@@ -624,17 +626,20 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
       inputSchema: z.object({}).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async () =>
-      ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
+    async () => {
+      // Chapter diagrams off (Settings → Capabilities): the brief names no chapter diagram (rule and schema), nothing in its place.
+      const diagrams = context.chapterDiagramsOn?.() ?? true;
+      return ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false, diagrams) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
         // Code review on: a chapter's diagram (approval "guide-chapter-diagrams"), Mermaid always and Shape's html kind
         // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
         // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, ...(diagrams ? [inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false)] : []), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
         example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
-      }),
+      });
+    },
   );
 
   server.registerTool(
@@ -647,7 +652,13 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           guide: z
             .union([z.record(z.string(), z.unknown()), z.string()])
             .optional()
-            .describe(context.codeReviewOn?.() ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES : INBOX_GUIDE_FIELD_DESCRIPTION),
+            .describe(
+              context.codeReviewOn?.()
+                ? context.chapterDiagramsOn?.() === false
+                  ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM
+                  : INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES
+                : INBOX_GUIDE_FIELD_DESCRIPTION,
+            ),
           patch: z.string().optional().describe("The exact unified diff the guide describes (get_guide_brief's diff_steps)."),
           snapshot: z
             .union([z.record(z.string(), z.unknown()), z.string()])

@@ -316,6 +316,17 @@ in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
   (what Copy reads) and the same context `selectionActions` get (`blockId`,
   offsets, `element`), and closes the toolbar; what Side opens is yours. Absent renders no
   button and no extra divider. The Plannotator Inbox uses it for Ask AI.
+- **`AnnotationToolbar` `sideButton`** (forwarded by `Viewer` and
+  `HtmlViewer` beside `onSide`): `{ icon?: ReactNode; label: string }`. Draws
+  the `onSide` button icon-only, as an ordinary toolbar button the size of its
+  neighbours, in the same place between the same dividers: `icon` is its glyph
+  (absent means the package's two speech bubbles) and `label` its tooltip and
+  accessible name. Absent keeps the two bubbles and the word "Side"; ignored
+  without `onSide`. The press is unchanged. The Plannotator Inbox passes the
+  mark of the agent that owns the thread ("Side chat with Claude").
+- **`inbox-thread/icons` `hostHasMark(host)`**: whether `HostMark` draws that
+  host's own mark and not its neutral code glyph, for a place that would rather
+  draw something else than the neutral glyph. `HostMark` renders as before.
 - **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
   and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
   the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,

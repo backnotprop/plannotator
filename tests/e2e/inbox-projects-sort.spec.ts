@@ -129,9 +129,10 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
 
   // The row is exactly the header: the gap above it is not hover, and the header keeps its 12 px above.
   const headerBox = (await header(nav).boundingBox())!;
-  const rowBox = (await nav.locator('.ib-secrow').boundingBox())!;
+  const projectsRow = nav.locator('.ib-secrow', { has: page.locator('[data-sidebar-section="projects"]') });
+  const rowBox = (await projectsRow.boundingBox())!;
   expect([rowBox.y, rowBox.height]).toEqual([headerBox.y, headerBox.height]);
-  await expect(nav.locator('.ib-secrow')).toHaveCSS('margin-top', '12px');
+  await expect(projectsRow).toHaveCSS('margin-top', '12px');
   await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y - 6);
   await expect(toggle(nav)).toHaveCSS('opacity', '0');
 

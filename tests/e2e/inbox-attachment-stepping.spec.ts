@@ -209,7 +209,7 @@ test('one agent sends five files of five kinds across two messages of one thread
   expect(Object.keys(world.ids)).toEqual(['SCOPE.md', 'checkout-flow.html', 'retry-states.mmd', 'checkout-mobile.png', 'refund-policy.pdf']);
 });
 
-test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the header, the tile marked Open beside', async () => {
+test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the header, the tile marked as the open file', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.getByRole('button', { name: 'Open SCOPE.md' }).click();
@@ -223,7 +223,9 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await expect(page.getByRole('navigation', { name: 'Files in this thread' })).toBeVisible();
   const tile = page.locator(`.ib-att-t[data-attachment-id="${world.ids['SCOPE.md']}"]`);
   await expect(tile).toHaveAttribute('aria-current', 'true');
-  await expect(tile).toContainText('Open beside');
+  // It keeps its words: the highlight and aria-current alone say which file is open.
+  await expect(tile.locator('.ib-open')).toHaveText('Open');
+  await expect(tile).toHaveAttribute('aria-label', 'Open SCOPE.md');
   // The bar is a row of the pane under the file, never over it.
   const geometry = await page.evaluate(() => {
     const body = document.querySelector('[data-attachment-pane] .ib-vbody')!.getBoundingClientRect();
