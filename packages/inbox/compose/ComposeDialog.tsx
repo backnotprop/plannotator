@@ -650,7 +650,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
   // Escape on the tip: it leaves, and focus on its Got it (which is going) moves to To, as Got it from the keyboard does.
   const escapeTip = () => {
-    const onTip = !!(document.activeElement as Element | null)?.closest?.('.ib-lt');
+    const onTip = !!(document.activeElement as Element | null)?.closest?.('.ib-ctip');
     if (!leaveTip()) return false;
     if (onTip) (toRef.current ?? textRef.current)?.focus();
     return true;
