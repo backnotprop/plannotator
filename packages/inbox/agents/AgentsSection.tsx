@@ -116,7 +116,7 @@ const AgentRow = memo(
             onClick={(event) => props.onOpen(entry, event.currentTarget)}
             data-agent-open={props.opens}
           >
-            <AgentMark id={entry.agent.id} host={entry.agent.host} state={entry.agent.state} />
+            <AgentMark id={entry.agent.id} host={entry.agent.host} />
             <span className="ib-name" dir="auto">
               {entry.name}
             </span>
