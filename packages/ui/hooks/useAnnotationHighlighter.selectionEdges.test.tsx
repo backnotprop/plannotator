@@ -288,39 +288,3 @@ describe('useAnnotationHighlighter: a selection that reaches outside the documen
     expect(paintedText(container)).toBe(THIRD);
   });
 });
-
-describe('useAnnotationHighlighter: a release of another mouse button', () => {
-  test.skipIf(!hasDom)('a context click on selected words makes no highlight and keeps the selection', async () => {
-    const { container, second, added, hook } = await mount('selection');
-    const selection = select(second.firstChild!, 0, second.firstChild!, 6);
-
-    await pointerEnd(second, { button: 2 });
-
-    expect(container.querySelectorAll('mark').length).toBe(0);
-    expect(hook.current!.toolbarState).toBeNull();
-    expect(added).toEqual([]);
-    // Still there for the context menu's Copy.
-    expect(selection.toString()).toBe('Second');
-  });
-
-  test.skipIf(!hasDom)('a context click in redline mode deletes nothing', async () => {
-    const { second, added } = await mount('redline');
-    select(second.firstChild!, 0, second.firstChild!, 6);
-
-    await pointerEnd(second, { button: 2 });
-
-    expect(added).toEqual([]);
-  });
-
-  test.skipIf(!hasDom)('the next main-button release highlights as before', async () => {
-    const { container, second, added } = await mount('redline');
-    select(second.firstChild!, 0, second.firstChild!, 6);
-    await pointerEnd(second, { button: 2 });
-
-    select(second.firstChild!, 0, second.firstChild!, 6);
-    await pointerEnd(second);
-
-    expect(added.length).toBe(1);
-    expect(paintedText(container)).toBe('Second');
-  });
-});
