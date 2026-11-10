@@ -849,8 +849,9 @@ export function createInboxLiveSessions(options: {
    */
   const agentsSignature = (since: number): string =>
     agentSessions(since)
-      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}`)
-      .join("|");
+      // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
+      .join("|") + `#${continuations.signature()}`;
 
   /**
    * The agents that read the Inbox through MCP only, newest first: every
@@ -1333,6 +1334,10 @@ export function createInboxLiveSessions(options: {
     actingFor,
     /** The sessions `session` stands in for now (its conversation continues them, and they do not poll). */
     inheritedBy: continuations.inheritedBy,
+    /** The live session standing in for `session` now, or null (the Agents list: one agent for one conversation). */
+    continuedBy: continuations.heirOf,
+    /** Every session id `session`'s conversation continues, nearest first. */
+    continuesOf: continuations.lineOf,
     stuck,
     replyTarget,
     seenOverMcp,
