@@ -407,3 +407,27 @@ test.skipIf(!hasDom)('several Claude marks never move in step: each starts its g
     expect(start).toBe(end);
   }
 });
+
+/* ---------- our faces move as a whole: the Glass tile is turned, moved and scaled, never stretched or skewed ---------- */
+test.skipIf(!hasDom)('a Glass face keeps its rounded tile while it moves: every frame scales both axes alike and never skews', async () => {
+  motion.agentMotionOptions.clock = 300;
+  motion.setAgentFaceArt(Object.fromEntries(motion.AGENT_FACES.filter((f) => f !== 'agent').map((f) => [f, `<img class="am-art" data-art="${f}" alt="">`])) as Parameters<typeof motion.setAgentFaceArt>[0]);
+  const [el] = handSidebar([null]) as [HTMLElement];
+  motion.showAgentFace(el, 'glass-blue', false);
+  const face = el.querySelector('.am-f-glass-blue')!;
+  const gestures = () => made.filter((an) => face.contains(an.target) && an.options.iterations !== Infinity);
+  // Enough of its gestures to have drawn each kind (a tilt, a hop, a dip, a shake, a nod) more than once.
+  await until(() => gestures().length >= 12, 'a dozen gestures of the Glass face');
+  const frames = made.filter((an) => face.contains(an.target)).flatMap((an) => an.frames.map((f) => String(f.transform ?? '')));
+  expect(frames.length).toBeGreaterThan(50);
+  let squashes = 0;
+  for (const t of frames) {
+    for (const m of t.matchAll(/scale\(([-\d.]+),([-\d.]+)\)/g)) {
+      expect(Math.abs(Number(m[1]) - Number(m[2]))).toBeLessThan(0.0015);
+      if (Number(m[1]) !== 1) squashes++;
+    }
+    for (const m of t.matchAll(/skewX\(([-\d.]+)deg\)/g)) expect(Number(m[1])).toBe(0);
+  }
+  // It still dips and hops (a uniform scale), so the guard is not passing on a face that never scales.
+  expect(squashes).toBeGreaterThan(0);
+});

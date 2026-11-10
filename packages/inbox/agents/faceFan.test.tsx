@@ -224,6 +224,37 @@ test.skipIf(!hasDom)('reduced motion: the choices appear in place, with no trave
   expect(document.querySelector('.am-fan')!.hasAttribute('data-still')).toBe(true);
 });
 
+// The owner saw the row's Glass as a sharp square while the fan showed a rounded tile: the rounding was the fan's own
+// CSS, the picture square. It is in the picture now, the same picture in the row and in the fan.
+test.skipIf(!hasDom)("every Glass colour is the same rounded tile in the row as in the fan, the rounding in the picture itself", async () => {
+  const art = await import('./faceArt');
+  motion.setAgentFaceArt(art.AGENT_FACE_ART);
+  const icon = mount();
+  const tileOf = (src: string) => {
+    expect(src.startsWith('data:image/svg+xml,')).toBe(true);
+    const svg = new DOMParser().parseFromString(decodeURIComponent(src.slice('data:image/svg+xml,'.length)), 'image/svg+xml');
+    const side = Number(svg.querySelector('svg')!.getAttribute('viewBox')!.split(' ')[2]);
+    // Every layer of the tile (its glass, its highlight, its rims) has round corners: nothing square shows past it.
+    const layers = [...svg.querySelectorAll('rect')].filter((r) => Number(r.getAttribute('width')) > side * 0.9);
+    expect(layers.length).toBeGreaterThanOrEqual(4);
+    for (const r of layers) expect(Number(r.getAttribute('rx'))).toBeGreaterThanOrEqual(side * 0.15);
+    return svg.querySelector('[data-tile]')!.getAttribute('rx');
+  };
+  const glass = motion.AGENT_FACES.filter((f): f is Exclude<typeof f, 'agent'> => f.startsWith('glass') || f === 'yellow');
+  expect(glass.length).toBe(10);
+  for (const face of glass) {
+    act(() => faces.keepAgentFace('ses_1', face));
+    await until(() => !!document.querySelector(`.am-f-${face} img.am-art`), `the row's ${face}`);
+    const row = document.querySelector<HTMLImageElement>(`.am-f-${face} img.am-art`)!;
+    tileOf(row.getAttribute('src')!);
+    // The row's picture and the fan's are the one picture.
+    expect(row.getAttribute('src')).toBe(art.AGENT_FACE_SRC[face] as string);
+  }
+  enter(icon);
+  await until(() => !!choice('glass-blue')?.querySelector('img'), 'the fan with its pictures');
+  for (const face of glass) expect(choice(face)!.querySelector('img')!.getAttribute('src')).toBe(art.AGENT_FACE_SRC[face] as string);
+});
+
 test('the fan fits the window: every choice inside it, targets a pitch apart, opening away from an edge', () => {
   const check = (cx: number, cy: number, w: number, h: number, counts: number[]) => {
     const rings = fanLayout(cx, cy, w, h, counts);

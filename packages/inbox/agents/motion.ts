@@ -575,6 +575,17 @@ const opencodeRig = (R: Rand): Rig => {
   };
 };
 
+/**
+ * A face that keeps its shape: a squash becomes the same small dip on both axes, so a tile (the Glass faces' rounded
+ * square) is only ever turned, moved and scaled as a whole, never stretched into a shape it is not.
+ */
+const keepShape = (p: PoseIn): PoseIn => {
+  if (p.sx === undefined && p.sy === undefined) return p;
+  const s = Math.sqrt((p.sx ?? 1) * (p.sy ?? 1));
+  return { ...p, sx: s, sy: s };
+};
+const whole = (clip: Clip): Clip => ({ ...clip, f: (t) => keepShape(clip.f(t)) });
+
 /* Our faces (the favicon art) and a host with no rig: the whole mark sways, tilts, bounces and nods, in a 64-unit grid. */
 const faceRig = (R: Rand): Rig => {
   const u = px(64);
@@ -594,8 +605,8 @@ const faceRig = (R: Rand): Rig => {
           I.x('body', once(1600, (t) => ({ r: 9 * s * visit(t, 900, 0.55, 13) })));
         },
       ],
-      [2, (I) => I.x('body', once(900, (t) => hop(t, 900, 2.4 * u, 0.12, 0.85)))],
-      [1.5, (I) => I.x('body', once(420, (t) => ({ sy: 1 - 0.08 * bell(t, 420), sx: 1 + 0.04 * bell(t, 420) })))],
+      [2, (I) => I.x('body', whole(once(900, (t) => hop(t, 900, 2.4 * u, 0.12, 0.85))))],
+      [1.5, (I) => I.x('body', whole(once(420, (t) => ({ sy: 1 - 0.08 * bell(t, 420), sx: 1 + 0.04 * bell(t, 420) }))))],
       [1.5, (I) => I.x('body', once(1050, (t) => ({ x: 1.3 * u * Math.sin((TAU * t) / 420) * Math.sin((Math.PI * t) / 1050) })))],
       [1.2, (I) => I.x('body', once(1300, (t) => ({ y: -1.7 * u * visit(t, 800, 0.7, 18) })))],
     ],

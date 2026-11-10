@@ -66,7 +66,13 @@ export function oklchHex(colour: Oklch): string {
 
 const shift = ([l, c, h]: Oklch, dl: number, kc = 1): Oklch => [l + dl, c * kc, h];
 
-/** The face as an svg, in the 1024 grid of the tab icon (the tile 72..952). */
+/**
+ * The tile's corner radius in the 1024 grid: about 18 % of its 880 side (4 px at 22, 4.4 at 24). The rounding is part
+ * of the picture, so the face is the same rounded tile wherever it is drawn and whole while it moves.
+ */
+export const GLASS_CORNER = 160;
+
+/** The face as an svg, in the 1024 grid of the tab icon (the tile 72..952, rounded by GLASS_CORNER). */
 export function glassSvg(colour: GlassColour): string {
   const t = colour.tint;
   const dark = colour.frame === 'dark';
@@ -84,6 +90,7 @@ export function glassSvg(colour: GlassColour): string {
   const [lx, ly, lw, lh] = GOGGLES_LENSES[0]!;
   const [rx, ry, rw, rh] = GOGGLES_LENSES[1]!;
   const [mx, my, mw, mh] = GOGGLES_MOUTH;
+  const R = GLASS_CORNER;
   const lenses =
     colour.lens === 'orange'
       ? `<g filter="url(#g)" fill="url(#o)"><rect x="${lx}" y="${ly}" width="${lw}" height="${lh}"/><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}"/></g>`
@@ -100,10 +107,10 @@ export function glassSvg(colour: GlassColour): string {
     `<filter id="s" x="-10%" y="-20%" width="120%" height="150%"><feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000" flood-opacity="${dark ? 0.45 : 0.3}"/></filter>` +
     `<filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur in="SourceGraphic" stdDeviation="14" result="b"/><feComponentTransfer in="b" result="b2"><feFuncA type="linear" slope=".55"/></feComponentTransfer><feMerge><feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` +
     `</defs>` +
-    `<rect x="72" y="72" width="880" height="880" fill="url(#t)"/>` +
-    `<rect x="72" y="72" width="880" height="880" fill="url(#h)"/>` +
-    `<rect x="78" y="78" width="868" height="868" fill="none" stroke="url(#r)" stroke-width="10"/>` +
-    `<rect x="73.5" y="73.5" width="877" height="877" fill="none" stroke="#000" stroke-opacity="${t[0] > 0.8 ? 0.16 : 0.3}" stroke-width="3"/>` +
+    `<rect data-tile="" x="72" y="72" width="880" height="880" rx="${R}" fill="url(#t)"/>` +
+    `<rect x="72" y="72" width="880" height="880" rx="${R}" fill="url(#h)"/>` +
+    `<rect x="78" y="78" width="868" height="868" rx="${R - 6}" fill="none" stroke="url(#r)" stroke-width="10"/>` +
+    `<rect x="73.5" y="73.5" width="877" height="877" rx="${R - 1.5}" fill="none" stroke="#000" stroke-opacity="${t[0] > 0.8 ? 0.16 : 0.3}" stroke-width="3"/>` +
     `<g filter="url(#s)"><path transform="scale(.5)" fill-rule="evenodd" fill="url(#f)" stroke="${edge}" stroke-width="6" d="${GOGGLES_FRAME}"/></g>` +
     lenses +
     `<rect x="${mx}" y="${my}" width="${mw}" height="${mh}" fill="${mouth}"${dark ? ' filter="url(#g)"' : ''}/>` +

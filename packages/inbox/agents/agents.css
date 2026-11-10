@@ -115,8 +115,7 @@
 /* The face shown now: a stronger fill. */
 .am-fan-i[aria-checked="true"] { background: color-mix(in oklch, var(--foreground) 24%, var(--popover)); }
 .am-fan-i:focus-visible { outline-offset: 1px; }
-.am-fan-f { width: 22px; height: 22px; display: grid; place-items: center; overflow: hidden; pointer-events: none; }
-.am-fan-f[data-kind="glass"] { border-radius: 4px; }
+.am-fan-f { width: 22px; height: 22px; display: grid; place-items: center; pointer-events: none; }
 .am-fan-f > img { display: block; width: 22px; height: 22px; }
 .am-fan-f > img.am-art-l { display: none; }
 :root.light .am-fan-f > img.am-art-l { display: block; }
