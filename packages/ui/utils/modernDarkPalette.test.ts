@@ -2,7 +2,7 @@
  * Plannotator Modern's dark palette is the PaulMillr palette (owner, 2026-11-09). The two live in two files,
  * because the palette sweeps read each theme from its own file (softGround.test.ts, diffCountColors.test.ts).
  * What regresses if this fails: one of the two is edited and Modern dark stops being PaulMillr's dark, in its
- * colors or in the syntax theme its code is drawn in.
+ * colors or in the syntax theme its code is drawn in, or its blue stops being the blue of its light half.
  */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -24,14 +24,18 @@ function tokens(file: string, selector: string): Record<string, string> {
 /** Fonts are each theme's own; everything else is the palette. */
 const colors = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).filter(([name]) => !name.startsWith('--font-')));
 
-/** Modern's own: PaulMillr's blue (#396bd7) a step brighter, on the button and the ring (owner, 2026-11-09). */
-const MODERN_OWN = { '--primary': '#336be9', '--ring': '#336be9' };
+/** The only tokens where Modern dark is not PaulMillr's: its blue (PaulMillr's primary and ring, one colour there). */
+const MODERN_BLUE_TOKENS = ['--primary', '--ring'];
 
-test("Plannotator Modern's dark colors are PaulMillr's, token for token, but for its blue", () => {
+test("Plannotator Modern's dark colors are PaulMillr's, token for token, except the blue, which is its light half's", () => {
   const paulmillr = colors(tokens('paulmillr.css', '.theme-paulmillr'));
+  const dark = colors(tokens('plannotator-modern.css', '.theme-plannotator-modern'));
+  const lightBlue = tokens('plannotator-modern.css', '.theme-plannotator-modern.light')['--primary']!;
   expect(Object.keys(paulmillr).length).toBeGreaterThan(20);
-  expect(paulmillr['--primary']).toBe(paulmillr['--ring']!);
-  expect(colors(tokens('plannotator-modern.css', '.theme-plannotator-modern'))).toEqual({ ...paulmillr, ...MODERN_OWN });
+  // PaulMillr's blue is one colour on both tokens; so is Modern's.
+  for (const name of MODERN_BLUE_TOKENS) expect(paulmillr[name]).toBe(paulmillr['--primary']!);
+  expect(lightBlue).toBeTruthy();
+  expect(dark).toEqual({ ...paulmillr, ...Object.fromEntries(MODERN_BLUE_TOKENS.map((name) => [name, lightBlue])) });
 });
 
 test("Plannotator Modern's dark code is drawn in the syntax theme PaulMillr's is", () => {

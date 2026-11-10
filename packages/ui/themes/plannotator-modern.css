@@ -2,7 +2,7 @@
    (https://www.boardui.com, https://github.com/BoardUI/boardui).
 
    Dark is the PaulMillr palette (themes/paulmillr.css: "PaulMillr — terminal color scheme"),
-   every color as that theme has it but its blue, which is a step brighter here. The fonts stay Modern's.
+   every color as that theme has it but its blue, which is the light half's blue. The fonts stay Modern's.
 
    Light, set on our tokens: BoardUI's secondary surface is the ground, its full surface the
    card, its tertiary surface muted. Values are BoardUI's unless a comment says not.
@@ -42,9 +42,8 @@
   --card-foreground: #f2f2f2;
   --popover: #2a2a2a;
   --popover-foreground: #f2f2f2;
-  /* Not PaulMillr's #396bd7: the same hue a small step up in chroma and lightness (oklch 0.553 0.175 263 to
-     0.565 0.20 263), as far as its white label allows (4.75:1; 4.5:1 is the floor). */
-  --primary: #336be9;
+  /* Not PaulMillr's #396bd7: the blue of the light half below, so the theme has one blue. */
+  --primary: oklch(0.515 0.245 263);
   --primary-foreground: #ffffff;
   --secondary: #414141;
   --secondary-foreground: #f2f2f2;
@@ -57,7 +56,7 @@
   --border: #414141;
   --input: #2a2a2a;
   /* The primary, as PaulMillr's ring is its primary. */
-  --ring: #336be9;
+  --ring: oklch(0.515 0.245 263);
   --success: #79ff0f;
   --success-foreground: #000000;
   --warning: #e7bf00;

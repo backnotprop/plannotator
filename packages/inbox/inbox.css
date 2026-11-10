@@ -4929,11 +4929,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
    thread's foot, a normal gap; pressed it takes a quiet success tint. The pill under the
    acknowledged message says it was not sent, and later that the agent saw it. */
 .pn-inbox .ib-btn.ib-ack .ib-ack-emoji { font-size: var(--ib-fs-15, 15px); line-height: 1; }
-.pn-inbox .ib-btn.ib-ack[aria-pressed="true"] { border-color: color-mix(in srgb, var(--ib-ack-tone, var(--success)) 55%, transparent); background: color-mix(in srgb, var(--ib-ack-tone, var(--success)) 14%, var(--card)); }
-/* Plannotator Modern, dark (the PaulMillr palette): that palette's success is a neon green, and the pressed
-   button in the foot read as a stray green by the reply box (owner, 2026-11-09). It takes the theme's blue there.
-   Only this button: the ticks, the checks and every other success mark keep the palette's green. */
-:root.theme-plannotator-modern:not(.light) .pn-inbox { --ib-ack-tone: var(--primary); }
+.pn-inbox .ib-btn.ib-ack[aria-pressed="true"] { border-color: color-mix(in srgb, var(--success) 55%, transparent); background: color-mix(in srgb, var(--success) 14%, var(--card)); }
 .ib-ackpill { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 12px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-ackchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--success) 50%, transparent); background: color-mix(in srgb, var(--success) 12%, var(--card)); color: var(--foreground); font-weight: 500; white-space: nowrap; }
 .ib-ackwhen { min-width: 0; }
@@ -5070,7 +5066,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   --ib-ft-hover-s: var(--ib-soft-foot) color-mix(in oklch, var(--muted) 90%, transparent);
   --ib-ft-pri-hover-s: var(--ib-soft-foot) color-mix(in oklch, var(--primary) 88%, var(--foreground));
   --ib-ft-ghost-hover-s: var(--ib-soft-foot) var(--ib-hover);
-  --ib-ft-pressed-s: var(--ib-soft-foot) color-mix(in oklch, var(--ib-ack-tone, var(--success)) 16%, transparent);
+  --ib-ft-pressed-s: var(--ib-soft-foot) color-mix(in oklch, var(--success) 16%, transparent);
   --ib-ft-on-s: var(--ib-soft-foot) color-mix(in oklch, var(--primary) 12%, transparent);
   --ib-ft-box-line-s: var(--ib-soft-foot) color-mix(in oklch, var(--primary) 55%, transparent);
   --ib-ft-box-r-s: var(--ib-soft-foot) 14px;
@@ -5346,7 +5342,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .ib-pfoot .ib-btn.ib-pri:hover:not(:disabled) { background: var(--ib-ft-pri-hover-s, var(--primary)); }
 .pn-inbox .ib-pfoot .ib-btn.ib-ghost { border-color: transparent; background: transparent; color: var(--ib-ft-fg-s, var(--muted-foreground)); }
 .pn-inbox .ib-pfoot .ib-btn.ib-ghost:hover:not(:disabled) { background: var(--ib-ft-ghost-hover-s, transparent); color: var(--ib-hb-fg-s, var(--muted-foreground)); }
-.pn-inbox .ib-pfoot .ib-btn[aria-pressed="true"] { background: var(--ib-ft-pressed-s, color-mix(in srgb, var(--ib-ack-tone, var(--success)) 14%, var(--card))); }
+.pn-inbox .ib-pfoot .ib-btn[aria-pressed="true"] { background: var(--ib-ft-pressed-s, color-mix(in srgb, var(--success) 14%, var(--card))); }
 .pn-inbox .ib-pfoot .ib-btn.ib-on { border-color: var(--ib-ft-line-s, color-mix(in oklch, var(--primary) 55%, transparent)); background: var(--ib-ft-on-s, color-mix(in oklch, var(--primary) 10%, var(--card))); color: var(--ib-ft-fg-s, var(--primary)); }
 /* The reply box: the accent's ring and a soft glow; its chips are pills. */
 .ib-rbox { border-color: var(--ib-ft-box-line-s, color-mix(in oklch, var(--primary) 60%, transparent)); border-radius: var(--ib-ft-box-r-s, 8px); box-shadow: var(--ib-ft-box-glow-s, 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent)); }
@@ -5421,7 +5417,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .ib-btn { --ib-bt-ghost-fg-s: var(--ib-soft-buttons) var(--foreground); border-color: var(--ib-bt-line-s, var(--border)); border-radius: var(--ib-bt-r-s, 7px); background: var(--ib-bt-bg-s, var(--card)); color: var(--ib-bt-fg-s); transition: var(--ib-fade2-s, var(--ib-ui-fade)); }
 /* Off, a hovered button keeps its own rest colour (today's buttons have no hover fill). */
 .pn-inbox .ib-btn.ib-on { --ib-btn-rest: color-mix(in oklch, var(--primary) 10%, var(--card)); }
-.pn-inbox .ib-btn.ib-ack[aria-pressed="true"] { --ib-btn-rest: color-mix(in srgb, var(--ib-ack-tone, var(--success)) 14%, var(--card)); }
+.pn-inbox .ib-btn.ib-ack[aria-pressed="true"] { --ib-btn-rest: color-mix(in srgb, var(--success) 14%, var(--card)); }
 .pn-inbox .ib-btn:hover:not(:disabled) { background: var(--ib-bt-hover-s, var(--ib-btn-rest, var(--card))); }
 .pn-inbox .ib-btn.ib-pri { background: var(--primary); color: var(--primary-foreground); }
 .pn-inbox .ib-btn.ib-pri:hover:not(:disabled) { background: var(--ib-bt-pri-hover-s, var(--primary)); }
