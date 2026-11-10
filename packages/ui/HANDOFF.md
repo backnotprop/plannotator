@@ -2990,6 +2990,16 @@ An `owner/repo#123` ref used to link only where `InlineMarkdown` had a `githubRe
 - **Unchanged either way:** a caller that passes `githubRepo` (its `repoHost` decides), bare `#123` and `@user` (they still need `githubRepo`), and link labels.
 - **A host that passes nothing sees no change**, apart from one subscription per mounted `InlineMarkdown`. The Plannotator Inbox passes `true` at start and then `{ host }` with the host most of its projects use (`packages/inbox/defaultRefHost.ts`). Workspaces needs it only where it renders agent text with `InlineMarkdown` and no repo. Its own native renderers are not affected.
 
+## The comment card: its skill list shows, and its words drag it (unreleased; opt-in hosts only, no core change)
+
+Only for a host that turned the card on (`configurePlannotatorUI({ commentCard })`); the popover every other host draws is the same, pixel for pixel.
+
+- **The skill list was clipped away.** In the card, `SkillReferenceMenu` was a child of `.pn-cbox-field`, which scrolls (`overflow-y: auto`), so `/` and `$` drew the whole list where nothing shows. It is now a child of the card (`.pn-cbox`), on the side away from the words the comment is about (`prefer` below a card that sits under them, above one over them or docked), and flips when there is no room.
+- **The quoted words are a drag handle** (`[data-comment-card-handle]`, `useDraggable`'s `dragHandleProps`), as the popover's header is. A dragged card stays where it was put (`data-dragged`) until other words are picked or it is opened to full, which docks it again. Not on a phone, where it is docked. A press on the handle keeps the caret in the field and starts no selection of the page (which closed the card as a draft).
+- **`useDraggable(ref, { keepInside?: boolean })`**: with `keepInside`, the whole element stays inside the window. Absent: at least 50 px stays on screen, as before. The card passes it; the popover does not.
+
+Pinned by `components/CommentPopover.card.test.tsx` ("/" lists the skills, and its words drag it).
+
 ## `ImageLightbox` `at`: which of two images with the same URL opens (unreleased; additive, opt-in, no core change)
 
 `ImageLightbox` with `images` opened on the first image whose `src` is `src`. When two entries share a URL (the Plannotator Inbox's decision mode shows one picture for two choices, each named for its choice), the second could never open as itself.

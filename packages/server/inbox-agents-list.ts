@@ -16,6 +16,12 @@
  * A launched agent's id is its launch's id, so it keeps its place while its session moves from the placeholder
  * (`launch:<id>`) to the real one; every other agent's id is its session.
  *
+ * One conversation, one agent: a conversation that goes on under a new session id (inbox-continuations.ts, a poll's
+ * `continues`) is listed once, as the live session that stands in for the old id. The old id's launch and its
+ * waiting threads are that agent's, and an old id that no longer polls is no agent of its own (nor "ended today":
+ * it did not end). The agent says which ids its conversation continues (`continues`), so the window finds its
+ * threads under them. An old id that still polls keeps its own row here (both conversations may go on).
+ *
  * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, waiting first, then working, idle and ended, `total` and
  * `ended_today` counting them all. Another machine's group comes from its own list (the door's `threads`, read by
  * its PeerLink), capped again here, so a merged list is never longer than the cap per machine.
@@ -60,6 +66,10 @@ export interface InboxAgentsEvidence {
   projectById: (id: string) => { id: string; name: string } | null;
   /** When this Inbox last heard from a session it does not hold in memory (an Inbox tool call); null when never. */
   lastHeardOf: (session: string) => number | null;
+  /** The live session standing in for `session` (its conversation goes on there); null when it is live itself or nobody continues it. */
+  continuedBy: (session: string) => string | null;
+  /** Every session id `session`'s conversation continues, nearest first. */
+  continuesOf: (session: string) => string[];
   /** Labels are shown (this computer's owner). */
   labels: boolean;
 }
@@ -92,9 +102,11 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
   const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
 
   for (const entry of evidence.sessions) {
+    const continues = entry.live ? evidence.continuesOf(entry.session) : [];
     bySession.set(entry.session, {
       id: entry.session,
       session: entry.session,
+      ...(continues.length > 0 ? { continues } : {}),
       host: entry.host,
       ...(evidence.labels && entry.label ? { label: entry.label } : {}),
       project: evidence.projectOf(entry.root, entry.session),
@@ -106,20 +118,29 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     });
   }
 
+  // The session a listed one's conversation goes on as: a live, listed session standing in for it.
+  const nowAs = (session: string): string => {
+    const heir = evidence.continuedBy(session);
+    return heir !== null && bySession.get(heir)?.live ? heir : session;
+  };
+  // An old id whose conversation goes on is no agent of its own.
+  for (const entry of evidence.sessions) if (!entry.live && nowAs(entry.session) !== entry.session) bySession.delete(entry.session);
+
   for (const launch of evidence.launches) {
-    const known = bySession.get(launch.session);
+    const session = nowAs(launch.session);
+    const known = bySession.get(session);
     // A launch that is done (its thread archived) is listed only while its session is still live.
     if (evidence.archived.has(launch.thread_id) && !known?.live) {
-      bySession.delete(launch.session);
+      bySession.delete(session);
       continue;
     }
     const run = launch.run;
     const working = run === "starting" || run === "working" || run === "cloning" || known?.state === "working";
     const ended = !known?.live && (run === "failed" || run === "missing" || run === "clone_failed" || run === "clone_cancelled");
-    bySession.set(launch.session, {
+    bySession.set(session, {
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
-      session: launch.session,
+      session,
       launch: { id: launch.launch_id, thread_id: launch.thread_id },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
@@ -130,12 +151,13 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
   }
 
   for (const wait of evidence.waits) {
-    let agent = bySession.get(wait.session);
+    const session = nowAs(wait.session);
+    let agent = bySession.get(session);
     if (!agent) {
-      const heard = evidence.lastHeardOf(wait.session);
+      const heard = evidence.lastHeardOf(session);
       agent = {
-        id: wait.session,
-        session: wait.session,
+        id: session,
+        session,
         host: wait.host,
         project: wait.project,
         state: "ended",
@@ -144,7 +166,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
         started_at: null,
         last_seen_at: heard === null ? null : iso(heard),
       };
-      bySession.set(wait.session, agent);
+      bySession.set(session, agent);
     }
     agent.waiting += 1;
     agent.state = "waiting";
