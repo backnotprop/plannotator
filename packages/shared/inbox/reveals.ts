@@ -5,8 +5,7 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order: the "themes" dialog (from the second day of use, for someone still on the default theme;
- * theme-chooser.ts), Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
+ * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
  * options, voice, the tab icon), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
