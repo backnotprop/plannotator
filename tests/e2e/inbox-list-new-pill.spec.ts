@@ -57,8 +57,9 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  // A busy Inbox: a long "Waiting on you", so "New since you looked" starts far below the fold on every screen.
-  for (let n = 0; n < 4; n++) await agent.send({ project_path: project, subject: `Update ${n}`, body: 'Done. Nothing to answer.', agent_session: `ses_seed_new_${n}` } as Send);
+  // A busy Inbox: a long "Waiting on you", so "New since you looked" starts far below the fold on every screen, and
+  // enough rows in it that its first row can come to the middle of the list (the list's end would stop it short).
+  for (let n = 0; n < 16; n++) await agent.send({ project_path: project, subject: `Update ${n}`, body: 'Done. Nothing to answer.', agent_session: `ses_seed_new_${n}` } as Send);
   for (let n = 0; n < 30; n++) await agent.send({ project_path: project, subject: `Question ${n}`, body: QUESTION, agent_session: `ses_seed_wait_${n}` } as Send);
   world = { url: started.stdout.trim().replace(/\/$/, ''), agent, project };
 });
