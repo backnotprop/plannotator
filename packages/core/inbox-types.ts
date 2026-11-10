@@ -2325,6 +2325,10 @@ export const INBOX_ROWS_OPTIONS = [
   // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
   // every thread name in bold, read or not.
   "boldNames",
+  // Pull requests off (approval "inbox-rows-settings-page", 2026-11-10; the owner: "some people might wanna hide the
+  // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
+  // own PR button stays. No rival.
+  "hidePulls",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 

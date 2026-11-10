@@ -1,28 +1,44 @@
 /**
- * Settings → Rows (`#settings/rows`; the owner, 2026-11-02: "Take me to a settings page where I can customize how the
- * inbox rows look", opened from the list's ⋮ "Customize rows…"). Two live pictures drawn by the list's own rows
- * (`ListRow`) with fixed sample threads: "With a thread open" (the three-line row in the 380 px column) and "Full
- * width" (the one-line row, zoomed down when the page is narrower than a wide list). On a phone one picture, the
- * phone's rows. Round 2 (the owner, 2026-11-02: "Couldn't customization go a bit further"): three presets beside the
- * lede (Minimal, Balanced = the defaults, Detailed) as starting points, then beside the narrow picture Look (density,
- * first line, thread names, unread, subject preview, time) and Show (agent icons, project). Letter marks (approval
- * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
- * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures). A notes-list look (the
- * owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default and in no preset: Look →
- * Time position (Top right / Under the preview), and Show → Dividers, Status mark and Bold thread names.
+ * Settings → Rows (`#settings/rows`, opened from the list's ⋮ "Customize rows…"; approval
+ * "inbox-rows-settings-page", 2026-11-10, which replaced the flat form of "inbox-customize-rows"). "Your list": the
+ * person's own newest rows, drawn by the list's own row (`ListRow`), stays in view while they choose: beside the
+ * controls on a wide page, pinned at the top on a phone (two rows, the two that show the last change best). Labelled
+ * examples stand in when there are no threads. Beside it: four looks to start from (Balanced = the defaults, Dense,
+ * Minimal, Detailed), eight choices, and nine more under "More choices". Every change says what it was beside the
+ * list's title ("Changed: Spacing → Compact", with Undo) and tints the part of the rows that moved for a moment
+ * (not under reduced motion). Undo, in the header too, steps back through this visit's changes; Reset to default is
+ * Balanced.
  *
- * Every control is the list's look (listLook.ts): a change shows at once and is saved for the person (config.json `inboxRows`), and every list in every window
- * takes it (`useListLook` listens). The pictures follow the person's mode, light or dark.
+ * Every control is the list's look (listLook.ts) through the control model (rowsControls.ts): a change shows at once
+ * and is saved for the person (config.json `inboxRows`), and every list in every window takes it. The page reads the
+ * look and never writes it on open; only a press writes.
  */
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RowMarksScope } from '../letterMarks';
-import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, lookMarks, markStyleLook, marksWhatLook, useListLook, type ListLook, type ListLookKey, type MarkStyle, type MarksWhat } from '../listLook';
+import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, isDefaultListLook, listLookClasses, lookWithChange, useListLook, type ListLook } from '../listLook';
+import { ROWS_MAIN_CONTROLS, ROWS_MORE_CONTROLS, ROWS_PRESETS, lookWithChoice, rowsChangeWords, rowsChangedControls, rowsPreset, type RowsControl, type RowsControlId } from '../rowsControls';
 import { ListRow } from './InboxList';
 import { Icon } from '../icons';
 
-/** The width a wide list needs for its one-line rows (InboxList `WIDE_ROWS_MIN_LIST_WIDTH`): the picture zooms below it. */
-const WIDE_PREVIEW_PX = 900;
+export { ROWS_PRESETS, rowsPreset, type RowsPreset } from '../rowsControls';
+
+/** The looks the one-time "Choose how your list looks" dialog offers (ListLookIntro.tsx), in its order. */
+export const ROWS_INTRO_PRESETS = (['minimal', 'balanced', 'detailed'] as const).map((id) => ROWS_PRESETS.find((preset) => preset.id === id)!);
+
+/** A row of the person's list for the pictures, with the group it is drawn in. */
+export interface RowsPreviewRow {
+  row: InboxListRow;
+  drawn: InboxListGroupId;
+}
+
+/** How many of the person's rows "Your list" draws: beside the controls, and pinned on a phone. */
+const PREVIEW_ROWS = 6;
+const PHONE_ROWS = 2;
+/** A preset's picture: the first rows, at half size. */
+const PRESET_ROWS = 2;
+/** How long a changed part stays tinted (inbox.css `ib-rws-flash-*`), with a little room for the fade's end. */
+const FLASH_MS = 1700;
 
 const noop = () => {};
 
@@ -36,7 +52,7 @@ function sample(over: Partial<InboxListRow> & Pick<InboxListRow, 'thread_id' | '
     resolved_at: null,
     questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null },
     waiting_on_person: true,
-    project: { id: 'prj_sample', name: 'plannotator' },
+    project: { id: 'prj_sample', name: 'storefront' },
     thread_name: null,
     unread: false,
     answered_not_sent: false,
@@ -48,103 +64,147 @@ function sample(over: Partial<InboxListRow> & Pick<InboxListRow, 'thread_id' | '
   };
 }
 
-/** The sample threads: each control changes at least one of them. Times are a few minutes ago, so they read today. */
-function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow[] }[] {
+/** The examples for someone with no threads yet: between them, every choice changes at least one. */
+function exampleRows(): RowsPreviewRow[] {
   const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
-  return [
-    {
-      id: 'stopped',
-      label: 'Stopped on you',
-      rows: [
-        sample({
-          thread_id: 'rows-sample-stopped',
-          project: { id: 'prj_billing', name: 'billing-svc' },
-          thread_name: 'Postgres 17 migration',
-          subject: 'The staging password expired: can you rotate it?',
-          author: { kind: 'agent', host: 'codex', session: 'ses_b', name: null },
-          section: 'stopped',
-          questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null },
-          last_at: ago(38),
-        }),
+  const rows: InboxListRow[] = [
+    sample({
+      thread_id: 'rows-sample-stopped',
+      project: { id: 'prj_billing', name: 'billing-svc' },
+      thread_name: 'Staging database upgrade',
+      subject: 'The staging password expired: can you rotate it?',
+      author: { kind: 'agent', host: 'codex', session: 'ses_b', name: null },
+      section: 'stopped',
+      unread: true,
+      questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null },
+      last_at: ago(4),
+    }),
+    sample({
+      thread_id: 'rows-sample-named',
+      thread_name: 'Cart page refresh',
+      subject: 'Which cart layout should ship first?',
+      participants: [
+        { host: 'claude-code', session: 'ses_a' },
+        { host: 'codex', session: 'ses_c' },
       ],
-    },
-    {
-      id: 'waiting',
-      label: 'Waiting on you',
-      rows: [
-        sample({
-          thread_id: 'rows-sample-named',
-          project: { id: 'prj_store', name: 'storefront' },
-          thread_name: 'Checkout redesign',
-          subject: 'Which cart layout should ship first?',
-          participants: [
-            { host: 'claude-code', session: 'ses_a' },
-            { host: 'codex', session: 'ses_c' },
-          ],
-          section: 'waiting',
-          unread: true,
-          questions: { open: 2, picked: 0, stopped: false, holds_up: [], prompt: null },
-          last_at: ago(4),
-        }),
-      ],
-    },
-    {
-      // A thread with nothing left to do, so Show → Status mark has a "done" to draw.
-      id: 'quiet',
-      label: 'Quiet',
-      rows: [
-        sample({
-          thread_id: 'rows-sample-plain',
-          subject: 'Tests pass on main after the retry fix',
-          author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
-          section: 'quiet',
-          waiting_on_person: false,
-          last_at: ago(52),
-        }),
-      ],
-    },
+      section: 'waiting',
+      unread: true,
+      questions: { open: 2, picked: 0, stopped: false, holds_up: [], prompt: null },
+      pulls: { count: 1, headline: { key: 'github.com/example/storefront#412', state: 'open' } },
+      last_at: ago(10),
+    }),
+    sample({
+      thread_id: 'rows-sample-new',
+      project: { id: 'prj_docs', name: 'docs-site' },
+      subject: 'Install guide rewritten',
+      author: { kind: 'agent', host: 'opencode', session: 'ses_o', name: null },
+      section: 'new',
+      waiting_on_person: false,
+      unread: true,
+      last_at: ago(42),
+    }),
+    sample({
+      thread_id: 'rows-sample-drift',
+      project: { id: 'prj_infra', name: 'infra' },
+      thread_name: 'Nightly Terraform drift',
+      subject: 'Drift in three modules; nothing to answer yet',
+      section: 'new',
+      waiting_on_person: false,
+      pulls: { count: 3, headline: { key: 'github.com/example/infra#88', state: 'draft' } },
+      last_at: ago(68),
+    }),
+    sample({
+      thread_id: 'rows-sample-plain',
+      subject: 'Tests pass on main after the retry fix',
+      author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
+      section: 'quiet',
+      waiting_on_person: false,
+      pulls: { count: 1, headline: { key: 'github.com/example/storefront#409', state: 'merged' } },
+      last_at: ago(60 * 26),
+    }),
   ];
+  return rows.map((row) => ({ row, drawn: row.section }));
 }
 
-/** One picture: a list column with the sample rows in `shape`, the look applied. Not interactive, not announced. */
-function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narrow' | 'wide' | 'phone'; className: string }) {
-  const [groups] = useState(sampleGroups);
+/**
+ * Whether a row has the part a choice changes, so a phone's two rows can be ones that show it. The parts every row
+ * has (its spacing, its time) are true for all, which keeps the newest two.
+ */
+function rowShows(control: RowsControlId, row: InboxListRow): boolean {
+  switch (control) {
+    case 'pulls':
+      return !!row.pulls;
+    case 'preview':
+      return row.thread_name !== null;
+    case 'needs':
+      return row.questions.open > 0 || row.section === 'quiet';
+    case 'newer':
+      return row.unread;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Where a choice shows on a row: the parts to tint, first one found wins; none found (or none named), the whole rows.
+ * The selectors are the list's own classes (InboxList.tsx, letterMarks.tsx, threadPulls/ThreadPulls.tsx).
+ */
+const FLASH_PARTS: Partial<Record<RowsControlId, readonly string[]>> = {
+  preview: ['.ib-pv'],
+  first: ['.ib-title', '.ib-m-title'],
+  time: ['.ib-t'],
+  timeAt: ['.ib-t'],
+  needs: ['.ib-stm, .ib-qn, .ib-act, .ib-lc'],
+  agents: ['.ib-mks'],
+  project: ['.ib-pn'],
+  pulls: ['.ib-prmark'],
+  newer: ['.ib-title', '.ib-m-title'],
+  boldAll: ['.ib-title', '.ib-m-title'],
+  pill: ['.ib-title', '.ib-m-title'],
+  badges: ['.ib-lm'],
+  shape: ['.ib-lm'],
+  logo: ['.ib-lm'],
+  github: ['.ib-lm'],
+};
+const FLASH_ROWS = '.ib-nrow, .ib-mrow';
+
+/** The person's rows in one look, by the list's own row. Not interactive, not announced. */
+function LookList({ rows, look, phone, examples, projectNames, awayMachines, className = '' }: { rows: readonly RowsPreviewRow[]; look: ListLook; phone: boolean; examples: boolean; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string>; className?: string }) {
   return (
-    // The sample projects have no pictures: their marks are letters (`pictures` off asks the Inbox for none).
-    <RowMarksScope look={look} pictures={false}>
-      <section className={`ib-listcol ib-rws-list ${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
-        {/* The rows alone, no bands: nothing here changes a band, and the page keeps both pictures in one screen. */}
+    // The examples' projects have no pictures: their badges are letters (`pictures` off asks the Inbox for none).
+    <RowMarksScope look={look} pictures={!examples}>
+      <section className={`ib-listcol ib-rws-list${phone ? '' : ' ib-narrow'}${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
+        {/* The rows alone, no bands: no choice here changes a band. */}
         <div className="ib-lbody">
           <div className="ib-group">
-            {groups.flatMap((group) =>
-              group.rows.map((row) => (
-                <ListRow
-                  key={row.thread_id}
-                  row={row}
-                  project={row.project.name}
-                  away={false}
-                  drawn={group.id}
-                  shape={shape}
-                  full={false}
-                  filtered={look.hideProject}
-                  selected={false}
-                  lit={false}
-                  onOpen={noop}
-                  day=""
-                  menu={false}
-                  pinned={false}
-                  pinColumn={false}
-                  pill={look.highlight}
-                  compact={look.compact}
-                  noPreview={look.hidePreview}
-                  relative={look.relativeTime}
-                  titleFirst={look.titleFirst}
-                  timeBelow={look.timeBelow}
-                  statusMark={look.statusMark}
-                  noAgents={look.hideAgents}
-                />
-              )),
-            )}
+            {rows.map(({ row, drawn }) => (
+              <ListRow
+                key={row.thread_id}
+                row={row}
+                project={projectNames?.get(row.project.id) ?? row.project.name}
+                away={!!row.machine && (awayMachines?.has(row.machine) ?? false)}
+                drawn={drawn}
+                shape={phone ? 'phone' : 'narrow'}
+                full={false}
+                filtered={look.hideProject}
+                selected={false}
+                lit={false}
+                onOpen={noop}
+                day=""
+                menu={false}
+                pinned={false}
+                pinColumn={false}
+                pill={look.highlight}
+                compact={look.compact}
+                noPreview={look.hidePreview}
+                relative={look.relativeTime}
+                titleFirst={look.titleFirst}
+                timeBelow={look.timeBelow}
+                statusMark={look.statusMark}
+                noAgents={look.hideAgents}
+                noPulls={look.hidePulls}
+              />
+            ))}
           </div>
         </div>
       </section>
@@ -152,33 +212,10 @@ function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narro
   );
 }
 
-/** The wide picture: drawn at a wide list's width, zoomed down to the page's when that is narrower. */
-function WidePreview({ look }: { look: ListLook }) {
-  const frame = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(WIDE_PREVIEW_PX);
-  useLayoutEffect(() => {
-    const el = frame.current;
-    if (!el) return;
-    const measure = () => setWidth(el.clientWidth || WIDE_PREVIEW_PX);
-    measure();
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    observer?.observe(el);
-    return () => observer?.disconnect();
-  }, []);
-  const zoom = Math.min(1, width / WIDE_PREVIEW_PX);
+/** A segmented choice: a radio group named by its row's label, as Settings → General's Theme and Text size. */
+function Seg({ name, labelledBy, describedBy, value, choices, onChange }: { name: string; labelledBy: string; describedBy?: string; value: string | null; choices: readonly { id: string; label: string }[]; onChange: (next: string) => void }) {
   return (
-    <div ref={frame} className="ib-rws-frame ib-rws-wide" inert data-rows-preview="wide">
-      <div style={{ width: zoom < 1 ? WIDE_PREVIEW_PX : '100%', zoom: zoom < 1 ? zoom : undefined }}>
-        <PreviewList look={look} shape="wide" className="" />
-      </div>
-    </div>
-  );
-}
-
-/** A row's two- or three-way choice, as Settings → General's Theme and Text size. */
-function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: { name: string; labelledBy: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
-  return (
-    <span className="ib-seg" role="radiogroup" aria-labelledby={labelledBy}>
+    <span className="ib-seg" role="radiogroup" aria-labelledby={labelledBy} aria-describedby={describedBy}>
       {choices.map((choice) => (
         <label key={choice.id} className="ib-seg-o" data-on={value === choice.id ? '' : undefined}>
           <input type="radio" name={name} value={choice.id} checked={value === choice.id} onChange={() => onChange(choice.id)} />
@@ -189,317 +226,236 @@ function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: {
   );
 }
 
-/** A Look row: its title (naming the choice for a screen reader) and its segmented choice. */
-function LookRow<T extends string>({ id, label, desc, value, choices, onChange }: { id: string; label: string; desc?: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
+/** One choice: its label (naming it for a screen reader), its words if any, and its segmented choice or switch. */
+function ControlRow({ control, look, onChoice }: { control: RowsControl; look: ListLook; onChoice: (control: RowsControl, value: string | boolean) => void }) {
+  const id = `ib-rows-${control.id}`;
+  const desc = control.desc?.(look);
+  const descId = desc ? `${id}-desc` : undefined;
   return (
-    <div className="ib-prow" data-rows-control={id}>
+    <div className="ib-prow" data-rows-control={control.id}>
       <span className="ib-txt">
-        <span className="ib-l" id={`ib-rows-${id}`}>
-          {label}
-        </span>
-        {desc && <span className="ib-desc">{desc}</span>}
-      </span>
-      <span className="ib-ctl">
-        <Seg name={`ib-rows-${id}`} labelledBy={`ib-rows-${id}`} value={value} choices={choices} onChange={onChange} />
-      </span>
-    </div>
-  );
-}
-
-/**
- * The Show card's switches: on is shown. Each hides with its `ListLook` key. The page's words follow the owner's rule
- * (2026-11-07: "only necessary labels or words for things that are not intuitive"): a description says only what the
- * pictures cannot show (a machine, where a picture comes from, a side effect).
- */
-const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
-  { key: 'hideAgents', label: 'Agent icons' },
-  { key: 'hideProject', label: 'Project', desc: 'With its machine' },
-];
-
-/** The notes-list look's switches (all off by default): on is shown, as each one's own `ListLook` key. */
-// Words as few as the owner asked (2026-11-07: "only necessary labels or words for things that are not intuitive"):
-// the pictures show Dividers and Bold names, so only Status mark says what it replaces.
-const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark' | 'boldNames'; label: string; desc?: string }[] = [
-  { key: 'dividers', label: 'Dividers' },
-  { key: 'statusMark', label: 'Status mark', desc: 'Instead of counts' },
-  { key: 'boldNames', label: 'Bold names' },
-];
-
-/** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
-const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
-  { key: 'repoLogo', label: 'Logo from the repo', desc: 'Stays on this computer' },
-  { key: 'githubPictures', label: 'GitHub pictures', desc: "The owner's picture. Asks GitHub once a week." },
-];
-
-/** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words, if any, for a screen reader. */
-function OnSwitch({ id, label, desc, on, onToggle }: { id: ListLookKey; label: string; desc?: string; on: boolean; onToggle: () => void }) {
-  return (
-    <div className="ib-prow" data-rows-control={id}>
-      <span className="ib-txt">
-        <span className="ib-l" id={`ib-rows-${id}`}>
-          {label}
+        <span className="ib-l" id={id}>
+          {control.label}
         </span>
         {desc && (
-          <span className="ib-desc" id={`ib-rows-${id}-desc`}>
+          <span className="ib-desc" id={descId}>
             {desc}
           </span>
         )}
       </span>
       <span className="ib-ctl">
-        <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={`ib-rows-${id}`} aria-describedby={desc ? `ib-rows-${id}-desc` : undefined} onClick={onToggle} />
-      </span>
-    </div>
-  );
-}
-
-export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
-
-/**
- * The presets: starting points, each a whole look. Balanced is the defaults (smaller thread names on, every other
- * option off), so choosing it is also how to reset. Detailed keeps the larger unread names it had before smaller
- * names became the default. A look that matches none reads "Custom": a look saved as Detailed before Detailed turned
- * letter marks on (approval "inbox-letter-marks") now reads Custom until Detailed is picked again.
- */
-// Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
-// turns them on, both kinds as Avatar (no style option on), with the repo's logo on and GitHub pictures off.
-export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
-  // Minimal (approval "inbox-rows-dialog", round 7b): the two-line title-first row, no preview, no dot, clock times.
-  { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, titleFirst: true, hidePreview: true, smallNames: true } },
-  { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
-  {
-    id: 'detailed',
-    label: 'Detailed',
-    look: {
-      ...LIST_LOOK_OFF,
-      roomy: true,
-      // No subject pill beside the avatars (pending owner answer q-70c1a472). To undo: `highlight: true`.
-      previewTwo: true,
-      marksThreads: true,
-      marksProjects: true,
-      // The repo's logo on project marks (pending owner answer q-737e5fd4): a local file, nothing asked of GitHub.
-      repoLogo: true,
-    },
-  },
-];
-
-export function rowsPreset(look: ListLook): RowsPreset | null {
-  return ROWS_PRESETS.find((preset) => LIST_LOOK_KEYS.every((key) => preset.look[key] === look[key]))?.id ?? null;
-}
-
-export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: () => void }) {
-  // A choice that turns one option on turns its rival off (Compact and Roomy; no preview and two lines), in one write.
-  const [look, set] = useListLook();
-  const marks = lookMarks(look);
-  const preset = rowsPreset(look);
-  // Buttons, not radios: a radio group's arrow keys choose as they move, so one stray key would wipe a Custom look.
-  // Tab reaches each preset, and only Enter, Space or a click applies one; the pressed one is the look's.
-  const presets = (
-    <div className="ib-rws-presets" data-rows-preset={preset ?? 'custom'}>
-      <span className="ib-l" id="ib-rows-preset">
-        Start from
-      </span>
-      <span className="ib-seg" role="group" aria-labelledby="ib-rows-preset" aria-describedby={preset ? undefined : 'ib-rows-custom'}>
-        {ROWS_PRESETS.map((choice) => (
-          <button key={choice.id} type="button" className="ib-seg-o" aria-pressed={preset === choice.id} data-on={preset === choice.id ? '' : undefined} data-preset={choice.id} onClick={() => set(choice.look)}>
-            {choice.label}
-          </button>
-        ))}
-      </span>
-      {/* Not a choice: says the look was changed from every preset. Balanced puts the defaults back. */}
-      {!preset && (
-        <span className="ib-rws-custom" id="ib-rows-custom">
-          Custom
-        </span>
-      )}
-    </div>
-  );
-  const controls = (
-    <div className="ib-rws-ctl">
-      <section className="ib-sgroup ib-sgroup-first" aria-labelledby="ib-g-rows-look">
-        <h2 id="ib-g-rows-look">Look</h2>
-        <div className="ib-card">
-          <LookRow
-            id="density"
-            label="Density"
-            value={look.compact ? 'compact' : look.roomy ? 'roomy' : 'comfortable'}
-            choices={[
-              { id: 'compact', label: 'Compact' },
-              { id: 'comfortable', label: 'Comfortable' },
-              { id: 'roomy', label: 'Roomy' },
-            ]}
-            onChange={(next) => set({ compact: next === 'compact', roomy: next === 'roomy' })}
-          />
-          <LookRow
-            id="first"
-            label="First line"
-            value={look.titleFirst ? 'name' : 'project'}
-            choices={[
-              { id: 'project', label: 'Project' },
-              { id: 'name', label: 'Thread name' },
-            ]}
-            onChange={(next) => set({ titleFirst: next === 'name' })}
-          />
-          <LookRow
-            id="names"
-            label="Thread names"
-            value={look.highlight ? 'pill' : 'plain'}
-            choices={[
-              { id: 'plain', label: 'Plain' },
-              { id: 'pill', label: 'Highlighted' },
-            ]}
-            onChange={(next) => set({ highlight: next === 'pill' })}
-          />
-          {/* Where a letter mark lives. Nothing is picked while marks are off; picking one turns thread marks on, so
-              the choice never does nothing. */}
-          <LookRow<MarkStyle>
-            id="markstyle"
-            label="Mark style"
-            desc={marks.what === 'off' ? 'Turns letter marks on' : undefined}
-            value={marks.what === 'off' ? null : marks.style}
-            choices={[
-              { id: 'inline', label: 'Inline' },
-              { id: 'avatar', label: 'Avatar' },
-              { id: 'dot', label: 'Dot' },
-            ]}
-            onChange={(style) => set(markStyleLook(style, look))}
-          />
-          <LookRow
-            id="unread"
-            label="Unread"
-            value={look.unreadDot ? 'dot' : look.smallNames ? 'bold' : 'larger'}
-            choices={[
-              { id: 'larger', label: 'Larger' },
-              { id: 'bold', label: 'Bold' },
-              { id: 'dot', label: 'Dot' },
-            ]}
-            onChange={(next) => set({ smallNames: next !== 'larger', unreadDot: next === 'dot' })}
-          />
-          <LookRow
-            id="preview"
-            label="Subject preview"
-            value={look.hidePreview ? 'none' : look.previewTwo ? 'two' : 'one'}
-            choices={[
-              { id: 'none', label: 'None' },
-              { id: 'one', label: '1 line' },
-              { id: 'two', label: '2 lines' },
-            ]}
-            onChange={(next) => set({ hidePreview: next === 'none', previewTwo: next === 'two' })}
-          />
-          <LookRow
-            id="time"
-            label="Time"
-            value={look.relativeTime ? 'relative' : 'clock'}
-            choices={[
-              { id: 'clock', label: 'Clock' },
-              { id: 'relative', label: 'Relative' },
-            ]}
-            onChange={(next) => set({ relativeTime: next === 'relative' })}
-          />
-          {/* Where the time sits on three-line and phone rows; a full-width row keeps its columns. */}
-          <LookRow
-            id="timeplace"
-            label="Time position"
-            value={look.timeBelow ? 'below' : 'top'}
-            choices={[
-              { id: 'top', label: 'Top right' },
-              { id: 'below', label: 'Under the preview' },
-            ]}
-            onChange={(next) => set({ timeBelow: next === 'below' })}
-          />
-        </div>
-      </section>
-      <section className="ib-sgroup" aria-labelledby="ib-g-rows-show">
-        <h2 id="ib-g-rows-show">Show</h2>
-        <div className="ib-card">
-          {SHOW.map((item) => (
-            <div className="ib-prow" key={item.key} data-rows-control={item.key}>
-              <span className="ib-txt">
-                <span className="ib-l" id={`ib-rows-${item.key}`}>
-                  {item.label}
-                </span>
-                {item.desc && (
-                  <span className="ib-desc" id={`ib-rows-${item.key}-desc`}>
-                    {item.desc}
-                  </span>
-                )}
-              </span>
-              <span className="ib-ctl">
-                <button
-                  type="button"
-                  role="switch"
-                  className="ib-sw"
-                  aria-checked={!look[item.key]}
-                  aria-labelledby={`ib-rows-${item.key}`}
-                  aria-describedby={item.desc ? `ib-rows-${item.key}-desc` : undefined}
-                  onClick={() => set({ [item.key]: !look[item.key] })}
-                />
-              </span>
-            </div>
-          ))}
-          {NOTES_LOOK.map((item) => (
-            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
-          ))}
-          <LookRow<MarksWhat>
-            id="marks"
-            label="Letter marks"
-            value={marks.what}
-            choices={[
-              { id: 'off', label: 'Off' },
-              { id: 'threads', label: 'Threads' },
-              { id: 'projects', label: 'Projects' },
-              { id: 'both', label: 'Both' },
-            ]}
-            onChange={(what) => set(marksWhatLook(what))}
-          />
-          {PICTURES.map((item) => (
-            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-  const note = (
-    <div className="ib-note ib-rws-note">
-      <Icon name="info" />
-      <span>
-        Full width keeps one line.{' '}
-        {onGeneral ? (
-          <>
-            Text size is in{' '}
-            <button type="button" className="ib-lnk" onClick={onGeneral}>
-              General
-            </button>
-            .
-          </>
+        {control.kind === 'switch' ? (
+          <button type="button" role="switch" className="ib-sw" aria-checked={control.get(look)} aria-labelledby={id} aria-describedby={descId} onClick={() => onChoice(control, !control.get(look))} />
         ) : (
-          'Text size is in General.'
+          <Seg name={id} labelledBy={id} describedBy={descId} value={control.get(look)} choices={control.choices} onChange={(next) => onChoice(control, next)} />
         )}
       </span>
     </div>
   );
+}
+
+export interface RowsSectionProps {
+  phone: boolean;
+  onGeneral?: () => void;
+  /** The person's list, newest first: "Your list" draws its top rows. None (or absent): the examples. */
+  rows?: readonly RowsPreviewRow[];
+  projectNames?: ReadonlyMap<string, string>;
+  /** Linked machines that are away (machines.ts): their rows are greyed, as in the list. */
+  awayMachines?: ReadonlySet<string>;
+}
+
+interface Step {
+  /** The look before the change. */
+  look: ListLook;
+  words: string[];
+}
+
+export function RowsSection({ phone, onGeneral, rows, projectNames, awayMachines }: RowsSectionProps) {
+  const [look, set] = useListLook();
+  const preset = rowsPreset(look);
+  const [examples] = useState(exampleRows);
+  const own = rows && rows.length > 0 ? rows : null;
+  const source = own ?? examples;
+  // This visit's changes, oldest first: Undo takes the last. Kept here, not saved: leaving the page forgets them.
+  const [steps, setSteps] = useState<readonly Step[]>([]);
+  const [last, setLast] = useState<{ words: string[]; undone: boolean } | null>(null);
+  const [more, setMore] = useState(false);
+  // The choices that moved in the last change (the tint), and a count so the same one twice tints twice.
+  const [flash, setFlash] = useState<{ ids: readonly RowsControlId[]; n: number }>({ ids: [], n: 0 });
+  /**
+   * A picture switch turned on while no project badges showed turned them on (listLook.ts `lookWithChange`). Until
+   * the person picks the badges themselves (Letter badges, Badge shape, a look to start from, Undo), turning the
+   * pictures off again puts project badges back off, so on then off is no change. Only this page's clicks: a saved
+   * look reads as it always did.
+   */
+  const broughtProjects = useRef(false);
+  const frame = useRef<HTMLDivElement>(null);
+
+  // A phone's two rows: the newest that show the last change, else the newest.
+  const lead = flash.ids[0];
+  const shown = useMemo(() => {
+    if (!phone) return source.slice(0, PREVIEW_ROWS);
+    const telling = lead ? source.filter(({ row }) => rowShows(lead, row)) : [];
+    return [...telling, ...source.filter((entry) => !telling.includes(entry))].slice(0, PHONE_ROWS);
+  }, [phone, source, lead]);
+
+  /** One change by the person: shown and saved (one save), remembered for Undo, said beside the list. */
+  const apply = (next: ListLook, undone?: Step) => {
+    const changed = rowsChangedControls(look, next);
+    const words = rowsChangeWords(look, next);
+    // The look is whole and settled (`lookWithChange`), so writing it over the one on screen writes exactly it.
+    set(next);
+    if (undone) setSteps((all) => all.slice(0, -1));
+    else setSteps((all) => [...all, { look, words }]);
+    setLast({ words: undone ? undone.words : words, undone: !!undone });
+    setFlash((was) => ({ ids: changed.map((control) => control.id), n: was.n + 1 }));
+  };
+  const same = (next: ListLook) => LIST_LOOK_KEYS.every((key) => next[key] === look[key]);
+  const choose = (control: RowsControl, value: string | boolean) => {
+    let next = lookWithChoice(look, control, value);
+    const picture = control.id === 'logo' || control.id === 'github';
+    if (picture && value === false && broughtProjects.current && !next.repoLogo && !next.githubPictures) next = lookWithChange(next, { marksProjects: false });
+    if (picture) broughtProjects.current = value === true ? broughtProjects.current || !look.marksProjects : broughtProjects.current && next.marksProjects;
+    else if (control.id === 'badges' || control.id === 'shape') broughtProjects.current = false;
+    if (!same(next)) apply(next);
+  };
+  const whole = (next: ListLook) => {
+    broughtProjects.current = false;
+    if (!same(next)) apply(next);
+  };
+  const undo = () => {
+    const step = steps.at(-1);
+    if (!step) return;
+    broughtProjects.current = false;
+    apply(step.look, step);
+  };
+
+  // The tint: the changed parts of the rows in "Your list", by the list's own classes. A fill that fades (inbox.css),
+  // never an outline; reduced motion draws none. Set on the frame, which React leaves alone, so a row that renders
+  // again keeps it.
+  useLayoutEffect(() => {
+    const el = frame.current;
+    if (!el || flash.ids.length === 0) return;
+    const found: Element[] = [];
+    for (const id of flash.ids) {
+      const parts = FLASH_PARTS[id]?.flatMap((selector) => [...el.querySelectorAll(selector)]) ?? [];
+      found.push(...(parts.length > 0 ? parts : el.querySelectorAll(FLASH_ROWS)));
+    }
+    // Two names for one animation: a second change while the first still fades starts it again.
+    const name = `ib-rws-flash-${flash.n % 2 ? 'a' : 'b'}`;
+    for (const part of found) (part as HTMLElement).dataset.rowsFlash = name;
+    const timer = setTimeout(() => {
+      for (const part of found) delete (part as HTMLElement).dataset.rowsFlash;
+    }, FLASH_MS);
+    return () => {
+      clearTimeout(timer);
+      for (const part of found) delete (part as HTMLElement).dataset.rowsFlash;
+    };
+  }, [flash]);
+
+  // Under the list's title, a phone's pinned list casts a soft shadow once the page has scrolled under it.
+  const pin = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const mark = sentinel.current;
+    const el = pin.current;
+    if (!phone || !mark || !el || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) el.toggleAttribute('data-stuck', !entry.isIntersecting);
+    });
+    observer.observe(mark);
+    return () => observer.disconnect();
+  }, [phone]);
+
+  const step = steps.at(-1);
+  const line = last ? `${last.undone ? 'Undid' : 'Changed'}: ${last.words.join(', ')}` : '';
+  const controlRow = (control: RowsControl) => <ControlRow key={control.id} control={control} look={look} onChoice={choose} />;
   return (
-    <div className="ib-rws" data-settings-rows="">
-      {/* Settings draws no lede of its own for Rows: this one has the presets beside it. */}
+    <div className="ib-rws" data-settings-rows="" data-rows-preset={preset ?? 'none'}>
+      {/* Settings draws no lede of its own for Rows: this one has Undo and Reset beside it. */}
       <div className="ib-rws-head">
-        <p className="ib-lede">Changes apply everywhere you use the Inbox.</p>
-        {presets}
+        <p className="ib-lede">How each thread looks in your list. Changes show at once, everywhere you use the Inbox.</p>
+        <span className="ib-rws-acts">
+          <button type="button" className="ib-btn ib-ghost" data-rows-undo="" disabled={!step} title={step ? `Undo: ${step.words.join(', ')}` : undefined} onClick={undo}>
+            <Icon name="reply" size={14} /> Undo
+          </button>
+          <button type="button" className="ib-btn" data-rows-reset="" disabled={isDefaultListLook(look)} onClick={() => whole(LIST_LOOK_DEFAULT)}>
+            Reset to default
+          </button>
+        </span>
       </div>
-      <div className="ib-rws-top">
-        <figure className="ib-rws-fig ib-rws-fig-narrow">
-          <figcaption>{phone ? 'On this phone' : 'With a thread open'}</figcaption>
-          <div className="ib-rws-frame ib-rws-narrow" inert data-rows-preview={phone ? 'phone' : 'narrow'}>
-            <PreviewList look={look} shape={phone ? 'phone' : 'narrow'} className={phone ? '' : 'ib-narrow'} />
+      <div className="ib-rws-grid">
+        <div ref={sentinel} className="ib-rws-sentinel" aria-hidden="true" />
+        <div ref={pin} className="ib-rws-pv" data-rows-pinned={phone ? '' : undefined}>
+          <div className="ib-rws-pvhead">
+            <h2 id="ib-rows-yours">Your list</h2>
+            {/* What the last change was, said to a screen reader as it happens; Undo beside it while there is one. */}
+            <span className="ib-rws-last" data-rows-last="">
+              <span role="status" aria-live="polite">
+                {line}
+              </span>
+              {last && !last.undone && step && (
+                <button type="button" className="ib-lnk" data-rows-undo-last="" onClick={undo}>
+                  <Icon name="reply" size={13} /> Undo
+                </button>
+              )}
+            </span>
           </div>
-        </figure>
-        {controls}
+          <div ref={frame} className="ib-rws-frame" inert data-rows-preview={phone ? 'phone' : 'narrow'} data-rows-source={own ? 'own' : 'examples'}>
+            {!own && !phone && <p className="ib-rws-empty">You have no threads yet. These examples show the look.</p>}
+            <LookList rows={shown} look={look} phone={phone} examples={!own} projectNames={projectNames} awayMachines={awayMachines} />
+          </div>
+          {!own && phone && <p className="ib-rws-empty">You have no threads yet. These examples show the look.</p>}
+        </div>
+        <div className="ib-rws-ctl">
+          <h2 id="ib-rows-preset">Start from</h2>
+          {/* Buttons, not radios: a radio group's arrow keys choose as they move, so one stray key would wipe a look of
+              the person's own. Tab reaches each, and only Enter, Space or a click applies one; the pressed one is the
+              look's, and a look that matches none has none pressed. */}
+          <div className="ib-rws-presets" role="group" aria-labelledby="ib-rows-preset">
+            {ROWS_PRESETS.map((choice) => (
+              <button key={choice.id} type="button" className="ib-rws-pre" aria-pressed={preset === choice.id} data-preset={choice.id} onClick={() => whole(choice.look)}>
+                <span className="ib-rws-pic" aria-hidden="true" inert>
+                  <span className="ib-rws-pic-in">
+                    <LookList rows={source.slice(0, PRESET_ROWS)} look={choice.look} phone={false} examples={!own} projectNames={projectNames} awayMachines={awayMachines} />
+                  </span>
+                </span>
+                <span className="ib-rws-pre-n">{choice.label}</span>
+              </button>
+            ))}
+          </div>
+          <h2 id="ib-rows-choices">Choices</h2>
+          <div className="ib-card" role="group" aria-labelledby="ib-rows-choices">
+            {ROWS_MAIN_CONTROLS.map(controlRow)}
+          </div>
+          <button type="button" className="ib-rws-fold" aria-expanded={more} aria-controls="ib-rows-more" data-rows-more="" onClick={() => setMore((open) => !open)}>
+            <Icon name="chevR" size={14} />
+            More choices <span className="ib-rws-fold-n">· {ROWS_MORE_CONTROLS.length}</span>
+          </button>
+          <div id="ib-rows-more" hidden={!more}>
+            <div className="ib-card" role="group" aria-label="More choices">
+              {ROWS_MORE_CONTROLS.map(controlRow)}
+            </div>
+          </div>
+          <div className="ib-note ib-rws-note">
+            <Icon name="info" />
+            <span>
+              Full width keeps one line.{' '}
+              {onGeneral ? (
+                <>
+                  Text size is in{' '}
+                  <button type="button" className="ib-lnk" onClick={onGeneral}>
+                    General
+                  </button>
+                  .
+                </>
+              ) : (
+                'Text size is in General.'
+              )}
+            </span>
+          </div>
+        </div>
       </div>
-      {!phone && (
-        <figure className="ib-rws-fig ib-rws-fig-wide">
-          <figcaption>Full width</figcaption>
-          <WidePreview look={look} />
-        </figure>
-      )}
-      {note}
     </div>
   );
 }
@@ -509,3 +465,4 @@ export function rowsSummary(look: ListLook): string {
   const preset = rowsPreset(look);
   return preset ? ROWS_PRESETS.find((p) => p.id === preset)!.label : 'Custom';
 }
+

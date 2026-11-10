@@ -28,7 +28,7 @@ import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
-import { RowsSection, rowsSummary } from './RowsSettings';
+import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -140,6 +140,8 @@ export interface SettingsPageProps {
   activity?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
+  /** Settings → Rows' "Your list": the person's newest rows, with the names and away machines the list draws them by. Absent: examples. */
+  rowsPreview?: Pick<RowsSectionProps, 'rows' | 'projectNames' | 'awayMachines'>;
   /** The section on screen (`#settings/<section>`); null is `#settings` alone: General, or the list of sections on a phone. */
   section?: SettingsSection | null;
   /** `#settings/devices/pair`: Pair a phone is open. */
@@ -962,7 +964,7 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
-  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
+  // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   accounts: '',
@@ -1196,7 +1198,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'rows':
-        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} />;
+        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} {...props.rowsPreview} />;
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;

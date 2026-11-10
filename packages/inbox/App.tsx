@@ -5329,6 +5329,13 @@ function Inbox() {
     listViewReveal.stage !== 'claimed' &&
     tabIconChoice.stage !== 'open' &&
     tabIconChoice.stage !== 'claimed';
+  // Settings → Rows' "Your list" (approval "inbox-rows-settings-page"): the person's newest rows, whatever their group.
+  const rowsPageOpen = route.page === 'settings' && route.section === 'rows';
+  const rowsPagePreview = useMemo(() => {
+    if (!rowsPageOpen || !shown) return undefined;
+    const rows = shown.flatMap((section) => (section.id === 'snoozed' ? [] : section.threads.map((row) => ({ row, drawn: section.id }))));
+    return { rows: rows.sort((a, b) => b.row.last_at.localeCompare(a.row.last_at)).slice(0, 6), projectNames, awayMachines: machines.away };
+  }, [rowsPageOpen, shown, projectNames, machines.away]);
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -6504,6 +6511,7 @@ function Inbox() {
           />
         }
         archivedTotal={archivedTotal}
+        rowsPreview={rowsPagePreview}
         aboutDot={pageUpdate ? true : pageCheckFailing ? 'check-failing' : false}
         updateRow={
           settings && pageOffersUpdates(settings) ? (
