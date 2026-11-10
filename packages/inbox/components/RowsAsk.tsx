@@ -34,7 +34,8 @@ function firstLine(body: string): string {
   return line.length > 220 ? `${line.slice(0, 217)}…` : line;
 }
 
-export function RowsAsk() {
+/** `replyPollMs`: tests only, how often the sent thread is read. */
+export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number } = {}) {
   const { model, load } = useComposeSessions(true);
   const [text, setText] = useState('');
   const [chosen, setChosen] = useState<string | null>(null);
@@ -72,12 +73,12 @@ export function RowsAsk() {
     const timer = setInterval(() => {
       if (Date.now() - started > REPLY_WAIT_MS) clearInterval(timer);
       else void read();
-    }, REPLY_POLL_MS);
+    }, replyPollMs);
     return () => {
       gone = true;
       clearInterval(timer);
     };
-  }, [thread]);
+  }, [thread, replyPollMs]);
 
   const change = (next: string) => {
     setText(next);
