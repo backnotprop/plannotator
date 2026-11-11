@@ -105,7 +105,7 @@ test('every write held unanswered: typing, a pick, Send and Mark read still draw
   page.on('request', (r) => api(r) && !/\/sessions(\?|$)/.test(new URL(r.url()).pathname) && requests.push(r));
 
   // 60 keys in "Other…": every key drawn, at most two requests, no list or drafts read.
-  const other = card(page, T[0]!, 0).locator('input[aria-label^="Other answer"]');
+  const other = card(page, T[0]!, 0).locator('textarea[aria-label^="Other answer"]');
   await other.click();
   const words = 'Cards, but keep the totals pinned at the bottom of the list.';
   expect(words).toHaveLength(60);
