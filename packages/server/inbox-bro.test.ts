@@ -76,6 +76,8 @@ async function world(options: WorldOptions = {}) {
       favicon: "glass",
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+      // "Set the rules" (after Bro mode in the line): settled by rules already set.
+      prompts: { inbox: { rules: "Keep messages short." } },
       ...options.config,
     }),
   );

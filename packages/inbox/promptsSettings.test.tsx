@@ -61,13 +61,17 @@ function server(start: InboxPromptsSettings) {
     const inbox = body.prompts.inbox;
     const clean = (value: string | null) => (value === null || value.trim() === '' ? null : value);
     if ('reminder' in inbox) state.reminder.shared = clean(inbox.reminder);
-    for (const [agent, entry] of Object.entries(inbox.runtimes ?? {})) state.reminder.runtimes[agent as InboxPromptHost] = clean((entry as { reminder: string | null }).reminder);
+    if ('rules' in inbox && state.rules) state.rules.shared = clean(inbox.rules);
+    for (const [agent, entry] of Object.entries(inbox.runtimes ?? {}) as [InboxPromptHost, { reminder?: string | null; rules?: string | null }][]) {
+      if ('reminder' in entry) state.reminder.runtimes[agent] = clean(entry.reminder ?? null);
+      if ('rules' in entry && state.rules) state.rules.runtimes[agent] = clean(entry.rules ?? null);
+    }
     return new Response(JSON.stringify({ prompts: structuredClone(state) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   return sent;
 }
 
-function mount(start: InboxPromptsSettings) {
+function mount(start: InboxPromptsSettings, open = true) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -88,6 +92,9 @@ function mount(start: InboxPromptsSettings) {
     root = createRoot(host!);
     render();
   });
+  // The reminder is folded into one row ("Reminder text"): these cases read it open.
+  const fold = q<HTMLButtonElement>(host!, '[data-prompts-reminder-fold]');
+  if (open && fold?.getAttribute('aria-expanded') === 'false') act(() => fold.click());
   return host;
 }
 
@@ -278,6 +285,7 @@ test.skipIf(!hasDom)("OpenCode 1: its row shows the default it really gets (the 
     root = createRoot(host!);
     root.render(<PromptsSection prompts={shared} />);
   });
+  act(() => q<HTMLButtonElement>(host!, '[data-prompts-reminder-fold]')!.click());
   expect(q(host!, '[data-prompt-status="opencode"]')?.textContent).toBe('Uses the shared text · Reminder off in Agents');
   expect(q(host!, '[data-prompt-text="opencode"]')).toBeNull();
 });
@@ -303,4 +311,48 @@ test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
   expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset], [data-prompt-use-shared]')).toHaveLength(0);
   expect(el.textContent).toContain('Change it on this computer.');
   expect(q(el, '[data-prompt-text="pi"]')?.textContent).toBe('Pi.');
+});
+
+/** The model with "Rules for your agents" (an Inbox that has them). */
+function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = {}): InboxPromptsSettings {
+  return {
+    ...model(),
+    rules: {
+      shared: null,
+      runtimes: { 'claude-code': null, pi: null, opencode: null },
+      room: { shared: 8000, runtimes: { 'claude-code': 8000, pi: 8000, opencode: 8000 } },
+      dropped: [],
+      ...rules,
+    },
+  };
+}
+
+test.skipIf(!hasDom)('Rules for your agents: on top, the reminder folded under it; a tap adds an example, Save writes the rules for all agents, Back to default deletes them', async () => {
+  const sent = server(withRules());
+  const el = mount(withRules(), false);
+  expect(q(el, '[data-rules-section] + section [data-prompts-reminder-fold]')).not.toBeNull();
+  expect(q(el, '[data-prompts-reminder]')).toBeNull();
+  await click(q(el, '[data-rules-add]'));
+  await click(q(document.body, '[data-rules-example]'));
+  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('Only message me when you are blocked or done.');
+  await click(q(document.body, '[data-rules-save]'));
+  expect(sent.at(-1)).toEqual({ inbox: { rules: 'Only message me when you are blocked or done.' } });
+  expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Only message me when you are blocked or done.');
+  await click(q(el, '[data-rules-edit="shared"]'));
+  await click(q(document.body, '[data-rules-reset]'));
+  expect(sent.at(-1)).toEqual({ inbox: { rules: null } });
+  expect(q(el, '[data-rules-add]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save writes only its key", async () => {
+  const sent = server(withRules({ shared: 'Keep messages short.' }));
+  const el = mount(withRules({ shared: 'Keep messages short.' }), false);
+  await click(q(el, '[data-rules-edit="shared"]'));
+  await click(q(document.body, '[data-rules-for="pi"]'));
+  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('');
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'Never send from reviewer sessions.');
+  await click(q(document.body, '[data-rules-save]'));
+  expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { rules: 'Never send from reviewer sessions.' } } } });
+  expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
+  expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
 });

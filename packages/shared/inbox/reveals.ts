@@ -46,7 +46,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -147,6 +147,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // After the Checklist in order since 2026-11-10 (it was after Snooze). Opt-in, as the Board: the claim only stamps
   // it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
   { id: "bro", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, heavyUse: true, enabled: true },
+  // 11. "Set the rules" (Rules for your agents, #2194; the owner approved the place and the dialog, 2026-11-11): last of
+  // the later group, so no earlier dialog moves; two days' use and ten threads, so the person has seen agents write first; offered while no rules are set (the server's
+  // `lineOffers`). Its moment: back from a thread read 5 s or more. "Add your rules" opens Settings → Prompts' editor.
+  { id: "agent_rules", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 10, enabled: true },
   // The grill-me tip (the owner, 2026-11-08: "if we have any gap in like consistent use, we should say, hey, have you
   // tried /grill-me yet?"; its cadence, the owner: "Sooner: after 3 answered questions, whatever the days, once"). No
   // tenure, but it never costs another card its day (`lastResort`): it waits until the line has nothing else for the

@@ -744,15 +744,69 @@ export function inboxReminderCustomText(config: unknown, host: string): string |
   return usable(record(record(inbox.runtimes)?.[host])?.reminder) ?? usable(inbox.reminder)
 }
 
+/** Every whole word `plannotator_inbox` in a person's text renamed to the tool as the host registered it. */
+function withToolName(text: string, toolName: string): string {
+  return text.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+}
+
+/**
+ * The line before the person's own rules (Settings → Prompts, "Rules for your
+ * agents"), right after the reminder. It says the rules are the person's and
+ * win over the reminder, its "be proactive" included, so a rule such as "only
+ * message me when you are blocked or done" holds. Fixed text.
+ */
+export const INBOX_RULES_LEAD =
+  "The person's own rules for how you use the Plannotator Inbox. They come from the person, so where they differ from the lines above (being proactive included), follow these:"
+
+/** Room the rules leave for renaming the tool in them and for rounding: a rule that fits the page's count fits here. */
+export const INBOX_RULES_MARGIN = 100
+
+/**
+ * The person's own rules for a host, from config.json
+ * (`prompts.inbox.runtimes.<host>.rules`, which wins, then the shared
+ * `prompts.inbox.rules`), or null when neither holds text besides whitespace.
+ * They are ADDED after the reminder (`inboxReminderWithRules`), never in its place.
+ */
+export function inboxReminderRulesText(config: unknown, host: string): string | null {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  const usable = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+  const inbox = record(record(record(config)?.prompts)?.inbox)
+  if (!inbox) return null
+  return usable(record(record(inbox.runtimes)?.[host])?.rules) ?? usable(inbox.rules)
+}
+
+/**
+ * How many characters of rules fit after this reminder: Claude Code puts at
+ * most INBOX_REMINDER_MAX_CHARS of it in context (with room for a compaction's
+ * thread list), the reminder and the lead line included.
+ */
+export function inboxRulesRoom(reminder: string): number {
+  return Math.max(0, INBOX_REMINDER_MAX_CHARS - reminder.length - INBOX_RULES_LEAD.length - 3 - INBOX_RULES_MARGIN)
+}
+
+/**
+ * The reminder with the person's rules after it: the reminder, a blank line,
+ * INBOX_RULES_LEAD, then the rules as written. No rules: the reminder byte for
+ * byte. Rules that would take the whole past INBOX_REMINDER_MAX_CHARS are not
+ * cut: they are left out, and Settings → Prompts says so.
+ */
+export function inboxReminderWithRules(reminder: string, rules: string | null | undefined, toolName: string = INBOX_TOOL_NAME): string {
+  if (typeof rules !== 'string' || rules.trim() === '') return reminder
+  const text = `${reminder}\n\n${INBOX_RULES_LEAD}\n${withToolName(rules.trim(), toolName)}`
+  return text.length <= INBOX_REMINDER_MAX_CHARS ? text : reminder
+}
+
 /**
  * The reminder a host sends: the person's own text when there is one (it
  * REPLACES the line, for hosts with the wake and without it alike, every
  * whole word `plannotator_inbox` in it renamed to the tool as the host
- * registered it), else exactly `inboxReminderText(toolName, options)`.
+ * registered it), else exactly `inboxReminderText(toolName, options)`; then
+ * the person's rules (`options.rules`), when there are any, after it.
  */
-export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
-  if (typeof custom !== 'string' || custom.trim() === '') return inboxReminderText(toolName, options)
-  return custom.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean; rules?: string | null } = {}): string {
+  const reminder = typeof custom !== 'string' || custom.trim() === '' ? inboxReminderText(toolName, options) : withToolName(custom, toolName)
+  return inboxReminderWithRules(reminder, options.rules, toolName)
 }
 
 /**

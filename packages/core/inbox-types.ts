@@ -3467,13 +3467,29 @@ export interface InboxPromptsSettings {
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
+  /**
+   * The person's own rules for how agents use the Inbox ("Rules for your agents"), ADDED after the reminder.
+   * Absent from an older Inbox.
+   */
+  rules?: {
+    /** `prompts.inbox.rules`: rules for every agent, or null. */
+    shared: string | null;
+    /** `prompts.inbox.runtimes.<agent>.rules`: an agent's own rules (they win over the shared ones), or null. */
+    runtimes: Record<InboxPromptHost, string | null>;
+    /** The most characters each slot's rules may hold, so every agent they reach stays within the reminder's cap. */
+    room: { shared: number; runtimes: Record<InboxPromptHost, number> };
+    /** Agents whose rules are not sent now: with their reminder they are over the cap (shown, never cut). */
+    dropped: InboxPromptHost[];
+  };
 }
 
-/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text (the reminder or the rules), null (or blank) deletes the key. */
 export interface InboxPromptsChange {
   inbox: {
     reminder?: string | null;
-    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+    /** The rules for every agent ("Rules for your agents"). */
+    rules?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null; rules?: string | null }>>;
   };
 }
 
