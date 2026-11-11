@@ -1,18 +1,3 @@
-/**
- * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button", with the owner's
- * "highlights when open"; `.product/approved/pr-list-filters/`).
- *
- * - The head holds "Reviews" and the filter mark alone; narrowed, the mark is in full ink with a dot. No project name
- *   and no "N on you" in the head (the list's "On you N" band already says it), so nothing there grows.
- * - The menu, drawn like Linear's: the views (All, Mine, To review, Others), then the projects (only when more than
- *   one has PRs here), each with its icon, its count and a tick; the picked rows are tinted as the sidebar's
- *   selected row is. "Clear filters" while narrowed. A phone draws it as a modal bottom sheet titled "Filter".
- * - What is picked is named once, in one quiet line over the list (`PullScopeLine`): the view, then the project cut
- *   short with an ellipsis, and × to clear both.
- *
- * Base UI carries the keys (arrows, Home/End, type-ahead, Escape and Tab close, focus back to the trigger). No
- * shortcut of its own. The mark's tooltip (its name) opens on keyboard focus too.
- */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { formatCount } from '@plannotator/core/inbox-format';
@@ -21,7 +6,6 @@ import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
 import { PULL_FILTERS, pullFilterWords, type PullFilter } from './model';
 
-/** Marks the Inbox's icon set has no match for, drawn as its icons are (24-unit view, stroked). */
 const GLYPHS = {
   // Lucide list-filter (ISC): Linear's filter mark.
   filter: 'M3 6h18M7 12h10M10 18h4',
@@ -47,36 +31,27 @@ function Glyph({ name }: { name: GlyphName }) {
   return <Icon name={name as IconName} />;
 }
 
-/** Each view's mark: every PR, the person's pen, their eye on others' work, other people. */
 const VIEW_GLYPH: Record<PullFilter, GlyphName> = { all: 'pullRequest', mine: 'pen', review: 'eye', others: 'users' };
 
 export interface PullFilterProps {
-  /** How many rows a view shows in a project (null: every project): the menu's counts. */
   count: (project: string | null, filter: PullFilter) => number;
   filter: PullFilter;
-  /** The chosen project; one the list no longer offers is dropped by the page before it gets here. */
   project: string | null;
-  /** The projects offered: those with a GitHub or GitLab remote here. The project rows show when there are two or more. */
   projects: readonly ProjectFolder[];
   names: ReadonlyMap<string, string>;
   phone: boolean;
-  /** The trigger, so the quiet line's × can put focus back on it. */
   triggerRef: RefObject<HTMLButtonElement | null>;
-  /** A new view and project, in one step (Clear filters sets both). */
   onChange: (next: { filter: PullFilter; project: string | null }) => void;
 }
 
-/** What the picks say: the view's words and the project's name, or nothing at rest. */
 export function pullScopeWords(filter: PullFilter, projectName: string | null): string {
   return [filter === 'all' ? null : pullFilterWords(filter), projectName].filter(Boolean).join(', ');
 }
 
 export function PullFilterControl({ count, filter, project, projects, names, phone, triggerRef, onChange }: PullFilterProps) {
   const [open, setOpen] = useState(false);
-  // The menu is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(triggerRef.current?.closest<HTMLElement>('.pn-inbox') ?? null), [triggerRef]);
-  // The trigger has keyboard focus (not a click's): its tooltip opens as a hover would open it.
   const [keyed, setKeyed] = useState(false);
 
   const projectName = project ? (names.get(project) ?? projects.find((p) => p.id === project)?.name ?? null) : null;
@@ -167,10 +142,6 @@ export function PullFilterControl({ count, filter, project, projects, names, pho
   );
 }
 
-/**
- * What is picked, named once, in one quiet line over the list: the view, then the project cut short with an
- * ellipsis, so a long name never pushes anything; × clears both (and focus goes back to the filter). Absent at rest.
- */
 export function PullScopeLine({ filter, projectName, triggerRef, onClear }: { filter: PullFilter; projectName: string | null; triggerRef: RefObject<HTMLButtonElement | null>; onClear: () => void }) {
   const view = filter === 'all' ? null : filter;
   if (!view && !projectName) return null;
@@ -206,7 +177,6 @@ export function PullScopeLine({ filter, projectName, triggerRef, onClear }: { fi
   );
 }
 
-/** A ref for the filter's trigger, shared by the head and the quiet line. */
 export function useFilterTrigger() {
   return useRef<HTMLButtonElement | null>(null);
 }

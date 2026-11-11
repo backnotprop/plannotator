@@ -7,14 +7,8 @@ import { Modal } from '../components/Updates';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
 const LOADING = [{ value: '', label: 'Loading models…' }];
-/** What the guided review's picker calls an agent's own default model. */
 const AGENT_DEFAULT = { value: '', label: 'Default' };
 
-/**
- * "No slop zone rules": the person's words for what a high-risk pull request is, and the
- * agent that ranks the open ones against them. Saved to the Inbox's config, never to a
- * repository. Empty rules turn the judging off.
- */
 export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPullRiskAnswer; onSaved: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
   const titleId = useId();
   const rulesId = useId();
@@ -26,7 +20,6 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
-  // The words come first: the box takes the focus, not Save.
   useEffect(() => field.current?.focus(), []);
   useEffect(() => {
     if (!provider) return;
@@ -37,7 +30,6 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       .then((next) => {
         if (controller.signal.aborted) return;
         setList(next);
-        // A saved pick stays while the list can't say otherwise.
         setModel((was) => (was && (next.models.length === 0 || next.models.some((m) => m.id === was)) ? was : next.default_model));
       })
       .catch(() => {
@@ -55,9 +47,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       setSaving(false);
     }
   };
-  // No model yet: wait for the list and the pick it starts on.
   const readingModel = !!provider && !list && !model;
-  // No pick to start on means the agent's own default is a choice, as in the guided review (Pi, OpenCode).
   const modelOptions = !list ? LOADING : [...(list.default_model ? [] : [AGENT_DEFAULT]), ...modelSelectOptions(list.models, model ?? undefined)];
   return (
     <Modal labelledBy={titleId} onClose={onClose} testId="pull-risk-rules" className="ib-riskd" ownKeys>

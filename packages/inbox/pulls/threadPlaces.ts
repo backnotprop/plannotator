@@ -1,40 +1,25 @@
-/**
- * Where other people's threads go on the PR page's diff (approval inbox-pr-page, q-530b62e0 and q-7d0a1587): each on
- * the line it is about when this diff shows that line; one whose line this diff does not show (a push moved past it,
- * or the whole stack's diff starts lower) at the top of its file, saying why. A thread on the whole file is not on a
- * line at all: it is a band under the file's header, above its first lines (the owner's pick B, 2026-11-09): folded,
- * in the header, so it stays with it; open, above the first hunk, so it scrolls away with the code. A thread on a file
- * this diff does not change is in the Details panel only. Nothing here is cut at a count: every thread is placed,
- * and every open one is counted on its file's row.
- */
 import type { InboxPullThread } from '@plannotator/core/inbox-types';
 
-/** Why a thread sits where it does: on its line, or at the top of its file because its line is not drawn. */
 export type ThreadWhere = 'line' | 'outdated' | 'elsewhere';
 
 export interface PlacedThread {
   thread: InboxPullThread;
-  /** The line it is drawn under, on `side`. */
   line: number;
   side: 'old' | 'new';
   where: ThreadWhere;
 }
 
-/** A thread on a whole file, and the side its file's top is on (a deleted file has only its old side). */
 export interface FileThreadPlace {
   thread: InboxPullThread;
   side: 'old' | 'new';
-  /** False for a file the diff draws no line of (a binary file): there is no code to open the thread above. */
   lines: boolean;
 }
 
-/** The lines one file's patch draws on each side, and the first it draws (where a thread with no line here goes). */
 export function patchLines(patch: string): { old: Set<number>; new: Set<number>; first: { line: number; side: 'old' | 'new' } | null } {
   const out = { old: new Set<number>(), new: new Set<number>(), first: null as { line: number; side: 'old' | 'new' } | null };
   let oldAt = 0;
   let newAt = 0;
   let inHunk = false;
-  // Removed lines come in order: the first one read is the lowest.
   let firstOld: number | null = null;
   for (const row of patch.split('\n')) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(row);
@@ -63,23 +48,15 @@ export function patchLines(patch: string): { old: Set<number>; new: Set<number>;
       oldAt++;
     }
   }
-  // A deleted file draws only removed lines.
   if (!out.first && firstOld !== null) out.first = { line: firstOld, side: 'old' };
   return out;
 }
 
-/**
- * Every thread placed on this diff, in the forge's order; the threads on whole files, in the time they started; and each
- * file's open (unresolved) threads. `scope` is the
- * diff on screen: a whole stack's diff runs from the stack's base, so a thread on a removed line (this PR's base) has
- * no line there.
- */
 export function placeThreads(
   threads: readonly InboxPullThread[],
   files: readonly { path: string; patch: string }[],
   scope: 'layer' | 'stack',
 ): { placed: PlacedThread[]; onFiles: FileThreadPlace[]; open: Map<string, number> } {
-  // A path changed twice is drawn once, as its last part (reviewFiles).
   const byPath = new Map(files.map((file) => [file.path, file.patch]));
   const lines = new Map<string, ReturnType<typeof patchLines>>();
   const placed: PlacedThread[] = [];
@@ -90,13 +67,9 @@ export function placeThreads(
     if (patch === undefined || thread.comments.length === 0) continue;
     let drawn = lines.get(thread.file);
     if (!drawn) lines.set(thread.file, (drawn = patchLines(patch)));
-    // Counted only when drawn: a file with no line to carry it (a binary file, a bare rename) shows no count, and the
-    // thread is in the Details panel.
     const count = () => {
       if (!thread.resolved) open.set(thread.file, (open.get(thread.file) ?? 0) + 1);
     };
-    // On the whole file (no line, and not a line a push moved past): its band under the file's header, which every file
-    // in the diff draws, lines or none.
     if (thread.line === null && !thread.outdated) {
       onFiles.push({ thread, side: drawn.first?.side ?? 'new', lines: drawn.first !== null });
       count();
@@ -114,7 +87,6 @@ export function placeThreads(
     placed.push({ thread, line: drawn.first.line, side: drawn.first.side, where });
     count();
   }
-  // Several on one file stack in the time they started (the first comment's), the earliest on top.
   const started = ({ thread }: FileThreadPlace) => {
     const at = Date.parse(thread.comments[0]?.at ?? '');
     return Number.isNaN(at) ? Number.POSITIVE_INFINITY : at;
@@ -123,38 +95,29 @@ export function placeThreads(
   return { placed, onFiles, open };
 }
 
-/**
- * Why a thread starts as one line, or null when it starts open. Resolved, or only bots speaking: one line that says
- * so. A push never folds a thread (an outdated one is open), and no count of threads folds them.
- */
 export function foldedWhy(thread: InboxPullThread): 'resolved' | 'bot' | null {
   if (thread.resolved) return 'resolved';
   if (thread.comments.every((comment) => comment.bot)) return 'bot';
   return null;
 }
 
-/** A thread longer than this shows its first and last comments, and how many between. */
 export const THREAD_SHOWN_MAX = 3;
 
-/** The comments an open thread shows, and how many it leaves between its first and its last. */
 export function shownComments<T>(comments: readonly T[], whole: boolean): { shown: T[]; between: number } {
   if (whole || comments.length <= THREAD_SHOWN_MAX) return { shown: [...comments], between: 0 };
   return { shown: [comments[0]!, comments[comments.length - 1]!], between: comments.length - 2 };
 }
 
-/** A short text's hash, for a thread's drawing key: its words change, it is drawn again. */
 export function wordsHash(text: string): string {
   let hash = 5381;
   for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
   return (hash >>> 0).toString(36);
 }
 
-/** What a placed thread draws, as a key: the same key, the line is left as it is. */
 export function threadKey(placed: PlacedThread): string {
   return keyOf(placed.where, placed.thread);
 }
 
-/** What a thread on a whole file draws, as a key: the same key, the file's header is left as it is. */
 export function fileThreadKey(thread: InboxPullThread): string {
   return keyOf('file', thread);
 }

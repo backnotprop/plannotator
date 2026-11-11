@@ -5,7 +5,6 @@ import { riskFilterWords, type RiskFilterValue } from './risk';
 
 const OPTIONS: RiskFilterValue[] = ['all', 'high', 'medium'];
 
-/** All | High | Medium and up, in the Board's filter chip, and the way to the rules: all it holds until rules exist. No shortcut of its own. */
 export function RiskFilter({ value, rulesSet, phone, onChange, onRules }: { value: RiskFilterValue; rulesSet: boolean; phone: boolean; onChange: (value: RiskFilterValue) => void; onRules: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);

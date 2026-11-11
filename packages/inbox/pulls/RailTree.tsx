@@ -1,9 +1,3 @@
-/**
- * The PR page's file rail: one column of names. A folder holding one thing merges into it
- * (charges/client.ts), indent is small, each row is the review app's ([viewed][letter] name) with its +/- as one pair at
- * its end. A name is whole on one line: what does not fit gives way in the
- * middle of the folder first, then of the name, and the tip has the path. The code review app's own tree is not touched.
- */
 import { useMemo, useState, type ReactNode } from 'react';
 import type { DiffFile } from '@plannotator/core/diff-files';
 import type { DiffFileTreeNode } from '@plannotator/ui/utils/diffFileTree';
@@ -17,7 +11,6 @@ type Row =
   | { kind: 'file'; file: DiffFile; dir: string; name: string; depth: number }
   | { kind: 'dir'; path: string; name: string; depth: number; rows: Row[]; additions: number; deletions: number };
 
-/** A folder with one thing in it is that thing, its name carrying the folder's. */
 function compact(nodes: DiffFileTreeNode<DiffFile>[], depth: number): Row[] {
   return nodes.map((node): Row => {
     if (node.type === 'file') return { kind: 'file', file: node.file!, dir: '', name: node.name, depth };
@@ -37,23 +30,12 @@ function reindent(rows: Row[], by: number): Row[] {
 
 const pad = (depth: number) => 6 + depth * 10;
 
-/**
- * Where a name gives way when the row is short: a path keeps its last folder and the slash before it, so a cut reads
- * `crates/c…/src/` (`crates/core-api` + `/src/`); a file name
- * its end, as the Inbox's `FileName` cuts one (`render-worker-reads-own-source` + `.test.ts`), so the end, which tells
- * rows apart, stays. A short name has no tail: it is whole or, past all room, cut at its end.
- */
 export function middleCut(text: string): [head: string, tail: string] {
   const path = /^(.+?)(\/[^/]+\/?)$/.exec(text);
   if (path) return [path[1]!, path[2]!];
   return splitFileName(text);
 }
 
-/**
- * A name on one line that gives way in its middle: the head ends in "…", the tail stays. A tail too long for the row
- * on its own (a last folder like `render-worker-reads-own-source` beside a rail's numbers) gives way in its own middle
- * after the head is spent, so its end still shows and nothing is cut at its end.
- */
 function Cut({ text, className }: { text: string; className: string }) {
   const [head, tail] = middleCut(text);
   const [lead, end] = tail ? splitFileName(tail) : ['', ''];
@@ -82,12 +64,9 @@ export function RailTree({ tree, loose, files, viewed, commentCount, threadCount
   files: readonly DiffFile[];
   viewed: ReadonlySet<string>;
   commentCount: (path: string) => number;
-  /** Other people's open threads on the file (the forge's). Absent: none shown, as before. */
   threadCount?: (path: string) => number;
   onSelect: (path: string) => void;
-  /** Without it the rows have no Viewed circle (a review where nothing takes the ticks). */
   onToggleViewed?: (path: string) => void;
-  /** In place of the head's file count: the page's Changes | All files switch. */
   head?: ReactNode;
 }) {
   const rows = useMemo(() => compact(tree, 0), [tree]);
@@ -108,7 +87,6 @@ export function RailTree({ tree, loose, files, viewed, commentCount, threadCount
       <li key={key}>
         <Tip content={file.path}>
           <button type="button" className="ib-prp-file" data-seen={seen ? '' : undefined} style={{ paddingLeft: pad(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}${t ? `, ${t} open ${t === 1 ? 'thread' : 'threads'}` : ''}`} onClick={() => onSelect(file.path)} data-review-file={file.path}>
-            {/* The review app's row: [viewed][letter] name [comments], its numbers at the row's end. */}
             {onToggleViewed && <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />}
             <span className="review-change-letter"><ChangeTypeLetter status={file.status} oldPath={file.oldPath} /></span>
             <span className="ib-prp-fname" data-has-dir={dir ? '' : undefined}>

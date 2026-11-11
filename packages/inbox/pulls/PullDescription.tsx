@@ -1,12 +1,4 @@
-/**
- * A PR's own description at the head of its diff, in the Inbox's read-only Markdown. A long one starts folded and opens
- * into a box of its own height, so the diff is never far. No description draws nothing.
- *
- * A body is someone else's words. Its images do not load: the window's CSP is `img-src 'self' data: blob:`, so a remote
- * picture is its alt text in ui's quiet chip (a diagram can still name one: the CSP stops it, so nothing leaves, and it
- * is a broken picture and a CSP report). A path opens on the forge, never as an address of this window, and only the
- * web's links stay links. Folded, only its start is parsed, so a hostile one costs its reader nothing until they open it.
- */
+/** A PR body is someone else's words. Remote images do not load (CSP `img-src 'self' data: blob:`): a picture is its alt text in a chip. Folded, only its start is parsed. */
 
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -17,10 +9,8 @@ import { forgeBody, forgeFileUrl, isLiveLink } from './descriptionLinks';
 
 const resolveImage: ImageResolver = (src) => (src.startsWith('data:image/') ? { kind: 'src', src } : { kind: 'unavailable', title: 'Images in a description open on the forge' });
 
-/** How much of a body is parsed while folded: far past what the fold shows. */
 const FOLDED_CHARS = 4000;
 
-/** The start of a long body. A `<details>` the cut leaves open is closed, or its lines would draw outside its box. */
 function foldedStart(markdown: string): string {
   const line = markdown.lastIndexOf('\n', FOLDED_CHARS);
   const start = markdown.slice(0, line > FOLDED_CHARS / 2 ? line : FOLDED_CHARS);
@@ -32,11 +22,6 @@ function foldedStart(markdown: string): string {
   return `${start}${fence}\n${'</details>'.repeat(unclosed)}`;
 }
 
-/**
- * A link's click: what is not the web's stays in the page, an anchor or an empty address never moves the window (its
- * route is its hash), and the web's links never replace it. ui takes `//host/a.md` or `HTTPS://host/a.md` for a local
- * document by its extension and draws it with no target, so such a link opens its new tab here, as any other does.
- */
 function keepInPage(event: MouseEvent) {
   const link = (event.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
   if (!link) return;
@@ -51,7 +36,6 @@ function keepInPage(event: MouseEvent) {
   }
 }
 
-/** Words a stranger wrote on the forge, in the page: a picture is its words, a link never replaces the window. */
 export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; layer: InboxPull; headSha?: string | null }) {
   const resolveLink = useMemo<LocalLinkResolver>(() => {
     const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
@@ -72,10 +56,8 @@ export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; 
 
 export function PullDescription({ markdown, layer, headSha }: { markdown: string | null | undefined; layer: InboxPull; headSha?: string | null }) {
   const body = useRef<HTMLDivElement>(null);
-  // Whether it is taller than its fold (--ib-desc-fold), measured while folded and on every change of width.
   const [tall, setTall] = useState(false);
   const [open, setOpen] = useState(false);
-  // They opened a <details> in it: it grew under their click, so it stays open rather than folding away.
   const summaryUsed = useRef(false);
   useLayoutEffect(() => {
     summaryUsed.current = false;
@@ -108,7 +90,6 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
         if ((event.target as Element).closest?.('summary')) summaryUsed.current = true;
       }}
     >
-      {/* Folded, what is clipped takes no Tab stops; a click anywhere on it opens it. */}
       <div ref={body} className="ib-prr-desc-body" inert={folded}>
         <ForgeMarkdown markdown={shown} layer={layer} headSha={headSha} />
       </div>
@@ -119,7 +100,6 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
           aria-expanded={open}
           onClick={(event) => {
             event.stopPropagation();
-            // Show less is their word: a <details> they opened no longer holds it open.
             if (open) summaryUsed.current = false;
             setOpen(!open);
           }}

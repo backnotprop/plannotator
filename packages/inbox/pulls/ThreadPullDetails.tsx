@@ -1,9 +1,3 @@
-/**
- * The PR page's Details (description, comments, reviewers, checks, labels) in a thread's full-window review, when the
- * thread was handed exactly one PR (approval "inbox-review-details-panel"). The same panel and the same reads as the PR
- * page: the Inbox's PR list names the PR, then `GET /api/inbox/pulls/details`. A local review, or a thread handed
- * several PRs (a stack posts from each layer's own page), has none.
- */
 import { useEffect, useRef, useState } from 'react';
 import type { InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
@@ -14,10 +8,6 @@ import { forgeName } from './labels';
 
 export type ThreadPullDetails = ReturnType<typeof useThreadPullDetails>;
 
-/**
- * `known`: the pane's own read of the same PR (the post's), `undefined` when it reads none; it is not read twice.
- * `onOpen`: what else covers the code closes as the details open.
- */
 export function useThreadPullDetails(thread: InboxThread, known: InboxPull | null | undefined, onOpen?: () => void) {
   const key = thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const ownRead = known === undefined;
@@ -30,7 +20,6 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
       (answer) => {
         if (!controller.signal.aborted) setListed(answer.pulls.find((pull) => pull.key === key) ?? null);
       },
-      // The list could not be read: no details, as before.
       () => {},
     );
     return () => controller.abort();
@@ -53,9 +42,7 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
     setOpen(false);
     opener.current?.focus({ preventScroll: true });
   };
-  // Escape closes the details before it closes the review: read on the document, after what is inside the page (a menu
-  // over the bar marks its own Escape) and ahead of App's ladder on the window, and marked used so the ladder stands
-  // down. The same Escape as the PR page's (`useSheetEscape`), not a new key.
+  // Escape closes the details before the review: read on the document after what is inside the page, ahead of App's ladder, and marked used so the ladder stands down.
   const closeRef = useRef(close);
   closeRef.current = close;
   const shown = open && !!pull;
@@ -74,8 +61,6 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
   useEffect(() => {
     if (open) panel.current?.focus({ preventScroll: true });
   }, [open]);
-  // Tabbing out of the details closes them, so focus never lands unseen on what they cover (a click beside them does
-  // not): the PR page's sheet keys.
   const tabbing = useRef(false);
   const keys = {
     onKeyDown: (event: React.KeyboardEvent) => {
@@ -94,7 +79,6 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
   return { pull, details, open: shown, toggle, close, shut: () => setOpen(false), panel, keys };
 }
 
-/** A phone's row under the bar: the PR's title, which opens the details full screen, as on the PR page. */
 export function ThreadPullTitleRow({ state }: { state: ThreadPullDetails }) {
   if (!state.pull) return null;
   return (
@@ -107,7 +91,6 @@ export function ThreadPullTitleRow({ state }: { state: ThreadPullDetails }) {
   );
 }
 
-/** The panel over the review; a comment's file:line opens that file in All files (`onFile`). */
 export function ThreadPullDetailsPanel({ state, phone, inDiff, onFile }: { state: ThreadPullDetails; phone: boolean; inDiff: (path: string) => boolean; onFile: (path: string) => void }) {
   const { pull, details } = state;
   if (!state.open || !pull) return null;

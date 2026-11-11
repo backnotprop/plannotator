@@ -1,15 +1,3 @@
-/**
- * Other people's threads (teammates', bots') on the lines they are about, in the PR page's diff (approval
- * inbox-pr-page, q-530b62e0 "threads open on the line" and q-7d0a1587). Flat on the diff's own surface with a hairline
- * above and below, so they never read as the person's own raised comment cards. Read-only: to reply or resolve, a
- * thread links to the forge. Never annotations: nothing here is counted with the person's comments, sent to an agent
- * or posted. No keyboard shortcuts.
- *
- * An open thread shows every comment, or its first and last with "N more" between when it is long; a long comment
- * shows its start and "Show all". A resolved thread, or one where only bots speak, is one line that says why and opens
- * in place. A comment the forge hides is one line too. A thread on a whole file is a band under the file's header
- * (`FileThread`), folded to one line until opened.
- */
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { InboxPull, InboxPullDetailComment, InboxPullThread } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
@@ -20,10 +8,6 @@ import { Face } from './Face';
 import { ForgeMarkdown } from './PullDescription';
 import { foldedWhy, shownComments, type PlacedThread } from './threadPlaces';
 
-/**
- * What the person opened or folded, per thread, for the page's life: the diff draws a line again when it scrolls back
- * or a read brings news, and a thread they opened stays open.
- */
 export class ThreadMemory {
   private kept = new Map<string, boolean>();
   private listeners = new Set<() => void>();
@@ -72,7 +56,6 @@ function Who({ comment }: { comment: InboxPullDetailComment }) {
   );
 }
 
-/** A comment's words; a long one stops after a few lines and says "Show all". */
 function Words({ comment, layer, memory, headSha }: { comment: InboxPullDetailComment; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
   const [all, setAll] = useRemembered(memory, `all:${comment.id}`, false);
   const box = useRef<HTMLDivElement>(null);
@@ -131,7 +114,6 @@ const WHERE_WORDS: Record<PlacedThread['where'], string | null> = {
   elsewhere: 'On a line this diff does not show',
 };
 
-/** A folded thread's one line: who started it, their first words, how many, and why it is folded. */
 function FoldedWords({ thread, layer }: { thread: InboxPullThread; layer: InboxPull }) {
   const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
   const first = thread.comments[0]!;
@@ -150,7 +132,6 @@ function FoldedWords({ thread, layer }: { thread: InboxPullThread; layer: InboxP
   );
 }
 
-/** An open thread's comments: all of them, or the first and last with "N more" between. */
 function ThreadComments({ thread, layer, memory, headSha }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
   const [whole, setWhole] = useRemembered(memory, `whole:${thread.id}`, false);
   const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
@@ -179,7 +160,6 @@ function ThreadComments({ thread, layer, memory, headSha }: { thread: InboxPullT
   );
 }
 
-/** One thread on its line: open, or one line that says why it is folded. */
 export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null }) {
   const { thread, where } = placed;
   const why = foldedWhy(thread);
@@ -219,16 +199,8 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
 export const FILE_BAND_HEIGHT = 32;
 export const FILE_BAND_HEIGHT_PHONE = 52;
 
-/** Whether a whole file's thread is open, as the person left it (folded until they open it). */
 export const fileThreadOpen = (memory: ThreadMemory, threadId: string): boolean => memory.get(`open:${threadId}`) ?? false;
 
-/**
- * A thread on a whole file: a band under the file's header, above its first lines (the owner's pick B, 2026-11-09).
- * It starts folded to one line ("On this file", who, the first words, when), even unresolved, which the owner chose
- * for this band only. Folded, the host draws it in the file's header, so it stays with the header while the file
- * scrolls; open, above the first hunk, so it scrolls away with the code. `open` is where the host drew it: a click
- * only records the choice (`ThreadMemory`), and the host moves the band.
- */
 export function FileThread({ thread, layer, memory, headSha, open, phone = false }: { thread: InboxPullThread; layer: InboxPull; memory: ThreadMemory; headSha?: string | null; open: boolean; phone?: boolean }) {
   const why = foldedWhy(thread);
   const setOpen = (value: boolean) => memory.set(`open:${thread.id}`, value);
