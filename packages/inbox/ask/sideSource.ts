@@ -1,24 +1,13 @@
-/**
- * Where a Side's words came from (the owner, 2026-11-08: "any context of the
- * comment, the document, the thing I'm annotating should be given to the
- * agent"). One bracketed line per quote, which the agent gets in front of the
- * question (AskChat sends it as useAIChat's `contextPreamble`); the box and the transcript show only the
- * clean quote. A message: its sender, id and time, and the heading the words
- * sit under. A file: its name and the path the agent sent, which version,
- * the line and the heading (markdown; an HTML page has no blocks). Either: a
- * comment the person already has on those words.
- */
+/** One bracketed line per quote, sent to the agent in front of the question; the box and transcript show only the clean quote. */
 import { inboxAgentName } from '@plannotator/core/inbox-types';
 import type { Annotation, Block } from '@plannotator/ui/types';
 
-/** A time as the person reads it in the thread: "Nov 8, 11:55 AM". */
 export function sideTime(at: string): string {
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return at;
   return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-/** The heading the block sits under (not the block itself), or null. */
 function headingBefore(blocks: readonly Block[], blockId: string): string | null {
   const at = blocks.findIndex((block) => block.id === blockId);
   for (let i = at - 1; i >= 0; i--) {
@@ -31,7 +20,6 @@ function headingBefore(blocks: readonly Block[], blockId: string): string | null
 const COMMENT_MAX = 300;
 const clip = (text: string) => (text.length > COMMENT_MAX ? `${text.slice(0, COMMENT_MAX)}…` : text);
 
-/** What the person already has on these words: a comment's words, or a mark to remove them. */
 function commentsOn(annotations: readonly Annotation[], selected: string): string[] {
   const words = selected.trim();
   if (!words) return [];
@@ -46,12 +34,9 @@ function commentsOn(annotations: readonly Annotation[], selected: string): strin
 }
 
 interface Where {
-  /** The words, as the toolbar read them. */
   selected: string;
-  /** The block the selection starts in (ui `SelectionActionContext.blockId`), '' when none. */
   blockId: string;
   blocks: readonly Block[];
-  /** The person's comments on this message or file. */
   annotations: readonly Annotation[];
 }
 

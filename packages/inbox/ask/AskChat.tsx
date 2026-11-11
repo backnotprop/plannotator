@@ -15,20 +15,15 @@ import { AskChatMenu } from './AskChatMenu';
 import { askAnswerId, askChatName, askMessages, askShownQuestion, askStopped, askTurnNote, askUnanswered, askUnseen, askUserId } from './askModel';
 import { askSourceFor, readAskSources, readAskWords, saveAskSources, saveAskWords, type AskSource } from './askWords';
 
-/** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
 
 export interface AskChatProps {
   threadId: string;
   store: ChatWindowStore;
-  /** This thread's chat, or null while it is first read. */
   model: InboxAskModel | null;
-  /** The row picked in the dropdown: its header until the read arrives. */
   picked: InboxAskChat | null;
   phone: boolean;
-  /** Moves with each press that asks for the box's focus; `takeFocus` says whether it was for this chat. */
   focusRequest: number;
-  /** Words to put in the box (a new token each time): after the words already there. `source`: where a Side's quote came from. */
   seed?: { words: string; token: number; source?: string; taken?: () => void } | null;
   takeFocus: () => boolean;
   onPick: (chat: InboxAskChat) => void;
@@ -38,30 +33,16 @@ export interface AskChatProps {
   onReply: (words: string) => void;
 }
 
-/**
- * One thread's chat: its transcript, its box and its live answer. Keyed by
- * thread, and mounted while the window is minimized, so an answer keeps
- * arriving. The saved file is the truth and the stream only fills in the turn
- * running here; leaving the thread drops the stream, the server finishes the
- * answer, and coming back reads it.
- *
- * No Escape, no chord and no `useChatFrameKeys`: the Inbox gets no new
- * shortcuts. The window sits outside the thread's section and wears
- * `data-popover-layer`, so its keys reach neither the reply nor the ladder.
- */
-/** Seeds already put in a box: a chat that mounts again (minimized, reopened) never adds them twice. */
 const seedsApplied = new Set<number>();
 
 export function AskChat({ threadId, store, model, picked, phone, focusRequest, seed, takeFocus, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
   const chat = useAIChat({ context: ASK_CONTEXT });
   const [words, setWords] = useState(() => readAskWords(threadId));
-  /** Where the box's Side quotes came from: they go to the agent with the question, never into the box. */
   const sources = useRef<AskSource[]>(readAskSources(threadId));
   const [posting, setPosting] = useState(false);
   const postingRef = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  /** The turn this window's stream belongs to, its place in the hook's list (the list only grows), and the session it went to. */
   const [live, setLive] = useState<{ turnId: string; index: number; session: string } | null>(null);
   const liveTurn = live?.turnId ?? null;
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -73,7 +54,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   const streaming = response?.isStreaming === true;
   const saved = conversation?.turns.find((turn) => turn.id === liveTurn);
   const answerSaved = saved !== undefined && (saved.answer !== undefined || saved.failure !== undefined || saved.stopped === true);
-  // The turn being answered: this window's stream, or the Inbox's word for one that started before a reload or elsewhere.
   const runningTurn = streaming && !answerSaved ? liveTurn : (model?.running ?? null);
   const busy = runningTurn !== null;
   const liveText = liveTurn && response && !answerSaved ? { turnId: liveTurn, text: response.text, streaming } : null;
@@ -84,7 +64,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     saveAskWords(threadId, words);
   }, [threadId, words]);
 
-  // Words handed in (code review's Ask on lines): after what the box holds, never in place of it; once each.
   useEffect(() => {
     if (!seed || seedsApplied.has(seed.token)) return;
     seedsApplied.add(seed.token);
@@ -93,11 +72,9 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
       saveAskSources(threadId, sources.current);
     }
     setWords((box) => (box.trim() ? `${box.trimEnd()}\n${seed.words}` : seed.words));
-    // The box has them now (and keeps them per thread, askWords.ts): whoever handed them over may let go of its copy.
     seed.taken?.();
   }, [seed?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The stream ended here: read what the Inbox kept, whether or not its event came first.
   const wasStreaming = useRef(false);
   useEffect(() => {
     if (wasStreaming.current && !streaming) onReload();
@@ -107,7 +84,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     if (runningTurn === null) setStopping(false);
   }, [runningTurn]);
 
-  // Mark answers seen only while they are on screen.
   const unseen = askUnseen(conversation);
   const seenSent = useRef<string | null>(null);
   const windowOpen = !store.minimized;
@@ -123,7 +99,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   const canFocus = model !== null;
   useLayoutEffect(() => {
     if (canFocus && takeFocus()) composerRef.current?.focus();
-    // takeFocus is read once per request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest, canFocus]);
 
@@ -138,8 +113,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     (isTouchPhone() ? paneRef.current : composerRef.current)?.focus({ preventScroll: true });
   };
 
-  /** Start, or restart, the answer of a turn POST /ask accepted. */
-  // `source` (a Side's): where the quoted words came from, as useAIChat's contextPreamble, which leads the message the agent gets.
   const answer = (posted: InboxAskPosted, question: string, providerId: string, policy?: SessionAskAction, source?: string) => {
     setLive({ turnId: posted.turn.id, index: chat.messages.length, session: posted.turn.session });
     void chat.ask({ prompt: question, ...(source ? { contextPreamble: source } : {}), ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
@@ -163,7 +136,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     const source = askSourceFor(question, sources.current);
     try {
       const posted = await post(turnId, question, undefined, source);
-      // Only now: a refused question keeps its words, and words added meanwhile stay.
       setWords((box) => (box.trim() === question ? '' : box));
       sources.current = sources.current.filter((s) => !question.includes(s.quote));
       saveAskSources(threadId, sources.current);
@@ -171,7 +143,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     } catch (cause) {
       if (!readAskWords(threadId)) saveAskWords(threadId, question);
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
-      // A damaged file was set aside by this refusal, so the read has changed.
       onReload();
     } finally {
       postingRef.current = false;
@@ -179,7 +150,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     }
   };
 
-  /** Ask a saved turn again: the same id, so it stays one question. */
   const askAgain = async (turn: InboxAskTurnWire, policy?: SessionAskAction) => {
     if (postingRef.current) return;
     postingRef.current = true;
@@ -188,7 +158,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     keepFocusHere();
     const shownFor = live?.session;
     try {
-      // A Show me asks again as a Show me: the agent's request for a Shape, the same lines.
       const posted = await post(
         turn.id,
         turn.question,
@@ -197,8 +166,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
           : undefined,
         turn.source,
       );
-      // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and
-      // after a hand-off that one gets its own note: it is never interrupted on a choice made about another.
       if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined, turn.source);
       else if (posted.reason) setProblem(`${name} can't take this right now. Try again, or reply in the thread.`);
     } catch (cause) {
@@ -282,7 +249,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   const footer = (message: ChatMessage<ChatTextPart>) => {
     const turn = conversation?.turns.find((candidate) => askUserId(candidate.id) === message.id || askAnswerId(candidate.id) === message.id);
     if (!turn) return null;
-    // Under the turn's last row.
     const hasAnswerRow = messages.some((row) => row.id === askAnswerId(turn.id));
     if (message.id !== (hasAnswerRow ? askAnswerId(turn.id) : askUserId(turn.id))) return null;
     return turnFooter(turn);
@@ -342,14 +308,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
   );
 }
 
-/**
- * Ask's box, as T6's reply box (approval "inbox-reply-box"; "inbox-reply-floaters", 2026-11-07): the words first,
- * then T6's own row. Ask takes no files, no skills and no voice, and keeps no draft to discard, so its row holds one
- * button: Ask's quiet return arrow at the right end ("it's not like a thread"), icon only, no fill, grey while the
- * box is empty and the accent once there are words. Its name and tooltip are "Ask"; while an answer runs it is Stop.
- * A phone draws an up arrow, since its Enter makes a new line. Enter sends on a computer (Shift+Enter, a new line),
- * as Ask's box always has, and goes no further than the box, so the thread's keys never hear it.
- */
 export function AskBox({
   words,
   onWords,
@@ -444,7 +402,6 @@ export function AskBox({
   );
 }
 
-/** A return key, as the owner's picture: down the right, then back left to the arrowhead. */
 function AskEnterGlyph() {
   return (
     <svg className="ib-ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-ask-glyph="enter">
@@ -454,7 +411,6 @@ function AskEnterGlyph() {
   );
 }
 
-/** A phone: an up arrow, the same stroke. */
 function AskUpGlyph() {
   return (
     <svg className="ib-ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-ask-glyph="up">
