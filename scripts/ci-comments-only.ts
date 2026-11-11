@@ -248,7 +248,7 @@ if (import.meta.main) {
   const repo = repoFlag >= 0 ? args.splice(repoFlag, 2)[1] : process.cwd();
   const [base, head] = args;
   if (!repo || !base || !head) {
-    console.error('usage: bun run scripts/ci-comments-only.ts [--repo <dir>] <base> <head> | guards');
+    console.error('Usage: bun run scripts/ci-comments-only.ts [--repo <dir>] <base> <head> | guards');
     process.exit(2);
   }
   const verdict = verifyCommentsOnly(repo, base, head);
