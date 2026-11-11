@@ -93,7 +93,7 @@ test("a pick saved and not sent is posted as a draft: its own mark in the table,
   const d = decisionExportForPost(doc([item(1)], [draft, item(3, { state: "open", answer: null })]));
   for (const body of [renderDecisionComment(d, { platform: "github" }), renderDecisionSection(d, { platform: "github" })!]) {
     expect(body).toContain("1 decided, 1 draft, 1 open");
-    expect(body).toContain("| D2 | Show who made it? | B · _draft, not sent to the agent_ | |");
+    expect(body).toContain("| D2 | Show who made it? | B · _draft, not sent to the agent_ |");
     expect(body).toContain("<details><summary><h3>D2 · Show who made it?</h3><br>B · draft, not sent to the agent</summary>");
     expect(body).toContain("- **B** · _draft, not sent to the agent_");
     expect(body).not.toContain("- ✓ **B**");
@@ -181,6 +181,16 @@ test("an opened decision shows its pick, verdict, note and context; the other ch
   expect(inside).toContain("<dt>Stakes</dt>");
   // Who asked and when closes the decision, after the nested fold.
   expect(fold.indexOf("asked Nov 8")).toBeGreaterThan(nested);
+});
+
+test("the posted table has no Recommendation column: whether a pick took it is said inside the opened decision", () => {
+  const d = doc([item(1)], [item(2, { state: "open", answer: null })]);
+  for (const body of [renderDecisionComment(d, { platform: "github" }), renderDecisionSection(d, { platform: "github" })!]) {
+    const table = body.split("\n").filter((l) => l.startsWith("|"));
+    expect(table.slice(0, 2)).toEqual(["| | Question | Answer |", "|---|---|---|"]);
+    expect(table.slice(2)).toEqual(["| D1 | Question 1? | A |", "| D2 | Question 2? | _open_ |"]);
+    expect(body).toContain("Took the recommendation.");
+  }
 });
 
 test("the nested fold's words", () => {

@@ -91,19 +91,19 @@ function answerOf(item: DecisionExportItem): string {
   return [...a.selected, ...(a.other ? [a.other] : []), ...(a.text ? [a.text] : [])].join(", ");
 }
 
-/** The verdict sentence and the table's word (as the HTML download says them), or null with no recommendation. */
-export function decisionVerdict(item: DecisionExportItem): { sentence: string; word: string } | null {
+/** The verdict sentence (as the HTML download says it), or null with no recommendation. */
+export function decisionVerdict(item: DecisionExportItem): string | null {
   const labels = item.recommendation.labels;
   if (labels.length === 0 && !item.recommendation.text) return null;
   const a = item.answer;
   const selected = a?.selected ?? [];
-  if (item.recommendation.taken) return { sentence: "Took the recommendation.", word: "taken" };
+  if (item.recommendation.taken) return "Took the recommendation.";
   if (item.kind === "multi" && labels.length > 0 && labels.every((l) => selected.includes(l)) && !a?.other) {
     const added = selected.filter((s) => !labels.includes(s));
-    return { sentence: `Took the recommendation and added ${joinWords(added)}.`, word: `taken +${added.length}` };
+    return `Took the recommendation and added ${joinWords(added)}.`;
   }
-  if (a?.other || a?.text) return { sentence: "Wrote their own answer instead of the recommendation.", word: "not taken" };
-  return { sentence: "Chose differently from the recommendation.", word: "not taken" };
+  if (a?.other || a?.text) return "Wrote their own answer instead of the recommendation.";
+  return "Chose differently from the recommendation.";
 }
 
 function replacementOf(doc: DecisionExportV1, item: DecisionExportItem): DecisionExportItem | null {
@@ -155,15 +155,17 @@ function head(doc: DecisionExportV1, when: ReturnType<typeof decisionExportDesig
 }
 
 function table(doc: DecisionExportV1, max = Infinity): string[] {
-  const rows = ["| | Question | Answer | Recommendation |", "|---|---|---|---|"];
+  // No Recommendation column (the owner, 2026-11-10: "Remove recommendation row"): whether the pick took the
+  // recommendation is said inside each opened decision ("Took the recommendation.").
+  const rows = ["| | Question | Answer |", "|---|---|---|"];
   const cell = (text: string) => mdInline(text).replace(/\|/g, "\\|");
   const all = orderedOf(doc);
   for (const item of all.slice(0, max)) {
-    if (item.state === "decided") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${cell(clip(answerOf(item), 70))} | ${decisionVerdict(item)?.word ?? ""} |`);
-    else if (item.state === "picked_unsent") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${answerOf(item) ? `${cell(clip(answerOf(item), 50))} · ` : ""}_${DECISION_POST_DRAFT}_ | |`);
-    else rows.push(`| D${item.n} | ${cell(item.prompt)} | _${shortState(doc, item)}_ | |`);
+    if (item.state === "decided") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${cell(clip(answerOf(item), 70))} |`);
+    else if (item.state === "picked_unsent") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${answerOf(item) ? `${cell(clip(answerOf(item), 50))} · ` : ""}_${DECISION_POST_DRAFT}_ |`);
+    else rows.push(`| D${item.n} | ${cell(item.prompt)} | _${shortState(doc, item)}_ |`);
   }
-  if (all.length > max) rows.push(`| | _and ${all.length - max} more, in the thread's download_ | | |`);
+  if (all.length > max) rows.push(`| | _and ${all.length - max} more, in the thread's download_ | |`);
   return rows;
 }
 
@@ -210,7 +212,7 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
   for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`${mark(mdInline(own))} · own answer`);
   out.push("");
   const verdict = draft ? null : decisionVerdict(item);
-  if (verdict) out.push(mdInline(verdict.sentence), "");
+  if (verdict) out.push(mdInline(verdict), "");
   // A draft's note is posted with it, inside the draft (the owner chose to post drafts).
   if (item.answer?.note) out.push(`> ${mdInline(item.answer.note)}`, "");
   if (level === "full" && item.context) out.push(mdInline(item.context), "");

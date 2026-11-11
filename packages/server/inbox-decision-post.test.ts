@@ -199,7 +199,7 @@ test("a pick saved and not sent is posted as a draft, not sent to the agent (the
   await postThreadDecisions(world.store, world.thread, { pull: "acme/notes#12" }, { runtime: forge.runtime, version: "test", destination: "comment" });
   const body = forge.comments("acme/notes#12")[0]!.body;
   expect(body).toContain("1 decided, 1 draft");
-  expect(body).toContain("| D2 | Show who made the losing edit? | Name and time · _draft, not sent to the agent_ | |");
+  expect(body).toContain("| D2 | Show who made the losing edit? | Name and time · _draft, not sent to the agent_ |");
   expect(body).toContain("- **Name and time** · _draft, not sent to the agent_");
   // A draft's note is posted, inside the draft's own fold.
   const draftFold = body.slice(body.indexOf("<details><summary><h3>D2"));
