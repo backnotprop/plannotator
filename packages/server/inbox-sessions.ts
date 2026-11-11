@@ -382,7 +382,7 @@ export function createInboxLiveSessions(options: {
     const entry = mcpEntry(session);
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
-    if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
+    if (typeof who.name === "string" && who.name.trim()) entry.name = inboxStoredAgentName(who.name) ?? undefined;
   };
   /**
    * project_path to its project's root. The Inbox passes its shared
