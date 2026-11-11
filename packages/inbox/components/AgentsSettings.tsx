@@ -633,7 +633,7 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.model, launch?.effort, launch?.settings_file]);
   // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
     if (!launch) return;

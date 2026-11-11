@@ -86,6 +86,7 @@ import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { inboxLaunchTokenOk, LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
 import { readLastLaunchChoice, writeLastLaunchChoice } from "./inbox-launch-choice";
+import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
@@ -1260,6 +1261,22 @@ ${result.text}`);
         // Undefined drops the key (the default) when config.json is written.
         saveConfig({ inboxLaunch: { scratchDir: path ? resolve(path) : undefined } as { scratchDir?: string } });
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        return json({ launch: settingsState() });
+      }
+      if ("settings_file" in body) {
+        // Settings → Agents' "Claude settings file" (#3064): a full path (`~/` is the home), checked now so a typo is said
+        // here rather than at the next start; empty or null clears it. Kept as typed. Its contents never leave this process.
+        const raw = body.settings_file;
+        if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "settings_file: a file path, or null.", { field: "settings_file" });
+        const typed = (raw ?? "").trim();
+        if (typed && !(typed === "~" || typed.startsWith("~/") || isAbsolute(typed))) throw new InboxError("validation_error", "Give a full path, such as ~/.claude/gateway.json.", { field: "settings_file" });
+        if (typed) {
+          const path = claudeSettingsFilePath(typed, options.homeDir);
+          const read = readClaudeSettingsFile(path, options.displayFolder(path));
+          if (!read.ok) throw new InboxError("validation_error", read.text.replace(/ Fix it in Settings → Agents, or clear it there\.$/, ""), { field: "settings_file" });
+        }
+        saveConfig({ inboxLaunch: { settingsFile: typed || undefined } as { settingsFile?: string } });
+        if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
       if ("model" in body || "effort" in body) {

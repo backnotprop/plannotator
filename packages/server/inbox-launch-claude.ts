@@ -52,6 +52,7 @@ import {
 } from "./inbox-agents";
 import { launchChoiceArgs, parseClaudeChoices } from "@plannotator/core/inbox-launch-choice";
 import { launchChoiceCache } from "./inbox-launch-choice";
+import { claudeSettingsFilePath, claudeSettingsSignIn, mergeClaudeLaunchSettings, readClaudeSettingsFile, type ClaudeSettingsFileRead } from "./inbox-launch-claude-settings-file";
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
@@ -478,13 +479,13 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
    * folder's hooks held behind it. A server in the person's `disabledMcpjsonServers` still stays off (2.1.316: that
    * list is checked first), and it is here, not `enabledMcpjsonServers`, which Claude moves into the project's files.
    */
-  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv): string => {
+  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, person: Record<string, unknown> | null): string => {
     const fullPermissions = inboxLaunchFullPermissions(launch);
     const dir = ctx.launchDir(launch.id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, "settings.json");
     const isDefaultDataDir = resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir));
-    const settings = {
+    const ours = {
       env: launchSettingsEnv(login, {
         launchId: launch.id,
         key: randomBytes(32).toString("hex"),
@@ -497,6 +498,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       // Permission prompts come to the launch thread as questions (inbox-launch-claude-permission.ts).
       hooks: launchPermissionHooks(ctx.selfCommand),
     };
+    // Settings → Agents' Claude settings file: its keys under ours (it may hold a secret: only ever written here, 0600).
+    const settings = person ? mergeClaudeLaunchSettings(person, ours) : ours;
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
     return path;
@@ -536,10 +539,22 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     checking = { key, answer };
     return answer;
   };
-  /** The launched session may sign in another way the check can't see (the login shell's token or key, a cloud provider). */
+  /** Settings → Agents' Claude settings file, read (null: none set). Its words name the path only. */
+  const personSettings = (): ClaudeSettingsFileRead | null => {
+    const typed = ctx.config().settingsFile;
+    if (!typed) return null;
+    const path = claudeSettingsFilePath(typed, ctx.homeDir);
+    return readClaudeSettingsFile(path, ctx.displayFolder(path));
+  };
+  /**
+   * The launched session may sign in another way the check can't see: the login shell's token or key, a cloud
+   * provider, or the Claude settings file's key helper or gateway (a gateway user is "signed out" to `claude auth status`).
+   */
   const signsInOtherwise = (e: AgentEnvironment) => {
     const shell = ctx.shell();
-    return CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name]);
+    if (CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name])) return true;
+    const person = personSettings();
+    return !!person?.ok && claudeSettingsSignIn(person.settings);
   };
 
   return {
@@ -625,7 +640,13 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      * describes. Full permissions: bypass mode; the person's own default mode: no flag; otherwise auto mode.
      */
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
-      const settingsPath = writeSettings(launch, input.login);
+      // Settings → Agents' Claude settings file, read now: missing or not JSON, the start says so and nothing runs.
+      const person = personSettings();
+      if (person && !person.ok) {
+        ctx.startLog(launch.id, person.text);
+        return { ok: false as const, code: "failed" as const, text: person.text };
+      }
+      const settingsPath = writeSettings(launch, input.login, person?.settings ?? null);
       const result = await cli.start({
         folder: launch.folder,
         shownFolder: ctx.displayFolder(trustFolderOf(launch)),
@@ -698,6 +719,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         models: lists.models,
         efforts: lists.efforts,
         settings_file: settingsFile,
+        ...(settingsFile ? { settings_file_shown: ctx.displayFolder(claudeSettingsFilePath(settingsFile, ctx.homeDir)) } : {}),
         full_permissions: setting ?? start.wantsFull,
         follows,
         own_mode: start.ownMode,

@@ -697,6 +697,9 @@ export interface InboxLaunchSettings {
   effort?: string | null;
   models?: string[];
   efforts?: string[];
+  /** Claude Code's "Claude settings file" (`inboxLaunch.settingsFile`, as typed; null: none), and as shown (`~/…`). Its contents never reach the window. */
+  settings_file?: string | null;
+  settings_file_shown?: string;
 }
 
 /**
@@ -1873,6 +1876,8 @@ export const inboxApi = {
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   /** Settings → Agents' Claude Code Model or Effort default: a value, or null for Claude Code's own. */
   launchDefault: (field: 'model' | 'effort', value: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { [field]: value }),
+  /** Settings → Agents' "Claude settings file": a full path (`~/…` too), or null for none. */
+  launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
