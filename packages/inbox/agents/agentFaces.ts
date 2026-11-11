@@ -115,7 +115,8 @@ function rebuild(): void {
   }
   const was = resolved;
   resolved = next;
-  if ([...next.values()].some((face) => !face.startsWith('own:'))) void loadAgentFaceArt().catch(() => {});
+  // Our faces' pictures load only when one is shown (an uploaded picture or a set icon needs none of them).
+  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:'))) void loadAgentFaceArt().catch(() => {});
   const changed = new Set<string>();
   for (const [id, face] of next) if (was.get(id) !== face) changed.add(id);
   for (const id of was.keys()) if (!next.has(id)) changed.add(id);

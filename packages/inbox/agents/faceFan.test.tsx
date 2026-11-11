@@ -106,8 +106,8 @@ test.skipIf(!hasDom)('a rest of the pointer on the mark opens the picker; a poin
   // A labelled radio group: every face, the one shown checked; nothing took focus from where it was.
   expect(group()!.getAttribute('aria-label')).toBe('Icon for Invoice retries');
   const radios = [...group()!.querySelectorAll('[role="radio"]')];
-  // Along the arcs: the kinds inside (the agent's own mark, Transparent, Face, "Your own…"), then the Glass colours.
-  expect(radios.map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent', 'transparent', 'totman', 'own', ...motion.AGENT_FACES.filter((f) => f.startsWith('glass') || f === 'yellow')]);
+  // Along the arcs: the kinds inside (the agent's own mark, Transparent, Face, "Your own…", "Sets"), then the Glass colours.
+  expect(radios.map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent', 'transparent', 'totman', 'own', 'sets', ...motion.AGENT_FACES.filter((f) => f.startsWith('glass') || f === 'yellow')]);
   expect(choice('agent')!.getAttribute('aria-checked')).toBe('true');
   expect(choice('agent')!.getAttribute('aria-label')).toBe('Claude Code');
   expect(choice('glass-blue')!.getAttribute('aria-label')).toBe('Blue glass');

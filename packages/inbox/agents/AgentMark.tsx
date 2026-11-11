@@ -7,6 +7,7 @@ import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { OwnIconPanel } from './OwnIconPanel';
+import { SetsPanel } from './SetsPanel';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
@@ -42,7 +43,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     const el = ref.current;
     if (!el) return;
     const withMotion = clicked.current;
-    if (face === 'agent' || face.startsWith('own:') || agentFaceArtReady()) {
+    if (face === 'agent' || face.startsWith('own:') || face.startsWith('set:') || agentFaceArtReady()) {
       showAgentFace(el, face, withMotion);
       return;
     }
@@ -95,6 +96,13 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     closeFan();
     setOwn({ open: true, touch });
   };
+  // "Sets": the icon sets, opened from the fan's place after "Your own…" (SetsPanel.tsx).
+  const [setsPanel, setSetsPanel] = useState<{ open: boolean; touch: boolean } | null>(null);
+  const openSets = () => {
+    const touch = fan?.by === 'touch';
+    closeFan();
+    setSetsPanel({ open: true, touch });
+  };
   const choose = (next: AgentFace) => {
     clicked.current = true;
     keepAgentFace(agent ?? id, next);
@@ -122,7 +130,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     dwell.current = setTimeout(() => openFan('hover'), FAN_DWELL_MS);
   };
   const onPointerEnter = (event: PointerEvent) => {
-    if (event.pointerType === 'touch' || fan?.open || own?.open || quiet.current) return;
+    if (event.pointerType === 'touch' || fan?.open || own?.open || setsPanel?.open || quiet.current) return;
     rest();
   };
   const onPointerLeave = () => {
@@ -145,7 +153,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     };
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !own?.open) {
+    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !own?.open && !setsPanel?.open) {
       quiet.current = false;
       rest();
     }
@@ -189,7 +197,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
-      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={openOwn} onClose={closeFan} />}
+      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={openOwn} onSets={openSets} onClose={closeFan} />}
       {own && button.current && (
         <OwnIconPanel
           anchor={button.current}
@@ -202,6 +210,21 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
             clicked.current = true;
             quiet.current = true;
             setOwn((was) => (was ? { ...was, open: false } : was));
+          }}
+        />
+      )}
+      {setsPanel && button.current && (
+        <SetsPanel
+          anchor={button.current}
+          open={setsPanel.open}
+          agent={agent ?? id}
+          name={name}
+          face={face}
+          touch={setsPanel.touch}
+          onClose={() => {
+            clicked.current = true;
+            quiet.current = true;
+            setSetsPanel((was) => (was ? { ...was, open: false } : was));
           }}
         />
       )}
