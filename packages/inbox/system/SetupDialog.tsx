@@ -26,38 +26,24 @@ const STEPS = ['Project', 'What to read', 'Keep it current'] as const;
 
 export interface SystemSetupDialogProps {
   phone: boolean;
-  /** The home folder, so folders read `~/…`. */
   home: string | null;
-  /**
-   * The agents the Inbox can start here (`GET /api/inbox/sessions` `launch.agents`; none while launch is off). Every
-   * agent System knows is offered; the last step ends at Draw it for one of these, else at Copy prompt (the fallback).
-   */
   loadAgents: () => Promise<SystemSetupAgent[]>;
-  /** The project to start on; null: the first one found. */
   startProject: string | null;
   load: () => Promise<SystemSetupAnswer>;
   save: (input: SystemSetupInput) => Promise<SystemSetup>;
-  /** Draw it, after the save (launch on). */
   onDrawIt: (project: SystemSetupProject, setup: SystemSetup) => void;
   /** Copy prompt (launch off): starts the copy inside the click, as the clipboard needs; resolves whether it copied. */
   copy: (text: string) => Promise<boolean>;
-  /** After Copy prompt copied the prompt and saved. */
   onCopied: (project: SystemSetupProject, setup: SystemSetup) => void;
   onClose: () => void;
 }
 
-/**
- * System → Set up a project (approval "system-inbox", screens 2b to 2d): pick the project, what the agent should
- * read, and who keeps the drawing current. Nothing to type but extra repos and doc sites. The last step saves
- * `<data dir>/system/<key>/setup.json`, then Draw it (an agent the Inbox can start) or Copy prompt (the fallback). Cancel saves nothing.
- */
 export function SystemSetupDialog(props: SystemSetupDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const [projects, setProjects] = useState<SystemSetupProject[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   const [chosen, setChosen] = useState<string | null>(null);
-  /** The project whose choices the fields below hold: picking another starts from that project's own. */
   const [filledFor, setFilledFor] = useState<string | null>(null);
   const [repos, setRepos] = useState<string[]>([]);
   const [docs, setDocs] = useState<string[]>([]);
@@ -76,7 +62,6 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
   const docInputRef = useRef<HTMLInputElement>(null);
   const reposRef = useRef<HTMLUListElement>(null);
   const docsRef = useRef<HTMLUListElement>(null);
-  /** A chip just removed: focus goes to the chip now in its place, or to its field when none is left after it. */
   const removed = useRef<{ list: 'repos' | 'docs'; index: number } | null>(null);
   const firstStep = useRef(true);
 
@@ -102,16 +87,13 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
       live = false;
     };
   }, []);
-  /** Draw it when the Inbox can start the picked agent here; Copy prompt (the fallback) otherwise. */
   const canLaunch = !!launchable && launchable.includes(agent);
-  /** Every agent the Inbox launches itself is offered (none needs connecting first), once the read of which can start is in. */
   const agents = launchable === null ? null : SYSTEM_SETUP_AGENTS;
   const pickAgent = (next: SystemSetupAgent) => {
     setModel((current) => systemModelForAgent(current, agent, next));
     setAgent(next);
   };
   useEffect(() => {
-    // A new step's heading takes focus, so a screen reader hears where it is.
     if (firstStep.current) {
       firstStep.current = false;
       return;
@@ -156,7 +138,6 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
     setDocError(null);
   };
 
-  /** Adds what is typed in the repo field; false (and says why) when it is not a repo. Empty adds nothing. */
   const addRepo = (): boolean => {
     if (!project || repoDraft === null || !repoDraft.trim()) return true;
     const parsed = parseSystemRepo(repoDraft, ownHost ?? undefined);
@@ -196,7 +177,6 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
       return;
     }
     if (step === 1) {
-      // Words typed and not yet added go in with Next, so nothing typed is lost.
       if (!addRepo() || !addDoc()) return;
       setStep(2);
     }
@@ -212,7 +192,6 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
     try {
       const setup = await props.save(input);
       if (copied && !(await copied)) {
-        // Saved, not copied: the dialog stays, so the next press copies it.
         setSaving(false);
         setSaveError('Your choices are saved, but the prompt could not be copied. Press Copy prompt again.');
         return;
