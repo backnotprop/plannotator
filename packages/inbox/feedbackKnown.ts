@@ -8,8 +8,8 @@
  * list's ⋮ menu → View → Simple list (listView.ts); `settings-<section>` opens that Settings section;
  * `settings-experimental` opens Capabilities on its Experimental group. A link opens real release notes or docs.
  *
- * Experimental features held until 0.29 (packages/server/inbox.ts `heldSwitch`: Code review, Shape, System) are
- * not here: their switches are hidden, so nothing may offer them.
+ * Features still held (Shape, packages/server/inbox.ts `heldShapeSwitch`; System, `SYSTEM_SETTINGS_ROW_VISIBLE` in
+ * components/Settings.tsx) are not here: their switches are hidden, so nothing may offer them.
  *
  * Matching is whole words and whole phrases, no stems: "moves" never finds "remove". An entry matches on one of its
  * `phrases`, or when every `near` group has a word that is not negated ("doesn't move" is praise) and they sit

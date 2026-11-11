@@ -92,6 +92,8 @@ async function world(): Promise<World> {
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // Code review's offer (first in the line since 0.29, at once on a release build): decided.
+      inboxCodeReview: false,
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxReveals: { lastShownAt: snoozeShown },
     }),

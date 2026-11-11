@@ -316,6 +316,13 @@ describe.skipIf(!hasDom)("Code review's offer on day 0", () => {
     act(() => notNow.click());
     expect(document.activeElement).toBe(document.querySelector('[data-opener]'));
   });
+
+  test('names nothing held back: Shape (packages/server/inbox.ts heldShapeSwitch) and System stay hidden in 0.29', async () => {
+    const set = mount(DAY0);
+    set({ tourScreen: false });
+    await until(() => dialog() !== null);
+    expect(dialog()!.textContent).not.toMatch(/\bshape\b|\bsystem\b/i);
+  });
 });
 
 describe.skipIf(!hasDom)('focus on a fresh load', () => {

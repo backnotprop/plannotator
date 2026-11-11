@@ -13,8 +13,9 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; a guest claiming it; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * not next on day 0 of a fresh install while Code review is undecided; offered without PLANNOTATOR_INBOX_PREVIEW (the
- * 0.29 hold), or to someone who switched Code review off or on; its claim turning anything on or not taking the day.
+ * not next on day 0 of a fresh install while Code review is undecided, with or without PLANNOTATOR_INBOX_PREVIEW (0.29
+ * released it; the variable now holds only Shape); offered to someone who switched Code review off or on; its claim
+ * turning anything on or not taking the day.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -116,6 +117,9 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    // Code review's offer (first in the line, for everyone since 0.29): decided here, so the other dialogs are what these
+    // cases see. Its own cases unset it (`freshDay0`).
+    inboxCodeReview: false,
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -852,11 +856,11 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
 
 describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   const KEY = "page-key-aaaa";
-  /** A fresh install on day 0: first use not known yet, no threads in the store. */
-  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, ...config } });
+  /** A fresh install on day 0: first use not known yet, no threads in the store, Code review never decided. */
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
 
   test("next on day 0 of a fresh install while Code review was never decided; the claim stamps it, turns nothing on and takes the day", async () => {
-    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", undefined);
     const w = await freshDay0();
     const before = await w.settings();
     expect(before.reveal.next).toBe("code_review");
@@ -880,19 +884,16 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
     expect(w.saved().inboxCodeReview).toBeUndefined();
   });
 
-  test("held (no PLANNOTATOR_INBOX_PREVIEW): never next, never claimed, nothing written", async () => {
-    setEnv("PLANNOTATOR_INBOX_PREVIEW", undefined);
+  test("PLANNOTATOR_INBOX_PREVIEW=1 (it now holds only Shape) changes nothing for the offer: next on day 0 all the same", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
     const w = await freshDay0();
     const read = await w.settings();
-    expect(read.reveal.next).toBeNull();
-    expect(read.code_review).toBeUndefined();
-    const config = readFileSync(join(w.dataDir, "config.json"), "utf8");
-    expect((await w.claim("code_review", KEY)).show).toBe(false);
-    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(config);
+    expect(read.reveal.next).toBe("code_review");
+    expect(read.code_review).toEqual({ on: false });
   });
 
   test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {
-    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", undefined);
     for (const decided of [false, true]) {
       const w = await freshDay0({ inboxCodeReview: decided });
       expect(await w.next()).toBeNull();

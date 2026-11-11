@@ -106,7 +106,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // This run is "just updated" from the version before it, with its notes and one image already saved (no network).
   const [major, minor, patch] = VERSION.split('.').map(Number);
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: `${major}.${minor}.${patch! - 1}` }));
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxCodeReview: false }));
   const filler = Array.from({ length: 40 }, (_, n) => `- Item ${n + 1} of the long list of things that changed in this release, long enough to wrap on a phone.`).join('\n');
   writeFileSync(
     join(dataDir, 'update-notes', `${VERSION}.json`),

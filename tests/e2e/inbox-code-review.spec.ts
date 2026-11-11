@@ -213,8 +213,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // Code review's one-time offer (approval "code-review-offer-card") was already answered: with PREVIEW on a release
-  // build it would open on the first page, over this spec's flow. Its own test is packages/inbox/codeReviewOffer.test.tsx.
+  // Code review's one-time offer (approval "code-review-offer-card") was already answered: on a release build it would
+  // open on the first page, over this spec's flow. Its own test is packages/inbox/codeReviewOffer.test.tsx.
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
   writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
@@ -230,9 +230,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
-    // Held until the next big release (packages/server/inbox.ts heldSwitch): the Code review switch shows while off only with this.
-    // That release removes this line.
-    PLANNOTATOR_INBOX_PREVIEW: '1',
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     XDG_CONFIG_HOME: join(root, 'xdg'),

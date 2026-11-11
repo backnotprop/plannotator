@@ -106,6 +106,8 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    // Code review's offer (first in the line since 0.29): decided, so Snooze is what these cases see.
+    inboxCodeReview: false,
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
   if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });

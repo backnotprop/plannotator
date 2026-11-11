@@ -1,20 +1,20 @@
 /**
- * Code review and Shape held until the next big release, 0.29 (owner decisions,
- * 2026-11-04 and 2026-11-05; inbox.ts `heldSwitch`). Until then their Settings →
- * Capabilities switches show only to a person who already has that feature on, or with PLANNOTATOR_INBOX_PREVIEW=1.
- * Settings draws a row only for a key the settings read carries, so the proof is
- * on the doors a window reads, on a real Inbox with config.json deciding:
+ * Shape held until the owner releases it; Code review released in 0.29 (owner decisions 2026-11-04, 2026-11-05 and,
+ * for 0.29, approval "code-review-029-shape-off"; inbox.ts `heldShapeSwitch`). Shape's Settings → Capabilities switch
+ * shows only to a person who already has Shape on, or with PLANNOTATOR_INBOX_PREVIEW=1; Code review's shows to everyone.
+ * Settings draws a row only for a key the settings read carries, so the proof is on the doors a window reads, on a
+ * real Inbox with config.json deciding:
  *
- *  - off and no preview: the settings read leaves both out, and a Checklist save's
- *    `event: capabilities` names neither (a window would otherwise merge them in);
- *  - already on: both are there; turning one off answers `{ on: false }` and tells
- *    every window, then the next read leaves it out;
- *  - PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and the event;
- *  - a release build, 0.28.50 included: the same, as the hold reads no version.
+ *  - off and no preview: the settings read, a Checklist save's answer and its `event: capabilities` carry Code review
+ *    (off) and leave Shape out (a window would otherwise merge it in);
+ *  - already on: both are there; turning one off answers `{ on: false }` and tells every window; then the next read
+ *    still carries Code review (off) and leaves Shape out;
+ *  - PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off too, in the read and the event;
+ *  - a release build: the same, as the hold reads no version.
  *
- * What regresses: a normal user seeing either switch before that release, or the
- * owner (on) losing the row, or a shown switch that cannot be turned off.
- * The next big release deletes this file with `heldSwitch`.
+ * What regresses: a person not seeing Code review's switch, or seeing Shape's before the owner releases it; a person
+ * with Shape on losing its row; a shown switch that cannot be turned off.
+ * The release that ships Shape deletes the Shape half of this file with `heldShapeSwitch`.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -97,25 +97,25 @@ async function windowCapabilities(base: string) {
   };
 }
 
-test("off, no preview: the settings read and a Checklist save's event leave Code review and Shape out", async () => {
+test("off, no preview: the settings read and a Checklist save carry Code review (off) and leave Shape out", async () => {
   for (const config of [null, { inboxCodeReview: false, inboxShape: false }]) {
     const w = await world(config, false);
     const read = await w.read();
     expect(read.steps).toEqual({ on: false });
-    expect("code_review" in read).toBe(false);
+    expect(read.code_review).toEqual({ on: false });
     expect("shape" in read).toBe(false);
 
     const stream = await windowCapabilities(w.base);
     const saved = await w.save({ steps: { on: true } });
-    expect("code_review" in saved).toBe(false);
+    expect(saved.code_review).toEqual({ on: false });
     expect("shape" in saved).toBe(false);
     await stream.next(1);
-    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false } }]);
+    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false } }]);
     await stream.stop();
   }
 });
 
-test("already on: both rows' keys are there; turning each off answers off, tells the windows, then the read leaves it out", async () => {
+test("already on: both rows' keys are there; turning each off answers off and tells the windows; then Code review stays, Shape goes", async () => {
   const w = await world({ inboxCodeReview: true, inboxShape: true }, false);
   const read = await w.read();
   expect(read.code_review).toEqual({ on: true });
@@ -128,15 +128,15 @@ test("already on: both rows' keys are there; turning each off answers off, tells
   expect(stream.frames[0]!.shape).toEqual({ on: true });
   expect((await w.save({ shape: { on: false } })).shape).toEqual({ on: false });
   await stream.next(2);
-  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, shape: { on: false } });
+  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, shape: { on: false } });
   await stream.stop();
 
   const after = await w.read();
-  expect("code_review" in after).toBe(false);
+  expect(after.code_review).toEqual({ on: false });
   expect("shape" in after).toBe(false);
 });
 
-test("PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and in the windows' event", async () => {
+test("PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off too, in the read and in the windows' event", async () => {
   const w = await world(null, true);
   const read = await w.read();
   expect(read.code_review).toEqual({ on: false });
@@ -149,10 +149,10 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and in 
   await stream.stop();
 });
 
-test("a release build holds the same way: the hold reads no version, so 0.28.50 does not end it", async () => {
-  for (const version of ["0.28.49", "0.28.50"]) {
+test("a release build: Code review's switch is there for everyone, Shape's held the same way (the hold reads no version)", async () => {
+  for (const version of ["0.28.50", "0.29.0"]) {
     const off = await (await world({ updateCheck: false }, false, version)).read();
-    expect("code_review" in off).toBe(false);
+    expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
 
     const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, false, version)).read();

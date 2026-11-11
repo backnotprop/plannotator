@@ -103,7 +103,7 @@ export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer"
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // Not shipped yet (held until 0.29, packages/server/inbox.ts `switchesHeld`): its slot is kept as it was.
+  // Code review's offer (released in 0.29): first, ahead of the owner's order below.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
   // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then

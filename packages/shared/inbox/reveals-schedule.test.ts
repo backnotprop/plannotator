@@ -97,7 +97,7 @@ interface User {
   moment: (id: RevealId, day: number) => boolean;
   /** The dialogs this person closes with Not now. */
   notNow?: readonly RevealId[];
-  /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
+  /** Code review was never decided (config.json `inboxCodeReview` unset): its offer is open. */
   codeReviewOff?: boolean;
   /** The day the person's third question card is answered (grill-me-tip.ts `revealGrillMeGap`): from then the tip is open. Absent: never. */
   grillMeGap?: number;
@@ -396,7 +396,7 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
     expectSpaced(shown);
   });
 
-  test("Code review decided (on, or switched off by the person) or held: never offered", () => {
+  test("Code review decided (on, or switched off by the person): never offered", () => {
     expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
   });
 });
@@ -533,7 +533,7 @@ describe("the line's rules", () => {
     expect(revealLineFree("setup", after, later(40 * MINUTE))).toBe(true);
     expect(revealNext(after, later(40 * MINUTE))).toBe("sound");
     expect(revealNotNowAllowed("code_review")).toBe(true);
-    // Not open (decided, or held back): nothing on day 0.
+    // Not open (decided): nothing on day 0.
     expect(revealNext(base({ firstUseAt: null, threads: 0, open: { snooze: true } }), at(0, 9))).toBeNull();
   });
 
