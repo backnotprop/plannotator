@@ -15,7 +15,9 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 /* "Your own…": a large drop area, the pictures beneath. */
 .ib-agi-own { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
 .ib-agi-drop { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 168px; border: 1.5px dashed color-mix(in oklch, var(--foreground) 24%, transparent); border-radius: 12px; background: color-mix(in oklch, var(--foreground) 3%, transparent); color: var(--muted-foreground); font: inherit; cursor: pointer; transition: background 120ms linear, border-color 120ms linear; }
-.ib-agi-drop:hover, .ib-agi-drop:focus-visible, .ib-agi-own[data-over] .ib-agi-drop { border-color: var(--primary); background: color-mix(in oklch, var(--primary) 7%, transparent); outline: none; }
+.ib-agi-drop:hover, .ib-agi-own[data-over] .ib-agi-drop { border-color: var(--primary); background: color-mix(in oklch, var(--primary) 7%, transparent); }
+/* Focused as the dialog opens: a quiet ring, not the drop's own highlight. */
+.ib-agi-drop:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 55%, transparent); outline-offset: 2px; }
 .ib-agi-drop .am-own-add { width: 28px; height: 28px; border-radius: 8px; }
 .ib-agi-drop-l { font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
 .ib-agi-drop-b { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 550; }
