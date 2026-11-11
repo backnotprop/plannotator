@@ -28,6 +28,7 @@ const TARGET = Number(process.env.PLANNOTATOR_INBOX_BUDGET_MESSAGES ?? 100_000);
  * Ceilings in ms at 100,000 messages (30,580 threads). Provisional: about twice today's JSONL store measured
  * 2026-11-11 on a laptop at load average ~30 (start 11.4 s, first list 11.8 s, thread 0.3 ms, search build
  * 23.9 s, a query 0.15 s). Tighten them on a quiet machine, and again once the SQLite log reads by query.
+ * The SQLite log fails `start` until then (31.5 s the same day): the store still replays its whole change log.
  */
 const CEILING = { start: 25_000, listCold: 25_000, threadRead: 50, searchBuild: 60_000, searchQuery: 1_000 };
 
