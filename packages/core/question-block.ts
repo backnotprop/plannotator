@@ -277,8 +277,13 @@ export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
  *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
  *  task-list label over 200 characters, so it could never be picked.) */
 export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
+/** @deprecated No longer applied: the person's answer, Other and note are kept
+ *  whole (through core 0.25.27 they were cut here without a word). Kept so an
+ *  importer still builds. */
 export const MAX_QUESTION_OTHER_CHARS = 2000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_TEXT_CHARS = 4000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
@@ -1608,7 +1613,7 @@ export function capQuestionPrompt(prompt: string): string {
 
 /**
  * Fail-closed validator: returns a normalized copy holding only the known
- * fields (strings truncated to their caps, empty optionals dropped), or null
+ * fields (the prompt copy cut to its cap, empty optionals dropped), or null
  * for anything malformed. Every reader of `questionAnswer` goes through it,
  * so a row from an older or foreign writer can never throw in a renderer.
  */
@@ -1631,9 +1636,10 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
     .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
     .filter(Boolean))]
     .slice(0, MAX_QUESTION_CHOICES);
-  const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
-  const text = typeof v.text === 'string' ? cap(v.text, MAX_QUESTION_TEXT_CHARS) : '';
-  const note = typeof v.note === 'string' ? cap(v.note, MAX_QUESTION_NOTE_CHARS) : '';
+  // The person's own words are kept whole: never cut without a word.
+  const other = typeof v.other === 'string' ? v.other : '';
+  const text = typeof v.text === 'string' ? v.text : '';
+  const note = typeof v.note === 'string' ? v.note : '';
   return {
     v: 1,
     key: v.key,

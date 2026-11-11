@@ -540,11 +540,13 @@ describe("parseQuestionAnswer", () => {
     }
   });
 
-  test("truncates to the caps", () => {
-    const parsed = parseQuestionAnswer(answer({ prompt: "p".repeat(900), text: "t".repeat(9000), selected: Array.from({ length: 30 }, (_, i) => `c${i}`) }))!;
+  test("keeps the person's long answer, Other and note whole; only the prompt copy is cut", () => {
+    const long = "t".repeat(50_000);
+    const parsed = parseQuestionAnswer(answer({ prompt: "p".repeat(900), text: long, other: long, note: long }))!;
     expect(parsed.prompt.length).toBe(400);
-    expect(parsed.text!.length).toBe(4000);
-    expect(parsed.selected.length).toBe(20);
+    expect(parsed.text).toBe(long);
+    expect(parsed.other).toBe(long);
+    expect(parsed.note).toBe(long);
   });
 
   test("never cuts a prompt inside an emoji, and the Inbox's check cuts it the same way", () => {
