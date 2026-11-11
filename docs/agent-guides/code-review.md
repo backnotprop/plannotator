@@ -298,9 +298,10 @@ registered on the CAPTURE phase and swallows `Mod+Enter`, so a keystroke aimed
 at the announcement cannot approve a plan or post a review behind it.
 
 **Media is hosted, not bundled.** The two demos (`tui-herdr-full-demo` and
-`tui-herdr-lite-demo`, mp4 + webm + poster jpg each, ~23MB together) live in
-`apps/marketing/public/assets/` and are served from
-`https://plannotator.ai/assets/` once the marketing deploy syncs them, the same
+`tui-herdr-lite-demo`, mp4 + webm + poster jpg each, ~23MB together) are served from
+`https://plannotator.ai/assets/` (the videos are uploaded there by hand, see
+[Marketing Site videos](project-and-development.md#videos); the posters ship from
+`apps/marketing/public/assets/`), the same
 precedent as `GuideIntroDialog`'s hero image (the Edit Mode recording is small
 enough to inline; these are not). The `<video>` is `muted playsInline loop`
 with `preload="auto"`, mp4 first in source order, and `autoPlay` unless
@@ -373,7 +374,7 @@ sees terminal tools first and this one on the next load; behind every chain dial
 history-shortcut guard defer behind it like they do behind terminal tools.
 
 **Media:** real footage, hosted like the terminal-tools demos:
-`apps/marketing/public/assets/ask-this-session-demo.{mp4,webm}` + `ask-this-session-poster.jpg`
+`https://plannotator.ai/assets/ask-this-session-demo.{mp4,webm}` + `ask-this-session-poster.jpg`
 (1280x800, ~35 s). Recorded from a real Claude Code 2.1.289 session (real plugin and mod, real
 compiled CLI, real review app) whose model calls went to a scripted local stand-in for the
 Messages API, so the question, the Read tool call and the streamed answer are real traffic with
@@ -393,7 +394,7 @@ it). Unlike the other announcements it is built on the shared dialog (`component
 UI: modal, focus trapped and restored), with the same capture-phase keydown that swallows
 `Mod+Enter` and keeps Escape from the App's own handlers (`data-inbox-announcement-dialog`).
 
-**Media:** the marketing page's own film, `apps/marketing/public/assets/inbox-film.mp4`
+**Media:** the marketing page's own film, `https://plannotator.ai/assets/inbox-film.mp4`
 (1920x1080, ~14 MB, voice-led) and `inbox-film-poster.jpg` (~120 KB), from
 `https://plannotator.ai/assets/` like the other announcements' footage (no CSP is involved; see
 the terminal-tools section). It never autoplays and is `preload="none"`, so opening the panel loads
