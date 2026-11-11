@@ -179,6 +179,8 @@ export function agentMotionStill(): boolean {
 /* ---------- one icon: every animation it runs, so off screen pauses them all and unmount cancels them all ---------- */
 interface Icon {
   el: HTMLElement;
+  /** An uploaded picture that did not load (a dropped link): shown as the agent's own mark until a try loads it. */
+  fellBack?: AgentFace;
   rig: AgentRigKind | null;
   size: number;
   seed: number;
@@ -998,6 +1000,27 @@ export function agentFaceArtReady(): boolean {
 }
 
 /**
+ * A picture that did not load is asked again (the link back, then after 2, 8 and 30 s), while nothing else was chosen
+ * for this icon since: a hand-back heard on a dropped link must not leave the agent's own mark for good.
+ */
+const OWN_RETRY_MS = [2_000, 8_000, 30_000];
+function retryOwnFace(icon: Icon, face: AgentFace, attempt = 0): void {
+  icon.fellBack = face;
+  const again = () => {
+    window.removeEventListener('online', again);
+    clearTimeout(timer);
+    if (icons.get(icon.el) !== icon || icon.fellBack !== face || icon.face !== 'agent') return;
+    icon.fellBack = undefined;
+    showFace(icon, face, false);
+    // Failing again goes through the error handler, which counts on from here.
+    pendingAttempt.set(icon, attempt + 1);
+  };
+  const timer = attempt < OWN_RETRY_MS.length ? setTimeout(again, OWN_RETRY_MS[attempt]) : undefined;
+  window.addEventListener('online', again);
+}
+const pendingAttempt = new WeakMap<Icon, number>();
+
+/**
  * An uploaded picture ("Your own…"), moved as a whole like our faces: built with the DOM, never as markup, and only ever
  * an `<img>` of its address on this Inbox (an SVG in an image runs no script and loads nothing). It plays its own
  * animation here, in the sidebar; under reduced motion it shows its still, which the Inbox makes (an animation inside
@@ -1016,9 +1039,13 @@ function ownFaceEl(icon: Icon, f: HTMLElement, face: AgentFace): void {
   img.decoding = 'async';
   img.dataset.own = face;
   img.src = ownIconSrc(face, reduceQuery?.matches ?? false);
+  img.addEventListener('load', () => pendingAttempt.delete(icon));
   img.addEventListener('error', () => {
     if (icons.get(icon.el) !== icon) return;
-    if (icon.face === face) showFace(icon, 'agent', false);
+    if (icon.face === face) {
+      showFace(icon, 'agent', false);
+      retryOwnFace(icon, face, pendingAttempt.get(icon) ?? 0);
+    }
     // Built again (and asked again) the next time this face shows.
     if (icon.face !== face && icon.faces.get(face) === f) {
       f.remove();
@@ -1146,7 +1173,13 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
 /** Show a face (the click cycle, or the face kept for this agent). `animate`: the swap's little show. */
 export function showAgentFace(el: HTMLElement, face: AgentFace, withMotion = true): void {
   const icon = icons.get(el);
-  if (!icon || icon.face === face) return;
+  if (!icon) return;
+  // A new choice ends any try at a picture that did not load.
+  if (icon.fellBack !== undefined && icon.fellBack !== face) {
+    icon.fellBack = undefined;
+    pendingAttempt.delete(icon);
+  }
+  if (icon.face === face) return;
   if (face !== 'agent' && !face.startsWith('own:') && !face.startsWith('set:') && !faceArt) return;
   showFace(icon, face, withMotion);
 }

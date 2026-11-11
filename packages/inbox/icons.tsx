@@ -10,11 +10,12 @@
  */
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
-import { useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import { useAgentFace } from './agents/agentFaces';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
+import { useImageRetry } from './agents/useImageRetry';
 import { isSetFace, setArtStyle, setFaceParts, setIconSrc, useSetLook, type SetFace } from './agents/iconSets';
 
 export * from '@plannotator/ui/components/inbox-thread/icons';
@@ -35,11 +36,11 @@ export function HostMark({ host, big, agent }: { host: string | null | undefined
  * A picture that does not load (removed, kept on another machine, a guest's window) is the agent's own mark.
  */
 function OwnMark({ face, host, big }: { face: OwnFace; host: string | null | undefined; big?: boolean }) {
-  const [failed, setFailed] = useState(false);
+  const [failed, fail] = useImageRetry();
   if (failed) return <UiHostMark host={host} big={big} />;
   return (
     <span className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-own`} data-agent-face={face}>
-      <img src={ownIconSrc(face, true)} alt="" draggable={false} decoding="async" onError={() => setFailed(true)} />
+      <img src={ownIconSrc(face, true)} alt="" draggable={false} decoding="async" onError={fail} />
     </span>
   );
 }
@@ -51,12 +52,11 @@ function OwnMark({ face, host, big }: { face: OwnFace; host: string | null | und
  * load. Only ever the icon's address on this Inbox; one that does not load is the agent's own mark.
  */
 function SetMark({ face, host, big }: { face: SetFace; host: string | null | undefined; big?: boolean }) {
-  const [failed, setFailed] = useState(false);
+  const [failed, fail] = useImageRetry();
   const { set, icon } = setFaceParts(face);
   const look = useSetLook(set);
   if (failed) return <UiHostMark host={host} big={big} />;
   const src = setIconSrc(set, icon);
-  const fail = () => setFailed(true);
   return (
     <span
       className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-set`}
