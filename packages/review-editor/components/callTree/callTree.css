@@ -1,0 +1,283 @@
+/* The Call tree (CallTree.tsx). Theme tokens only, so light and dark come from
+   the theme; a container query (not the viewport) drops the location under
+   the row when the tree is narrow, so a phone and a thin Dock panel both get
+   it. Its own file so another host (a Guided Review, the Inbox) can import it
+   with the component. */
+
+.call-tree {
+  --call-tree-row-h: 26px;
+  --call-tree-indent: 4ch;
+  --call-tree-line: oklch(from var(--muted-foreground) l c h / 0.45);
+  --call-tree-hover: oklch(from var(--foreground) l c h / 0.05);
+  --call-tree-current: oklch(from var(--primary) l c h / 0.16);
+  container-type: inline-size;
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.call-tree-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  padding: 0 0.125rem;
+}
+.call-tree-title {
+  margin: 0;
+  font: 600 0.8125rem/1.4 var(--font-mono);
+  color: var(--foreground);
+}
+.call-tree-provenance {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+.call-tree-provenance-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.call-tree-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-left: auto;
+}
+.call-tree-filter {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.125rem 0.5rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 500 0.6875rem/1.5 var(--font-sans);
+  cursor: pointer;
+}
+.call-tree-filter:hover { color: var(--foreground); }
+.call-tree-filter[aria-pressed='true'] {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.call-tree-trail {
+  flex-basis: 100%;
+  margin: 0;
+  font: 0.6875rem/1.4 var(--font-mono);
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-tree-rows {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.625rem);
+  background: var(--card);
+  padding: 0.375rem 0;
+  font: 0.78125rem/var(--call-tree-row-h) var(--font-mono);
+  outline: none;
+}
+.call-tree-rows:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--primary) l c h / 0.45); }
+
+.call-tree-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.375rem minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: var(--call-tree-row-h);
+  padding-right: 0.75rem;
+  cursor: default;
+}
+.call-tree-row-openable { cursor: pointer; }
+.call-tree-row:hover { background: var(--call-tree-hover); }
+.call-tree-row-openable:hover .call-tree-name,
+.call-tree-row-openable:hover .call-tree-branch-label {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.call-tree-row-current,
+.call-tree-row-current:hover { background: var(--call-tree-current); }
+.call-tree-rows:focus-visible .call-tree-row-current { box-shadow: inset 2px 0 0 var(--primary); }
+.call-tree-row-commenting { box-shadow: inset 2px 0 0 var(--primary); }
+
+/* Bands: only a call whose own line changed (core/call-tree.ts). */
+.call-tree-band-added { background: oklch(from var(--success) l c h / 0.14); }
+.call-tree-band-removed { background: oklch(from var(--destructive) l c h / 0.14); }
+.call-tree-band-added:hover { background: oklch(from var(--success) l c h / 0.2); }
+.call-tree-band-removed:hover { background: oklch(from var(--destructive) l c h / 0.2); }
+.call-tree-band.call-tree-row-current { box-shadow: inset 0 0 0 1px oklch(from var(--primary) l c h / 0.6); }
+.call-tree-gutter {
+  grid-column: 1;
+  grid-row: 1;
+  text-align: center;
+  font-weight: 600;
+}
+.call-tree-band-added .call-tree-gutter { color: var(--success); }
+.call-tree-band-removed .call-tree-gutter { color: var(--destructive); }
+
+.call-tree-comment {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  visibility: hidden;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  background: var(--primary);
+  color: var(--primary-foreground, var(--background));
+  font: 600 0.8125rem/18px var(--font-sans);
+  cursor: pointer;
+}
+.call-tree-row:hover .call-tree-comment,
+.call-tree-row-current .call-tree-comment,
+.call-tree-row-commenting .call-tree-comment { visibility: visible; }
+.call-tree-row:hover .call-tree-gutter,
+.call-tree-row-current .call-tree-gutter { visibility: hidden; }
+
+.call-tree-body {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+.call-tree-guide {
+  flex: none;
+  width: var(--call-tree-indent);
+  color: var(--call-tree-line);
+}
+.call-tree-twist {
+  flex: none;
+  width: 1.1em;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  text-align: center;
+  cursor: pointer;
+}
+.call-tree-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.4em;
+  border-radius: 999px;
+}
+.call-tree-dot-added { background: var(--success); }
+.call-tree-dot-removed { background: var(--destructive); }
+
+.call-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.call-tree-receiver { color: var(--foreground); }
+.call-tree-name { color: var(--primary); }
+.call-tree-args { color: oklch(from var(--foreground) l c h / 0.82); }
+.call-tree-branch-label {
+  font-style: italic;
+  color: color-mix(in oklab, var(--accent) 70%, var(--foreground));
+}
+.call-tree-label-removed { text-decoration: line-through; text-decoration-color: oklch(from var(--destructive) l c h / 0.6); }
+.call-tree-label-removed .call-tree-name,
+.call-tree-label-removed .call-tree-receiver,
+.call-tree-label-removed .call-tree-args { color: var(--destructive); }
+.call-tree-band-added .call-tree-name,
+.call-tree-band-added .call-tree-receiver,
+.call-tree-band-added .call-tree-args { color: var(--success); }
+.call-tree-pencil { color: var(--muted-foreground); }
+
+.call-tree-note,
+.call-tree-count,
+.call-tree-repeat {
+  flex: none;
+  margin-left: 0.75rem;
+  font: 0.6875rem/1 var(--font-sans);
+  color: var(--muted-foreground);
+}
+
+.call-tree-ref {
+  grid-column: 3;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 1rem;
+  white-space: nowrap;
+  font-size: 0.71875rem;
+  color: var(--muted-foreground);
+}
+.call-tree-open {
+  display: none;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+.call-tree-row:hover .call-tree-open,
+.call-tree-row-current .call-tree-open { display: inline; }
+.call-tree-location {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.call-tree-location:disabled { cursor: default; opacity: 0.75; }
+.call-tree-location:not(:disabled):hover { color: var(--foreground); text-decoration: underline; }
+.call-tree-row-current .call-tree-location { color: var(--primary); }
+
+/* Narrow (a phone, a thin Dock panel): shorter tree lines, the location under the row. */
+@container (max-width: 560px) {
+  .call-tree { --call-tree-indent: 2ch; --call-tree-row-h: 28px; }
+  .call-tree-dash { display: none; }
+  .call-tree-row {
+    grid-template-columns: 1.125rem minmax(0, 1fr);
+    padding-right: 0.5rem;
+  }
+  .call-tree-ref {
+    grid-column: 2;
+    grid-row: 2;
+    padding: 0 0 0.25rem 0;
+    line-height: 1.2;
+    font-size: 0.6875rem;
+  }
+  .call-tree-note { display: none; }
+}
+
+/* The hunk's way into the tree (CallTreeHunkEntry). */
+.call-tree-hunk-entry-line {
+  display: flex;
+  padding: 2px 8px;
+}
+.call-tree-hunk-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font: 500 0.6875rem/1.25rem var(--font-sans);
+  cursor: pointer;
+}
+.call-tree-hunk-entry:hover,
+.call-tree-hunk-entry:focus-visible {
+  color: var(--foreground);
+  border-color: oklch(from var(--primary) l c h / 0.6);
+}
+.call-tree-hunk-entry-name {
+  font-family: var(--font-mono);
+  color: var(--primary);
+}
+
+/* The Call flow tab's Call tree view: one tree per entry, or the hunk's tree. */
+.call-flow-call-trees {
+  display: grid;
+  gap: 1.25rem;
+  padding-top: 0.5rem;
+}
