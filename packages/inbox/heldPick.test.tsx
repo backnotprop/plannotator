@@ -7,6 +7,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { TYPED_ANSWER_SAVE_MS } from './typedAnswers';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
@@ -279,15 +280,21 @@ test.skipIf(!hasDom)('an answer typed behind a held pick: only its newest words 
   const release = gate[0]!;
   gate = null;
   await act(async () => release());
-  await until(() => picks.length === 2, 'the newest words');
+  // The first letter changes the answer from a choice to words: it goes at once. The rest wait for the typing to
+  // pause (typedAnswers.ts), then only the newest words go.
+  await until(() => picks.length === 2, 'the first letter');
+  await new Promise((resolve) => setTimeout(resolve, TYPED_ANSWER_SAVE_MS + 50));
+  await until(() => picks.length === 3, 'the newest words');
   await settle();
-  expect(picks).toHaveLength(2);
-  // Held behind the first, it goes with the revision the first will make there.
+  expect(picks).toHaveLength(3);
+  expect(picks[1]!.body.questions[0]!.answer?.other).toBe('l');
+  // Held behind the ones before, each goes with the revision the one before will make there.
   expect(picks[1]!.body.questions[0]!.revision).toBe(4);
-  expect(picks[1]!.body.questions[0]!.answer?.other).toBe('loose');
+  expect(picks[2]!.body.questions[0]!.revision).toBe(5);
+  expect(picks[2]!.body.questions[0]!.answer?.other).toBe('loose');
   expect(field.value).toBe('loose');
 
-  act(() => draw([held('k1'), held('k2', 'refused')]));
+  act(() => draw([held('k1'), held('k2'), held('k3', 'refused')]));
   await until(() => field.value === '', 'the words undone');
   expect(toasts.at(-1)!.lead.startsWith('Pick not saved.')).toBe(true);
 });
