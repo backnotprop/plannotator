@@ -76,6 +76,8 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .am-sets-n { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* Not here yet (a set still downloading) or still loading (a slow link): a faint tile, not an empty space. */
 .am-sets-i[data-missing] .am-sets-art, .am-sets-i > .am-sets-art:not([data-mono]):not([data-loaded]) { border-radius: 6px; background: color-mix(in oklch, var(--foreground) 6%, transparent); }
+/* One that did not load waits behind that tile to be asked again (SetsBody.tsx), never a broken picture. */
+.am-sets-art > img[data-failed] { visibility: hidden; }
 .am-sets-get { display: flex; align-items: center; gap: 10px; padding: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; flex: none; }
 .am-sets-getb { height: 28px; padding: 0 14px; border: 0; border-radius: 7px; background: var(--primary); color: var(--primary-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; cursor: pointer; }
 .am-sets-getb:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--background), 0 0 0 3.5px var(--primary); }
