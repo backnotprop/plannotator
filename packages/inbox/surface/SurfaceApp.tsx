@@ -1,17 +1,3 @@
-/**
- * The surface (PLAN step S1): what a native shell loads to show one
- * attachment with Plannotator's annotation tools, or one guided review.
- * Built by apps/inbox's `build:surface` into a single file with no network
- * (CSP `connect-src 'none'`); every byte arrives over the bridge
- * (./bridge.ts, adr/implementation/inbox-mobile.md section 5).
- *
- * The shell draws every bar and sheet; the surface draws only the document
- * and its marks, with Plannotator's viewers (Viewer and its toolstrip,
- * HtmlViewer with pins, DiagramViewer, the guide chain). The composer is the
- * shell's: the viewers hand their drafts over (`onHostDraft`) and the shell
- * answers with `commit_annotation` once the door saved the comment.
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAnnotationRecord, SurfaceOpenAttachment, SurfaceOpenGuide, SurfaceShellMessage } from '@plannotator/core/inbox-types';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -24,14 +10,10 @@ import { listenToShell, postToShell } from './bridge';
 
 declare const __APP_VERSION__: string;
 
-// Nothing persists and nothing is fetched: settings live in memory for this
-// load, and the shell decides the theme. A phone reads diffs unified and
-// wrapped (6.2).
 const memory = new Map<string, string>();
 configurePlannotatorUI({
   serverSync: () => {},
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
-  // The selection toolbar on a phone: below the selection, inside the screen, thumb-sized.
   touchSelectionToolbar: true,
   storageBackend: {
     getItem: (key) => memory.get(key) ?? null,

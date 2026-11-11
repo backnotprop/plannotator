@@ -1,11 +1,3 @@
-/**
- * One attachment in the surface (3.6, 4.1 to 4.4): markdown and text through
- * `Viewer` with the annotation toolstrip, HTML through `HtmlViewer` with pins,
- * diagrams through `DiagramViewer`. Each hands its draft to the shell
- * (`onHostDraft`); the shell's sheet writes the comment, the door saves it,
- * and `commit` draws it as saved.
- */
-
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { diagramTargetName, diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
@@ -22,12 +14,10 @@ import { Icon } from '../icons';
 import { postToShell } from './bridge';
 import type { DiagramHostDraft } from '@plannotator/ui/components/diagram/DiagramViewer';
 
-// The diagram engine and its runtimes load on the first diagram, as in Plannotator's own viewers.
 const SurfaceDiagram = lazy(() => import('./SurfaceDiagram'));
 
 export interface SurfaceDocumentHandle {
   stepPin: (direction: 'parent' | 'child') => void;
-  /** Comment in the shell's edit menu: the selection becomes a draft; false when there is none. */
   takeSelection: () => boolean;
   commit: (record: InboxAnnotationRecord) => void;
   remove: (id: string) => void;
@@ -52,17 +42,12 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
   const [mode, setMode] = useState<EditorMode>('selection');
   const [selectedId, setSelectedId] = useState<string | null>(open.focus);
-  // The draft the shell holds, so a commit or a cancel drops it.
   const draft = useRef<{ id: string; intent: HostDraft['intent'] | 'diagram'; cancel: () => void } | null>(null);
 
   const kind = readInboxAttachmentKind(attachment.kind);
   const isHtml = kind === 'html';
   const isDiagram = kind === 'mermaid' || kind === 'graphviz';
-  // An image, a PDF, any other file and a kind this surface does not know are
-  // the shell's to show natively (its image viewer, PDFKit, Quick Look); the
-  // surface draws a plain card for them and never reads their bytes as text.
   const isText = isInboxTextKind(kind) && !isHtml && !isDiagram;
-  // Code is shown read-only here (one code block); its line comments are made in the window.
   const isCode = kind === 'code';
   const fileRecords = useMemo(
     () => records.filter((r) => r.attachment_id === attachment.id && r.version === version),
@@ -70,14 +55,10 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   );
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   const blocks = useMemo(() => attachmentBlocks(attachment.kind, open.text, attachment.name), [attachment.kind, attachment.name, open.text]);
-  // A Markdown file with Contents (contents.ts: 4 or more headings): a Contents button opens the list, as in the window on a phone.
   const hasContents = kind === 'markdown' && showsContents(blocks);
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const [contentsOpen, setContentsOpen] = useState(false);
 
-  // Paint the stored highlights once the document is drawn; later ones arrive through commit.
-  // The shell's "3 annotations" sheet opens a file at one mark (`focus`):
-  // once the marks are painted, that one is brought to the middle of the screen.
   const painted = useRef(false);
   useEffect(() => {
     if (!isText || painted.current) return;
@@ -103,7 +84,6 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     commit: (record) => {
       if (record.attachment_id !== attachment.id || record.version !== version) return;
       dropDraft();
-      // A diagram draws its comments from `records`; text and HTML paint the saved mark.
       if (!isDiagram) viewerRef.current?.applySharedAnnotations([annotationOf(record)]);
     },
     remove: (id) => {
@@ -127,7 +107,6 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     if (next.intent === 'selection') {
       postToShell({ type: 'selection', quote: annotation.originalText, draft: wire });
     } else if (annotation.htmlAnchor) {
-      // Parent or Child may have moved it out of sight.
       requestAnimationFrame(() => viewerRef.current?.revealPin?.());
       postToShell({
         type: 'pin',
@@ -171,8 +150,6 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
     [blocks],
   );
 
-  // The shell's panel covers the page's lower part and shrinks the web view:
-  // the pin being written about stays in sight.
   useEffect(() => {
     if (!isHtml) return;
     const onResize = () => {

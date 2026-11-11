@@ -14,7 +14,6 @@
 
 import { INBOX_SURFACE_BRIDGE_VERSION, readSurfaceShellMessage, type SurfaceMessage, type SurfaceShellMessage } from '@plannotator/core/inbox-types';
 
-/** A message to the shell, without its `v` (added here). */
 export type ToShell = SurfaceMessage extends infer M ? (M extends { v: 1 } ? Omit<M, 'v'> : never) : never;
 
 interface ShellChannels {
@@ -29,14 +28,9 @@ export function postToShell(message: ToShell): void {
     shell.webkit.messageHandlers?.plannotatorSurface?.postMessage(wire);
     return;
   }
-  // Outside a shell (a desktop browser opening the file) there is nobody to tell.
   shell.plannotatorShell?.postMessage(JSON.stringify(wire));
 }
 
-/**
- * Install `window.plannotatorSurface.receive`. A message this surface cannot
- * read is answered with `error` and goes no further.
- */
 export function listenToShell(onMessage: (message: SurfaceShellMessage) => void): () => void {
   const receive = (value: unknown) => {
     const read = readSurfaceShellMessage(value);
