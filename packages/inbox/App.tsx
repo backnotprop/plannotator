@@ -369,6 +369,8 @@ const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
 const SEEN_RETRIES = 5;
 const SEEN_RETRY_MS = 1000;
+/** How long a look that landed waits for its record (written before the look answers) to bring the list read. */
+const LOOK_RECORD_WAIT_MS = 250;
 /** The What's new page asks again this often while the server fetches the notes (its request gives up after 10 s). */
 const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
@@ -1724,6 +1726,12 @@ function Inbox() {
     };
     look.then(done, done);
   }, []);
+  /**
+   * The list read of the records that come after a look (the look's own record among them), started at once; it
+   * resolves with that read (null: it failed), or undefined when no record came within `ms`. Set by the stream's
+   * effect below.
+   */
+  const recordRead = useRef<(ms: number) => Promise<ListModel | null | undefined>>(() => Promise.resolve(undefined));
   const seenRetries = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const retries = seenRetries.current;
@@ -1749,7 +1757,9 @@ function Inbox() {
               lookRef.current = next;
               setLook(next);
             }
-            return refreshList(false);
+            // The look's record brings a list read to every window: this one's is the look's too (one read, not
+            // two). No record (the look changed nothing, or the stream is down): the list is read here.
+            return recordRead.current(LOOK_RECORD_WAIT_MS).then((read) => (read === undefined ? refreshList(false) : read));
           })
           .catch(() => {
             // A later look on its way covers this one.
@@ -2245,7 +2255,7 @@ function Inbox() {
       if (timer) clearTimeout(timer);
       // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
       const heard = perfStart();
-      const readNow = () => {
+      const readNow = (): Promise<ListModel | null> => {
         timer = null;
         const records = batch;
         batch = newRecordBatch();
@@ -2289,9 +2299,46 @@ function Inbox() {
             // A failed list read says nothing: the drafts are read, as before.
             if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next)) void refreshDrafts();
           });
+        return listRead;
       };
-      if (how.now) readNow();
-      else timer = setTimeout(readNow, 80);
+      // A look of this window waits for this read (`recordRead`): it starts now, for both.
+      const waiting = lookWaiters.splice(0);
+      if (how.now || waiting.length > 0) {
+        const listRead = readNow();
+        for (const resolve of waiting) resolve(listRead);
+      } else {
+        timer = setTimeout(readNow, 80);
+        flushRecordRead = () => {
+          if (timer) clearTimeout(timer);
+          return readNow();
+        };
+      }
+    };
+    /** The records' read waiting its pause, started now (null: none waits). */
+    let flushRecordRead: (() => Promise<ListModel | null>) | null = null;
+    /** Looks of this window waiting for the next records' read (`recordRead`). */
+    const lookWaiters: ((read: Promise<ListModel | null>) => void)[] = [];
+    // A look that landed: its record (or another's) is on its way, and its read is the look's list read too. One
+    // already waiting starts now; else the next one to come starts at once; none within `ms` (the look changed
+    // nothing, or the stream is down): null, and the look reads the list itself.
+    recordRead.current = (ms) => {
+      if (timer && flushRecordRead) {
+        const flush = flushRecordRead;
+        flushRecordRead = null;
+        return flush();
+      }
+      return new Promise<ListModel | null | undefined>((resolve) => {
+        const take = (read: Promise<ListModel | null>) => {
+          clearTimeout(giveUp);
+          resolve(read);
+        };
+        const giveUp = setTimeout(() => {
+          const at = lookWaiters.indexOf(take);
+          if (at >= 0) lookWaiters.splice(at, 1);
+          resolve(undefined);
+        }, ms);
+        lookWaiters.push(take);
+      });
     };
     /** The question record's thread, when this window's own save explains it (ownSaves.ts); null: news. */
     const ownEcho = (event: InboxEvent): string | null =>
@@ -2615,6 +2662,8 @@ function Inbox() {
     })();
     return () => {
       cancelled = true;
+      recordRead.current = () => Promise.resolve(undefined);
+      for (const resolve of lookWaiters.splice(0)) resolve(Promise.resolve(null));
       pickSaves.current.read = () => {};
       pickSaves.current.readOwn = () => {};
       pickSaves.current.readHeld = () => {};
