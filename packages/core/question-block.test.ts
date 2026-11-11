@@ -152,7 +152,6 @@ iOS background execution is unreliable.
     expect(parseQuestionBlock("question", "")).toBeNull();
     expect(parseQuestionBlock("question", "- [ ] only choices\n- [ ] no prompt")).toBeNull();
     expect(parseQuestionBlock("question", "Recommended: nothing to ask")).toBeNull();
-    expect(parseQuestionBlock("question", `Q?\n${"x".repeat(25_000)}`)).toBeNull();
     expect(parseQuestionBlock("question", undefined as unknown as string)).toBeNull();
   });
 });
@@ -822,9 +821,15 @@ describe("long task-list choices (picked as written)", () => {
     expect(canonicalQuestionAnswer(q, cutLoose)).toBe(cutLoose);
   });
 
-  test("selected stays bounded: a label longer than any block body is cut", () => {
-    const parsed = parseQuestionAnswer(answer({ selected: ["x".repeat(30_000)] }))!;
-    expect(parsed.selected[0].length).toBe(20_000);
+  test("a question over 20,000 characters with 25 choices keeps every choice, and each can be picked whole", () => {
+    const labels = Array.from({ length: 25 }, (_, i) => `Option ${i + 1} ${"x".repeat(1_000)}`);
+    const q = parseQuestionBlock("question-multi", `Which ones?\n\n${labels.map((l) => `- [ ] ${l}`).join("\n")}`)!;
+    expect(q).not.toBeNull();
+    expect(q.choices.map((c) => c.label)).toEqual(labels);
+    const plain = parseQuestionBlock("question", `Which one?\n\n${labels.map((l) => `- ${l.slice(0, 20)}`).join("\n")}`)!;
+    expect(plain.choices).toHaveLength(25);
+    const parsed = parseQuestionAnswer(answer({ kind: "multi", selected: labels }))!;
+    expect(parsed.selected).toEqual(labels);
   });
 });
 
