@@ -3,7 +3,8 @@
  * matrix in briefs `session-names-states.md` (§3, numbered as there). The failures this catches: a name shown in a
  * project with one live session (rows change for nobody's benefit); the project shown where rows of one project would
  * read alike; the generated title or a default hiding the name the person gave; two rows reading the same; a default
- * that changes between reads; a long name that is cut where two names differ, or loses its whole form in the tooltip.
+ * that changes between reads; a long name cut twice (the slot's cut, then the column's), a same-name code cut off, or a long name that loses its
+ * whole form in the tooltip.
  * The live-count hold is severalSessions.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
@@ -26,7 +27,8 @@ const cases: Case[] = [
   ['4 Claude Code with no name: its own listed name (it rides as the title)', base({ names: { title: 'plannotator-3f' } }), 'plannotator-3f', `${P} · plannotator-3f`],
   ['6 two sessions with the same name each add their code', base({ names: { label: 'docs' }, peers: [{ session: 'cc-a', label: 'docs' }, { session: 'cc-b', label: 'Docs' }] }), `docs (${code('cc-a')})`, `${P} · docs (${code('cc-a')})`],
   ['6 a name equal to another’s generated title is alike too', base({ names: { label: 'docs' }, peers: [{ session: 'cc-a', label: 'docs' }, { session: 'cc-b', title: 'docs' }] }), `docs (${code('cc-a')})`, `${P} · docs (${code('cc-a')})`],
-  ['7 a very long name: cut in the middle, whole in the tooltip', base({ names: { label: LONG } }), 'Migrate auth tok…e store to JWTs', `${P} · ${LONG}`],
+  ['7 a very long name: cut once, at its end (as the column cuts), whole in the tooltip', base({ names: { label: LONG } }), 'Migrate auth tokens from the le…', `${P} · ${LONG}`],
+  ['6+7 two long names alike: the code stays after the cut', base({ names: { label: LONG }, peers: [{ session: 'cc-a', label: LONG }, { session: 'cc-b', label: LONG }] }), `Migrate auth tokens from t… (${code('cc-a')})`, `${P} · ${LONG} (${code('cc-a')})`],
   ['8 right-to-left and emoji names are drawn as they are', base({ names: { label: 'إصلاح 🔧' } }), 'إصلاح 🔧', `${P} · إصلاح 🔧`],
   ['8 a blank name is no name: the next source', base({ names: { label: '   ', title: 'plannotator-3f' } }), 'plannotator-3f', `${P} · plannotator-3f`],
   ['9 an ended session with no name left (Inbox restarted): the default', base({ session: 'gone-1', peers: [{ session: 'cc-a' }, { session: 'cc-b' }] }), `${P}-${code('gone-1')}`, `${P} · ${P}-${code('gone-1')}`],

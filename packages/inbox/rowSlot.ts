@@ -9,11 +9,13 @@
  *   Code's own name for the session (`title`), else a default made here, the project and a short code from the
  *   session id ("plannotator-k3"), stable, lengthened only when two sessions of the project would share it.
  * - Two sessions of the project that would read alike each add their code: "docs (k3)", "docs (p9)".
- * - A long name is cut in the middle at SLOT_NAME_MAX characters ("Fix login…for SSO users"); the tooltip has it whole.
+ * - A long name is cut at its end at SLOT_NAME_MAX characters ("Migrate auth tokens from the le…"), so the column's own
+ *   cut (CSS, "…" at the end) never adds a second "…" and the server's hard cut of a long label (60) never shows as a
+ *   stray tail ("…to signed J"); a same-name code stays at the end, outside the cut. The tooltip has it whole.
  */
-import { shortLabel } from './sessionLabels';
+import { graphemesOf } from '@plannotator/core/inbox-format';
 
-/** The longest name the slot draws, in characters; past it, cut in the middle (CSS then cuts at the column). */
+/** The longest name the slot draws, in characters; past it, cut at the end (CSS then cuts at the column, the same way). */
 export const SLOT_NAME_MAX = 32;
 
 export interface SlotNames {
@@ -62,6 +64,12 @@ export function sessionCode(session: string, others: readonly string[]): string 
 const clean = (name: string | null | undefined): string | null => (typeof name === 'string' && name.trim() ? name.trim() : null);
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 
+/** `name` cut to `max` characters (whole graphemes) at its end, with "…". */
+function endCut(name: string, max: number): string {
+  const chars = graphemesOf(name);
+  return chars.length <= max ? name : `${chars.slice(0, max - 1).join('').trimEnd()}…`;
+}
+
 /** A session's name: the person's, else the generated one, else the default; null when it has none of the first two. */
 function givenName(names: SlotNames): string | null {
   return clean(names.label) ?? clean(names.title);
@@ -72,7 +80,8 @@ export function rowSlot(input: RowSlotInput): RowSlot {
   const others = input.peers.filter((peer) => peer.session !== input.session);
   const code = sessionCode(input.session, others.map((peer) => peer.session));
   const given = givenName(input.names);
-  let name = given ?? `${input.project}-${code}`;
-  if (given && others.some((peer) => { const theirs = givenName(peer); return theirs !== null && same(theirs, given); })) name = `${given} (${code})`;
-  return { kind: 'name', text: shortLabel(name, SLOT_NAME_MAX), tip: `${input.project} · ${name}` };
+  const alike = given !== null && others.some((peer) => { const theirs = givenName(peer); return theirs !== null && same(theirs, given); });
+  const name = given === null ? `${input.project}-${code}` : alike ? `${given} (${code})` : given;
+  const text = given === null ? name : alike ? `${endCut(given, SLOT_NAME_MAX - code.length - 3)} (${code})` : endCut(given, SLOT_NAME_MAX);
+  return { kind: 'name', text, tip: `${input.project} · ${name}` };
 }
