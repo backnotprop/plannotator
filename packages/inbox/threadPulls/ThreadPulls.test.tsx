@@ -309,6 +309,53 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(2);
   });
 
+  test('Post decisions: a row on each PR, only on a thread with decisions', async () => {
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/web#2', 'open', 'main', 'b')]);
+    const posted: string[] = [];
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    const rows = [...popover()!.querySelectorAll('[data-pr-post]')];
+    expect(rows.map((b) => [b.getAttribute('data-pr-post'), b.getAttribute('aria-label')])).toEqual([
+      ['o/r#1', 'Post decisions on o/r#1'],
+      ['o/web#2', 'Post decisions on o/web#2'],
+    ]);
+    await click(rows[1]!);
+    expect(posted).toEqual(['o/web#2']);
+    act(() => root!.render(<ThreadPullsButton threadId={THREAD} summary={undefined} />));
+    await settle();
+    expect(popover()!.querySelector('[data-pr-post]')).toBeNull();
+  });
+
+  test('Post decisions with one PR: a button under its card', async () => {
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a')]);
+    const posted: string[] = [];
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(popover()!.querySelector('[data-pr-edit] [data-pr-post="o/r#1"]'));
+    expect(posted).toEqual(['o/r#1']);
+  });
+
+  test('Post on a pull request with none linked: the card opens on Add, and the PR added gets the post, then the card closes', async () => {
+    postAnswer = (body) => {
+      answer = answerOf([pull((body.add as string[])[0]!, 'unknown', 'main', 'z')]);
+      return Response.json(answer);
+    };
+    const posted: string[] = [];
+    let done = 0;
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} adding postOnAdd onAddingDone={() => (done += 1)} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    const input = popover()!.querySelector<HTMLInputElement>('[data-pr-add-input]')!;
+    expect(document.activeElement).toBe(input);
+    await type(input, 'https://github.com/acme/notes/pull/12');
+    await click(popover()!.querySelector('[data-pr-add]'));
+    expect(posts.map((p) => p.body)).toEqual([{ add: ['https://github.com/acme/notes/pull/12'] }]);
+    expect(posted).toEqual(['acme/notes#12']);
+    expect(done).toBe(1);
+    expect(popover()).toBeNull();
+  });
+
   test("a change to this thread's PRs reads them again; another thread's does not", async () => {
     answer = answerOf([pull('o/r#1', 'open', 'main', 'a')]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);

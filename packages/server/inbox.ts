@@ -136,8 +136,9 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
-import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
-import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
+import { encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "@plannotator/shared/app-html";
+import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASSETS_MARKER } from "@plannotator/shared/packed-app";
+import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
@@ -202,6 +203,8 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
+import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
+import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -235,6 +238,10 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
+import { createInboxIconAnimate } from "./inbox-icon-animate";
+import { createBuiltInIconSets, createInboxIconSets } from "./inbox-icon-sets";
+import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./inbox-icon-set-fetch";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
@@ -919,30 +926,53 @@ function etagMatches(header: string | null, etag: string): boolean {
 }
 
 /**
- * `/` through the tailnet listener (#2032): the page compressed as remote-mode
- * and `--tailscale` sessions serve theirs (#1617, `packages/shared/app-html.ts`),
- * brotli in practice since serve is HTTPS. The window's own loopback port keeps
- * the uncompressed `no-store` answer: on loopback the transfer is free and the
- * one-time compression pass only delays the first load.
+ * `/` on every listener the browser reaches (the window's loopback port, so a
+ * plain reverse proxy or ssh tunnel in front of it too, and the tailnet
+ * listener, #2032): the page compressed through the shared
+ * `packages/shared/app-html.ts` helper (brotli or gzip on `Accept-Encoding`,
+ * `Vary: Accept-Encoding`), made in brotli when the Inbox starts. `compress`
+ * is false only for a browser on this computer while that body is still being
+ * made (`compressWindowAsset`): it gets the plain page at once. Loopback once got the page
+ * uncompressed and `no-store`, which left a proxy or tunnel to that port with
+ * the whole 2 MB page on every load.
  *
  * Cache: `private, no-cache` with a weak ETag, not `no-store`. The page is the
- * same bytes until a restart to update swaps the binary, and a phone on cellular
- * opens it many times a day, so a revalidation that answers 304 saves the ~5 MB
- * body; `no-cache` still asks every time, so a new build is never missed. The tag
- * is weak because the br, gzip and identity bodies are one page (one tag fits all
- * three under `Vary: Accept-Encoding`). The data routes stay `no-store`.
- * The listener's checks (owner login, served Host, Sec-Fetch-Site) ran before this.
+ * same bytes until a restart to update swaps the binary, so a revalidation that
+ * answers 304 saves the body on every reload; `no-cache` still asks every time,
+ * so a new build is never missed. The tag is weak because the br, gzip and
+ * identity bodies are one page (one tag fits all three under
+ * `Vary: Accept-Encoding`). The data routes stay `no-store`.
+ * A listener's own checks (on the tailnet: owner login, served Host,
+ * Sec-Fetch-Site) ran before this.
  */
-async function tailnetWindowPage(req: Request, page: string): Promise<Response> {
+async function windowPage(req: Request, page: string, compress: boolean): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
     return new Response(null, { status: 304, headers: { ...WINDOW_PAGE_HEADERS, ...cacheHeaders } });
   }
-  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), true);
+  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), compress);
   const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
+}
+
+/** How long after start the window's lazy scripts start being compressed: after the first load's own work. */
+const LAZY_ASSET_WARM_DELAY_MS = 15_000;
+
+/** The text assets packed behind the window page (scripts, styles), by route path; none for an unpacked page. */
+function packedTextAssetPaths(bundle: string): string[] {
+  const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
+  if (markerAt < 0) return [];
+  const from = markerAt + PACKED_ASSETS_MARKER.length;
+  try {
+    const index = JSON.parse(bundle.slice(from, bundle.indexOf("\n", from))) as Record<string, { base64?: true }>;
+    return Object.entries(index)
+      .filter(([, entry]) => !entry.base64)
+      .map(([path]) => path);
+  } catch {
+    return [];
+  }
 }
 
 function errorResponse(error: unknown): Response {
@@ -1156,8 +1186,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
   const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  // The pictures uploaded for agents' icons ("Your own…", inbox-agent-icons.ts): every faces wire carries them.
+  const agentIconFiles = createAgentIcons({ dir: join(inboxDir(dataDir), INBOX_AGENT_ICONS_DIR) });
   const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
-    for (const listener of agentFaceListeners) listener(wire);
+    const withIcons = { ...wire, icons: agentIconFiles.list() };
+    for (const listener of agentFaceListeners) listener(withIcons);
   });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
@@ -4372,7 +4405,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).
-  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json });
+  // "Animate it": an agent hands an animated picture back for the one icon it was asked about (inbox-icon-animate.ts).
+  const iconAnimate = createInboxIconAnimate({
+    inboxDir: inboxDir(dataDir),
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    touch: () => void agentFacesFile.touch(),
+  });
+  const agentIcons = createInboxAgentIcons({
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    kept: () => iconAnimate.kept(),
+  });
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
+  // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
+  const builtInIconSets = createBuiltInIconSets();
+  const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
+  // A download a stop cut short goes on (only one the person started; nothing is asked otherwise).
+  iconSetFetcher.resume();
+  const iconSets = createInboxIconSets({ builtIn: builtInIconSets, fetcher: iconSetFetcher, serverSession, localOnly: () => localOnly(), readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -4626,6 +4685,49 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
+  // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
+  // off the event loop, and kept: the page and the entry script it asks for next now, in brotli (what Chromium
+  // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
+  const compressedReady = new Set<string>();
+  const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
+    const key = `${encoding} ${path}`;
+    if (compressedReady.has(key)) return Promise.resolve();
+    const made: Promise<boolean> =
+      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+    return made.then(
+      (ok) => {
+        if (ok) compressedReady.add(key);
+      },
+      () => {},
+    );
+  };
+  /**
+   * Whether this answer of the page or a script goes out compressed. Always, except to a browser on this
+   * computer (the window's port, no proxy in between) while that body is still being made: the transfer is
+   * free there, so it gets the plain body at once rather than wait on the one-time pass (the window opens the
+   * moment the Inbox starts). A proxy, a tunnel or the tailnet always waits for the compressed body.
+   */
+  const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
+    if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
+    const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
+    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    void warmCompressed(path, encoding);
+    return false;
+  };
+  void warmCompressed("/", "br");
+  for (const entry of windowEntryScripts) void warmCompressed(entry, "br");
+  // The window's other text scripts (Mermaid, Graphviz, each code grammar…) are compressed one by one a while
+  // after start, so the first diagram or code block over a slow link never waits on its one-time pass either
+  // (the largest takes ~0.1-0.3 s). One at a time, off the event loop; a stop ends it.
+  const lazyAssetWarm = setTimeout(() => {
+    void (async () => {
+      for (const path of packedTextAssetPaths(options.htmlContent ?? "")) {
+        if (stopped) return;
+        await warmCompressed(path, "br");
+      }
+    })();
+  }, LAZY_ASSET_WARM_DELAY_MS);
+  lazyAssetWarm.unref?.();
 
   /**
    * The window's read of one thread (`GET /api/inbox/threads/<id>`), or null when there is none: each message's seq
@@ -5456,6 +5558,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw error;
         }
       }
+      // Post decisions (the thread's ⋯ More, Export decisions › Post on a pull request, and the PR card's row): the
+      // thread's decisions as one comment on one of its PRs, edited in place on a later post (inbox-decision-post.ts).
+      // A write to the forge as the person's own gh / glab: the review post's guards, the owner only and same origin.
+      {
+        const posting = INBOX_DECISION_POST_ROUTE.exec(path);
+        if (posting) {
+          if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+          if (!ownerOrLocal(req, via)) return localOnly();
+          if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+            return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+          }
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
+          return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
+        }
+      }
       // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
       // the same origin as the thread's own read; the phone door carries it (inbox-decision-export.ts).
       if (INBOX_DECISION_EXPORT_ROUTE.test(path)) {
@@ -5466,6 +5585,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return (await inboxDecisionExportRoute(url, store, { version }))!;
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      // Where Post decisions puts them (config.json `inboxDecisionsPostTo`; the Post group's "Where" in Export decisions):
+      // read by any window that may post, changed by the owner only, like the post itself.
+      if (path === "/api/inbox/settings/decisions-post") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method === "GET") return json({ serverSession, post_to: decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo) });
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!DECISION_POST_DESTINATIONS.includes(body.post_to as never)) throw new InboxError("validation_error", "post_to: description, comment or both.", { field: "post_to" });
+        saveConfig({ inboxDecisionsPostTo: body.post_to as "description" | "comment" | "both" });
+        const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
+        if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+        return json({ serverSession, post_to: saved });
+      }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
@@ -5810,6 +5946,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Agent icons' faces: the face each agent shows in every window.
       const faced = await agentFaces.route(req, url);
       if (faced) return faced;
+      // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
+      const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
+      if (iconed) return iconed;
+      const animated = await iconAnimate.route(req, url, ownerOrLocal(req, via));
+      if (animated) return animated;
+      // Icon sets for agents' icons ("Sets"): built-in ones to any window, fetched ones and downloads to the owner's.
+      const setIconed = await iconSets.route(req, url, ownerOrLocal(req, via));
+      if (setIconed) return setIconed;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
@@ -6508,13 +6652,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        if (via === "tailnet") return tailnetWindowPage(req, page);
-        return new Response(req.method === "HEAD" ? null : page, {
-          headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        });
+        return windowPage(req, page, compressWindowAsset(req, via, "/"));
       }
-      // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
-      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
+      // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
+      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
@@ -6632,9 +6773,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return served(req, "local");
   };
+  // What the window's own port answers the browser: the same answers, JSON compressed (inbox-encoding.ts). The
+  // device door calls `fetch` above in process and reads plain bodies, so the encoding sits only here and on the
+  // tailnet listener's dispatch.
+  const loopbackFetch = async (req: Request): Promise<Response> => encodeInboxResponse(req, await fetch(req));
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
-  const started = startOnLoopback(fetch, previous?.port ?? null);
+  const started = startOnLoopback(loopbackFetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;
   port = server.port as number;
@@ -6662,12 +6807,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
-    // Compress the page, and the entry script it asks for next, for the tailnet before the first phone asks (#2032).
-    onListen: () => {
-      prewarmAppHtml(windowApp.html, "br");
-      for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
-    },
+    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
     tailscale: options.tailscale,
     flag: options.publishTailnet === true,
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
@@ -6790,6 +6930,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    clearTimeout(lazyAssetWarm);
     stopLoopWatch?.();
     releasePerfPhases?.();
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).
