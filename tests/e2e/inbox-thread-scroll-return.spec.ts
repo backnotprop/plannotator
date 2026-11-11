@@ -188,6 +188,25 @@ async function leave(p: Page, how: Return, narrow: boolean): Promise<void> {
   else await pane(p).getByRole('button', { name: /^Close / }).first().click();
 }
 
+/**
+ * A pointer press on the opener's middle, where it sits now. Never `locator.click()`: when the opener moves by a pixel
+ * during its "stable" check (WebKit corrects a scrollTop set past the end a moment later), Playwright tries again and
+ * first calls `scrollIntoView({ block: 'end' })` on it, so the thread moves 44 px (the padding under the last tile)
+ * between the place this spec read and the press, and the place the app then keeps is not the one that was read.
+ */
+async function pressWhereItIs(p: Page, selector: string): Promise<void> {
+  const point = await p.evaluate((sel) => {
+    const target = document.querySelector<HTMLElement>(sel)!;
+    const r = target.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return { x, y, onIt: hit !== null && (target === hit || target.contains(hit)) };
+  }, selector);
+  expect(point.onIt, `the middle of ${selector} is on screen and nothing covers it`).toBe(true);
+  await p.mouse.click(point.x, point.y);
+}
+
 async function roundTrip(p: Page, { file, opener, how, narrow = false, shot }: { file: string; opener: Opener; how: Return; narrow?: boolean; shot?: string }) {
   await loadThread(p);
   const selector = openerSelector(opener, file);
@@ -205,7 +224,7 @@ async function roundTrip(p: Page, { file, opener, how, narrow = false, shot }: {
   const before = await where(p, selector);
   expect(before.scrollTop, 'the thread is scrolled before the file opens').toBeGreaterThan(40);
   if (shot && shotsDir) await p.screenshot({ path: join(shotsDir, `${shot}-1-thread.png`) });
-  await p.locator(selector).click();
+  await pressWhereItIs(p, selector);
   await expect(pane(p)).toBeVisible();
   await p.waitForTimeout(300);
   if (shot && shotsDir) await p.screenshot({ path: join(shotsDir, `${shot}-2-file.png`) });
