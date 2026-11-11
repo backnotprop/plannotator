@@ -33,7 +33,7 @@
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
+import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, INBOX_REPLY_DRAFT_RECIPIENTS_MAX, INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyQuote } from "@plannotator/core/inbox-types";
 import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
@@ -59,6 +59,8 @@ function parse(text: string): InboxReplyDraft | null {
       : [];
     // Who the reply goes to (the recipient pill): kept only when well formed.
     const recipients = recipientList(value.recipients);
+    // The message the reply quotes (approval "inbox-reply-quote"): kept only when well formed.
+    const quote = replyQuote(value.quote);
     return {
       v: 1,
       thread_id: value.thread_id,
@@ -67,6 +69,7 @@ function parse(text: string): InboxReplyDraft | null {
       updated_at: value.updated_at,
       ...(files.length > 0 ? { files } : {}),
       ...(recipients && recipients.length > 0 ? { recipients } : {}),
+      ...(quote ? { quote } : {}),
     };
   } catch {
     return null;
@@ -79,6 +82,15 @@ function recipientList(value: unknown): string[] | null {
   if (value.some((id) => typeof id !== "string" || !INBOX_SESSION_ID_PATTERN.test(id))) return null;
   if (new Set(value).size !== value.length) return null;
   return [...(value as string[])];
+}
+
+/** A reply's quote as a draft keeps it (`{ of, words? }`), or null when it is not one. */
+export function replyQuote(value: unknown): InboxReplyQuote | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { of, words } = value as Record<string, unknown>;
+  if (!isInboxId("msg", of)) return null;
+  if (words !== undefined && (typeof words !== "string" || words.trim() === "" || words.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX)) return null;
+  return { of, ...(typeof words === "string" ? { words } : {}) };
 }
 
 /** Every reply draft on disk, by thread id (a file that does not parse is skipped). */
@@ -134,6 +146,8 @@ export function checkInboxReplyDraftInput(
   ops: ReplyDraftFileOps<InboxDraftFile> | null;
   /** Who the reply goes to (the recipient pill); null: not sent, the draft keeps its own. */
   recipients: string[] | null;
+  /** The message the reply quotes: undefined, not sent (the draft keeps its own); null, none any more. */
+  quote: InboxReplyQuote | null | undefined;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -163,7 +177,11 @@ export function checkInboxReplyDraftInput(
   if (input.recipients !== undefined && input.recipients !== null && recipients === null) {
     throw new InboxError("validation_error", `recipients: at most ${INBOX_REPLY_DRAFT_RECIPIENTS_MAX} session ids (letters, digits, . _ : -), each once.`, { field: "recipients" });
   }
-  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients };
+  const quote = input.quote === undefined ? undefined : input.quote === null ? null : replyQuote(input.quote);
+  if (quote === null && input.quote !== null && input.quote !== undefined) {
+    throw new InboxError("validation_error", `quote: { of, words? }, of a message id, words at most ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters.`, { field: "quote" });
+  }
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients, quote };
 }
 
 /** What a reply draft save may carry (`POST /api/inbox/threads/:id/draft`). */
@@ -179,6 +197,8 @@ export interface InboxReplyDraftInput {
   files_place?: unknown;
   /** Who the reply goes to: session ids (the recipient pill); absent, the draft keeps its own. */
   recipients?: unknown;
+  /** The message the reply quotes, `{ of, words? }` (approval "inbox-reply-quote"); null: none; absent, the draft keeps its own. */
+  quote?: unknown;
 }
 
 /** Write one draft whole (owner-only folder and file). */
