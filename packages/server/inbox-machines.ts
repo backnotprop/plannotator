@@ -1093,7 +1093,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (via !== "local") return json({ error: "Linking machines works only on this computer's own screen.", code: "local_only" }, 403);
+      // This computer's, and its owner's from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest's.
+      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can link machines.", code: "owner_only" }, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;

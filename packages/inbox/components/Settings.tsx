@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
+import { tailnetGuest, type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -1059,6 +1059,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
+  const guest = tailnetGuest(settings);
   const { mode } = useInboxTheme();
   const palettes = useInboxPalettes();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -1243,6 +1244,7 @@ export function SettingsPage(props: SettingsPageProps) {
             phones={phonesOn ? phones : null}
             tailscale={settings.tailscale}
             via={via}
+            guest={guest}
             tailscaleBusy={tailscaleBusy}
             onToggleTailscale={onToggleTailscale}
             pairing={pairing && phonesOn}
@@ -1251,7 +1253,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
+        body = <MachinesSection machines={machines} guest={guest} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (

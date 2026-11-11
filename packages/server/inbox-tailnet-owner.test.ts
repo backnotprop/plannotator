@@ -118,6 +118,8 @@ async function world(options: WorldOptions = {}) {
     binaryPath: null,
     version: "0.28.10",
     phones: options.phones ?? true,
+    // Pair a phone's step 1 reads this computer through these; scripted, so no real probe runs.
+    pairingProbes: { lanAddress: () => null, network: () => null, which: () => null, firewall: () => "unknown" },
     tailscale: ts.run,
     feedbackUrl: "http://127.0.0.1:9/feedback",
     ...(options.board === undefined ? {} : { board: options.board }),
@@ -232,16 +234,8 @@ const BLOCKED: { name: string; call: (w: World) => Call; local: [number, string?
   { name: "bridge/event", call: (w) => ({ method: "POST", path: "/api/inbox/bridge/event", headers: { Authorization: `Bearer ${w.inbox.token}` } }), local: [403, "origin_not_allowed"] },
   { name: "the door: health", call: () => ({ path: "/api/inbox/device/health" }), local: [403, "origin_not_allowed"] },
   { name: "the door: pair", call: () => ({ path: "/api/inbox/device/pair", body: { code: "000000" } }), local: null },
-  { name: "POST pairing", call: () => ({ path: "/api/inbox/pairing", body: {} }), local: "answers" },
-  { name: "GET pairing", call: () => ({ path: "/api/inbox/pairing" }), local: "answers" },
-  { name: "GET pairing/checks", call: () => ({ path: "/api/inbox/pairing/checks" }), local: null },
-  { name: "POST tailnet: the door's switch", call: () => ({ path: "/api/inbox/tailnet", body: { on: true } }), local: null },
-  { name: "POST lan: the Wi-Fi's switch", call: () => ({ path: "/api/inbox/lan", body: { on: true } }), local: null },
-  { name: "settings tailscale on", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }), local: null },
   { name: "POST open-in: launching an app", call: () => ({ path: "/api/inbox/open-in", body: { attachment_id: "att_x", app_id: "vscode" } }), local: null },
   { name: "GET open-in/apps", call: () => ({ path: "/api/inbox/open-in/apps" }), local: "answers" },
-  { name: "POST machines/offer", call: () => ({ path: "/api/inbox/machines/offer", body: {} }), local: null },
-  { name: "POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }), local: null },
 ];
 
 describe("what the approval opened, by caller", () => {
@@ -729,12 +723,6 @@ describe("what stays refused for everyone over the tailnet", () => {
       else if (row.local) expect(await answerOf(await call(w, "local", row.call(w)))).toEqual(row.local as [number, string]);
     });
   }
-
-  test("turning the tailnet switch off stays as it was; turning it on does not", async () => {
-    const w = await world();
-    expect(await answerOf(await call(w, "owner", { path: "/api/inbox/settings", body: { tailscale: { on: true } } }))).toEqual(REFUSED);
-    expect(w.config().inboxTailscale).toBe(true);
-  });
 });
 
 describe("another site never rides the owner's login", () => {

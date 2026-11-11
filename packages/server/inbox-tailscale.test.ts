@@ -283,13 +283,12 @@ describe("Inbox over your tailnet", () => {
     // A link that opens the Inbox still works.
     expect((await throughServe(inbox, "/", { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" } })).status).toBe(200);
 
-    // The tailnet cannot widen the exposure: the switch cannot be turned on from there, nor a phone paired.
+    // The owner over the tailnet has the switch as on the computer (owner ruling 2026-11-11); the page still says where it is.
     const settings = (await (await throughServe(inbox, "/api/inbox/settings")).json()) as Json;
     expect(settings.via).toBe("tailnet");
     expect(settings.tailscale.url).toBe(`https://${MAGIC}:${inbox.port}/`);
     const on = await throughServe(inbox, "/api/inbox/settings", { method: "POST", headers: own, body: JSON.stringify({ tailscale: { on: true } }) });
-    expect(await codeOf(on)).toEqual([403, "local_only"]);
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
+    expect(on.status).toBe(200);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
 
   });

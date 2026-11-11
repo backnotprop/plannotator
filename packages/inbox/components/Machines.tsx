@@ -20,7 +20,7 @@ export function linkErrorText(error: unknown): string {
     return "Paste the other machine's link code, or type its address and six digits.";
   }
   if (error.code === 'no_way_back') return 'The other machine needs a way back to this one, and Tailscale could not publish this machine. Check Tailscale here, then link again.';
-  if (error.code === 'local_only') return "Linking works only on this computer's own screen.";
+  if (error.code === 'owner_only' || error.code === 'local_only') return "Only this computer's owner can link machines.";
   return error.message;
 }
 
@@ -40,7 +40,8 @@ function machineLine(machine: MachineView, offersUpdates: boolean): string {
 export interface MachinesSectionProps {
   /** Every machine the merged view knows, this one included. */
   machines: MachineView[];
-  via: 'local' | 'tailnet';
+  /** A tailnet login other than the owner's (`tailnetGuest`): it sees the machines, and links or unlinks none. */
+  guest: boolean;
   /** After a link or an Unlink: read the machines again. */
   onChanged: () => void;
   /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
@@ -51,11 +52,11 @@ export interface MachinesSectionProps {
  * Settings → Machines: the other computers whose threads this Inbox shows.
  * Each one keeps its own Inbox; a link works both ways, over the tailnet.
  * Built like Devices → Phones: one card, a row per machine with Unlink
- * (asked twice), then the row that starts a link. Linking is local only,
- * like Pair a phone, so a code never shows on another device.
+ * (asked twice), then the row that starts a link. The owner links from this
+ * computer or from any of their own devices over the tailnet; a guest does not.
  */
-export function MachinesSection({ machines, via, onChanged, onMachineUpdate }: MachinesSectionProps) {
-  const remote = via !== 'local';
+export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }: MachinesSectionProps) {
+  const remote = guest;
   const linked = machines.filter((machine) => !machine.self);
   // Why this Inbox's own door is not on the tailnet (its port held by another mapping): linked machines cannot reach it until that is fixed.
   const doorError = machines.find((machine) => machine.self)?.reason ?? null;
@@ -93,7 +94,7 @@ export function MachinesSection({ machines, via, onChanged, onMachineUpdate }: M
       {remote && (
         <div className="ib-callout" data-machines-remote="">
           <Icon name="lock" />
-          <span>You opened this page over your tailnet. Linking and Unlink work only on this computer&apos;s own screen, so a code is never shown to another device.</span>
+          <span>Linking and Unlink are for this computer&apos;s owner.</span>
         </div>
       )}
       {doorError && (
