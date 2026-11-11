@@ -166,6 +166,17 @@ describe('ReviewCallFlowPanel Call tree view', () => {
     });
     expect(backs).toBe(1);
 
+    // The hunk's tree has the same search.
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="Search call paths"]')!.click());
+    const input = host!.querySelector<HTMLInputElement>('input[placeholder="Find calls or files"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'parley');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/1');
+    expect(host!.querySelector('.call-tree-row-match')?.textContent).toContain('parley.layout()');
+
     await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
     expect(cleared).toBe(1);
     await render(state({ callTreeRequest: null }));
