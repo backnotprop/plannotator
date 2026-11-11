@@ -13,8 +13,8 @@ const BODY_MAX_PINNED = 340;
 
 const FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   unsupported: "Linear details don't load in this window.",
-  cli_missing: 'Set LINEAR_API_KEY to see details here.',
-  signed_out: 'Set LINEAR_API_KEY to see details here.',
+  cli_missing: 'Add a Linear API key to see details here.',
+  signed_out: 'Add a Linear API key to see details here.',
   not_found: "Your Linear key can't see this issue, or it doesn't exist.",
   rate_limited: 'Linear asked for a short break. Details come back in a minute.',
   unavailable: "Details couldn't load right now.",
@@ -44,7 +44,11 @@ export function LinearStateIcon({ type, color, className = '' }: { type: LinearC
   );
 }
 
-export function LinearRefCardView({ target, href, result, pinned, onClose, sheet, tight }: RefCardViewProps) {
+/**
+ * `noKeyText`: what the card says when the host has no Linear key or Linear refused it; a host names where its key is
+ * set. Absent: a plain "Add a Linear API key".
+ */
+export function LinearRefCardView({ target, href, result, pinned, onClose, sheet, tight, noKeyText }: RefCardViewProps & { noKeyText?: string }) {
   const identifier = `${target.repo}-${target.number}`;
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
   const footer = (extra?: React.ReactNode) => (
@@ -91,7 +95,7 @@ export function LinearRefCardView({ target, href, result, pinned, onClose, sheet
           <div className="text-[11.5px] text-muted-foreground">{target.owner}</div>
           <div className="mt-1 text-[13.5px] font-semibold text-foreground">Issue {identifier}</div>
           <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {FAILURE_TEXT[error]}
+            {noKeyText && (error === 'signed_out' || error === 'cli_missing') ? noKeyText : FAILURE_TEXT[error]}
           </p>
         </div>
         {footer()}

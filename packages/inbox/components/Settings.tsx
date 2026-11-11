@@ -9,6 +9,7 @@ import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AccountsRefresh, AccountsSection } from './Accounts';
+import { LinearKeySettings } from './LinearKeySettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -27,7 +28,7 @@ import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
-import { useVoiceSettings } from '../voice';
+import { useVoiceSettings, voiceWhere } from '../voice';
 import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
@@ -1225,7 +1226,13 @@ export function SettingsPage(props: SettingsPageProps) {
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
         break;
       case 'accounts':
-        body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
+        body = (
+          <>
+            <AccountsSection machine={machines.find((machine) => machine.self)?.name} />
+            {/* The Linear hover cards' key (LinearKeySettings.tsx); a tailnet guest's settings have none. */}
+            {settings.linear_key && <LinearKeySettings initial={settings.linear_key} where={voiceWhere(settings.voice ?? null)} />}
+          </>
+        );
         break;
       case 'prompts':
         body = settings.prompts ? (

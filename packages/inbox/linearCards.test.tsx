@@ -74,5 +74,5 @@ test('a Linear link is a card target once a provider is registered, and its card
   expect(card).toContain('Open in Linear');
   expect(card).not.toContain('GitHub');
   const failed = renderToStaticMarkup(createElement(RefCardView, { target, href, result: { ok: false, error: 'signed_out', fetchedAt: 0 } }));
-  expect(failed).toContain('LINEAR_API_KEY');
+  expect(failed).toContain('Settings → Accounts');
 });

@@ -166,3 +166,16 @@ test("the key goes only to api.linear.app's authorization header: never in an av
   expect(JSON.stringify(answers)).not.toContain(KEY);
   expect(logged.join("\n")).not.toContain(KEY);
 });
+
+test("a new key: forget() drops the no-key card and the teams, so the next hover asks Linear with it", async () => {
+  const { calls, fetchImpl } = stub((body) => ({ body: body.query.includes("organization") ? { data: { organization: { urlKey: "acme" }, teams: { nodes: [{ key: "ENG" }] } } } : ISSUE }));
+  let key: string | null = null;
+  const cards = createLinearCards({ apiKey: () => key, fetch: fetchImpl, avatar: async () => null });
+  expect(await cards.get(LINK)).toMatchObject({ ok: false, error: "signed_out" });
+  expect(await cards.issueRefs()).toBeNull();
+  key = "lin_api_new";
+  cards.forget();
+  expect(await cards.get(LINK)).toMatchObject({ ok: true });
+  expect(await cards.issueRefs()).toEqual({ workspace: "acme", teams: ["ENG"] });
+  expect(calls).toHaveLength(2);
+});

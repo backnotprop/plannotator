@@ -10,6 +10,7 @@
 import { findLinearIdentifiers, isLinearRef, linearAsForgeRef, linearIssueUrl, parseLinearRefUrl, type LinearIssueRefs } from '@plannotator/core/linear-ref-card';
 import { LinearRefCardView } from '@plannotator/ui/components/LinearRefCardView';
 import { registerPlainTextLinker, registerRefCardProvider, type PlainTextLinker, type RefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { getRefCardTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { inboxUrl } from './inboxUrl';
 
 /** The linker for bare identifiers of these teams. */
@@ -28,6 +29,9 @@ export function linearIdentifierLinker(refs: LinearIssueRefs): PlainTextLinker {
   };
 }
 
+/** The card's words when this computer has no Linear key, or Linear refused it: where to add one. */
+export const NO_KEY_TEXT = 'Add your Linear API key in Settings → Accounts to see details here.';
+
 /** The provider: Linear issue links, Linear's own card, and the identifier as the card's accessible name. */
 export const linearRefCardProvider: RefCardProvider = {
   parse: (href) => {
@@ -35,21 +39,39 @@ export const linearRefCardProvider: RefCardProvider = {
     return ref ? linearAsForgeRef(ref) : null;
   },
   owns: (ref) => isLinearRef(ref),
-  View: LinearRefCardView,
+  View: (props) => <LinearRefCardView {...props} noKeyText={NO_KEY_TEXT} />,
   label: (ref) => `Linear issue ${ref.repo}-${ref.number}`,
 };
 
 let installed = false;
+let fetchTeams: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init);
+let unlink: (() => void) | null = null;
 
-/** Install once: the provider at once, the bare identifiers once the server has read the teams. */
-export function installLinearCards(fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init)): void {
-  if (installed) return;
-  installed = true;
-  registerRefCardProvider(linearRefCardProvider);
-  void fetchImpl(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
+/** Read the teams and link their bare identifiers (none without a key); a later read replaces the earlier linker. */
+function linkTeams(): Promise<void> {
+  return fetchTeams(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
     .then((res) => (res.ok ? (res.json() as Promise<{ workspace?: string | null; teams?: string[] }>) : null))
     .then((body) => {
-      if (body?.workspace && Array.isArray(body.teams) && body.teams.length > 0) registerPlainTextLinker(linearIdentifierLinker({ workspace: body.workspace, teams: body.teams }));
+      unlink?.();
+      unlink = null;
+      if (body?.workspace && Array.isArray(body.teams) && body.teams.length > 0) unlink = registerPlainTextLinker(linearIdentifierLinker({ workspace: body.workspace, teams: body.teams }));
     })
     .catch(() => {});
+}
+
+/** Install once: the provider at once, the bare identifiers once the server has read the teams. */
+export function installLinearCards(fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>): void {
+  if (installed) return;
+  installed = true;
+  if (fetchImpl) fetchTeams = fetchImpl;
+  registerRefCardProvider(linearRefCardProvider);
+  void linkTeams();
+}
+
+/** The key changed (Settings → Accounts → Linear): cards answered under the old key are dropped, and the teams read again. */
+export function refreshLinearCards(): Promise<void> {
+  if (!installed) return Promise.resolve();
+  // Setting the same transport again empties the window's card cache (@plannotator/ui/utils/refCard).
+  setRefCardTransport(getRefCardTransport());
+  return linkTeams();
 }

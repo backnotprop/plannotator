@@ -57,6 +57,7 @@ import type {
   InboxVoiceEngine,
   InboxVoiceFailure,
   InboxVoiceKeyState,
+  InboxLinearKeyState,
   InboxVoiceSettings,
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
@@ -566,6 +567,8 @@ export interface SettingsModel {
   reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
+  /** Settings → Accounts → Linear: where the Linear hover cards' key comes from (never the key). Absent for a guest. */
+  linear_key?: InboxLinearKeyState;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
@@ -2057,6 +2060,8 @@ export const inboxApi = {
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
+  /** The Linear hover cards' key, only to the Inbox that serves this window; the answer never holds the key. Null removes it. */
+  saveLinearKey: (key: string | null) => post<{ key: InboxLinearKeyState }>(inboxUrl('/linear/key'), { key }),
   voiceStatus: (fresh: boolean) => get<InboxVoiceStatus>(inboxUrl('/voice/status', fresh ? 'fresh=1' : undefined)),
   /**
    * The clip, to the Inbox that serves this window: never a `machine`, so audio is never forwarded, even for a thread
