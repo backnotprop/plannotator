@@ -190,7 +190,8 @@ const answerOf = async (response: Response): Promise<[number, string | undefined
   const text = await response.text();
   let code: string | undefined;
   try {
-    code = (JSON.parse(text) as Json).code;
+    // An error's code; a success may carry a field of that name (a link code's digits) that is no refusal.
+    code = response.status >= 400 ? (JSON.parse(text) as Json).code : undefined;
   } catch {
     code = undefined;
   }
@@ -589,6 +590,83 @@ describe("a tagged machine: the login its allowlist names has every route the ow
       if (row.did) expect(row.did(w)).toBe(true);
     });
   }
+});
+
+/**
+ * Parity (owner ruling 2026-11-11: "I want to use it the same way on my phone as I can on my computers"): every
+ * route the audit found treated the owner over the tailnet differently from this computer, or a tailnet guest
+ * differently for no reason, answers the owner exactly as it answers this computer. `guest`: what a login the allow
+ * list added gets (`"same"`: the same answer too). Each caller gets a world of its own, so a write by one never
+ * changes what the next one is answered. A row that fails here is a limit coming back.
+ */
+const projectOf = (w: World) => w.inbox.store.ensureProject({ name: "web", root: join(w.dataDir, "web") }).id;
+const UNKNOWN_MACHINE = `ibx_01K${"0".repeat(22)}N`;
+const PARITY: { name: string; call: (w: World) => Call; guest: [number, string] | "same"; world?: WorldOptions; shows?: true }[] = [
+  { name: "Pair a phone: GET pairing", call: () => ({ path: "/api/inbox/pairing" }), guest: REFUSED },
+  { name: "Pair a phone: POST pairing (the code)", call: () => ({ path: "/api/inbox/pairing", body: {} }), guest: REFUSED },
+  { name: "Pair a phone: GET pairing/checks (step 1)", call: () => ({ path: "/api/inbox/pairing/checks" }), guest: REFUSED },
+  { name: "the phone's Tailscale way: POST tailnet", call: () => ({ path: "/api/inbox/tailnet", body: { on: false } }), guest: REFUSED },
+  { name: "the phone's Wi-Fi way: POST lan", call: () => ({ path: "/api/inbox/lan", body: { on: false } }), guest: REFUSED },
+  { name: "Over your tailnet: Keep it on at every start", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }), guest: REFUSED },
+  { name: "Link a machine: POST machines/offer (the code)", call: () => ({ path: "/api/inbox/machines/offer", body: {} }), guest: [403, "owner_only"] },
+  { name: "Link a machine: POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }), guest: [403, "owner_only"] },
+  { name: "Unlink: POST machines/:id/unlink", call: () => ({ path: `/api/inbox/machines/${UNKNOWN_MACHINE}/unlink`, body: {} }), guest: [403, "owner_only"] },
+  { name: "the sound dialog's claim", call: () => ({ path: "/api/inbox/sound/dialog", body: {} }), guest: "same", world: { config: { inboxSound: { dialogDueFor: "0.28.10" } } }, shows: true },
+  { name: "the list options dialog's claim", call: () => ({ path: "/api/inbox/list-intro", body: {} }), guest: "same" },
+  { name: "the agent note's claim", call: () => ({ path: "/api/inbox/reveal", body: { id: "agent_note", agents: ["codex"] } }), guest: "same", shows: true },
+  { name: "What's new", call: () => ({ path: "/api/inbox/whats-new?version=0.28.12" }), guest: "same" },
+  { name: "What's new: the releases panel", call: () => ({ path: "/api/inbox/whats-new/releases" }), guest: "same" },
+  { name: "a project's picture: GET", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture?logo=1` }), guest: "same" },
+  { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }), guest: "same" },
+  { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }), guest: "same" },
+  { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }), guest: "same" },
+];
+
+describe("the owner over the tailnet gets what this computer gets", () => {
+  for (const row of PARITY) {
+    test(row.name, async () => {
+      const answers: Record<Caller, [number, string | undefined]> = {} as never;
+      const shown: Record<Caller, unknown> = {} as never;
+      for (const caller of CALLERS) {
+        const w = await world(row.world);
+        const response = await call(w, caller, row.call(w));
+        shown[caller] = row.shows ? ((await response.clone().json()) as Json).show : undefined;
+        answers[caller] = await answerOf(response);
+      }
+      expect(answers.local[0]).toBeLessThan(500);
+      expect(answers.owner).toEqual(answers.local);
+      expect(answers.guest).toEqual(row.guest === "same" ? answers.local : row.guest);
+      // A one-time dialog's claim: this computer's page and the owner's other devices get it, a guest's page never.
+      if (row.shows) expect(shown).toEqual({ local: true, owner: true, guest: false });
+    });
+  }
+
+  test("a paired phone's door reads What's new and a project's picture as the window does", async () => {
+    const w = await world();
+    const base = `http://127.0.0.1:${w.inbox.port}`;
+    const post = (path: string, body: Json = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post("/api/inbox/tailnet", { on: true })).status).toBe(200);
+    const offer = (await (await post("/api/inbox/pairing")).json()) as Json;
+    const token = ((await (await post("/api/inbox/device/pair", { code: offer.offer.code, name: "iPhone", platform: "ios" })).json()) as Json).token as string;
+    const doorPort = (JSON.parse(readFileSync(join(w.dataDir, "inbox", "inbox.json"), "utf8")) as Json).tailnet.door_port as number;
+    const door = (route: string) => fetch(`http://127.0.0.1:${doorPort}/api/inbox/device/${route}`, { headers: { Authorization: `Bearer ${token}`, Host: `${MAGIC}:8443`, "X-Forwarded-Proto": "https" } });
+    for (const route of ["whats-new?version=0.28.12", "whats-new/releases", `projects/${projectOf(w)}/picture?logo=1`]) {
+      const window = await answerOf(await fetch(`${base}/api/inbox/${route}`));
+      expect([route, ...(await answerOf(await door(route)))]).toEqual([route, ...window]);
+    }
+  });
+
+  test("the settings model: the owner's page reads what this computer's reads, but where it is", async () => {
+    const w = await world();
+    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
+    const local = await read("local");
+    const owner = await read("owner");
+    expect([owner.via, owner.guest]).toEqual(["tailnet", false]);
+    // The voice line names the computer for a page that is not on it, and the line's timer counts down between the
+    // two reads; nothing else differs.
+    const strip = (model: Json) => ({ ...model, via: null, voice: { ...model.voice, computer: null }, reveal: { ...model.reveal, again_in: null } });
+    expect(strip(owner)).toEqual(strip(local));
+  });
 });
 
 describe("what stays refused for everyone over the tailnet", () => {
