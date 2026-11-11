@@ -106,7 +106,14 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     mark = at;
     tick();
   };
-  let flushed: Promise<void> | null = null;
+  /** Flushes started while the file is written and after: the disk works while this thread does. */
+  const flushes: Promise<void>[] = [];
+  const flushing = () => flushes.push(flushFile(importing).catch(() => {}));
+  const flushed = async () => {
+    await Promise.all(flushes);
+    // The last one after everything was written: whatever an earlier one raced past goes now.
+    await flushFile(importing);
+  };
   try {
     // Today's exact rules: the JSONL log's own reader, then the store's order (seq; equal seqs in read order).
     const sources = filesFingerprint(inboxDir);
@@ -126,7 +133,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     const { sqlite, db } = openInboxDb(inboxDir, INBOX_DB_IMPORTING);
     try {
       options.beforeLoad?.(sqlite);
-      loadImportRows(sqlite, rows);
+      loadImportRows(sqlite, rows, flushing);
       keepSeqFloor(db, contents.seqFloor);
       options.afterWrite?.(sqlite);
     } finally {
@@ -135,7 +142,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     lap("load");
     step("load");
     // The file goes to disk on another thread while this one checks it: the two longest waits overlap.
-    flushed = flushFile(importing);
+    flushing();
 
     const integrity = new Database(importing, { readwrite: true, create: false, strict: true });
     try {
@@ -158,7 +165,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     );
     lap("checkDb");
     step("checked");
-    await flushed;
+    await flushed();
     if (!check.same) {
       removeDb(importing);
       writeReport(inboxDir, now(), { files: check.a.counts, database: check.b.counts });
@@ -192,7 +199,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     return { status: "imported", lines: lines.length, ms: Math.round(performance.now() - started), backup, phases };
   } catch (error) {
     // A flush still running holds the file open: let it end before the file goes.
-    await flushed?.catch(() => {});
+    await Promise.all(flushes);
     removeDb(importing);
     return { status: "kept_files", reason: "failed", detail: error instanceof Error ? error.message : String(error) };
   }

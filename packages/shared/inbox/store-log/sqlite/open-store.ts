@@ -3,7 +3,8 @@
  * Which record log an Inbox starts on, behind the SQLite switch (`inboxSqlite` / `PLANNOTATOR_INBOX_SQLITE`, off by
  * default and for everyone; `resolveInboxSqlite` in `../../../config.ts`).
  *
- * - Off, and no `inbox.db`: today's JSONL store, exactly as before (one `existsSync`).
+ * - Off, and no `inbox.db`: today's JSONL store, exactly as before (two `existsSync`; a half file a crashed move
+ *   left is removed).
  * - Off, with an `inbox.db` (the switch was on, then turned off): everything goes back into the files
  *   (`return-to-files.ts`), messages written on SQLite included, and the files serve. If that cannot be done
  *   safely, the database keeps serving: switching off never hides or loses a message.
@@ -17,7 +18,7 @@ import { join } from "node:path";
 import { inboxDir } from "../../schema";
 import { InboxStore } from "../../store";
 import { importJsonlInbox, type InboxImportOutcome } from "./import";
-import { readMeta } from "./move-files";
+import { INBOX_DB_IMPORTING, readMeta, removeDb } from "./move-files";
 import { returnToJsonl, type InboxReturnOutcome } from "./return-to-files";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
 
@@ -51,6 +52,9 @@ export async function openInboxStore(dataDir: string, options: OpenInboxStoreOpt
   const jsonl = () => InboxStore.open(dataDir, now ? { now } : {});
   const sqlite = () => InboxStore.open(dataDir, { ...(now ? { now } : {}), log: sqliteInboxLog });
   if (!options.sqlite) {
+    // A move the switch started and a crash stopped leaves a half file nothing will read: removed.
+    const half = join(inboxDir(dataDir), INBOX_DB_IMPORTING);
+    if (existsSync(half)) removeDb(half);
     if (!existsSync(db)) return { store: jsonl(), log: "jsonl" };
     const moved = returnToJsonl(dataDir, { now });
     return moved.status === "kept_db" ? { store: sqlite(), log: "sqlite", moved } : { store: jsonl(), log: "jsonl", moved };

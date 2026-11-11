@@ -16,8 +16,11 @@ import type { ImportRow, ImportRows } from "./import-rows";
 /** Rows per INSERT: a few hundred bound values each, well under SQLite's limit of 32,766. */
 const ROWS_PER_INSERT = 64;
 
-/** Write `rows` into the empty, migrated database `sqlite`. */
-export function loadImportRows(sqlite: Database, rows: ImportRows): void {
+/**
+ * Write `rows` into the empty, migrated database `sqlite`. `written`: after each of the big tables, so the caller can
+ * start the pages already in the file on their way to disk while the rest is written.
+ */
+export function loadImportRows(sqlite: Database, rows: ImportRows, written?: (table: string) => void): void {
   sqlite.run("PRAGMA journal_mode = OFF");
   sqlite.run("PRAGMA synchronous = OFF");
   sqlite.run("PRAGMA temp_store = MEMORY");
@@ -27,13 +30,16 @@ export function loadImportRows(sqlite: Database, rows: ImportRows): void {
     for (const { name } of indexes) sqlite.run(`DROP INDEX "${name}"`);
     insertAll(sqlite, "actors", rows.actors.rows.values());
     insertAll(sqlite, "events", eventsWithIds(rows.events));
+    written?.("events");
     insertAll(sqlite, "projects", rows.projects.rows.values());
     insertAll(sqlite, "messages", rows.messages.rows.values());
+    written?.("messages");
     insertAll(sqlite, "threads", rows.threads.rows.values());
     insertAll(sqlite, "read_state", rows.readState.rows.values());
     insertAll(sqlite, "attachments", [...rows.attachments.values()].flatMap((each) => [...each.rows.values()]));
     insertAll(sqlite, "mentions", [...rows.mentions.values()].flat());
     insertAll(sqlite, "questions", rows.questions.rows.values());
+    written?.("questions");
     insertAll(sqlite, "answers", rows.answers.rows.values());
     insertAll(sqlite, "annotations", rows.annotations.rows.values());
     insertAll(sqlite, "cards", rows.cards.rows.values());

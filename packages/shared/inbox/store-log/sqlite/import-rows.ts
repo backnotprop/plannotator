@@ -39,11 +39,11 @@ class Keyed {
     const found = this.rows.get(key);
     if (!found) {
       const row: ImportRow = { ...this.defaults };
-      for (const [column, value] of Object.entries(values)) if (value !== undefined) row[column] = value;
+      for (const column in values) if (values[column] !== undefined) row[column] = values[column];
       this.rows.set(key, row);
       return row;
     }
-    for (const [column, value] of Object.entries(set)) if (value !== undefined) found[column] = value;
+    for (const column in set) if (set[column] !== undefined) found[column] = set[column];
     return found;
   }
 }
