@@ -2549,7 +2549,6 @@ const ReviewApp: React.FC = () => {
     });
   }, [dockApi, prMetadata]);
 
-  // A picture or video clicked in PR text: open the panel at that artifact.
   const [prArtifactFocus, setPRArtifactFocus] = useState<{ id: string; seq: number } | null>(null);
   const openPRArtifact = useCallback((artifactId: string) => {
     // A selected note on another artifact would pull the panel back to it.

@@ -4,10 +4,8 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { mediaArtifact } from '../utils/prMediaTarget';
 
-/** Set on a picture or link this scope opens; `artifact` or `zoom`. */
 const MEDIA_ATTR = 'data-pr-media';
 const ARTIFACT_ID_ATTR = 'data-pr-artifact-id';
-/** A link that keeps its own behaviour (a player's caption link). */
 export const PR_MEDIA_SKIP_ATTR = 'data-pr-media-skip';
 
 function isShown(img: HTMLImageElement): boolean {
@@ -26,18 +24,7 @@ function clearMedia(element: HTMLElement): void {
   element.removeAttribute('title');
 }
 
-/**
- * PR text (description, comments) whose pictures and video links open where
- * they can be seen large: a picture or video the Artifacts panel lists opens
- * there at that item (big view, comments, timestamps); any other picture
- * opens in place in the image viewer. A picture inside a link that is not an
- * artifact keeps the link. Pictures become buttons for the keyboard (Enter or
- * Space, the way a button is pressed; no new shortcut).
- *
- * The rendered text is not this component's: it marks the elements after
- * they render (attributes only, never moving a node), so the annotation
- * highlighter and React keep the DOM they made.
- */
+// Marks rendered elements with attributes only (never moves a node): the text belongs to the renderer and highlighter.
 export function PRMediaScope({ children }: { children: React.ReactNode }): React.JSX.Element {
   const state = useReviewStateOptional();
   const ref = useRef<HTMLDivElement>(null);
@@ -56,7 +43,6 @@ export function PRMediaScope({ children }: { children: React.ReactNode }): React
         const zoom = artifact === null && isShown(img) && img.closest('a') === null;
         if (artifact === null && !zoom) {
           clearMedia(img);
-          // A picture that is a link's face opens the link: no zoom promise.
           if (img.closest('a') !== null) img.classList.remove('cursor-zoom-in');
           continue;
         }
@@ -134,7 +120,6 @@ export function PRMediaScope({ children }: { children: React.ReactNode }): React
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         const element = target(event);
-        // A link presses itself on Enter (a click, handled above).
         if (element === null || element.tagName === 'A' || element !== event.target) return;
         event.preventDefault();
         event.stopPropagation();

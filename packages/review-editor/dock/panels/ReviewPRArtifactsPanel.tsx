@@ -590,8 +590,6 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
 
   useEffect(() => setPendingComment(null), [selected?.id]);
 
-  // A picture or video clicked in PR text: show it, even if it was hidden
-  // or sits in a resolved thread, and put focus on its row.
   const focusRowRef = useRef<string | null>(null);
   useEffect(() => {
     if (prArtifactFocus === null) return;

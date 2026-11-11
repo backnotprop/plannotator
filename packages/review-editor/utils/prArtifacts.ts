@@ -316,11 +316,7 @@ function buildSources(metadata: PRMetadata, context: PRContext) {
   ];
 }
 
-/**
- * The artifact a URL in the PR's text names, by the same rule the list
- * dedupes with (so a signed or re-written copy of an upload still matches),
- * or null when the list does not hold it.
- */
+/** Same key as the list's dedupe, so a re-signed copy of an upload still matches. */
 export function findPRArtifactByUrl(
   artifacts: readonly PRArtifact[],
   metadata: PRMetadata | null,

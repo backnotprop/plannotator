@@ -3,12 +3,7 @@ import { Maximize2 } from 'lucide-react';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { findPRArtifactByUrl } from '../utils/prArtifacts';
 
-/**
- * Under a video player in PR text: opens that video in the Artifacts panel
- * (large, comments at a timestamp). A click on the player itself plays it,
- * so the way to the panel is this button. Nothing when the list does not
- * hold the video.
- */
+/** A click on the player plays it, so the way to the panel is this button. */
 export function OpenInArtifactsButton({ url }: { url: string }): React.JSX.Element | null {
   const state = useReviewStateOptional();
   const artifact = state ? findPRArtifactByUrl(state.prArtifacts, state.prMetadata, url) : null;

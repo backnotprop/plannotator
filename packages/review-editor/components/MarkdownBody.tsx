@@ -85,7 +85,6 @@ export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticate
   markdown: string;
   textClassName?: string;
   authenticatedImages?: boolean;
-  /** PR comment text: its pictures and videos open in the Artifacts panel (PRMediaScope). */
   prMedia?: boolean;
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);

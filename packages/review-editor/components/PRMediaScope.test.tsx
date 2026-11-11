@@ -1,20 +1,4 @@
-/**
- * Pictures and videos in PR text open in the Artifacts panel at that item
- * (owner, 2026-11-11: "Artifacts panel for both").
- *
- * What regresses if this fails:
- *  - a click on an attachment picture in a comment does nothing again (the
- *    zoom cursor promising a viewer that never opens);
- *  - a keyboard user cannot reach it (no focus, Enter does nothing);
- *  - GitHub's pasted video (a bare link) opens the forge instead of the panel,
- *    or a Cmd/Ctrl-click on it no longer opens a new tab;
- *  - a picture the panel does not list (another host) promises a zoom and
- *    shows nothing, instead of opening in place;
- *  - the panel opens on the gallery, or keeps a hidden item hidden, instead
- *    of showing the item that was clicked.
- *
- * DOM-gated (DOM_TESTS=1, listed in tests/dom-test-list.txt).
- */
+/** DOM-gated (DOM_TESTS=1, tests/dom-test-list.txt). */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
