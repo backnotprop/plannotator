@@ -154,8 +154,11 @@ for (const phone of [
       const page = await context.newPage();
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(String(e)));
+      // Mark read's warning is on once the window has read its settings (until then a Mark read asks nothing).
+      const settingsRead = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/inbox/settings' && r.ok());
       await page.goto(world.url);
       await expect(row(page, world.ask)).toBeVisible();
+      await settingsRead;
       const touch = await finger(page, phone.browserName);
 
       // The hold: the sheet, the row's muted look, the thread's name over the items.

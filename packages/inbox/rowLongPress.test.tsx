@@ -136,6 +136,22 @@ test.skipIf(!hasDom)("a finger held on a row opens the row's own menu with its m
   expect(calls.opened).toEqual([]);
 });
 
+test.skipIf(!hasDom)("a lift the page never hears (the browser took the touch for its own long press): the next tap on an item is the person's, at once", async () => {
+  const calls = draw();
+  const row = button('a');
+  touch(row, 'touchstart');
+  await wait(LONG_PRESS_MS + 60);
+  expect(menu()?.getAttribute('data-row-menu')).toBe('a');
+  // No touchend, no touchcancel: a new finger lands on Mark read and taps it.
+  const item = menu()!.querySelector<HTMLElement>('[data-row-action="read"]')!;
+  touch(item, 'touchstart');
+  touch(item, 'touchend');
+  const tap = click(item);
+  expect(tap.defaultPrevented).toBe(false);
+  expect(calls.actions).toEqual([['a', 'read']]);
+  expect(calls.opened).toEqual([]);
+});
+
 test.skipIf(!hasDom)('a tap opens the thread at once, and no menu follows', async () => {
   const calls = draw();
   touch(button('m'), 'touchstart');

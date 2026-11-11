@@ -169,6 +169,11 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
       if (event.type === 'touchend' && event.cancelable) event.preventDefault();
       lift ??= setTimeout(() => done(), LIFT_MS);
     };
+    // A new finger alone on the screen: the one that opened the menu has lifted, heard or not (a browser that took
+    // the touch for its own long press may send no touchend). This touch is a new tap, and is the person's.
+    const again = (event: Event) => {
+      if ((event as TouchEvent).touches?.length === 1) done();
+    };
     const swallow = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -177,7 +182,11 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
       ['touchmove', move, false],
       ['touchend', lifted, false],
       ['touchcancel', lifted, true],
+      // The lift as pointer events say it, when the touch's own events stop.
+      ['pointerup', lifted, true],
+      ['pointercancel', lifted, true],
     ]);
+    const next = listen(null, [['touchstart', again, true]]);
     const clicks = listen(null, [
       ['click', swallow, false],
       ['mousedown', swallow, false],
@@ -189,6 +198,7 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
       if (lift) clearTimeout(lift);
       clearTimeout(lost);
       off();
+      next();
       clicks();
       if (held.current === done) held.current = null;
     };
