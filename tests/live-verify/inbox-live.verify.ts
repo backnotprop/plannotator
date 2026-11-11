@@ -20,7 +20,7 @@ import { chromium, test, type Browser, type BrowserContext, type Page, type Requ
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { cpus, totalmem, release, platform, arch } from 'node:os';
+import { cpus, totalmem, release, platform, arch, loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { seedInboxSearchWorld } from '../../scripts/inbox-large-store';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -158,7 +158,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
   const rules: Record<string, Rule> = {};
   const samples: Record<string, { unit: Stat['unit']; xs: number[] }> = {};
   const add = (name: string, unit: Stat['unit'], x: number) => ((samples[name] ??= { unit, xs: [] }).xs.push(x));
-  const out: any = { meta: { ...machine(), size: SIZE, sizeShape: SIZES[SIZE], profile: PROFILE, query: QUERY, runs: RUNS, budgetMs: BUDGET_MS, startedAt: new Date().toISOString() } };
+  const out: any = { meta: { ...machine(), size: SIZE, sizeShape: SIZES[SIZE], profile: PROFILE, query: QUERY, runs: RUNS, budgetMs: BUDGET_MS, startedAt: new Date().toISOString(), loadAtStart: loadavg().map((x) => Math.round(x * 10) / 10) } };
   mkdirSync(dirname(OUT), { recursive: true });
   const log = (s: string) => {
     const line = `${new Date().toISOString()} [live-verify ${SIZE}/${PROFILE}] ${s}\n`;
@@ -761,10 +761,16 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       const held: { route: any }[] = [];
       await A.route('**/api/inbox/**', (route) => (route.request().method() === 'POST' ? held.push({ route }) : route.continue()));
       try {
-        await arm(A, 'k19', `return ${checkedIndex(id, 0)} === 0`);
-        const t0 = Date.now();
-        await clickOption(A, id, 0, 0);
-        const pick = await landed(A, 'k19', t0);
+        // Three picks (first, second, first choice): the median, so one slow frame does not decide.
+        const picks: number[] = [];
+        for (const [k, n] of [0, 1, 0].entries()) {
+          await arm(A, `k19-${k}`, `return ${checkedIndex(id, 0)} === ${n}`);
+          const t0 = Date.now();
+          await clickOption(A, id, 0, n);
+          picks.push(await landed(A, `k19-${k}`, t0));
+          await pause(150);
+        }
+        const pick = picks.includes(-1) ? -1 : [...picks].sort((x, y) => x - y)[1]!;
         const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
         let key = -1;
         if (await A.$(sel)) {
@@ -774,7 +780,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
           await A.keyboard.type('x');
           key = await landed(A, 'k19b', t1);
         }
-        return { pass: pick >= 0 && pick <= 100 && key >= 0 && key <= 100, ms: Math.max(pick, key), detail: { pick, key, held: held.length } };
+        return { pass: pick >= 0 && pick <= 100 && key >= 0 && key <= 100, ms: Math.max(pick, key), detail: { picks, key, held: held.length } };
       } finally {
         await A.unroute('**/api/inbox/**');
         for (const h of held) await h.route.continue().catch(() => {});
@@ -817,6 +823,9 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     out.rules = rules;
     out.stats = stats;
     out.meta.finishedAt = new Date().toISOString();
+    out.meta.loadAtEnd = loadavg().map((x) => Math.round(x * 10) / 10);
+    // Timings taken on a busy machine are not a baseline: a 1-minute load above the core count's 80 % marks the run.
+    out.meta.provisional = Math.max(out.meta.loadAtStart[0], out.meta.loadAtEnd[0]) > cpus().length * 0.8;
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, JSON.stringify(out, null, 2));
     await agent?.close().catch(() => {});

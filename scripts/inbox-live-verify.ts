@@ -90,7 +90,10 @@ export function compare(base: Suite, next: Suite): Comparison {
   for (const key of new Set([...Object.keys(base.runs), ...Object.keys(next.runs)])) {
     const b = base.runs[key];
     const n = next.runs[key];
-    lines.push(`### ${key}`, "", "| Rule | Baseline | New | Verdict |", "|---|---|---|---|");
+    const busy = [b, n].filter((r) => r?.meta?.provisional).map((r) => (r === b ? "baseline" : "new"));
+    lines.push(`### ${key}`, "");
+    if (busy.length) lines.push(`Provisional timings (${busy.join(" and ")} taken on a busy machine, load ${[b, n].map((r) => (r?.meta as { loadAtStart?: number[] } | undefined)?.loadAtStart?.[0] ?? "?").join(" / ")}): time verdicts are not trustworthy; rules still are.`, "");
+    lines.push("| Rule | Baseline | New | Verdict |", "|---|---|---|---|");
     const ids = [...new Set([...Object.keys(b?.rules ?? {}), ...Object.keys(n?.rules ?? {})])].sort();
     for (const id of ids) {
       const v = judgeRule(b?.rules[id], n?.rules[id]);
@@ -115,7 +118,8 @@ export function compare(base: Suite, next: Suite): Comparison {
 export function table(suite: Suite): string[] {
   const lines: string[] = [];
   for (const [key, r] of Object.entries(suite.runs)) {
-    lines.push(`### ${key}`, "", "| Rule | Result |", "|---|---|");
+    const m = r.meta as { provisional?: boolean; loadAtStart?: number[]; loadAtEnd?: number[] };
+    lines.push(`### ${key}`, "", `Load average at start / end: ${m.loadAtStart?.join(", ") ?? "?"} / ${m.loadAtEnd?.join(", ") ?? "?"}${m.provisional ? " — PROVISIONAL: taken on a busy machine, re-record when idle" : ""}`, "", "| Rule | Result |", "|---|---|");
     for (const id of Object.keys(r.rules).sort()) {
       const x = r.rules[id]!;
       lines.push(`| ${id} ${x.title} | ${x.pass ? "pass" : "FAIL"}${typeof x.ms === "number" ? ` (${x.ms} ms)` : ""} |`);
