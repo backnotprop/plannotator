@@ -37,7 +37,11 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi .am-own-x { position: absolute; right: -4px; top: -4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--foreground); color: var(--background); cursor: pointer; opacity: 0; transition: opacity 100ms linear; }
 .ib-agi .am-own-x > svg { width: 8px; height: 8px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
 .ib-agi .am-own-c:hover > .am-own-x, .ib-agi .am-own-c:focus-within > .am-own-x { opacity: 1; }
-@media (hover: none) { .ib-agi .am-own-x { opacity: 1; width: 24px; height: 24px; right: -6px; top: -6px; } }
+/* No hover: every × shows, so each is a quiet grey dot (18 px drawn, 24 px to tap), not a row of black badges. */
+@media (hover: none) {
+  .ib-agi .am-own-x { opacity: 1; width: 24px; height: 24px; right: -7px; top: -7px; background: none; color: var(--muted-foreground); isolation: isolate; }
+  .ib-agi .am-own-x::before { content: ""; position: absolute; inset: 3px; z-index: -1; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1.5px var(--background); }
+}
 
 /* "Animate it" (AnimateIt.tsx): under the agent's own picture, the picture, one line, one button. */
 .ib-agi-anim { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 3%, transparent); }
