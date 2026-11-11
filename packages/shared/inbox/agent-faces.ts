@@ -169,6 +169,28 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
         // Not saved (a newer file, a full disk): the window still finds it through the agents' list while it is live.
       }
     },
+    /**
+     * The uploaded pictures changed (one added or removed, packages/server/inbox-agent-icons.ts): a save with the same
+     * faces, so the count moves and every window hears it (the wire carries the pictures).
+     */
+    touch(): InboxAgentFacesWire {
+      return save(copy());
+    },
+    /** A removed picture: every agent that showed it goes back to its own mark, in one save (none when no agent did). */
+    dropFace(face: string): InboxAgentFacesWire {
+      const faces = copy();
+      let dropped = false;
+      for (const [key, entry] of Object.entries(faces)) {
+        if (entry.face !== face) continue;
+        delete faces[key];
+        dropped = true;
+      }
+      return dropped ? save(faces) : this.wire();
+    },
+    /** The faces agents show now (an uploaded picture in use is never the one the cap removes). */
+    shown(): Set<string> {
+      return new Set(Object.values(now().faces).map((entry) => entry.face));
+    },
     /** Tests: forget what was read. */
     forget(): void {
       cached = null;

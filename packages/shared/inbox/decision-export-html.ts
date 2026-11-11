@@ -31,7 +31,7 @@ type Other = Exclude<DecisionExportState, "decided">;
 /** The one word the overview gives a card that is not a decision. */
 const SHORT: Readonly<Record<Other, string>> = {
   open: "open",
-  picked_unsent: "not sent",
+  picked_unsent: "draft",
   answered_in_words: "in words",
   skipped: "skipped",
   set_aside: "set aside",
@@ -368,6 +368,8 @@ function replacement(doc: DecisionExportV1, d: DecisionExportItem): DecisionExpo
 }
 
 function shortState(doc: DecisionExportV1, d: DecisionExportItem): string {
+  // The overview's row for a pick saved and not sent: the posts' own wording (decision-post.ts DECISION_POST_DRAFT).
+  if (d.state === "picked_unsent") return "draft, not sent to the agent";
   if (d.state === "replaced") {
     const r = replacement(doc, d);
     return r ? `replaced by D${r.n}` : SHORT.replaced;
@@ -381,7 +383,7 @@ function restHint(doc: DecisionExportV1, d: DecisionExportItem): string {
   if (a && !a.sent && !a.skipped) {
     const picked = [...a.selected, ...(a.other ? [a.other] : []), ...(a.text ? [a.text] : [])];
     const note = a.note ? ` <q>${esc(a.note)}</q>` : "";
-    if (picked.length || note) return `Picked: ${esc(joinWords(picked))}${note}`;
+    if (picked.length || note) return `Draft: ${esc(joinWords(picked))}${note}`;
   }
   if (d.state === "skipped" && a?.note) return `<q>${esc(a.note)}</q>`;
   if (d.state === "replaced") {
@@ -480,3 +482,6 @@ ${restHtml(doc, when)}
 </html>
 `;
 }
+
+/** This design's dates (stamp "Nov 8 14:02", range "Nov 8 to 10, 2026", footer with the zone), for the posted comment. */
+export { dates as decisionExportDesignDates };
