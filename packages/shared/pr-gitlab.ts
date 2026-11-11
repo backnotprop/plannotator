@@ -654,6 +654,119 @@ export async function fetchGlFileBytes(
 
 // --- Submit MR Review ---
 
+type RunWithInput = NonNullable<PRRuntime["runCommandWithInput"]>;
+
+function commandFailure(result: CommandResult): string {
+  return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+}
+
+/**
+ * GitLab's own words for a refused approval: the JSON `message` glab prints on
+ * stdout, else glab's stderr. Null when the failure is not a refusal (401/403).
+ */
+function glApprovalRefusal(result: CommandResult): string | null {
+  const text = `${result.stderr}\n${result.stdout}`;
+  if (!/\bHTTP 40[13]\b|\b40[13] (?:Unauthorized|Forbidden)\b/i.test(text)) return null;
+  let message = "";
+  try {
+    const body: unknown = JSON.parse(result.stdout);
+    if (isRecord(body)) message = stringValue(body.message) || stringValue(body.error);
+  } catch {
+    // Not JSON: glab's stderr carries the answer.
+  }
+  return message || result.stderr.trim().replace(/^glab:\s*/, "") || `exit code ${result.exitCode}`;
+}
+
+/** Approve the MR. Returns the failure message, or null on success. */
+async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string): Promise<string | null> {
+  const result = await run(
+    "glab",
+    apiArgs(host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    "{}",
+  );
+  if (result.exitCode === 0) return null;
+  // The person may approve their own MR unless the project forbids it; GitLab
+  // then answers 401 (also when they already approved). Say so in plain words.
+  const refusal = glApprovalRefusal(result);
+  return refusal
+    ? `GitLab refused the approval (${refusal}). The project may not let you approve this merge request, for example because you are its author, or you already approved it.`
+    : `Failed to approve MR: ${commandFailure(result)}`;
+}
+
+// GitLab records requested changes only for a reviewer, and runs a document's
+// mutations in order, so the user is appended as a reviewer first.
+const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!, $username: String!) {
+  mergeRequestSetReviewers(input: { projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND }) { errors }
+  mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors }
+}`;
+
+/** GraphQL error messages from a top-level `errors` array and every mutation payload's `errors` strings. */
+function graphqlErrors(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const top = Array.isArray(value.errors)
+    ? value.errors.map((e) => (isRecord(e) ? stringValue(e.message) : stringValue(e))).filter(Boolean)
+    : [];
+  const payloads = isRecord(value.data) ? Object.values(value.data) : [];
+  const nested = payloads.flatMap((payload) =>
+    isRecord(payload) && Array.isArray(payload.errors) ? payload.errors.map(stringValue).filter(Boolean) : [],
+  );
+  return [...top, ...nested];
+}
+
+/** The server has no `mergeRequestRequestChanges` (added in GitLab 18.9). */
+const REQUEST_CHANGES_MISSING = Symbol("request changes missing");
+
+/**
+ * GitLab before 18.9 rejects the mutation document as a whole, before running
+ * any of it (HTTP 200, no `data`; glab exits 1 and prints the body), with an
+ * `undefinedField` error naming `mergeRequestRequestChanges` on `Mutation`.
+ */
+function requestChangesMissing(value: unknown): boolean {
+  if (!isRecord(value) || value.data != null || !Array.isArray(value.errors)) return false;
+  return value.errors.some((e) => {
+    if (!isRecord(e)) return false;
+    const ext = isRecord(e.extensions) ? e.extensions : {};
+    if (ext.code === "undefinedField") {
+      return ext.typeName === "Mutation" && ext.fieldName === "mergeRequestRequestChanges";
+    }
+    return /^Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'/.test(stringValue(e.message));
+  });
+}
+
+/**
+ * Add the current user as a reviewer and set their state to "Requested
+ * changes". Returns the failure message, null on success, or
+ * `REQUEST_CHANGES_MISSING` when the server is too old to have it (nothing
+ * changed on the MR).
+ */
+async function requestGlMRChanges(
+  runtime: PRRuntime,
+  run: RunWithInput,
+  ref: GlMRRef,
+): Promise<string | null | typeof REQUEST_CHANGES_MISSING> {
+  const username = await getGlUser(runtime, ref.host);
+  if (!username) return "could not read the current GitLab user";
+  const result = await run(
+    "glab",
+    apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    JSON.stringify({
+      query: REQUEST_CHANGES_MUTATION,
+      variables: { projectPath: ref.projectPath, iid: String(ref.iid), username },
+    }),
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    if (result.exitCode !== 0) return commandFailure(result);
+    return `unexpected GraphQL response: ${result.stdout.trim().slice(0, 200)}`;
+  }
+  if (requestChangesMissing(parsed)) return REQUEST_CHANGES_MISSING;
+  if (result.exitCode !== 0) return commandFailure(result);
+  const errors = graphqlErrors(parsed);
+  return errors.length > 0 ? errors.join("; ") : null;
+}
+
 /** One file of an MR's diff as a discussion's position needs it: its path before, and its unchanged lines' pairs. */
 interface GlPositionFile {
   oldPath: string;
@@ -774,7 +887,7 @@ export async function submitGlMRReview(
       notePayload,
     );
     if (noteResult.exitCode !== 0) {
-      const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
+      const msg = commandFailure(noteResult);
       throw new Error(`Failed to post MR note: ${msg}`);
     }
     reviewBodyPosted = true;
@@ -826,7 +939,7 @@ export async function submitGlMRReview(
           );
 
           if (res.exitCode !== 0) {
-            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            const msg = commandFailure(res);
             throw new Error(`${comment.path}:${comment.line}: ${msg}`);
           }
         }),
@@ -881,28 +994,42 @@ export async function submitGlMRReview(
     }
   }
 
-  // 3. Approve if requested. GitLab has no request-changes review, so a
-  //    `request_changes` action posts exactly what `comment` posts (#1611).
   let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
   let approvalError: string | undefined;
-  if (action === "approve") {
+  // An older GitLab without request changes: the review stays the plain comment it already is.
+  let postedAs: "comment" | undefined;
+  if (action === "approve" || action === "request_changes") {
+    const verb = action === "approve" ? "approve MR" : "request changes on MR";
     try {
-      const approveResult = await runCommandWithInput(
-        "glab",
-        apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-        "{}",
-      );
-      if (approveResult.exitCode !== 0) {
-        const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
-        approval = "failed";
-        approvalError = `Failed to approve MR: ${msg}`;
+      if (action === "approve") {
+        const failure = await approveGlMR(runCommandWithInput, ref.host, mrEndpoint);
+        if (failure) {
+          approval = "failed";
+          approvalError = failure;
+        } else {
+          approval = "succeeded";
+        }
       } else {
-        approval = "succeeded";
+        const failure = await requestGlMRChanges(runtime, runCommandWithInput, ref);
+        if (failure === REQUEST_CHANGES_MISSING) {
+          postedAs = "comment";
+        } else if (failure) {
+          approval = "failed";
+          approvalError = `Failed to ${verb}: ${failure}`;
+        } else {
+          approval = "succeeded";
+        }
       }
     } catch (error) {
       approval = "failed";
       const message = error instanceof Error ? error.message : String(error);
-      approvalError = `Failed to approve MR: ${message}`;
+      approvalError = `Failed to ${verb}: ${message}`;
+    }
+    if (approval === "failed" && !reviewBodyPosted && failedFileComments.length === fileComments.length) {
+      // A decision refused before anything else landed changed nothing on the
+      // MR: an error, like Bitbucket, so the review stays open with no retry
+      // locked to it and the person can still comment or request changes.
+      throw new Error(approvalError);
     }
   }
 
@@ -915,14 +1042,15 @@ export async function submitGlMRReview(
       approval,
       ...(approvalError ? { approvalError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
+      ...(postedAs ? { postedAs } : {}),
       retry: {
-        action: approval === "failed" ? "approve" : "comment",
+        action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((failure) => failure.comment),
       },
     };
   }
 
-  return { status: "complete" };
+  return postedAs ? { status: "complete", postedAs } : { status: "complete" };
 }
 
 // --- Marked text: a note or a description section found again by its marker (pr-marked.ts) ---

@@ -32,7 +32,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-[960px] max-w-[95vw] max-h-[85vh] flex flex-col bg-popover border border-border rounded-xl shadow-2xl">
+      <div data-highlight-composer="" className="relative w-[960px] max-w-[95vw] max-h-[85vh] flex flex-col bg-popover border border-border rounded-xl shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
