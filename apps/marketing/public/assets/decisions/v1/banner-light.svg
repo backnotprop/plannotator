@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="200" viewBox="0 0 1200 200" role="img" aria-label="Decisions, from Plannotator">
+<rect width="1200" height="200" fill="#f5f5f7"/>
+<text x="70" y="102" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Inter, sans-serif" font-size="72" font-weight="600" letter-spacing="-2" fill="#1d1d1f">Decisions</text>
+<text x="74" y="160" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="40" font-weight="500" letter-spacing="-0.5" fill="#6e6e73">from Plannotator</text>
+<line x1="752" y1="36" x2="752" y2="164" stroke="#e6e6ea" stroke-width="2"/>
+<text x="784" y="50" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#a1a1a7">D1</text>
+<path d="M820 43l4 4 8 -9" fill="none" stroke="#5a46d4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="848" y="41" width="196" height="6" rx="3" fill="#cfcfd6"/>
+<rect x="1056" y="41" width="74" height="6" rx="3" fill="#e2e2e7"/>
+<text x="784" y="78" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#a1a1a7">D2</text>
+<path d="M820 71l4 4 8 -9" fill="none" stroke="#5a46d4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="848" y="69" width="152" height="6" rx="3" fill="#cfcfd6"/>
+<rect x="1012" y="69" width="57" height="6" rx="3" fill="#e2e2e7"/>
+<text x="784" y="106" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#a1a1a7">D3</text>
+<path d="M820 99l4 4 8 -9" fill="none" stroke="#5a46d4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="848" y="97" width="204" height="6" rx="3" fill="#cfcfd6"/>
+<rect x="1064" y="97" width="77" height="6" rx="3" fill="#e2e2e7"/>
+<text x="784" y="134" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#a1a1a7">D4</text>
+<path d="M820 127l4 4 8 -9" fill="none" stroke="#5a46d4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="848" y="125" width="128" height="6" rx="3" fill="#cfcfd6"/>
+<rect x="988" y="125" width="48" height="6" rx="3" fill="#e2e2e7"/>
+<text x="784" y="162" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#a1a1a7">D5</text>
+<circle cx="826" cy="156" r="4" fill="none" stroke="#a1a1a7" stroke-width="1.6"/>
+<rect x="848" y="153" width="172" height="6" rx="3" fill="#e2e2e7"/>
+<rect x="1032" y="153" width="65" height="6" rx="3" fill="#e2e2e7"/>
+</svg>
