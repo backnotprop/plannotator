@@ -12,11 +12,11 @@
  *   plugin or loses the Inbox for a minute never makes the rows flip.
  *
  * `nextSeveral` is the rule (pure, tested alone); the rest keeps it in this window, recomputed when the agents change
- * (`subscribeInboxAgents`) and when the window is hidden or shown.
+ * (`onInboxAgentsSet`) and when the window is hidden or shown.
  */
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
-import { inboxAgentsNow, subscribeInboxAgents } from './agentsList';
+import { inboxAgentsNow, onInboxAgentsSet } from './agentsList';
 
 export const SEVERAL_HOLD_MS = 10 * 60_000;
 
@@ -89,9 +89,11 @@ let wired = false;
 function subscribe(listener: () => void): () => void {
   if (!wired) {
     wired = true;
-    // As a watcher: a session that starts or ends without writing must reach the rows too, so the window reads the
-    // list on the Agents' change even when the sidebar's Agents section is not drawn (a phone, the sidebar closed).
-    subscribeInboxAgents(() => recompute(hidden()));
+    // Not as a watcher (`subscribeInboxAgents`): that would read the whole list on every turn start or end, and a
+    // read landing mid-action moved focus under the person (rowMenu.test.tsx). Where the sidebar's Agents section is
+    // drawn the agents are read anyway; elsewhere (a phone) a session that starts without writing reaches the rows
+    // with the next list read.
+    onInboxAgentsSet(() => recompute(hidden()));
     // Hidden, or just shown again: nobody was looking, so a project may be let go now.
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => recompute(true));
     recompute(hidden());
@@ -102,7 +104,20 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/** The held projects and their agents, redrawn when they change. */
+/**
+ * The held projects and their agents, redrawn when they change. Plain state, never `useSyncExternalStore`, for the
+ * reason `useInboxAgents` gives (agentsList.ts): the agents are set in the middle of a list read, and a store hook
+ * would draw the rows there, before the read's own changes (a row leaving, focus moving to the row in its slot).
+ * As state, they draw in the same pass as the read.
+ */
 export function useRowSessions(): RowSessions {
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  const [sessions, setSessions] = useState(snapshot);
+  useEffect(() => {
+    const read = () => setSessions(snapshot());
+    const stop = subscribe(read);
+    // A change between the first draw and this subscription.
+    read();
+    return stop;
+  }, []);
+  return sessions;
 }
