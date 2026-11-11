@@ -5765,7 +5765,6 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-ss-pile { display: inline-flex; align-items: center; flex: none; }
 .ib-ss .ib-mk { width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
 .ib-ss .ib-mk > svg, .ib-ss .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
-.ib-ss .ib-mk.ib-face > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 .ib-ss-pile .ib-mk { box-shadow: 0 0 0 2px var(--card); }
 .ib-ss-pile .ib-mk + .ib-mk { margin-left: -6px; }
 .ib-ss-n { font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--muted-foreground); }
