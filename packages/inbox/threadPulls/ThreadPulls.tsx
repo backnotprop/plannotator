@@ -178,6 +178,9 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchor.contains(t)) return;
+      // The sheet's scrim closes it on its click (below), not on the press: closed on the press, the touch's click
+      // would land on what was under the scrim (the thread header's Back, a link), as BottomSheet.tsx says.
+      if (t instanceof Element && t.closest('[data-pr-scrim]')) return;
       onClose();
     };
     const onScroll = (e: Event) => {

@@ -441,6 +441,15 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
         expect(popover()?.hasAttribute('data-sheet')).toBe(sheet);
         expect(popover()?.classList.contains('ib-prpop-sheet')).toBe(sheet);
         expect(document.querySelector('[data-pr-scrim]') !== null).toBe(sheet);
+        if (sheet) {
+          // The scrim closes the sheet on its click, never on the press: closed on the press, a touch's click lands
+          // on what was under the scrim (the header's Back, at the top left).
+          const scrim = document.querySelector<HTMLElement>('[data-pr-scrim]')!;
+          await act(async () => scrim.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+          expect(popover()).not.toBeNull();
+          await click(scrim);
+          expect(popover()).toBeNull();
+        }
       } finally {
         window.matchMedia = saved;
       }

@@ -1,7 +1,8 @@
 /**
  * A thread's pull requests on a phone, in a real browser against the compiled
- * binary: the thread header's PR button opens the list as a bottom sheet the
- * width of the screen, at its bottom edge.
+ * binary: the thread header's PR button opens the list as a bottom sheet that
+ * floats as the thread's ⋯ sheet does: the same inset from the screen's sides
+ * and bottom edge, all corners rounded alike.
  *
  * What regresses: the Pull requests page's popover (prs/prs.css) also uses the
  * `.ib-prpop` class, and its rules come later than the thread card's own, so
@@ -92,27 +93,43 @@ async function openPulls(browser: Browser, viewport: { width: number; height: nu
   return page;
 }
 
-test("a phone: the thread's PRs open as a sheet the screen's width, at its bottom edge, top corners rounded", async ({ browser }) => {
+/** A sheet's gaps to the window's left, right and bottom edges, and its corners. */
+const placeOf = (selector: string) => (el: Element) => {
+  const target = el.matches(selector) ? el : el.querySelector(selector)!;
+  const r = target.getBoundingClientRect();
+  const cs = getComputedStyle(target);
+  return { left: Math.round(r.left), right: Math.round(innerWidth - r.right), bottom: Math.round(innerHeight - r.bottom), corners: [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius] };
+};
+
+test("a phone: the thread's PRs open as a sheet that floats as the thread's ⋯ sheet does, at the bottom", async ({ browser }) => {
   for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 640 }]) {
     const page = await openPulls(browser, viewport);
     const sheet = page.locator('[data-pr-popover]');
     await expect(sheet).toHaveAttribute('data-sheet', '');
-    const seen = await sheet.evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const cs = getComputedStyle(el);
-      const field = el.querySelector('[data-pr-add-input]')!.getBoundingClientRect();
-      return { left: r.left, right: r.right, bottom: r.bottom, w: innerWidth, h: innerHeight, bl: cs.borderBottomLeftRadius, br: cs.borderBottomRightRadius, tl: cs.borderTopLeftRadius, side: cs.borderLeftWidth, field: field.width };
-    });
-    expect(seen.left, JSON.stringify(seen)).toBe(0);
-    expect(seen.right, JSON.stringify(seen)).toBe(seen.w);
-    expect(Math.abs(seen.bottom - seen.h), JSON.stringify(seen)).toBeLessThanOrEqual(1);
-    expect(seen.tl).not.toBe('0px');
-    expect([seen.bl, seen.br, seen.side]).toEqual(['0px', '0px', '0px']);
-    // The Add field has the row's width beside Add.
-    expect(seen.field, JSON.stringify(seen)).toBeGreaterThan(seen.w * 0.65);
+    const pulls = await sheet.evaluate(placeOf('[data-pr-popover]'));
+    const field = (await page.locator('[data-pr-add-input]').boundingBox())!;
     // A tap on the scrim closes it.
     await page.locator('[data-pr-scrim]').tap({ position: { x: 20, y: 20 } });
     await expect(sheet).toHaveCount(0);
+    // The thread's ⋯ sheet, in the same window.
+    await page.locator('[data-thread-more]').first().tap();
+    const menu = page.locator('.ib-pm-pos[data-phone] .ib-pm');
+    await expect(menu).toBeVisible();
+    await page.waitForTimeout(400);
+    const more = await menu.evaluate(placeOf('.ib-pm'));
+    const seen = JSON.stringify({ viewport, pulls, more });
+    // The same inset on each side and at the bottom, a small one (not flush, not the old 352 px card from the left).
+    expect(pulls.left, seen).toBe(more.left);
+    expect(pulls.right, seen).toBe(more.right);
+    expect(pulls.bottom, seen).toBe(more.bottom);
+    expect(pulls.left, seen).toBeGreaterThan(0);
+    expect(pulls.left, seen).toBeLessThan(24);
+    expect(pulls.left, seen).toBe(pulls.right);
+    // Every corner rounded, as the ⋯ sheet's.
+    expect(pulls.corners, seen).toEqual(more.corners);
+    expect(pulls.corners[2], seen).not.toBe('0px');
+    // The Add field has the row's width beside Add.
+    expect(field.width, seen).toBeGreaterThan(viewport.width * 0.65);
     await page.context().close();
   }
 });
