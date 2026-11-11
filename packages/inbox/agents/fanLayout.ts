@@ -84,7 +84,8 @@ export function fanLayout(cx: number, cy: number, w: number, h: number, counts: 
   const radii: number[] = [];
   counts.forEach((n, ring) => {
     const floor = ring === 0 ? 0 : radii[ring - 1]! + o.between;
-    radii.push(ring === 0 && many ? o.inner : Math.max(floor, o.inner, n > 1 ? (o.pitch * (n - 1)) / (180 * RAD) : 0));
+    // Over half a turn with neighbours `pitch` apart in a straight line.
+    radii.push(ring === 0 && many ? o.inner : Math.max(floor, o.inner, n > 1 ? o.pitch / (2 * Math.sin((90 / (n - 1)) * RAD)) : 0));
   });
   const out: FanSpot[][] = counts.map(() => []);
   let aim = toward;
@@ -93,7 +94,9 @@ export function fanLayout(cx: number, cy: number, w: number, h: number, counts: 
     if (n <= 0) continue;
     let r = radii[ring]!;
     const inner = many && ring === 0;
-    const spanAt = (radius: number) => (n > 1 ? Math.max((o.pitch * (n - 1)) / (radius * RAD), inner ? o.innerSpread : 0) : 0);
+    // The angle that keeps neighbours `pitch` apart in a straight line (the chord), not along the arc.
+    const stepAt = (radius: number) => (2 * Math.asin(Math.min(1, o.pitch / (2 * radius)))) / RAD;
+    const spanAt = (radius: number) => (n > 1 ? Math.max(stepAt(radius) * (n - 1), inner ? o.innerSpread : 0) : 0);
     let span = spanAt(r);
     let run = pickRun(openRuns(cx, cy, r, w, h, o), aim);
     // Too little room: a wider arc, until its choices fit the room left (a few tries, and never past 220 px).
