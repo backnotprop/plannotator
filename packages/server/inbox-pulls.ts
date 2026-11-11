@@ -69,7 +69,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRFileContent, fetchPRTree, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
-import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import type { PRContext, PRRef, PRRuntime } from "@plannotator/shared/pr-types";
 import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
@@ -736,6 +736,12 @@ export interface InboxPulls {
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /**
+   * The PR's own text as the details read answered it (description, comments, reviews, threads), the PR, and the
+   * person's CLI for its host: what the PR media route checks a URL against and fetches with. Reads the details when
+   * none is kept. Throws InboxPullsError as `details` does.
+   */
+  text(key: string): Promise<{ pull: InboxPull; context: PRContext; runtime: PRRuntime }>;
+  /**
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
    * document, whatever its per-file read gives; `partial` when that is known to be less than the whole diff.
    * When that read is partial or empty and `roots` holds a clone of the PR's repository on this computer, git reads
@@ -1028,7 +1034,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
   /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
-  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean }>();
+  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean; context?: PRContext }>();
   /**
    * A PR's whole diff at `head`, read with git in a clone of its repository on this computer (its `origin` is the
    * PR's repository: that is how the clone is one of its projects). What the clone lacks is fetched by the PR's own
@@ -1604,17 +1610,15 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const ref: PRRef = pull.platform === "github"
         ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
         : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
-      const runtime: PRRuntime = {
-        runCommand: async (cmd, args, options) => {
-          const result = await run(cmd as RefCli, args, options?.env);
-          if (result.exitCode !== 0 && refErrorOf(cmd as RefCli, result) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
-          return result;
-        },
-      };
-      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean } = {
+      const runtime = forgeRuntime(pull);
+      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean; context?: PRContext } = {
         at: now(),
         updated: pull.updated_at,
-        read: fetchPRContextWithReviewers(runtime, ref).then((context) => pullDetailsOf(key, context, pull.author)),
+        read: fetchPRContextWithReviewers(runtime, ref).then((context) => {
+          // Kept for the PR media route: the only text whose pictures it fetches.
+          entry.context = context;
+          return pullDetailsOf(key, context, pull.author);
+        }),
         // The faces already shown stay allowed while the next read is out.
         ...(hit?.avatars ? { avatars: hit.avatars } : {}),
       };
@@ -1630,6 +1634,16 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         if (detailReads.get(key) === entry) detailReads.delete(key);
         throw failed();
       }
+    },
+    async text(key) {
+      // The text kept from the last details read serves every picture while the PR has not moved: no read per picture.
+      const known = findKnown(key);
+      const kept = detailReads.get(key);
+      if (!known || !kept?.context || kept.updated !== known.updated_at) await this.details(key);
+      const pull = findKnown(key);
+      const context = detailReads.get(key)?.context;
+      if (!pull || !context) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
+      return { pull, context, runtime: forgeRuntime(pull) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
     async file(key, path, repos) {

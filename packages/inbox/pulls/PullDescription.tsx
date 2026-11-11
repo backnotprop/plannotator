@@ -2,20 +2,19 @@
  * A PR's own description at the head of its diff, in the Inbox's read-only Markdown. A long one starts folded and opens
  * into a box of its own height, so the diff is never far. No description draws nothing.
  *
- * A body is someone else's words. Its images do not load: the window's CSP is `img-src 'self' data: blob:`, so a remote
- * picture is its alt text in ui's quiet chip (a diagram can still name one: the CSP stops it, so nothing leaves, and it
- * is a broken picture and a CSP report). A path opens on the forge, never as an address of this window, and only the
+ * A body is someone else's words. The window's CSP is `img-src 'self' data: blob:`: a picture GitHub keeps for the PR
+ * loads through the Inbox's own route (ForgeMedia.tsx), any other remote picture is its alt text in ui's quiet chip (a
+ * diagram can still name one: the CSP stops it, so nothing leaves, and it is a broken picture and a CSP report). A path opens on the forge, never as an address of this window, and only the
  * web's links stay links. Folded, only its start is parsed, so a hostile one costs its reader nothing until they open it.
  */
 
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { ContextMarkdown } from '../components/ContextMarkdown';
 import { forgeBody, forgeFileUrl, isLiveLink } from './descriptionLinks';
-
-const resolveImage: ImageResolver = (src) => (src.startsWith('data:image/') ? { kind: 'src', src } : { kind: 'unavailable', title: 'Images in a description open on the forge' });
+import { ForgeMedia, forgeImageResolver } from './ForgeMedia';
 
 /** How much of a body is parsed while folded: far past what the fold shows. */
 const FOLDED_CHARS = 4000;
@@ -51,8 +50,12 @@ function keepInPage(event: MouseEvent) {
   }
 }
 
-/** Words a stranger wrote on the forge, in the page: a picture is its words, a link never replaces the window. */
+/**
+ * Words a stranger wrote on the forge, in the page: a picture GitHub keeps for the PR shows through the Inbox and opens
+ * in the viewer (ForgeMedia.tsx), any other picture is its words, a link never replaces the window.
+ */
 export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; layer: InboxPull; headSha?: string | null }) {
+  const resolveImage = useMemo(() => forgeImageResolver(layer), [layer]);
   const resolveLink = useMemo<LocalLinkResolver>(() => {
     const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
     return (href) => {
@@ -62,11 +65,13 @@ export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; 
     };
   }, [layer, headSha]);
   return (
-    <div onClickCapture={keepInPage} onAuxClickCapture={keepInPage}>
-      <ImageResolverContext.Provider value={resolveImage}>
-        <ContextMarkdown markdown={forgeBody(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
-      </ImageResolverContext.Provider>
-    </div>
+    <ForgeMedia layer={layer}>
+      <div onClickCapture={keepInPage} onAuxClickCapture={keepInPage}>
+        <ImageResolverContext.Provider value={resolveImage}>
+          <ContextMarkdown markdown={forgeBody(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
+        </ImageResolverContext.Provider>
+      </div>
+    </ForgeMedia>
   );
 }
 

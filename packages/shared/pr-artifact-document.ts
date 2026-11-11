@@ -55,6 +55,10 @@ export interface PRArtifactContentOptions {
   readonly sourceUrl?: string;
   /** Valid single-range header forwarded for video seeking. */
   readonly range?: string;
+  /** Where a redirect may land, on top of the usual rule; absent: any public host. */
+  readonly followRedirect?: (next: URL) => boolean;
+  /** Send the sign-in only to the first request's origin, never across a redirect. */
+  readonly authOnRequestedOriginOnly?: boolean;
 }
 
 function contextMarkdown(context: PRContext): readonly string[] {
@@ -528,7 +532,8 @@ async function fetchArtifactContent(
           Accept: '*/*',
           'User-Agent': 'Plannotator artifact review',
           ...(isValidRangeHeader(options.range) ? { Range: options.range } : {}),
-          ...(shouldSendProviderAuth(currentUrl, metadata) ? providerHeaders : {}),
+          ...(shouldSendProviderAuth(currentUrl, metadata)
+            && (!options.authOnRequestedOriginOnly || currentUrl.origin === requestedUrl.origin) ? providerHeaders : {}),
         },
       });
       if (REDIRECT_STATUSES.has(response.status)) {
@@ -538,7 +543,7 @@ async function fetchArtifactContent(
           throw new PRArtifactDocumentError('Artifact document redirected too many times', 502);
         }
         const nextUrl = new URL(location, currentUrl);
-        if (!mayFollowProviderRedirect(currentUrl, nextUrl)) {
+        if (!mayFollowProviderRedirect(currentUrl, nextUrl) || (options.followRedirect && !options.followRedirect(nextUrl))) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
         }
         // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
