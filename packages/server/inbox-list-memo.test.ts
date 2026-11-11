@@ -33,15 +33,17 @@ async function setup() {
 const get = (server: InboxServer, path: string) => fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { "Sec-Fetch-Site": "same-origin" } });
 const agent = (session: string) => ({ kind: "agent" as const, host: "claude-code", session, name: null });
 
+/** Counts rows built (the store's private `buildRow`, behind its per-thread row cache) until the test ends. */
 function countRowBuilds(): { count: number } {
   const counter = { count: 0 };
-  const original = InboxStore.prototype.listRow;
-  InboxStore.prototype.listRow = function (this: InboxStore, threadId: string) {
+  const proto = InboxStore.prototype as unknown as { buildRow: (threadId: string) => unknown };
+  const original = proto.buildRow;
+  proto.buildRow = function (this: InboxStore, threadId: string) {
     counter.count += 1;
     return original.call(this, threadId);
   };
   restores.push(() => {
-    InboxStore.prototype.listRow = original;
+    proto.buildRow = original;
   });
   return counter;
 }
