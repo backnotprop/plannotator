@@ -274,6 +274,12 @@ export interface ReviewState {
   prContext: PRContext | null;
   /** Viewable attachments harvested from the current hosted PR/MR context. */
   prArtifacts: readonly PRArtifact[];
+  /** Open the Artifacts panel at this artifact (a picture or video clicked in PR text). */
+  openPRArtifact: (artifactId: string) => void;
+  /** The artifact the panel should show next; `seq` tells two asks for the same one apart. */
+  prArtifactFocus: { readonly id: string; readonly seq: number } | null;
+  /** The panel showed `prArtifactFocus`; clear it so a later reopen starts on the gallery. */
+  onPRArtifactFocusHandled: (seq: number) => void;
   isPRContextLoading: boolean;
   prContextError: string | null;
   fetchPRContext: () => void;

@@ -543,10 +543,13 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
     onAddCommentAnnotation,
     onSelectCommentAnnotation,
     onAskAIForComment,
+    prArtifactFocus,
+    onPRArtifactFocusHandled,
   } = useReviewState();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hideResolved, setHideResolved] = useState(false);
   const [pendingComment, setPendingComment] = useState<PendingComment | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const prUrl = prMetadata?.url ?? 'unknown';
   const storageKey = hiddenStorageKey(prUrl);
   const [hiddenState, setHiddenState] = useState<{ key: string; ids: Set<string> }>(() => ({
@@ -586,6 +589,34 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
   const hiddenCatalogCount = prArtifacts.filter((artifact) => hiddenIds.has(artifact.id)).length;
 
   useEffect(() => setPendingComment(null), [selected?.id]);
+
+  // A picture or video clicked in PR text: show it, even if it was hidden
+  // or sits in a resolved thread, and put focus on its row.
+  const focusRowRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prArtifactFocus === null) return;
+    const artifact = prArtifacts.find((item) => item.id === prArtifactFocus.id);
+    onPRArtifactFocusHandled(prArtifactFocus.seq);
+    if (artifact === undefined) return;
+    setHiddenState((current) => {
+      const ids = current.key === storageKey ? current.ids : readHiddenArtifacts(storageKey);
+      if (!ids.has(artifact.id)) return current;
+      const next = new Set(ids);
+      next.delete(artifact.id);
+      return { key: storageKey, ids: next };
+    });
+    if (isResolvedArtifact(artifact)) setHideResolved(false);
+    focusRowRef.current = artifact.id;
+    setSelectedId(artifact.id);
+  }, [onPRArtifactFocusHandled, prArtifactFocus, prArtifacts, storageKey]);
+
+  useEffect(() => {
+    if (selected === null || focusRowRef.current !== selected.id) return;
+    focusRowRef.current = null;
+    const row = rootRef.current?.querySelector<HTMLElement>(`[data-artifact-row="${selected.id}"]`);
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
 
   useEffect(() => {
     if (selectedId !== null && !visibleArtifacts.some((artifact) => artifact.id === selectedId)) {
@@ -748,6 +779,7 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
 
   return (
     <div
+      ref={rootRef}
       className="flex h-full min-w-0 bg-background"
       onKeyDown={(event) => {
         const target = event.target;
@@ -771,10 +803,10 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
         }
       }}
     >
-      <aside className="flex h-full w-[17rem] max-w-[36%] shrink-0 flex-col border-r border-border/50 bg-card/15">
+      <aside className="flex h-full w-[17rem] max-w-[36%] shrink-0 flex-col border-r border-border/50 bg-card/15 max-sm:w-auto max-sm:max-w-none">
         <div className="flex min-h-[var(--panel-header-h)] shrink-0 items-center justify-between border-b border-border/50 px-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Artifacts <span className="font-mono opacity-70">{visibleArtifacts.length}</span>
+            <span className="max-sm:sr-only">Artifacts </span><span className="font-mono opacity-70">{visibleArtifacts.length}</span>
           </span>
           <div className="flex items-center gap-1">
             {hiddenCatalogCount > 0 && (
@@ -804,14 +836,14 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
             <span className="flex h-7 w-7 items-center justify-center">
               <LayoutGrid className="h-4 w-4" aria-hidden="true" />
             </span>
-            <span className="min-w-0 flex-1">Gallery</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+            <span className="min-w-0 flex-1 max-sm:sr-only">Gallery</span>
+            <span className="rounded bg-muted max-sm:hidden px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
               {visibleArtifacts.length}
             </span>
           </button>
           {groups.map((group) => group.artifacts.length === 0 ? null : (
             <section key={group.key} className="mb-3 last:mb-0">
-              <div className="flex items-center justify-between px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/65">
+              <div className="flex items-center justify-between px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/65 max-sm:sr-only">
                 <span>{group.label}</span>
                 <span className="font-mono">{group.artifacts.length}</span>
               </div>
@@ -828,11 +860,12 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
                     <button
                       type="button"
                       aria-current={active ? 'true' : undefined}
+                      data-artifact-row={artifact.id}
                       onClick={() => setSelectedId(artifact.id)}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md px-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     >
                       <PRArtifactIcon kind={artifact.kind} />
-                      <span className="min-w-0 flex-1 py-1.5">
+                      <span className="min-w-0 flex-1 py-1.5 max-sm:sr-only">
                         <span className="flex items-center gap-1 truncate text-xs font-medium">
                           <span className="truncate">{artifact.name}</span>
                           {resolved && <span className="text-[8px] uppercase tracking-wide text-muted-foreground">resolved</span>}
@@ -907,13 +940,13 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
                 className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-muted/55 px-2.5 text-[10px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={(event) => setPendingComment({ artifactId: selected.id, anchorEl: event.currentTarget, anchor: { kind: 'page' } })}
               >
-                <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" /> Add note
+                <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" /> <span className="max-sm:sr-only">Add note</span>
               </button>
-              <a href={selected.provenance.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                Source <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              <a href={selected.provenance.sourceUrl} title="Source" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span className="max-sm:sr-only">Source</span> <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
-              <a href={selected.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                Open <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              <a href={selected.url} title="Open" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span className="max-sm:sr-only">Open</span> <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
             </header>
             <div className="min-h-0 flex-1 bg-muted/10">

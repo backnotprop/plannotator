@@ -5,6 +5,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { PRMediaScope } from './PRMediaScope';
 
 /**
  * The PR description, made annotatable. Mounts the shared text-anchored
@@ -62,13 +63,15 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
 
   return (
     <div ref={containerRef}>
-      <RenderedMarkdown
-        markdown={markdown}
-        className={className}
-        resolveImage={proxiedImages ? resolvePRImage : undefined}
-        preserveVideos
-        responsiveImages
-      />
+      <PRMediaScope>
+        <RenderedMarkdown
+          markdown={markdown}
+          className={className}
+          resolveImage={proxiedImages ? resolvePRImage : undefined}
+          preserveVideos
+          responsiveImages
+        />
+      </PRMediaScope>
 
       {hook.commentPopover &&
         createPortal(

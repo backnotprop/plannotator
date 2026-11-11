@@ -317,6 +317,23 @@ function buildSources(metadata: PRMetadata, context: PRContext) {
 }
 
 /**
+ * The artifact a URL in the PR's text names, by the same rule the list
+ * dedupes with (so a signed or re-written copy of an upload still matches),
+ * or null when the list does not hold it.
+ */
+export function findPRArtifactByUrl(
+  artifacts: readonly PRArtifact[],
+  metadata: PRMetadata | null,
+  rawUrl: string,
+): PRArtifact | null {
+  if (metadata === null || artifacts.length === 0) return null;
+  const url = resolveArtifactUrl(rawUrl, metadata.url);
+  if (url === null) return null;
+  const id = `pr-artifact-${fnv1aHex(artifactDedupeKey(url, metadata))}`;
+  return artifacts.find((artifact) => artifact.id === id) ?? null;
+}
+
+/**
  * Harvest viewable attachments from a hosted PR/MR's normalized live context.
  * Relative upload URLs are resolved against the change request's host URL.
  * Returns an empty catalog for local reviews or absent context.

@@ -2549,6 +2549,27 @@ const ReviewApp: React.FC = () => {
     });
   }, [dockApi, prMetadata]);
 
+  // A picture or video clicked in PR text: open the panel at that artifact.
+  const [prArtifactFocus, setPRArtifactFocus] = useState<{ id: string; seq: number } | null>(null);
+  const openPRArtifact = useCallback((artifactId: string) => {
+    // A selected note on another artifact would pull the panel back to it.
+    const description = descriptionAnnotationsRef.current.find((a) => a.id === selectedDescriptionAnnotationIdRef.current);
+    if (description?.artifact && description.artifact.artifactId !== artifactId) {
+      selectedDescriptionAnnotationIdRef.current = null;
+      setSelectedDescriptionAnnotationId(null);
+    }
+    const comment = commentAnnotationsRef.current.find((a) => a.id === selectedCommentAnnotationIdRef.current);
+    if (comment?.artifact && comment.artifact.artifactId !== artifactId) {
+      selectedCommentAnnotationIdRef.current = null;
+      setSelectedCommentAnnotationId(null);
+    }
+    setPRArtifactFocus((prev) => ({ id: artifactId, seq: (prev?.seq ?? 0) + 1 }));
+    openPRArtifactsPanel();
+  }, [openPRArtifactsPanel]);
+  const handlePRArtifactFocusHandled = useCallback((seq: number) => {
+    setPRArtifactFocus((prev) => (prev?.seq === seq ? null : prev));
+  }, []);
+
   // A switch to local review must not leave a hosted-review panel behind.
   useEffect(() => {
     if (prMetadata !== null) return;
@@ -4773,6 +4794,9 @@ const ReviewApp: React.FC = () => {
     prMetadata,
     prContext,
     prArtifacts,
+    openPRArtifact,
+    prArtifactFocus,
+    onPRArtifactFocusHandled: handlePRArtifactFocusHandled,
     isPRContextLoading,
     prContextError,
     fetchPRContext,
@@ -4834,7 +4858,7 @@ const ReviewApp: React.FC = () => {
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
     aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
-    aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
+    aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts, openPRArtifact, prArtifactFocus, handlePRArtifactFocusHandled,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleAllFilesVisibleFileChange, handleFileScrolledPast,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
