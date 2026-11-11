@@ -873,7 +873,7 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
 
 // Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
 describe("what the owner reads through the tailnet, and what a page there never claims", () => {
-  test("What's new and its images answer the owner over the tailnet, read only; another allowed login is refused, there and at the update control", async () => {
+  test("What's new and its images answer the owner over the tailnet and another allowed login, read only; the update control stays the owner's", async () => {
     const GUEST = "guest@example.com";
     const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
     let githubRequests = 0;
@@ -929,9 +929,9 @@ describe("what the owner reads through the tailnet, and what a page there never 
       expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
       expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
 
-      // Another allowed login is refused, for both routes.
-      expect(await codeOf(await throughServe(inbox, page, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
-      expect(await codeOf(await throughServe(inbox, image, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      // Another allowed login reads them too: public release notes (owner ruling 2026-11-11).
+      expect((await throughServe(inbox, page, { login: GUEST, headers: own })).status).toBe(200);
+      expect((await throughServe(inbox, image, { login: GUEST, headers: own })).status).toBe(200);
 
       // The window is told who is a guest.
       const settings = async (login: string | null) =>

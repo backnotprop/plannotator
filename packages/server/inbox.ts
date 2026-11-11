@@ -5285,18 +5285,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
-      // What's new and its images (inbox-whats-new-images.ts) only read release
-      // notes, so they answer this computer and the owner over the tailnet; any
-      // other tailnet login is refused (`owner_only`, as voice and Feedback do).
-      // Fetching missing notes by a release's tag is limited to the versions
+      // What's new and its images (inbox-whats-new-images.ts) only read public release
+      // notes, so they answer every window: this computer, the owner over the tailnet
+      // and a login the allow list let in. Fetching missing notes by a release's tag is limited to the versions
       // this Inbox knows, the cached release list's included (inbox-updates.ts
       // fetchableVersion), and stays inside the update-notes folder of the
       // data directory. The releases panel (inbox-whats-new-releases.ts) asks
       // GitHub for the release list at most once a day.
       if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_RELEASES_PATH || path === INBOX_WHATS_NEW_IMAGE_PATH) {
-        if (!ownerOrLocal(req, via)) {
-          throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
-        }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -6142,7 +6138,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
       // GitHub is never turned on by the request: `pictureSources`), or a 404 and the window draws
       // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
-      // guards as every window write. Window only: not on the phone's door, and never an agent's.
+      // guards as every window write. Every window (a tailnet guest's too: a picture is a logo), and a linked
+      // machine's window through the door; never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
       if (projectPictureMatch) {
         const projectId = projectPictureMatch[1]!;
@@ -6150,7 +6147,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const project = store.project(projectId);
         if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
         if (req.method === "GET") {
-          if (!ownerOrLocal(req, via)) return localOnly();
           if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
             return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
           }
@@ -6176,8 +6172,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           });
         }
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-        // A tailnet guest cannot see the picture, so it cannot set one either.
-        if (!ownerOrLocal(req, via)) return localOnly();
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.picture === null) {
