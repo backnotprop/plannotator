@@ -212,9 +212,11 @@ export interface LaunchHost {
   available(): Promise<LaunchAvailability>;
   /**
    * Compose's Model and Effort menus for this agent (packages/core/inbox-launch-choice.ts): the CLI's own lists and
-   * Settings → Agents' default. No member: the agent offers no choice, and a Send's `model` / `effort` is refused.
+   * Settings → Agents' default. Null: the CLI could not list them (an older CLI, a failing or slow call), and the agent
+   * is offered exactly as without this, with no menu. Never gates the offer: the engine waits on it a moment at most
+   * (`LAUNCH_CHOICES_WAIT_MS`). No member: the agent offers no choice, and a Send's `model` / `effort` is refused.
    */
-  choices?(): Promise<Omit<InboxLaunchChoices, "last">>;
+  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */

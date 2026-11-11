@@ -51,7 +51,7 @@ import {
   type AgentRunResult,
 } from "./inbox-agents";
 import { launchChoiceArgs, parseClaudeChoices } from "@plannotator/core/inbox-launch-choice";
-import { launchChoiceCache } from "./inbox-launch-choice";
+import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, claudeSettingsSignIn, mergeClaudeLaunchSettings, readClaudeSettingsFile, type ClaudeSettingsFileRead } from "./inbox-launch-claude-settings-file";
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
@@ -396,7 +396,7 @@ export function createClaudeHost(options: {
       };
     },
     /** `claude --help`, for the Model and Effort lists (`parseClaudeChoices`). */
-    help: async () => (await run(["--help"], undefined)).result,
+    help: async () => (await run(["--help"], undefined, LAUNCH_CHOICES_RUN_MS)).result,
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
     respawn: async (short: string, environment: AgentEnvironment) => (await run(["respawn", short], undefined, COMMAND_TIMEOUT_MS, environment)).result,
     rm: async (short: string) => (await run(["rm", short], undefined)).result,
@@ -513,8 +513,9 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     launch.model !== undefined || launch.effort !== undefined ? { model: launch.model, effort: launch.effort } : { model: ctx.config().model ?? undefined };
   let version: string | null = null;
   const choiceLists = launchChoiceCache(async () => {
+    // Killed at its deadline (the CLI itself, never its group). Help that names no `--effort` lists nothing: no menu.
     const help = await cli.help();
-    return help.exitCode === 0 ? parseClaudeChoices(help.stdout) : null;
+    return help.exitCode === 0 && !help.timedOut && /--effort <level>/.test(help.stdout) ? parseClaudeChoices(help.stdout) : null;
   });
 
   // `claude auth status`: kept CLAUDE_AUTH_TTL_MS (signed out, CLAUDE_AUTH_SIGNED_OUT_TTL_MS), and one check at a time,
@@ -586,7 +587,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
 
     /** The Model and Effort lists of the installed CLI (its `--help`, read once per version), with Settings → Agents' default. */
     async choices() {
-      const lists = (await choiceLists(version)) ?? parseClaudeChoices("");
+      const lists = await choiceLists(version);
+      if (!lists) return null;
       const { model, effort } = ctx.config();
       return { ...lists, ...(model || effort ? { default: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } } : {}) };
     },

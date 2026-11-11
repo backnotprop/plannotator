@@ -42,20 +42,20 @@ test("the person's settings go under the Inbox's: env merged name by name, both 
 test("the file at start: a ~ or relative path is home's; missing, not JSON or not an object says so with the path only", () => {
   const home = mkdtempSync(join(tmpdir(), "plannotator-claude-settings-file-"));
   dirs.push(home);
-  mkdirSync(join(home, ".claude"));
-  expect(claudeSettingsFilePath("~/.claude/gateway.json", home)).toBe(join(home, ".claude", "gateway.json"));
-  expect(claudeSettingsFilePath(".claude/gateway.json", home)).toBe(join(home, ".claude", "gateway.json"));
+  mkdirSync(join(home, "profiles"));
+  expect(claudeSettingsFilePath("~/profiles/gateway.json", home)).toBe(join(home, "profiles", "gateway.json"));
+  expect(claudeSettingsFilePath("profiles/gateway.json", home)).toBe(join(home, "profiles", "gateway.json"));
   expect(claudeSettingsFilePath("/etc/claude/gateway.json", home)).toBe("/etc/claude/gateway.json");
   const file = (name: string, text: string) => {
-    writeFileSync(join(home, ".claude", name), text);
-    return readClaudeSettingsFile(join(home, ".claude", name), `~/.claude/${name}`);
+    writeFileSync(join(home, "profiles", name), text);
+    return readClaudeSettingsFile(join(home, "profiles", name), `~/profiles/${name}`);
   };
   expect(file("ok.json", '{"apiKeyHelper":"secret-helper"}')).toEqual({ ok: true, settings: { apiKeyHelper: "secret-helper" } });
   const refused: [ReturnType<typeof readClaudeSettingsFile>, string][] = [
     [readClaudeSettingsFile(join(home, "nope.json"), "~/nope.json"), "Your Claude settings file ~/nope.json isn't there. Fix it in Settings → Agents, or clear it there."],
-    [file("bad.json", '{"apiKeyHelper": "secret-helper",'), "Your Claude settings file ~/.claude/bad.json isn't valid JSON. Fix it in Settings → Agents, or clear it there."],
-    [file("list.json", '["secret-helper"]'), "Your Claude settings file ~/.claude/list.json isn't valid JSON. Fix it in Settings → Agents, or clear it there."],
-    [readClaudeSettingsFile(join(home, ".claude"), "~/.claude"), "Your Claude settings file ~/.claude isn't a settings file. Fix it in Settings → Agents, or clear it there."],
+    [file("bad.json", '{"apiKeyHelper": "secret-helper",'), "Your Claude settings file ~/profiles/bad.json isn't valid JSON. Fix it in Settings → Agents, or clear it there."],
+    [file("list.json", '["secret-helper"]'), "Your Claude settings file ~/profiles/list.json isn't valid JSON. Fix it in Settings → Agents, or clear it there."],
+    [readClaudeSettingsFile(join(home, "profiles"), "~/profiles"), "Your Claude settings file ~/profiles isn't a settings file. Fix it in Settings → Agents, or clear it there."],
   ];
   for (const [read, words] of refused) {
     expect(read).toEqual({ ok: false, text: words });

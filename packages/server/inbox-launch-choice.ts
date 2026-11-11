@@ -44,23 +44,42 @@ export function writeLastLaunchChoice(dataDir: string, agent: string, choice: In
 
 export type LaunchChoiceLists = Omit<InboxLaunchChoices, "default" | "last">;
 
+/** How long a launch offer (compose's read, a Send) waits on a host's lists before going on without them. */
+export const LAUNCH_CHOICES_WAIT_MS = 250;
+/** How long one help or model-list call may run before it is killed (the run's own deadline). */
+export const LAUNCH_CHOICES_RUN_MS = 5_000;
+/** A CLI that could not list them is not asked again for this long (a compose read comes every few seconds). */
+const FAILED_AGAIN_MS = 5 * 60_000;
+
+/** `answer`, or null once `ms` passed: the lists are a nicety, never what an offer waits for. The read itself goes on. */
+export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOICES_WAIT_MS): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([answer.catch(() => null), late]).finally(() => clearTimeout(timer));
+}
+
 /**
  * A host's lists, read from its CLI once per `key` (the CLI's path and version): compose reads them every few seconds,
- * and a help read costs a process. One read at a time; a failed read is tried again on the next ask.
+ * and a help read costs a process. One read at a time; a failed read is not tried again for a while.
  */
-export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>) {
+export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now) {
   let kept: { key: string; value: LaunchChoiceLists } | null = null;
+  let failed: { key: string; at: number } | null = null;
   let reading: { key: string; answer: Promise<LaunchChoiceLists | null> } | null = null;
   const read = (key: string | null): Promise<LaunchChoiceLists | null> => {
     if (key === null) return Promise.resolve(null);
     if (kept?.key === key) return Promise.resolve(kept.value);
+    if (failed?.key === key && now() - failed.at < FAILED_AGAIN_MS) return Promise.resolve(null);
     if (reading?.key === key) return reading.answer;
     const answer = load()
+      .catch(() => null)
       .then((value) => {
         if (value) kept = { key, value };
+        else failed = { key, at: now() };
         return value;
       })
-      .catch(() => null)
       .finally(() => {
         if (reading?.answer === answer) reading = null;
       });

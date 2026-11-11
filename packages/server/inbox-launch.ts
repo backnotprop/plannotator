@@ -85,7 +85,7 @@ import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastC
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { inboxLaunchTokenOk, LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
-import { readLastLaunchChoice, writeLastLaunchChoice } from "./inbox-launch-choice";
+import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -1693,13 +1693,16 @@ ${result.text}`);
       }
       // Model and effort: the Send's, field by field, else Settings → Agents' default; an effort the agent doesn't list,
       // or a choice for an agent that offers none, is refused before anything is written.
-      const lists = host.choices ? await host.choices() : null;
-      if (target.choice && !lists) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
+      // Waited on a moment at most; lists not read yet (a slow CLI) check the tokens only, never refuse the start.
+      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
-      const model = target.choice?.model ?? lists?.default?.model;
-      const effort = target.choice?.effort ?? lists?.default?.effort;
+      // Settings → Agents' defaults are Claude Code's, read from config.json whether or not its lists could be read.
+      const defaults = host.agent === "claude-code" ? { model: config().model ?? undefined, effort: config().effort ?? undefined } : {};
+      const model = target.choice?.model ?? defaults.model;
+      const effort = target.choice?.effort ?? defaults.effort;
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1765,7 +1768,7 @@ ${result.text}`);
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
       // The next New message here starts on this choice (the default too).
-      if (lists) {
+      if (host.choices) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
@@ -1860,7 +1863,8 @@ ${result.text}`);
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
           // Model and Effort (compose's menu on the row): the CLI's lists, this machine's default and the last choice.
-          const lists = host.choices ? await host.choices() : null;
+          // A moment at most: a CLI that can't list them (or is slow to) is offered as before, with no menu.
+          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
           const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];

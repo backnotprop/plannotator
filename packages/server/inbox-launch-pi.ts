@@ -57,7 +57,7 @@ import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
-import { launchChoiceCache } from "./inbox-launch-choice";
+import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
@@ -707,10 +707,11 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     const e = await ctx.environment();
     const path = e.which("pi");
     if (!path) return null;
-    const help = await e.run([path, "--help"], { timeoutMs: 10_000 });
-    if (help.exitCode !== 0) return null;
-    const models = await e.run([path, "--list-models"], { timeoutMs: 15_000 });
-    return parsePiChoices(help.stdout, models.exitCode === 0 ? models.stdout : null);
+    // Each call killed at its deadline. A Pi whose help names no `--thinking` lists nothing: no menu, as before.
+    const help = await e.run([path, "--help"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
+    if (help.exitCode !== 0 || help.timedOut || !/--thinking <level>/.test(help.stdout)) return null;
+    const models = await e.run([path, "--list-models"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
+    return parsePiChoices(help.stdout, models.exitCode === 0 && !models.timedOut ? models.stdout : null);
   });
 
   return {
@@ -734,7 +735,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     },
 
     /** Pi's own lists: `--thinking` levels from its help, and the models `pi --list-models` says it can use here. Read once per version. */
-    choices: async () => (await choiceLists(choiceKey)) ?? parsePiChoices("", null),
+    choices: () => choiceLists(choiceKey),
 
     /** Pi has no permission modes: nothing to fix on the record. */
     startOf: () => ({ full: false, ownMode: false, bypass: false }),

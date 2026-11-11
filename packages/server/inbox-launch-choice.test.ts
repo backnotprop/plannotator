@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLastLaunchChoice, writeLastLaunchChoice } from "./inbox-launch-choice";
+import { launchChoiceCache, readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -35,4 +35,26 @@ test("the last choice is kept per agent on this machine; Default clears it; a ha
   // A broken file never stops the next Send from keeping its choice.
   writeLastLaunchChoice(dir, "claude-code", { model: "sonnet" });
   expect(readLastLaunchChoice(dir, "claude-code")).toEqual({ model: "sonnet" });
+});
+
+test("the lists never hold up an offer: a slow CLI is waited on a moment only, and one that can't list them is not asked again at once", async () => {
+  let calls = 0;
+  let clock = 0;
+  let finish: (value: null) => void = () => {};
+  const read = launchChoiceCache(() => {
+    calls++;
+    return new Promise((resolve) => (finish = resolve));
+  }, () => clock);
+  const started = Date.now();
+  expect(await withinLaunchWait(read("pi@1.5"), 50)).toBeNull();
+  expect(Date.now() - started).toBeLessThan(1000);
+  // The same read is shared, not run twice; it fails (an older CLI), and is not run again for a while.
+  void read("pi@1.5");
+  finish(null);
+  await Bun.sleep(0);
+  expect(await read("pi@1.5")).toBeNull();
+  expect(calls).toBe(1);
+  clock += 6 * 60_000;
+  void read("pi@1.5");
+  expect(calls).toBe(2);
 });
