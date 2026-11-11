@@ -4246,7 +4246,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Claude Code's own name for each live session (inbox-claude-names.ts): list rows only, on the plain env launch uses.
   const claudeNames = createInboxClaudeNames({
     environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchPlainEnv(launchOwnEnv(), [...launch.loginPath(), ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")])]) }),
-    wanted: () => deliveryListeners.size > 0 && live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude")),
+    // A window is open and a live Claude Code session has no name or title from its plugin (an old plugin, or no title yet).
+    wanted: () => {
+      if (deliveryListeners.size === 0) return false;
+      const titled = live.titles();
+      return live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude") && !entry.label && !Object.hasOwn(titled, entry.session));
+    },
     onChange: live.titlesChanged,
   });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).

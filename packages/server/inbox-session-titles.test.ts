@@ -8,11 +8,12 @@
  * listing is a fake environment.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
-import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
+import { createAgentEnvironmentFor, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
 import { CLAUDE_NAMES_EVERY_MS, createInboxClaudeNames } from "./inbox-claude-names";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -108,6 +109,48 @@ describe("Claude Code's own names (claude agents --json)", () => {
     clock += CLAUDE_NAMES_EVERY_MS;
     await names.refresh();
     expect(names.all()).toEqual({ s1: "release 0.28.61" });
+  });
+});
+
+describe("a claude that never answers (#3082's lesson: an outside CLI must never hold the Inbox)", () => {
+  // A fake `claude` (a shell script on a scratch PATH, never the real one) that ignores SIGTERM, starts a child that
+  // would run for 1000 s, and never exits. The failures: a run with no deadline; a deadline that ends the CLI but not
+  // what it started; a second run piling onto the first; a failing claude spawned again every period.
+  test("is ended at its deadline with everything it started, never doubled, and asked again only after a longer wait", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-claude-names-hang-")));
+    roots.push(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const pids = join(root, "pids");
+    const runs = join(root, "runs");
+    writeFileSync(join(bin, "claude"), `#!/bin/sh\necho run >> "${runs}"\necho $$ >> "${pids}"\ntrap '' TERM\nsleep 1000 &\necho $! >> "${pids}"\nwait\nwait\n`);
+    chmodSync(join(bin, "claude"), 0o755);
+    const environment = createAgentEnvironmentFor({ platform: process.platform, homeDir: root, env: { HOME: root, PATH: `${bin}:/usr/bin:/bin` } });
+    let clock = 1_000;
+    const names = createInboxClaudeNames({ environment: () => environment, wanted: () => true, onChange: () => {}, now: () => clock, runTimeoutMs: 400 });
+    stops.push(names.stop);
+
+    const started = Date.now();
+    const first = names.refresh();
+    expect(names.refresh()).toBe(first);
+    await first;
+    expect(Date.now() - started).toBeLessThan(3_000);
+    const runCount = () => readFileSync(runs, "utf8").trim().split("\n").length;
+    expect(runCount()).toBe(1);
+    const alive = (pid: string) => spawnSync("ps", ["-p", pid, "-o", "stat="], { encoding: "utf8" }).stdout.trim().replace(/^Z.*/, "");
+    const ids = readFileSync(pids, "utf8").trim().split("\n");
+    expect(ids).toHaveLength(2);
+    for (let i = 0; i < 20 && ids.some(alive); i += 1) await new Promise((r) => setTimeout(r, 50));
+    expect(ids.filter(alive)).toEqual([]);
+
+    // Failed once: the next run waits twice the period.
+    clock += CLAUDE_NAMES_EVERY_MS;
+    await names.refresh();
+    expect(runCount()).toBe(1);
+    clock += CLAUDE_NAMES_EVERY_MS;
+    await names.refresh();
+    expect(runCount()).toBe(2);
+    expect(existsSync(pids)).toBe(true);
   });
 });
 

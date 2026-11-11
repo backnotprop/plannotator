@@ -6,9 +6,21 @@
  *
  * Display only, as a label is: the list rows read it after the plugin's name and generated title (`session_titles`
  * in `GET /api/inbox/threads`, this computer's owner only). Nothing routes on it and nothing stores it. Bun only (the
- * Inbox). It runs only while a Claude Code session is live and a window watches (`wanted`), at most every
- * CLAUDE_NAMES_EVERY_MS; with no `claude` found it looks again after CLAUDE_NAMES_MISSING_RETRY_MS. A name a session
- * had stays after the session leaves the listing, as a label does, until the Inbox restarts.
+ * Inbox). A name a session had stays after the session leaves the listing, as a label does, until the Inbox restarts.
+ *
+ * An outside CLI must never hold the Inbox (#3082's lesson: a forge CLI that never answered hung it):
+ *  - Nothing waits on it. The list route reads `all()`, a map in memory; a run only ever updates that map.
+ *  - Each run has a hard deadline (CLAUDE_NAMES_RUN_TIMEOUT_MS) through `AgentEnvironment.run`
+ *    (packages/server/inbox-agents.ts `spawnRun`): its own process group, SIGKILL to the whole group at the deadline
+ *    (so a CLI that ignores SIGTERM, and anything it started, ends too), and the answer comes at the deadline
+ *    whatever the processes do. Killing the group is safe here: `claude agents --json` (no `--all`) was seen to start
+ *    no supervisor, and nothing it starts on purpose should outlive a run that never answered. Once #3082's runner
+ *    merges, the two should share one hardened runner.
+ *  - Never two at once: a refresh while one runs returns that run.
+ *  - It backs off: a run that failed doubles the wait, from CLAUDE_NAMES_EVERY_MS up to CLAUDE_NAMES_BACKOFF_MAX_MS;
+ *    one that worked starts it over. With no `claude` found it looks again after CLAUDE_NAMES_MISSING_RETRY_MS.
+ *  - It runs only when wanted: a window is open and a live Claude Code session has neither a name nor a title from its
+ *    plugin (a current plugin with a named or titled session costs nothing). Otherwise the timer only asks `wanted`.
  */
 
 import type { AgentEnvironment } from "./inbox-agents";
@@ -16,7 +28,10 @@ import { cleanInboxSessionLabel } from "./inbox-sessions";
 
 export const CLAUDE_NAMES_EVERY_MS = 15_000;
 export const CLAUDE_NAMES_MISSING_RETRY_MS = 5 * 60_000;
-const RUN_TIMEOUT_MS = 5_000;
+/** The longest wait after runs that failed in a row (timed out, failed, or said nothing readable): it doubles up to this. */
+export const CLAUDE_NAMES_BACKOFF_MAX_MS = 5 * 60_000;
+/** A run's hard deadline. One real run took 0.27-0.47 s and about 0.25 s of CPU on a Mac mini (2026-11-10). */
+export const CLAUDE_NAMES_RUN_TIMEOUT_MS = 5_000;
 /** The most names kept: one per session this Inbox saw since it started. */
 const NAMES_MAX = 500;
 
@@ -55,11 +70,14 @@ export function createInboxClaudeNames(options: {
   onChange: () => void;
   now?: () => number;
   everyMs?: number;
+  /** Tests: a shorter deadline. */
+  runTimeoutMs?: number;
 }): InboxClaudeNames {
   const now = options.now ?? Date.now;
   const every = options.everyMs ?? CLAUDE_NAMES_EVERY_MS;
   const names = new Map<string, string>();
   let next = 0;
+  let failures = 0;
   let running: Promise<void> | null = null;
 
   const run = async (): Promise<void> => {
@@ -69,9 +87,11 @@ export function createInboxClaudeNames(options: {
       next = now() + CLAUDE_NAMES_MISSING_RETRY_MS;
       return;
     }
-    next = now() + every;
-    const result = await environment.run([claude, "agents", "--json"], { timeoutMs: RUN_TIMEOUT_MS, killGroup: false }).catch(() => null);
-    const listed = result && result.exitCode === 0 ? claudeAgentNames(result.stdout) : null;
+    const result = await environment.run([claude, "agents", "--json"], { timeoutMs: options.runTimeoutMs ?? CLAUDE_NAMES_RUN_TIMEOUT_MS }).catch(() => null);
+    const listed = result && result.exitCode === 0 && !result.timedOut ? claudeAgentNames(result.stdout) : null;
+    // Counted from the run's end, so a slow run never makes the next one start sooner.
+    failures = listed ? 0 : failures + 1;
+    next = now() + Math.min(CLAUDE_NAMES_BACKOFF_MAX_MS, every * 2 ** Math.min(20, failures));
     if (!listed) return;
     let changed = false;
     for (const [session, name] of listed) {
