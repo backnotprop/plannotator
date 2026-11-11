@@ -1,10 +1,6 @@
 /**
- * Session names across linked machines (the owner's rule of 2026-11-11: whoever sees a row sees its name). Two real
- * Inboxes, each `plannotator inbox --background` under its own temp HOME and PLANNOTATOR_DATA_DIR, linked both ways
- * through the real CLI pairing (as inbox-machines.test.ts does; a `tailscale` and a `claude` stand-in on each PATH
- * fail if ever run). The failures this catches: a linked machine's rows that show its sessions with no name, or with
- * a name that never follows a rename there (each side's merged list must carry the other's `session_labels` and
- * `session_titles`, and hear when they change).
+ * Two real Inboxes linked both ways through the CLI pairing. Catches: a linked machine's rows without its sessions'
+ * names, or a rename there that never arrives here.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, writeFileSync } from "node:fs";
@@ -31,7 +27,6 @@ async function getJson(m: Machine, path: string): Promise<Json> {
   return (await (await fetch(`${base(m)}${path}`)).json()) as Json;
 }
 
-/** One poll from a session's connection on `m`, with its name fields. */
 async function poll(m: Machine, session: string, host: string, fields: Json) {
   const health = await getJson(m, "/api/inbox/health");
   const response = await fetch(`${base(m)}${INBOX_BRIDGE_POLL_PATH}`, {
@@ -42,7 +37,6 @@ async function poll(m: Machine, session: string, host: string, fields: Json) {
   expect(response.status).toBe(200);
 }
 
-/** A session's send through its waking connection, so the row is that session's. */
 async function sends(m: Machine, session: string, host: string, name: string, body: string) {
   const client = new Client({ name: "inbox-machines-names", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base(m)}/mcp`)));
@@ -66,7 +60,6 @@ describe("session names on linked machines, two real Inboxes", () => {
     for (const name of ["a", "b"]) {
       const w = createInboxWorld(`plannotator-machine-names-${name}-`, `machine-names-${name}`, "machines");
       const calls = join(w.root, "stand-in-calls.txt");
-      // Never the real tailscale or claude: stand-ins that record a call and fail.
       for (const tool of ["tailscale", "claude"]) {
         writeFileSync(join(w.bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${calls}'\nexit 1\n`);
         chmodSync(join(w.bin, tool), 0o755);
@@ -77,7 +70,6 @@ describe("session names on linked machines, two real Inboxes", () => {
       machines.push(m);
     }
     [A, B] = machines as [Machine, Machine];
-    // The person links A to B with B's code: both ways.
     const offered = cli(B, "link", "--offer");
     expect(offered.code).toBe(0);
     const linked = cli(A, "link", offered.out.trim(), "--address", base(B), "--back", base(A));
@@ -95,7 +87,6 @@ describe("session names on linked machines, two real Inboxes", () => {
   });
 
   test("each machine's merged list names the other's sessions, the person's rename and the generated title, and follows a rename there", async () => {
-    // On B: a session the person named, and one with only its generated title. On A: the same, Pi named.
     await poll(B, "ses-b-named", "claude-code", { label: "Release notes" });
     await poll(B, "ses-b-titled", "claude-code", { label: "", title: "Fix flaky e2e" });
     await sends(B, "ses-b-named", "claude-code", "Claude Code", "Notes drafted for 0.29.");
@@ -110,7 +101,6 @@ describe("session names on linked machines, two real Inboxes", () => {
     });
     expect(onA.session_labels).toMatchObject({ "ses-b-named": "Release notes", "ses-a-pi": "Docs sweep" });
     expect(onA.session_titles).toMatchObject({ "ses-b-titled": "Fix flaky e2e", "ses-a-titled": "Refund retries" });
-    // B's rows are on A's list, named by B's sessions.
     const bRows = (onA.sections as Json[]).flatMap((s) => s.threads as Json[]).filter((r) => r.author?.session?.startsWith("ses-b-"));
     expect(bRows.length).toBe(2);
 
@@ -121,7 +111,6 @@ describe("session names on linked machines, two real Inboxes", () => {
     expect(onB.session_labels).toMatchObject({ "ses-a-pi": "Docs sweep", "ses-b-named": "Release notes" });
     expect(onB.session_titles).toMatchObject({ "ses-a-titled": "Refund retries", "ses-b-titled": "Fix flaky e2e" });
 
-    // The person renames B's session there: A hears it from B's stream, with no list read asked by anyone.
     const abort = new AbortController();
     const frames: string[] = [];
     const watching = (async () => {
@@ -131,7 +120,7 @@ describe("session names on linked machines, two real Inboxes", () => {
     })().catch(() => {});
     try {
       await waitFor("A's stream is open", () => frames.join("").includes("event: "));
-      // Whatever the first compare after a window opens says passes first: only what follows the rename counts.
+      // The first compare after a window opens may already say `labels`: only frames after the rename count.
       await Bun.sleep(2_500);
       frames.length = 0;
       await poll(B, "ses-b-named", "claude-code", { label: "Release 0.29 notes" });

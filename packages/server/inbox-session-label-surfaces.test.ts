@@ -8,8 +8,7 @@
  * ends; a label written into a message record, where every reader (an agent's
  * read_thread, a linked machine, an export) would carry it; a window never told
  * a label changed; a tailnet guest shown a row without its name, or the name of
- * a session it is not shown (the owner's rule of 2026-11-11: whoever sees a row
- * sees its name, nobody learns of a session they could not otherwise see); and
+ * a session it is not shown; and
  * an agent that reads a name in place of the session's id.
  *
  * A real Inbox under a temp data dir; connections are plain HTTP with the
@@ -210,7 +209,6 @@ describe("the routes carry each session's own label", () => {
       const result = await client.callTool({ name: "read_thread", arguments: { ...args, agent_session: "ses-docs" } });
       expect(JSON.stringify(result)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
     }
-    // The person's reply tags two sessions: one named by the person, one by its generated title alone.
     await poll(server, "ses-plain", project, "", { title: "Cookie audit" });
     const origin = `http://127.0.0.1:${server.port}`;
     const tagged = await fetch(`${origin}/api/inbox/messages/${rootId}/reply`, {
@@ -279,7 +277,6 @@ describe("who sees them", () => {
     expect(owner.session_labels["ses-hidden"]).toBe("Salary talk");
     expect(owner.session_titles["ses-hidden"]).toBe("Offer letter draft");
     expect(JSON.stringify(guest)).not.toMatch(/ses-hidden|Salary talk|Offer letter draft/);
-    // The sessions on its rows keep their names.
     expect(guest.session_labels).toMatchObject({ "ses-login": "Fix login redirect", "ses-docs": "Docs pass" });
   });
 });

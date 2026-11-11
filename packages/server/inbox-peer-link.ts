@@ -65,7 +65,6 @@ export interface PeerList {
   snoozes: boolean;
   /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
   agents: InboxAgentsGroup | null;
-  /** Its sessions' names (its list's `session_labels` and `session_titles`, inbox-session-names.ts): its rows here read as there. */
   session_labels: Record<string, string>;
   session_titles: Record<string, string>;
 }

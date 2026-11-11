@@ -1,9 +1,4 @@
-/**
- * A list row's grey slot (option A, 2026-11-10; the rule is rowSlot.ts): the project, or, in a project with two or
- * more live sessions, the row's session's name with the project in its tooltip. Same element and class as the
- * project always had (`.ib-p`: one line, cut with "…"), so no row changes height or layout. `tip` false (a phone, a
- * name-first row) draws no tooltip, as before.
- */
+/** Same `.ib-p` element the project always used, so a name never changes a row's height. */
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { rowSlot, type SlotNames } from '../rowSlot';
 import { labelOf, useSessionLabels } from '../sessionLabels';

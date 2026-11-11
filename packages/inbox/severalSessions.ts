@@ -1,18 +1,6 @@
 /**
- * Which projects' list rows name their sessions (option A, 2026-11-10): those with two or more live sessions, held so
- * a row never flips between a name and its project while the person reads (the Inbox's rule that nothing moves under
- * them).
- *
- * - "Live" is the Agents list's own (`InboxAgent.live`, packages/server/inbox-agents-list.ts): a session polling in
- *   the last 30 s, a wake-only session (Codex, Qwen, T3) heard within the hour, a launch that did not fail. One
- *   conversation under a new id (`continues`) is one agent there, so it counts once.
- * - A project turns "several" at once, the moment a second session is live: one change, in place, rows keep their
- *   height. It goes back only when it has had fewer than two for SEVERAL_HOLD_MS straight AND nobody is looking:
- *   the window is hidden, or comes back from being hidden, or the page loads. A session that restarts, reloads its
- *   plugin or loses the Inbox for a minute never makes the rows flip.
- *
- * `nextSeveral` is the rule (pure, tested alone); the rest keeps it in this window, recomputed when the agents change
- * (`onInboxAgentsSet`) and when the window is hidden or shown.
+ * Projects whose rows name their sessions: two or more live. Held so a row never flips back while someone looks; it
+ * is let go only after SEVERAL_HOLD_MS with fewer than two, and only while the window is hidden or freshly shown.
  */
 import { useEffect, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -20,13 +8,8 @@ import { inboxAgentsNow, onInboxAgentsSet } from './agentsList';
 
 export const SEVERAL_HOLD_MS = 10 * 60_000;
 
-/** A project on one machine: `<machine>|<project id>` (machine empty on this Inbox's own list). */
 export const projectKey = (machine: string | null | undefined, projectId: string) => `${machine ?? ''}|${projectId}`;
 
-/**
- * The projects held as several, each with the last time it had two or more live sessions. `unseen`: nobody is
- * looking now (hidden, back from hidden, a fresh load), the only time one may be let go.
- */
 export function nextSeveral(held: ReadonlyMap<string, number>, live: ReadonlyMap<string, number>, now: number, unseen: boolean): Map<string, number> {
   const out = new Map<string, number>();
   for (const [key, count] of live) if (count >= 2) out.set(key, now);
@@ -38,16 +21,12 @@ export function nextSeveral(held: ReadonlyMap<string, number>, live: ReadonlyMap
   return out;
 }
 
-/** What the rows read: the held projects, and each project's agents (for their names and peers). */
 export interface RowSessions {
   several: ReadonlySet<string>;
-  /** Agents by project key, any state. */
   agents: ReadonlyMap<string, readonly InboxAgent[]>;
-  /** An old session id → the session its conversation goes on as (`continues`), by machine. */
   heirs: ReadonlyMap<string, string>;
 }
 
-/** Live agents per project and agents by project, from the Agents list's groups. */
 export function sessionsByProject(groups: readonly InboxAgentsGroup[] | null): { live: Map<string, number>; agents: Map<string, InboxAgent[]>; heirs: Map<string, string> } {
   const live = new Map<string, number>();
   const agents = new Map<string, InboxAgent[]>();
@@ -77,7 +56,6 @@ function recompute(unseen: boolean): void {
   const groups = inboxAgentsNow();
   if (groups === null) return;
   const { live, agents, heirs } = sessionsByProject(groups);
-  // The first read of this page is a fresh look: what is several now, nothing held from before.
   held = nextSeveral(held, live, Date.now(), unseen || !loaded);
   loaded = true;
   current = { several: new Set(held.keys()), agents, heirs };
@@ -89,12 +67,8 @@ let wired = false;
 function subscribe(listener: () => void): () => void {
   if (!wired) {
     wired = true;
-    // Not as a watcher (`subscribeInboxAgents`): that would read the whole list on every turn start or end, and a
-    // read landing mid-action moved focus under the person (rowMenu.test.tsx). Where the sidebar's Agents section is
-    // drawn the agents are read anyway; elsewhere (a phone) a session that starts without writing reaches the rows
-    // with the next list read.
+    // Not a watcher (`subscribeInboxAgents`): a list read on every turn moved focus under a row action.
     onInboxAgentsSet(() => recompute(hidden()));
-    // Hidden, or just shown again: nobody was looking, so a project may be let go now.
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => recompute(true));
     recompute(hidden());
   }
@@ -104,18 +78,12 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/**
- * The held projects and their agents, redrawn when they change. Plain state, never `useSyncExternalStore`, for the
- * reason `useInboxAgents` gives (agentsList.ts): the agents are set in the middle of a list read, and a store hook
- * would draw the rows there, before the read's own changes (a row leaving, focus moving to the row in its slot).
- * As state, they draw in the same pass as the read.
- */
+/** Plain state, not `useSyncExternalStore`: agents are set mid list read, and a store hook would draw before the read's own changes. */
 export function useRowSessions(): RowSessions {
   const [sessions, setSessions] = useState(snapshot);
   useEffect(() => {
     const read = () => setSessions(snapshot());
     const stop = subscribe(read);
-    // A change between the first draw and this subscription.
     read();
     return stop;
   }, []);

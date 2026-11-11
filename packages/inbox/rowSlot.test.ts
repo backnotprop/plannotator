@@ -1,11 +1,7 @@
 /**
- * The list row's grey slot under option A (the owner's decision of 2026-11-10), one case per cell of the state
- * matrix in briefs `session-names-states.md` (§3, numbered as there). The failures this catches: a name shown in a
- * project with one live session (rows change for nobody's benefit); the project shown where rows of one project would
- * read alike; the generated title or a default hiding the name the person gave; two rows reading the same; a default
- * that changes between reads; a long name cut twice (the slot's cut, then the column's), a same-name code cut off, or a long name that loses its
- * whole form in the tooltip.
- * The live-count hold is severalSessions.test.ts.
+ * Catches: a name in a project with one live session; rows of one project reading alike; a generated title or a
+ * default hiding the person's name; a default that changes between reads; a long name cut twice or losing its code;
+ * a tooltip without the whole name.
  */
 import { describe, expect, test } from 'bun:test';
 import { rowSlot, sessionCode, type RowSlotInput } from './rowSlot';

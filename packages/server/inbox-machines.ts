@@ -1127,7 +1127,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
-  /** Every linked machine's session names, as its list last said (inbox-session-names.ts); kept while it is away, like its rows. */
   const sessionNames = (): { labels: Record<string, string>; titles: Record<string, string> } => {
     const labels = Object.create(null) as Record<string, string>;
     const titles = Object.create(null) as Record<string, string>;

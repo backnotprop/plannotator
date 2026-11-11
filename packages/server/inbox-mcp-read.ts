@@ -168,7 +168,6 @@ export interface AgentAddressee {
   you: boolean;
 }
 
-/** A session's name by id (the person's rename, else its generated title, inbox-session-names.ts); null when it has none. */
 export type SessionNameOf = (session: string) => string | null;
 
 /**
@@ -208,7 +207,6 @@ export interface ThreadReadInput {
   message_id?: string;
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
-  /** The other sessions' names, for `to` and `tagged`. */
   names?: SessionNameOf;
 }
 

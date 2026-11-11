@@ -504,7 +504,6 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
       continue
     }
     if (typeof record?.sessionId === 'string' && record.sessionId !== sessionId) continue
-    // The title Claude Code generated for an unnamed session (`ai-title`): kept apart from the name the person gave.
     if (record?.type === 'ai-title' && typeof record.aiTitle === 'string') generated = cappedTitle(record.aiTitle)
     if (record?.type !== 'custom-title' || typeof record.customTitle !== 'string') continue
     title = cappedTitle(record.customTitle)
@@ -739,11 +738,6 @@ export class TranscriptTitle {
     private readonly candidates: () => Promise<readonly string[]>,
   ) {}
 
-  /**
-   * The latest title Claude Code generated (`ai-title`) as of the last `read`, or null when none was read. Not the
-   * session's name: the poll sends it apart (INBOX_TITLE_POLL_FIELD), and only list rows show it, for a session the
-   * person never named.
-   */
   generatedTitle(): string | null {
     return this.generated
   }
@@ -992,10 +986,7 @@ export interface InboxLinkOptions {
    * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
   label?: () => string | Promise<string>
-  /**
-   * The title Claude Code generated for the session (`TranscriptTitle.generatedTitle`), sent apart from `label` as
-   * INBOX_TITLE_POLL_FIELD on every poll: `''` when none. Set by the host, never by the model. Absent: no field.
-   */
+  /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
   /**
    * The session ids this conversation continues (`TranscriptForkedFrom`), read
@@ -1501,7 +1492,6 @@ export class InboxLink {
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
-      // The title the host generated (additive): only list rows show it, for a session with no name.
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),

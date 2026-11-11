@@ -1,10 +1,4 @@
-/**
- * A name for a session the person never named, for list rows only (option A, 2026-11-10): the list's
- * `session_titles`, the host's generated title (Claude Code's `ai-title`) else Claude Code's own name for the session
- * (`claude agents --json`). Kept apart from `session_labels` (sessionLabels.ts), the name the person gave, which every
- * other place reads: whether those places show a generated name too is the owner's to decide. Same rules as the
- * labels: display only, to whoever sees the row, no prototype, own keys only.
- */
+/** Kept apart from `session_labels`: only list rows show a generated title. */
 import { useSyncExternalStore } from 'react';
 import type { SessionLabels } from './sessionLabels';
 
@@ -12,7 +6,6 @@ const EMPTY: SessionLabels = Object.freeze(Object.create(null) as Record<string,
 let current: SessionLabels = EMPTY;
 const listeners = new Set<() => void>();
 
-/** The titles a list read brought; anything that is not a non-empty string is dropped. Unchanged: no redraw. */
 export function setSessionTitles(next: unknown): void {
   const clean = Object.create(null) as Record<string, string>;
   if (next && typeof next === 'object' && !Array.isArray(next)) {
@@ -31,7 +24,6 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/** The titles now, redrawn when a list read changes them. */
 export function useSessionTitles(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

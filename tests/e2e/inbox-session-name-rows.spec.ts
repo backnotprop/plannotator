@@ -1,21 +1,8 @@
 /**
- * List rows name their session in a project with two or more live sessions (option A, "name instead of project",
- * the owner's decision of 2026-11-10), on the compiled binary. Nothing is mocked in the window: `plannotator inbox
- * --background` under a temp PLANNOTATOR_DATA_DIR with a scratch HOME, sessions are the bridge's real long-polls
- * carrying a `label` (the person's name) and a `title` (the generated title, or Claude Code's own name, which the
- * Inbox reads from `claude agents --json`: no real `claude` runs here, so the poll carries it), messages go through
- * the Inbox's own MCP `send_message`. A Codex and a Pi session are simulated by polls with their host.
- *
- * World: `plannotator` has four Claude Code sessions (A named by the person, B named, C with a generated title only,
- * D with only Claude Code's default name), a Codex session (no name) and a Pi session (named); `workspaces` has one.
- *  - The one critical flow, on a poor link (300 ms, 1 Mbit/s, 3% loss, one window dropped for 8 s). The failures
- *    it catches: rows in a busy project that still read alike, or need a reload; a row that changes height when its
- *    slot names the session (wide, three-line beside a thread, phone); a rename that reaches one window and not
- *    another, or a window that lost its link and never catches up; rows that flip back to the project the moment the
- *    second-last session ends.
- *  - ROW_NAMES_SHOTS: where to write PNGs for the brief (none when unset).
- *
- * Build the binary first (see inbox.spec.ts).
+ * Session names in list rows, on the compiled binary with real bridge polls on a poor link. Catches: rows of a busy
+ * project that still read alike or need a reload; a row that changes height for its name; a rename that misses a
+ * window, or a window back from offline that never catches up; rows flipping back when the second-last session ends.
+ * ROW_NAMES_SHOTS writes PNGs. Build the binary first (see inbox.spec.ts).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -42,7 +29,6 @@ let world: World;
 const polls = new Map<string, Poll>();
 const contexts: BrowserContext[] = [];
 
-/** One live session: the bridge's long-poll with its `label` and `title` on every poll, as the plugin sends them. */
 class Poll {
   stopped = true;
   loop: Promise<void> = Promise.resolve();
@@ -197,13 +183,8 @@ async function showList(page: Page, hash = '') {
   await page.waitForTimeout(600);
 }
 
-/** The slot text of the row for `thread`. */
 const slotOf = (page: Page, thread: string) => page.locator(`[data-row="${thread}"] .ib-p, .ib-nrow[data-thread-id="${thread}"] .ib-p, .ib-mrow[data-thread-id="${thread}"] .ib-p`).first();
 
-/**
- * Each visible named row's height with its name, with the project in its place, and with a 60-character name, the
- * row's own state otherwise the same (the slot's text swapped in place, then put back): the slot alone never moves it.
- */
 async function slotSwapHeights(page: Page): Promise<{ named: number; project: number; long: number }[]> {
   return page.evaluate(async () => {
     const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -250,22 +231,14 @@ const EXPECTED: Record<string, string | RegExp> = {
   W: 'workspaces',
 };
 
-/**
- * A poor link, as on hotel Wi-Fi: 300 ms, about 1 Mbit/s, 3% loss (Chromium's own throttling, which the page's
- * requests and its event stream go through). `offline` drops the connection.
- */
 async function poorLink(page: Page, offline = false) {
   const cdp = await page.context().newCDPSession(page);
   const conditions = { offline, latency: 300, downloadThroughput: 125_000, uploadThroughput: 125_000 };
   await cdp.send('Network.enable');
-  // With loss. A run with it once left a window unnamed for 30 s: not the loss itself but the latency, which widened
-  // the gap between the page's first list read and its stream's `hello`, where a `deliveries` frame (no record, so
-  // never replayed) was lost. Every connect now reads the list once (App.tsx `onConnect`).
   await cdp.send('Network.emulateNetworkConditions', { ...conditions, packetLoss: 3 } as never);
   return cdp;
 }
 
-/** Every text a row's slot showed, in order (a MutationObserver in the page): the proof it never flips. */
 async function recordSlot(page: Page, thread: string) {
   await page.evaluate((id) => {
     const seen: string[] = [];

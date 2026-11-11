@@ -1,23 +1,10 @@
-/**
- * Plannotator Inbox: who reads a session's name (the person's rename, `session_labels`, and the generated title or
- * Claude Code's own name, `session_titles`). The owner's ask of 2026-11-11 ("Why are we limiting"): anyone who can
- * already see a thread or session row sees the same name the owner sees for it, and nobody learns of a session they
- * could not otherwise see.
- *
- * - A linked machine's list carries its names (its door answers it as the owner's): this one keeps them
- *   (`inboxPeerSessionNames`) and the merged view shows them on that machine's rows.
- * - A tailnet guest reads the names of the sessions its own answer already carries, rows and Agents alike
- *   (`inboxNamesShown`), and no other: Claude Code's own listing names every session on this computer, the ones
- *   that never reached the Inbox too.
- */
-
+/** Who reads a session's name: whoever already sees the session; a guest learns of no session it is not shown. */
 import type { InboxAgentsGroup, InboxListRow } from "@plannotator/core/inbox-types";
 import { cleanInboxSessionLabel } from "./inbox-sessions";
 
-/** The most names kept per linked machine (as inbox-claude-names.ts keeps per Inbox). */
 const PEER_NAMES_MAX = 500;
 
-/** A linked machine's `session_labels` or `session_titles` as its list sent them: own keys, each name cleaned as a poll's label is. */
+/** A peer's names are cleaned as a poll's label is: they reach this window as display text. */
 export function inboxPeerSessionNames(value: unknown): Record<string, string> {
   const out = Object.create(null) as Record<string, string>;
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
@@ -38,7 +25,6 @@ interface ListShape {
   agents?: InboxAgentsGroup[];
 }
 
-/** Every session a list answer names: its rows' authors, addressees and participants, and its Agents (with the ids they continue). */
 export function inboxSessionsShown(model: ListShape): Set<string> {
   const shown = new Set<string>();
   const row = (r: InboxListRow) => {
@@ -58,7 +44,6 @@ export function inboxSessionsShown(model: ListShape): Set<string> {
   return shown;
 }
 
-/** The names of the sessions in `shown` only. */
 export function inboxNamesShown(names: Record<string, string>, shown: ReadonlySet<string>): Record<string, string> {
   const out = Object.create(null) as Record<string, string>;
   for (const session of Object.keys(names)) if (shown.has(session)) out[session] = names[session]!;

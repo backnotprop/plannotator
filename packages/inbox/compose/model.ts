@@ -351,7 +351,6 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
   return out;
 }
 
-/** "Message Claude Code · release 0.28.61 in plannotator": the agent first, then the session's name, as the To menu names it. */
 export const actionLabel = (action: ComposeAction): string =>
   action.kind === 'new'
     ? 'New message…'

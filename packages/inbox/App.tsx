@@ -2176,7 +2176,7 @@ function Inbox() {
       if (eventListTimer) clearTimeout(eventListTimer);
       eventListTimer = setTimeout(() => {
         eventListTimer = null;
-        // A read lost on a bad link (the stream still up, so nothing else re-reads): tried again, 2 s doubling to 30 s.
+        // The stream stayed up, so nothing else would read again.
         void refreshList(false).then((next) => next === null && !eventListTimer && listAfterEvents(Math.min(30_000, 2_000 * 2 ** failed), failed + 1));
       }, delay);
     };
@@ -2474,8 +2474,7 @@ function Inbox() {
         onConnect: (hello) => {
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
-          // `event: deliveries` (a rename, a session that came or went) carries no record, so the stream's cursor never
-          // replays one sent before it connected: after the page's first list read, or while it was away. Read again.
+          // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
           listAfterEvents(80);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);

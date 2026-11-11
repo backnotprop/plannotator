@@ -207,7 +207,6 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
-/** The session a row's slot names (`RowSlot`, option A): its agent's, or none. */
 function slotSession(row: InboxListRow): string | null {
   const agent = rowAgent(row);
   return agent.kind === 'agent' ? (agent.session ?? null) : null;

@@ -128,9 +128,8 @@ describe('the title in the transcript', () => {
     expect(await titles.read()).toBe('Half written')
   })
 
-  // Option A (2026-11-10): a session the person never named shows Claude Code's generated title in list rows. The
-  // failures: the generated title taken as the person's name (it would show everywhere a name does), the person's
-  // name hidden behind it, a later generated title not following, or another session's taken.
+  // Catches: the generated title taken as the person's name, the name hidden behind it, a later title not
+  // followed, another session's taken.
   test("the generated title is kept apart from the name: read() keeps the person's name, a later one follows", async () => {
     const path = transcript(chatter('hello') + aiTitle('Plannotator usage reference') + aiTitle('Not mine', 'another-session'))
     const { host } = realHost()

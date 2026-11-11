@@ -60,7 +60,6 @@ export interface InboxPullsMcpContext {
   /** The state reader (packages/server/inbox-thread-pulls.ts). Absent: states as stored, no read. */
   pulls?: InboxPullsMcpLive;
   now?: () => number;
-  /** Another session's name, as the person's window shows it (inbox-mcp-read.ts `sessionWho`). */
   sessionName?: SessionNameOf;
 }
 

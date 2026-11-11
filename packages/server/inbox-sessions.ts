@@ -496,8 +496,7 @@ export function createInboxLiveSessions(options: {
    * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
    * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
    * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it and nothing is
-   * stored; an agent reads it only beside a session's id (inbox-mcp-read.ts `sessionWho`). Who reads it:
-   * inbox-session-names.ts.
+   * stored; an agent reads it only beside a session's id.
    * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
    */
   const labels = (): Record<string, string> => {
@@ -505,10 +504,6 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
     return out;
   };
-  /**
-   * Every session's generated title as its latest poll sent it (INBOX_TITLE_POLL_FIELD), kept as `labels` are:
-   * live sessions and those that ended while this Inbox ran, in memory only; who reads it as for `labels`.
-   */
   const titles = (): Record<string, string> => {
     const out = Object.create(null) as Record<string, string>;
     for (const [session, entry] of sessions) if (entry.title) out[session] = entry.title;
@@ -516,7 +511,6 @@ export function createInboxLiveSessions(options: {
   };
   /** One session's label (`labels`); null when it has none. */
   const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
-  /** One session's generated title (`titles`); null when it has none. */
   const titleOf = (session: string): string | null => sessions.get(session)?.title ?? null;
   /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
   let labelChanges = 0;
@@ -553,7 +547,6 @@ export function createInboxLiveSessions(options: {
     const label = cleanInboxSessionLabel(body.label);
     if ((entry.label ?? null) !== label) labelChanges += 1;
     entry.label = label;
-    // The host's generated title (additive): list rows show it for a session with no name. A change says `labels` too.
     const title = cleanInboxSessionLabel(body[INBOX_TITLE_POLL_FIELD]);
     if ((entry.title ?? null) !== title) labelChanges += 1;
     entry.title = title;
@@ -1233,8 +1226,7 @@ export function createInboxLiveSessions(options: {
     });
 
   /**
-   * The window's routes; null when the path is not one of them. A session carries its `label` to every reader of
-   * the route, a tailnet guest too: whoever sees the session sees its name (inbox-session-names.ts).
+   * The window's routes; null when the path is not one of them.
    * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
    */
   const route = async (req: Request, path: string, byGuest = false): Promise<Response | null> => {

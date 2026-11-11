@@ -1,58 +1,36 @@
-/**
- * What a list row's grey slot shows (option A, "name instead of project", the owner's decision of 2026-11-10; the
- * states in briefs `session-names-states.md`). Pure, so every state is one case of its table test.
- *
- * - A project with fewer than two live sessions (`several` false, held as severalSessions.ts decides), or a row with no
- *   session (the CLI, a raw MCP send, a note): the project, exactly as before.
- * - Otherwise the session's name in the project's place, the project in the tooltip ("plannotator · docs sweep").
- *   The name is the first there is of: the name the person gave (`label`), the host's generated title or Claude
- *   Code's own name for the session (`title`), else a default made here, the project and a short code from the
- *   session id ("plannotator-k3"), stable, lengthened only when two sessions of the project would share it.
- * - Two sessions of the project that would read alike each add their code: "docs (k3)", "docs (p9)".
- * - A long name is cut at its end at SLOT_NAME_MAX characters ("Migrate auth tokens from the le…"), so the column's own
- *   cut (CSS, "…" at the end) never adds a second "…" and the server's hard cut of a long label (60) never shows as a
- *   stray tail ("…to signed J"); a same-name code stays at the end, outside the cut. The tooltip has it whole.
- */
+/** What a list row's grey slot shows. The rule and its states: docs/agent-guides/inbox-compose.md. */
 import { graphemesOf } from '@plannotator/core/inbox-format';
 
-/** The longest name the slot draws, in characters; past it, cut at the end (CSS then cuts at the column, the same way). */
+/** Cut at the end, as CSS cuts the column, so a cut name never shows two "…". */
 export const SLOT_NAME_MAX = 32;
 
 export interface SlotNames {
-  /** The name the person gave (the list's `session_labels`, or a linked machine's agent label). */
   label?: string | null;
-  /** The host's generated title, else Claude Code's own name (the list's `session_titles`). */
   title?: string | null;
 }
 
 export interface RowSlotInput {
-  /** The project as the row shows it. */
   project: string;
-  /** The session the row is about (its author, or the addressee of a thread the person started); null: none. */
   session: string | null;
   names: SlotNames;
-  /** The project has two or more live sessions, as held (severalSessions.ts). */
   several: boolean;
-  /** The project's other known sessions and their names: a name that would read the same adds its code. */
   peers: readonly ({ session: string } & SlotNames)[];
 }
 
 export type RowSlot = { kind: 'project'; text: string } | { kind: 'name'; text: string; tip: string };
 
-/** A session id's code in base 36 (FNV-1a), stable across windows and reloads. */
 function codeOf(session: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < session.length; i += 1) {
     hash ^= session.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  // Lowest digits first: each is spread evenly (a 32-bit number's leading base-36 digit is only ever 0 or 1).
+  // Lowest digits first: a 32-bit number's leading base-36 digit is only ever 0 or 1.
   let out = '';
   for (let i = 0; i < 6; i += 1, hash = Math.floor(hash / 36)) out += (hash % 36).toString(36);
   return out;
 }
 
-/** The shortest code (2 characters or more) no other session of the project shares. */
 export function sessionCode(session: string, others: readonly string[]): string {
   const mine = codeOf(session);
   const theirs = others.filter((other) => other !== session).map(codeOf);
@@ -64,13 +42,11 @@ export function sessionCode(session: string, others: readonly string[]): string 
 const clean = (name: string | null | undefined): string | null => (typeof name === 'string' && name.trim() ? name.trim() : null);
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 
-/** `name` cut to `max` characters (whole graphemes) at its end, with "…". */
 function endCut(name: string, max: number): string {
   const chars = graphemesOf(name);
   return chars.length <= max ? name : `${chars.slice(0, max - 1).join('').trimEnd()}…`;
 }
 
-/** A session's name: the person's, else the generated one, else the default; null when it has none of the first two. */
 function givenName(names: SlotNames): string | null {
   return clean(names.label) ?? clean(names.title);
 }

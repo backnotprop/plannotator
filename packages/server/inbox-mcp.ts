@@ -302,10 +302,6 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * reaches it by itself. Never a Codex or Qwen Code wake. Absent: never.
    */
   bridgePolls?: (host: string, session: string) => boolean;
-  /**
-   * Another session's name as the person's window shows it (their rename, else its generated title): read_thread's
-   * `to` and `tagged`, steps, cards and PRs name a session by it beside its id. Absent: ids only.
-   */
   sessionName?: (session: string) => string | null;
   /**
    * Whether the Board is on (config.json `inboxBoard`, read on every

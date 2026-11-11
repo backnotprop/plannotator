@@ -569,7 +569,6 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
-      // Read after `label` on each poll, so it is the title as of that read.
       title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),

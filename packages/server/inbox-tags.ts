@@ -134,7 +134,7 @@ export function createInboxTagsRoute(options: {
     return { owner, sessions: [...liveRows.map(({ rank: _rank, activity: _activity, ...row }) => row), ...mcpRows] };
   };
 
-  /** The route; null when the path is not it. Live sessions carry their labels, to a tailnet guest too (inbox-session-names.ts). */
+  /** The route; null when the path is not it. */
   const route = (req: Request, path: string): Response | null => {
     const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/taggable$/.exec(path);
     if (!match) return null;

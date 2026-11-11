@@ -3594,8 +3594,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
         // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
-        // `labels` (additive): a session's name changed; every window reads names (a guest's, those of what it is shown).
-        // `agents` (additive): the sidebar's Agents moved (inbox-agents-list.ts); every reader hears it.
         const sendDeliveries = (labels: boolean, _moved: boolean, sessions: boolean, agents: boolean) => {
           send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) })}\n\n`);
         };

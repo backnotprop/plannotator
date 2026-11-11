@@ -1,6 +1,5 @@
 /**
- * When a project's rows name their sessions, held so rows never flip under the reader (option A, 2026-11-10). The
- * failures this catches: rows going back to the project the moment a second session ends (a restart, a plugin
+ * Catches: rows going back to the project the moment a second session ends (a restart, a plugin
  * reload, a minute offline would make them flip twice); rows going back while someone is looking; rows never going
  * back at all; an ended or MCP-only agent counted as live; a conversation that went on under a new id counted twice;
  * another machine's project counted with this one's.
