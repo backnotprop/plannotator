@@ -241,6 +241,62 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
 });
 
 /**
+ * Mermaid loads each diagram type (sequence, flowchart, ELK) as a chunk of its
+ * own on that type's first render, after the runtime has loaded; the error
+ * then comes out of `render()`, not the runtime import. What regresses: one
+ * dropped chunk (a flaky link, a proxy hiccup) leaves that diagram on
+ * "Importing a module script failed." for the life of the page, with no
+ * automatic re-attempt and no Retry, as if the source were wrong.
+ */
+describe('Mermaid diagram-type chunk', () => {
+  /** WebKit's words (Safari, every iPad browser) for an import that did not arrive. */
+  const chunkFailed = () => new TypeError('Importing a module script failed.');
+
+  test.skipIf(!hasDom)('a diagram-type chunk that fails once renders after the automatic re-attempt', async () => {
+    let renders = 0;
+    const runtime = {
+      initialize() {},
+      render: async () => {
+        renders += 1;
+        if (renders === 1) throw chunkFailed();
+        return { svg: SVG };
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(runtime), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(renders).toBe(2);
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+    expect(el.textContent).not.toContain('Mermaid Error');
+  });
+
+  // Safari keeps the failed fetch for the page, so neither a re-attempt nor a
+  // Retry can recover it: the source stays readable under the quiet Reload
+  // line every other part that could not load uses, never the red panel that
+  // reads as a broken diagram.
+  test.skipIf(!hasDom)('a diagram-type chunk that keeps failing shows the source under the Reload line, not the error panel', async () => {
+    let renders = 0;
+    const runtime = {
+      initialize() {},
+      render: async () => {
+        renders += 1;
+        throw chunkFailed();
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(runtime), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(renders).toBe(2);
+    expect(el.querySelector('[data-lazy-load-failed]')).not.toBeNull();
+    expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Rendering diagram');
+  });
+});
+
+/**
  * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not
  * render shows its plain fence, never the red panel; a renderer that could
  * not load still shows the panel and its Retry, which recovers the diagram.
