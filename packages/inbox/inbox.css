@@ -3314,7 +3314,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
+  .pn-inbox .ib-npill, .ib-phsubj, .ib-phead .ib-vsep { transition: none; }
 }
 /* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
    box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
@@ -3380,6 +3380,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* ── Mark read, the skip chip and the toast (design record "inbox-mark-read", 2026-10-11) ── */
 /* The header: Archive (icon) | Mark read (labelled), then the thread's own tools. */
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
+/* The divider after the way back shows only with something after it (the owner, 2026-11-11): it fades in and out
+   with the bar's title, and stays hidden when no title follows. No layout shift: it keeps its room. */
+.ib-phead .ib-vsep:has(+ .ib-sp), .ib-phead .ib-vsep:has(+ .ib-phsubj:not([data-on])) { opacity: 0; }
+.ib-phead .ib-vsep:has(+ .ib-phsubj) { transition: opacity 120ms ease-out; }
 .ib-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 16px; font-weight: 500; }
 /* The line under the subject while the thread is marked read. */
 .ib-readline { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 14px; padding: 9px 12px; border-radius: 8px; background: var(--ib-band); font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
