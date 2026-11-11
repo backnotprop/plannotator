@@ -486,7 +486,7 @@ export interface InboxServerOptions {
   feedbackUrl?: string;
   /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
   debug?: boolean;
-  /** Tests: the SQLite switch (`null`: unset, new installs only). Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (unset). */
+  /** Tests: the SQLite switch (`null`: unset). Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite`. */
   sqlite?: boolean | null;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
@@ -1041,7 +1041,6 @@ function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
-/** `POST /api/inbox/settings/storage/backups/<name>/remove`: Settings → Storage's Remove (`store-log/sqlite/backups.ts` checks the name). */
 const INBOX_BACKUP_REMOVE_ROUTE = /^\/api\/inbox\/settings\/storage\/backups\/(backup-[0-9a-z-]+)\/remove$/;
 
 /** Start the Inbox server and write the registry. */
@@ -1056,19 +1055,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  // The SQLite switch: unset, a new install starts on SQLite and every other Inbox stays as it is; off with no
-  // inbox.db, this is today's InboxStore.open, nothing more.
   const opened = await openInboxStore(dataDir, {
     sqlite: options.sqlite !== undefined ? options.sqlite : resolveInboxSqlite(loadConfig(), process.env),
     now: options.storeNow,
     onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
     importStep: inboxImportDelayFromEnv(process.env),
-    // A move checks its files' side in a second run of this program, beside the write.
     checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
   const store = opened.store;
-  // A move that did not finish leaves the Inbox as it was; why goes to the terminal and inbox.log (never the debug
-  // log, whose values are words from a list: the reason names paths).
+  // Never the debug log: the reason names paths.
   if (opened.moved && (opened.moved.status === "kept_files" || opened.moved.status === "kept_db")) {
     const kept = opened.moved.status === "kept_files" ? "into SQLite did not finish; the Inbox stays on its files" : "back to the files did not finish; the Inbox stays on its database";
     process.stderr.write(`Inbox: the move ${kept} (${opened.moved.reason}: ${opened.moved.detail}).\n`);
@@ -5535,7 +5530,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
       }
-      // Remove on a dated backup a move into SQLite left (behind its switch, off for everyone): the answer's sizes, as a Delete's.
       const backup = INBOX_BACKUP_REMOVE_ROUTE.exec(path);
       if (backup) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);

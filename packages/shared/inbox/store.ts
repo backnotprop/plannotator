@@ -1,14 +1,6 @@
 /**
- * Plannotator Inbox store: the record log (`store-log/log.ts`; today per-project
- * append-only JSONL under `${dataDir}/inbox/`, `store-log/jsonl-log.ts`), read
- * whole at start and kept in memory.
- *
- * One writer: the Inbox server process. Every change is ONE line, a full
- * snapshot of the record, persisted through the log; the in-memory view is
- * updated from that same line and every subscriber is told, in seq order.
- *
- * The rules (picks, Send, idempotency) live here so the window's API and the
- * MCP tools share them. See schema.ts for the layout.
+ * Plannotator Inbox store: the rules (picks, Send, idempotency) and the in-memory view over the record log
+ * (`store-log/log.ts`). One writer: every change is ONE line persisted through the log, then applied and announced in seq order.
  */
 
 import { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
@@ -438,9 +430,9 @@ export interface InboxDiskUsage {
   dir: string;
   bytes: number;
   projects: InboxProjectUsage[];
-  /** A log kept in one file (SQLite, behind its switch): that file's bytes, counted in `bytes` once instead of each project's lines. */
+  /** A log kept in one file (SQLite): that file's bytes, counted in `bytes` once instead of each project's lines. */
   database?: number;
-  /** The dated backups a move left (SQLite, behind its switch), counted in `bytes`: Settings → Storage lists each with Remove. */
+  /** The dated backups a move left, counted in `bytes`. */
   backups?: InboxStoreBackup[];
 }
 
@@ -910,7 +902,6 @@ export class InboxStore {
    */
   private readonly previewLines = new WeakMap<InboxMessage, { asks: string; text: string | null }>();
   private readonly now: () => Date;
-  /** Where the records are kept (`store-log/log.ts`). */
   private readonly log: InboxLog;
 
   private constructor(dataDir: string, now: () => Date, log: InboxLogFactory) {
@@ -919,7 +910,7 @@ export class InboxStore {
     this.log = log(this.dir);
   }
 
-  /** Read the store under `dataDir` (created owner-only when missing). `log`: where records are kept; today's JSONL by default. */
+  /** Created owner-only when missing. `log` defaults to JSONL. */
   static open(dataDir: string, options: { now?: () => Date; log?: InboxLogFactory } = {}): InboxStore {
     const store = new InboxStore(dataDir, options.now ?? (() => new Date()), options.log ?? jsonlInboxLog);
     store.load();
@@ -981,11 +972,7 @@ export class InboxStore {
     if (line && line.kind === "question") this.latest.set(key, { ...line, record });
   }
 
-  /**
-   * One line, replayed in seq order (at start from today's JSONL, and as each write lands). What depends on the
-   * order of lines (an archive line, a moved address, a name, a card's last real change, a PR event, a first
-   * line's tags) is worked out by `store-log/history.ts`, the same rules the SQLite log keeps in its tables.
-   */
+  /** Order-dependent facts come from `store-log/history.ts`, the same rules the SQLite log uses. */
   private apply(line: InboxLine): void {
     this.changes += 1;
     if (line.seq > this.seq) this.seq = line.seq;
@@ -1016,14 +1003,13 @@ export class InboxStore {
         break;
       }
       case "card": {
-        // Cards are their own records: nothing here touches routing or the list.
         const { card, heard } = cardAfter(this.cards.get(line.record.id), line.record);
         if (heard) this.cardHeardSeq.set(card.id, line.seq);
         this.cards.set(card.id, card);
         break;
       }
       case "thread_pull":
-        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
+        // Nothing here touches routing, the list's sections, unread or notifications.
         if (isInboxThreadPullRecord(line.record)) {
           const event = pullEventOf(this.pullsById.get(line.record.id), line.record, line.seq);
           this.placeThreadPull(line.record);
@@ -1039,17 +1025,13 @@ export class InboxStore {
     }
   }
 
-  /**
-   * A log's current state taken as it is (the SQLite log reads it from its tables): each record's latest line in
-   * the order the records began, and the order-dependent facts the log kept as they happened. Leaves exactly what
-   * `apply` over every line would (the every-read test holds it to that), without reading any history.
-   */
+  /** Must leave exactly what `apply` over every line would (the every-read test holds it to that). */
   private restore(state: InboxLogState): void {
     this.changes += 1;
     for (const { line: latest, firstSeq } of state.records) {
       if (latest.seq > this.seq) this.seq = latest.seq;
       this.latest.set(`${latest.kind}:${latest.id}`, latest);
-      // A latest line that fails its check (steps, PRs, initiatives): the record before it stays, as in `apply`.
+      // A latest line that fails its check: the record before it stays, as in `apply`.
       const kept = state.kept?.get(`${latest.kind}:${latest.id}`);
       const line = kept ? ({ ...latest, record: kept } as InboxLine) : latest;
       switch (line.kind) {
@@ -1128,10 +1110,7 @@ export class InboxStore {
     }
   }
 
-  /**
-   * A root's name from its first line (`firstLineName`): an agent's routes; one the person gave (typed, or
-   * compose's suggestion) routes nothing and is noted only so no other thread takes the same name.
-   */
+  /** An agent's name routes; one the person gave only keeps another thread from taking it. */
   private indexThreadName(projectId: string, named: { name: string; routes: boolean }, rootId: string): void {
     if (named.routes) return this.indexName(projectId, named.name, rootId);
     const key = threadNameIndexKey(projectId, named.name);
@@ -3788,7 +3767,7 @@ export class InboxStore {
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
-    // A log in one file is counted as that file (its lines still size each project and thread), plus its backups.
+    // A log in one file counts as that file, plus its backups; its lines still size each project and thread.
     const inOneFile = this.log.stored?.();
     if (inOneFile) total += inOneFile.bytes + inOneFile.backups.reduce((sum, backup) => sum + backup.bytes, 0);
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
@@ -3809,7 +3788,6 @@ export class InboxStore {
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
       const onDisk = this.log.usage(project);
       bytes += onDisk.bytes;
-      // Each project's lines are the total's on JSONL; in one file, that file was counted above.
       if (!inOneFile) total += onDisk.bytes;
       for (const { line, bytes: lineBytes } of onDisk.lines) {
         const messageId =
@@ -3843,7 +3821,7 @@ export class InboxStore {
     return { dir: this.dir, bytes: total, projects, ...(inOneFile ? { database: inOneFile.bytes, backups: inOneFile.backups } : {}) };
   }
 
-  /** Settings → Storage's Remove on a dated backup (SQLite only): false when there is no such backup. */
+  /** False when there is no such backup. */
   removeBackup(name: string): boolean {
     return this.log.removeBackup?.(name) ?? false;
   }
@@ -3854,7 +3832,7 @@ export class InboxStore {
     return this.now().toISOString();
   }
 
-  /** Persist one line through the log (`project`: the record's; null for an initiative), then apply it and tell every subscriber. */
+  /** `project` is null for an initiative. */
   private write(project: InboxProject | null, line: InboxLine): void {
     this.log.append(line, project);
     this.applyAndTell(line);
@@ -7237,7 +7215,6 @@ export class InboxStore {
   // change. Silent: nothing that routes, lists unread or notifies reads it.
   // Who may change it is the server's to check; the store keeps what it is told.
 
-  /** A PR record's latest line in memory (its event, if any, is `apply`'s: `pullEventOf`). */
   private placeThreadPull(record: InboxThreadPull): void {
     this.pullsById.set(record.id, record);
     let ids = this.pullIdsByThread.get(record.thread_id);
@@ -8026,7 +8003,6 @@ export class InboxStore {
     return next;
   }
 
-  /** Hashtags: one tag of a message's first line (`firstLineTagKeys`), indexed to its thread at `seq` (`tagThreads`). Code holds no tag. */
   private indexTag(key: string, threadId: string, seq: number): void {
     let entry = this.tagThreads.get(key);
     if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
@@ -8034,7 +8010,6 @@ export class InboxStore {
     entry.latest.set(threadId, seq);
     entry.order.push(threadId);
     if (entry.order.length > 2 * entry.latest.size + 16) {
-      // Keep each thread's last entry only, in order.
       const seen = new Set<string>();
       entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
     }

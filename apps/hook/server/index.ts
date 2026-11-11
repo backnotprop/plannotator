@@ -310,8 +310,7 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
 import { INBOX_CHECK_CHILD_ENV, runInboxCheckChild } from "@plannotator/shared/inbox/store-log/sqlite/check-child";
 
-// The second half of an Inbox move's check (check-child.ts): this program, run again by the Inbox while it moves
-// its records into SQLite. Nothing else, before any startup work.
+// Check child of an Inbox move: runs before any startup work.
 if (process.env[INBOX_CHECK_CHILD_ENV]) process.exit(await runInboxCheckChild(process.env));
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash

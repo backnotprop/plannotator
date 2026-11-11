@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react';
 import { inboxApi, type InboxStorageModel } from '../api';
 import { formatBytes } from '../format';
 
-/**
- * Settings → Storage's Backup group: the dated copy a move into SQLite left (its switch, off for everyone; the owner
- * approved "the backup listed in Settings → Storage with a Remove button"). Nothing removes it but this Remove. Drawn
- * only when the server lists a backup, so with the switch off Storage is as before.
- *
- * Remove asks twice, as Delete does in the table above it: nothing brings a removed backup back.
- */
+/** Settings → Storage's Backup group: the dated copy a move into SQLite left. Remove asks twice, as Delete does: a removed backup does not come back. */
 type Backup = NonNullable<InboxStorageModel['backups']>[number];
 
 function backupLabel(backup: Backup): string {

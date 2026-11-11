@@ -313,14 +313,7 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
  * The start lock: one starter at a time, so two agents that find the Inbox
  * stopped at once do not start two writers on one store. Returns a release
  * function, or null when another starter holds a fresh lock.
- *
- * The lock folder names the processes that hold it (`holders`: the starter,
- * and the detached Inbox it started, which joins with `joinInboxStartLock`).
- * When every one of them is gone (a start that crashed: a force quit, a power
- * cut, a kill during a long move into SQLite), the lock is stale at once
- * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
- * rather than giving up with "try again". A lock with no holders file (an
- * older Plannotator's) is stale by age alone, as before.
+ * Stale when every holder process is gone, or by age (`INBOX_START_LOCK_STALE_MS`).
  */
 export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const dir = inboxDir(dataDir);
@@ -347,16 +340,16 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
 
 const START_LOCK_HOLDERS = "holders";
 
-/** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
+/** Best effort. */
 export function joinInboxStartLock(dataDir: string): void {
   try {
     appendFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
   } catch {
-    // No lock (released meanwhile) or no room: the lock's age decides, as before.
+    // No lock (released meanwhile) or no room: the lock's age decides.
   }
 }
 
-/** The start lock's holders are all gone, or it is older than `INBOX_START_LOCK_STALE_MS`. Throws when there is no lock. */
+/** Throws when there is no lock. */
 export function inboxStartLockStale(dataDir: string): boolean {
   const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
   if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
@@ -375,7 +368,7 @@ export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs:
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    // `keepWaiting`: past the deadline, wait on while it says so (an Inbox still moving into SQLite).
+    // `keepWaiting`: past the deadline, wait on while it says so.
     if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

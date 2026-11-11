@@ -671,9 +671,9 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (a new install, or its switch on): the database file's bytes, counted in `bytes`. */
+  /** The database file's bytes, counted in `bytes`. */
   database?: number;
-  /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
+  /** The dated backups a move into SQLite left, counted in `bytes`. */
   backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
 }
 
@@ -2203,7 +2203,6 @@ export const inboxApi = {
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
-  /** Settings → Storage's Remove on a dated backup (the Inbox on SQLite only). */
   removeBackup: (name: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/settings/storage/backups/${encodeURIComponent(name)}/remove`), {}),
 };
 

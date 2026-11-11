@@ -1,13 +1,4 @@
-/**
- * `plannotator inbox export --jsonl <folder>` (design brief "The Inbox on SQLite", section 5: export, no lock-in):
- * the person's Inbox written out as JSONL files, from the database once the Inbox moved into one, else from its
- * files. A command and not a tool, as `inbox projects` is: tool text costs every session tokens, and this runs
- * seldom. It only reads the Inbox (`exportInbox` in `@plannotator/shared`), so it starts nothing and may run
- * beside a running Inbox. The Inbox has no Pi server, so this is Bun only.
- *
- * stdout: one line saying what was written, or one JSON object with --json. A refusal goes to stderr as
- * `<code>: <message>` and exits 1; bad usage exits 2.
- */
+/** `plannotator inbox export --jsonl <folder>`: writes the Inbox as JSONL files, from the database or its files. Read-only, so it may run beside a running Inbox. A refusal goes to stderr as `<code>: <message>` (exit 1); bad usage exits 2. */
 
 import { resolve } from "node:path";
 import { exportInbox, InboxExportError } from "@plannotator/shared/inbox/store-log/sqlite/export-inbox";
@@ -31,14 +22,12 @@ export function parseExportCommand(argv: readonly string[]): ParsedExportCommand
 
 export interface ExportCommandDeps {
   dataDir: string;
-  /** The folder a relative path is taken from. */
   cwd: string;
   json: boolean;
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
 }
 
-/** Run `plannotator inbox export …`; resolves to the exit code. */
 export async function runInboxExportCommand(argv: readonly string[], deps: ExportCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));

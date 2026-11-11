@@ -1,8 +1,4 @@
-/**
- * Test-only: a log that writes every change to two logs (today's first, so a refusal there writes nothing to
- * the other) and reads from the first, so a store written once leaves the same records, with the same ids, in
- * both. The every-read test and the SQLite tables test open each on its own afterwards.
- */
+/** Test-only: writes to both logs (the first first, so its refusal writes nothing to the other) and reads from the first. */
 import type { InboxLog, InboxLogFactory } from "./log";
 
 export function teeLog(first: InboxLogFactory, second: InboxLogFactory): InboxLogFactory {

@@ -1,25 +1,15 @@
 /**
- * Every read the server makes of the Inbox store, gathered into one plain value, so two stores can be
- * compared whole: the list (rows, sections, the unsent band, open decisions), each thread as the window, an
- * agent and the list read it, each message and its questions, the event log, the Board, steps, PRs,
- * annotations, drafts, pins, snoozes, what agents are owed, Decision data and Settings → Storage.
- *
- * Left out, on purpose: `threadVersion` and `reloadCount` (counters that only say "changed since", and a
- * store that deleted something has counted a re-read a fresh one has not), and the bytes of Settings →
- * Storage when `bytes: false` (another log stores the same records in another number of bytes).
- *
- * Test-only.
+ * Test-only: every read the server makes of the store as one plain value, so two stores compare whole.
+ * Left out on purpose: `threadVersion` and `reloadCount` (a store that deleted something has counted a re-read a fresh one has not).
  */
 import type { InboxStore } from "../store";
 
 export interface EveryReadOptions {
-  /** The agent sessions to read as (pending replies, a thread as that agent reads it). */
   sessions: readonly string[];
-  /** Compare Settings → Storage's byte counts too (same log on both sides). */
+  /** Compare byte counts too; false when the logs differ (they store the same records in different bytes). */
   bytes: boolean;
 }
 
-/** A plain value: Maps and Sets as sorted arrays, functions dropped, so `toEqual` compares what a reader sees. */
 function plain(value: unknown): unknown {
   if (value instanceof Map) return [...value.entries()].map(([k, v]) => [plain(k), plain(v)]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   if (value instanceof Set) return [...value].map(plain).sort();
@@ -34,7 +24,6 @@ function plain(value: unknown): unknown {
 
 const byThread = <T extends { thread_id: string }>(rows: T[]) => [...rows].sort((a, b) => a.thread_id.localeCompare(b.thread_id));
 
-/** Storage without its byte counts, and without the order they give (biggest first): projects by id, threads by id. */
 function withoutBytes(usage: ReturnType<InboxStore["diskUsage"]>) {
   return {
     projects: usage.projects
@@ -56,7 +45,7 @@ export function everyRead(store: InboxStore, options: EveryReadOptions): Record<
       rows: store.listRows(),
       perProject: projects.map((p) => store.listRows({ projectId: p.id })),
       sections: store.listSections(),
-      // In no order (the server sorts them, inbox-compose.ts): compared by thread.
+      // Unordered: compared by thread.
       unsent: byThread(store.unsentRows()),
       decisions: store.openDecisions(),
     },

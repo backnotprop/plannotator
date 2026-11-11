@@ -1,13 +1,4 @@
-/**
- * A realistic Inbox, written through the store's own write paths from a seeded random walk: agents' messages
- * with questions, action items, attachments and hashtags; the person's picks (typed notes too, a key at a time),
- * Sends, re-asks, comments, reads, archives and New messages; an agent naming a thread the person started, and
- * the person sending one on to another session; cards (an agent's drop the person then sees), initiatives, steps
- * and PRs; pins, snoozes and reply drafts; project renames and combines; and thread deletions. A refused step (the store's own rules) is skipped, as a person
- * or agent would see a refusal and move on.
- *
- * Test-only. Shared by the "every read" test and the size budget, so both run against any record log.
- */
+/** Test-only: a realistic Inbox written through the store's own write paths from a seeded random walk. A refused step is skipped. */
 import type { InboxAttachment, InboxAuthor, InboxProject, InboxQuestion } from "@plannotator/core/inbox-types";
 import { parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
 import { InboxError } from "../schema";
@@ -32,7 +23,7 @@ function pullRefs(value: string) {
 
 const addressOf = (agent: Agent) => ({ host: agent.host ?? "claude-code", session: agent.session });
 
-/** mulberry32: a small seeded generator, so a failing seed can be run again. */
+/** mulberry32: seeded, so a failing seed can be run again. */
 export function seeded(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -46,7 +37,6 @@ export function seeded(seed: number): () => number {
 
 export interface InboxWorld {
   store: InboxStore;
-  /** The clock every store over this data dir reads (frozen once the world is written). */
   now: () => Date;
   projects: InboxProject[];
   agents: Agent[];
@@ -55,12 +45,9 @@ export interface InboxWorld {
 export interface InboxWorldOptions {
   dataDir: string;
   seed: number;
-  /** How many steps the walk takes; each writes about one message or one change. */
   steps: number;
-  /** Stop early once the store holds this many messages (the size budget). */
   messages?: number;
   log?: InboxLogFactory;
-  /** Leave out the steps that rewrite or delete (the size budget only grows a store). */
   growOnly?: boolean;
 }
 
@@ -73,7 +60,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
   const store = InboxStore.open(options.dataDir, { now, log: options.log });
   const projects = ["web", "api", "billing"].map((name) => store.ensureProject({ name, root: `/work/${name}` }));
   const roots: string[] = [];
-  /** Threads the person started, with the session each went to. */
   const personRoots: { id: string; to: Agent }[] = [];
   const agentMessages: string[] = [];
   let n = 0;
@@ -122,7 +108,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     picked.add(id);
   };
 
-  /** The person types a note on a pick, a few keys at a time: each save a question line. */
   const personTypes = () => {
     const id = pick(agentMessages);
     const q = openQuestions(id).find((x) => x.kind !== "action");
@@ -138,7 +123,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     picked.add(id);
   };
 
-  /** The person starts a thread for an agent. */
   const personStarts = () => {
     const to = pick(AGENTS);
     // Sometimes named: typed (holds the name), or compose's suggestion (an agent may still replace it).
@@ -148,7 +132,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     personRoots.push({ id: started.message.id, to });
   };
 
-  /** The agent a person's thread went to replies and names it. */
   const agentNames = () => {
     const thread = personRoots.length > 0 ? pick(personRoots) : null;
     if (!thread || !store.message(thread.id)) return;
@@ -156,7 +139,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     agentMessages.push(sent.message.id);
   };
 
-  /** "Send to another session": a thread the person started, not taken yet, goes to another agent. */
   const personReaddresses = () => {
     const thread = personRoots.length > 0 ? pick(personRoots) : null;
     if (!thread || !store.message(thread.id)) return;
@@ -165,7 +147,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     thread.to = other;
   };
 
-  /** An agent's follow-up that replaces one of its open questions. */
   const agentReplaces = () => {
     const id = pick(agentMessages);
     const q = openQuestions(id).find((x) => x.kind !== "action");
@@ -175,14 +156,12 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     agentMessages.push(sent.message.id);
   };
 
-  /** The person marks an action item done or not done. */
   const personActs = () => {
     const id = pick(agentMessages);
     const action = store.questionsOf(id).find((q) => q.kind === "action" && q.state === "open");
     if (action) store.markAction(id, action.key, { outcome: pick(["done", "cant"]), note: words(3) });
   };
 
-  /** Messages the person picked on and has not sent: a Send goes there most of the time. */
   const picked = new Set<string>();
   const personSends = () => {
     const id = picked.size > 0 && chance(0.8) ? pick([...picked]) : pick(agentMessages);
@@ -217,7 +196,7 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
       if (card) store.updateCard(card.id, { by: { kind: "person" }, column: pick(["backlog", "todo", "in_progress", "done"]) });
     }],
     [2, () => {
-      // An agent drops a card; the person later sees it (a seen-only line: not a change to the card).
+      // The seen mark is a seen-only line, not a change to the card.
       const card = pick(store.listCards().length > 0 ? store.listCards() : [null]);
       if (card) store.updateCard(card.id, { by: pick(AGENTS), column: "dropped", reason: words(2) });
     }],
@@ -233,7 +212,6 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
       const id = roots.splice(Math.floor(random() * roots.length), 1)[0];
       if (!id) return;
       store.deleteThread(id);
-      // Its messages are gone: forget them.
       for (let i = agentMessages.length - 1; i >= 0; i--) if (!store.message(agentMessages[i]!)) agentMessages.splice(i, 1);
     }]);
   }

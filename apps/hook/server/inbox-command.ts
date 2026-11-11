@@ -146,11 +146,7 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 }
 
 /**
- * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (only then do files move), an Inbox
- * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
- * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
- * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
- */
+/** Wait for the Inbox to answer as running; null on timeout. While it moves its records into SQLite the wait outlasts the usual 20 s (up to `INBOX_UPGRADE_WAIT_MAX_MS`) and the move is said once on stderr after 2 s. */
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const started = Date.now();
   const timeout = startTimeoutMs();
@@ -180,10 +176,7 @@ function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   );
 }
 
-/**
- * How long a starter waits for a detached Inbox: `START_TIMEOUT_MS`, or under the test sandbox only,
- * `PLANNOTATOR_INBOX_START_TIMEOUT_MS` (so a test can outlast it without waiting 20 s).
- */
+/** `START_TIMEOUT_MS`; only under the test sandbox `PLANNOTATOR_INBOX_START_TIMEOUT_MS` overrides it. */
 export function startTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_START_TIMEOUT_MS?.trim() : undefined;
   const ms = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;

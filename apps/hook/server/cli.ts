@@ -516,7 +516,6 @@ export const INBOX_PROJECTS_USAGE = [
   "Run 'plannotator inbox --help' for when to use it.",
 ].join("\n");
 
-/** `plannotator inbox export …` (inbox-export-command.ts): the Inbox as JSONL files, on the person's request. */
 export const INBOX_EXPORT_USAGE = [
   "Usage:",
   "  plannotator inbox export --jsonl <folder> [--json]",
