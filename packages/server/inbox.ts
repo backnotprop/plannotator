@@ -4163,7 +4163,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
-    pin: (session, root, name) => live.pinCloud(session, root, name),
+    pin: (session, root, name, host) => live.pinCloud(session, root, name, host),
     threadUrl: (threadId) => threadPageUrl(baseUrl, threadId),
     ...options.cloudWake,
   });

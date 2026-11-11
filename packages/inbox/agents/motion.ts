@@ -46,7 +46,8 @@ export { AGENT_FACES, nextAgentFace, type AgentFace } from './faceChoices';
 
 /** The rig an agent host's mark has; null for a host with none (its plain mark, moved as a whole). */
 export function agentRigOf(host: string | null | undefined): AgentRigKind | null {
-  if (host === 'claude-code' || host === 'claude' || host === 'claude-app') return 'claude';
+  if (host === 'claude-code' || host === 'claude' || host === 'claude-app' || host === 'cloud-claude') return 'claude';
+  if (host === 'cloud-grok') return 'grok';
   if (host === 'codex' || host === 'pi' || host === 'opencode') return host;
   return null;
 }
@@ -569,6 +570,32 @@ const opencodeRig = (R: Rand): Rig => {
   };
 };
 
+/*
+ * Grok Bot (a paired Grok Bot routine; the owner, 2026-11-11: "Yes, with the glance animation"): still, and now and
+ * then its eyes glance to a side and back, like the glance on x.ai/bot. One gesture, nothing else: no idle drift, no
+ * blink, and the eyes do not follow the pointer, so a list of rows stays calm.
+ */
+const grokRig = (R: Rand): Rig => {
+  const u = px(60);
+  const side = () => (R() < 0.5 ? -1 : 1);
+  return {
+    parts: { body: { sel: '[data-p="body"]' }, eyes: { sel: '[data-p="eyes"]' } },
+    life: () => undefined,
+    // Now and then: the first glance a few seconds in, then one every 8 to 20 s, each icon on its own seed.
+    gap: (first) => (first ? 3000 + 7000 * R() : 8000 + 12000 * R()),
+    lean: 1,
+    acts: [
+      [
+        1,
+        (I) => {
+          const s = side();
+          I.x('eyes', once(1500, (t) => ({ x: 5 * u * s * visit(t, 1000, 0.6, 18), y: -2 * u * visit(t, 1000, 0.6, 18) })));
+        },
+      ],
+    ],
+  };
+};
+
 /**
  * A face that keeps its shape: a squash becomes the same small dip on both axes, so a tile (the Glass faces' rounded
  * square) is only ever turned, moved and scaled as a whole, never stretched into a shape it is not.
@@ -610,7 +637,7 @@ const faceRig = (R: Rand): Rig => {
 /** A part turn: eases in, eases out and settles with the faintest overshoot (about 3 % of the turn). */
 const TURN_EASE = 'cubic-bezier(0.45, 0, 0.22, 1.035)';
 
-const RIGS: Record<AgentRigKind | 'face', (R: Rand) => Rig> = { claude: claudeRig, codex: codexRig, pi: piRig, opencode: opencodeRig, face: faceRig };
+const RIGS: Record<AgentRigKind | 'face', (R: Rand) => Rig> = { claude: claudeRig, codex: codexRig, pi: piRig, opencode: opencodeRig, grok: grokRig, face: faceRig };
 
 /** One gesture at a time across the page: when the last one started. */
 let lastGesture = -1e9;

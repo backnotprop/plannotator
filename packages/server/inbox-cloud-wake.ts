@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import {
   INBOX_CLOUD_WAKE_GAP_MS,
   inboxCloudAnswer,
+  inboxCloudHostOf,
   inboxCloudWakeBody,
   inboxCloudWakeSettled,
   isInboxCloudSession,
@@ -53,7 +54,7 @@ export function createInboxCloudWake(options: {
   store: InboxStore;
   agents: InboxCloudAgents;
   /** The live sessions' pin (inbox-sessions.ts `pinCloud`). */
-  pin: (session: string, root: string | null, name: string) => void;
+  pin: (session: string, root: string | null, name: string, host?: string) => void;
   threadUrl: (threadId: string) => string;
   now?: () => number;
   fetch?: typeof fetch;
@@ -87,7 +88,7 @@ export function createInboxCloudWake(options: {
     for (const agent of list) {
       seen.add(agent.session);
       const project = agent.project_id ? store.project(store.canonicalProjectId(agent.project_id)) : null;
-      options.pin(agent.session, project?.root ?? homedir(), agent.name);
+      options.pin(agent.session, project?.root ?? homedir(), agent.name, inboxCloudHostOf(agent.preset));
       pinned.set(agent.session, agent.name);
     }
     for (const session of [...pinned.keys()]) {
@@ -102,7 +103,7 @@ export function createInboxCloudWake(options: {
     const before = store.message(item.id)?.cloud_wake;
     if (before && before.state === wake.state && before.next_at === wake.next_at && before.run_url === wake.run_url && before.status === wake.status) return;
     try {
-      store.recordCloudWake(item.id, wake, session);
+      store.recordCloudWake(item.id, wake, session, inboxCloudHostOf(agents.agent(session)?.preset ?? wake.preset ?? "other"));
     } catch {
       // Deleted meanwhile.
     }

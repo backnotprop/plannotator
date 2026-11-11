@@ -10,8 +10,19 @@
  * the routes) and packages/server/inbox-cloud-wake.ts (the wake).
  */
 
-/** The host every cloud agent writes and is addressed as. Its session is `cloud.<id>`. */
+/** The host of an "Other" cloud agent (the cloud mark). Its session is `cloud.<id>` whatever its kind. */
 export const INBOX_CLOUD_HOST = "cloud";
+
+/**
+ * Each kind's host: its mark and its name in the window come from it, as every agent's do. A Claude Code routine
+ * shows Claude Code's mark, a Grok Bot routine Grok Bot's, any other webhook the cloud.
+ */
+export const INBOX_CLOUD_HOSTS = { "claude-routine": "cloud-claude", "grok-bot": "cloud-grok", other: INBOX_CLOUD_HOST } as const;
+
+/** Whether a host is a paired cloud agent's (any kind). */
+export function isInboxCloudHost(host: unknown): boolean {
+  return host === "cloud" || host === "cloud-claude" || host === "cloud-grok";
+}
 
 /** At most one wake per thread in this window; replies inside it go together in the next wake. */
 export const INBOX_CLOUD_WAKE_GAP_MS = 60_000;
@@ -30,6 +41,10 @@ export const INBOX_CLOUD_PRESET_NAMES: Readonly<Record<InboxCloudPreset, string>
   "grok-bot": "Grok Bot routine",
   other: "Other",
 };
+
+export function inboxCloudHostOf(preset: InboxCloudPreset): string {
+  return INBOX_CLOUD_HOSTS[preset];
+}
 
 export function isInboxCloudPreset(value: unknown): value is InboxCloudPreset {
   return typeof value === "string" && (INBOX_CLOUD_PRESETS as readonly string[]).includes(value);

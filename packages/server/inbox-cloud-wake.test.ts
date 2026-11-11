@@ -82,7 +82,7 @@ async function world(options: { gapMs?: number; timeoutMs?: number; retryMs?: nu
     return answer.json.agent as InboxCloudAgentView;
   };
   const send = async (session: string, words: string, key = "c1") => {
-    const answer = await call("/api/inbox/messages", { to: { host: "cloud", session }, body: words, idempotency_key: key });
+    const answer = await call("/api/inbox/messages", { to: { session }, body: words, idempotency_key: key });
     expect(answer.status).toBe(200);
     return answer.json as { thread_id: string; message: { id: string } };
   };
@@ -119,7 +119,7 @@ describe("the cloud wake", () => {
     const agent = await w.pair(hook.url);
     // Listed in New message's To, under its name, in its project.
     const to = (await w.call("/api/inbox/sessions")).json.projects as { sessions: { session: string; host: string; label?: string }[] }[];
-    expect(to.flatMap((group) => group.sessions)).toContainEqual(expect.objectContaining({ session: agent.session, host: "cloud", label: "Nightly fixer" }));
+    expect(to.flatMap((group) => group.sessions)).toContainEqual(expect.objectContaining({ session: agent.session, host: "cloud-claude", label: "Nightly fixer" }));
 
     const sent = await w.send(agent.session, "Fix the flaky login test.");
     await until(() => hook.seen.length === 1);
@@ -132,7 +132,7 @@ describe("the cloud wake", () => {
     await until(async () => (await w.wakeOf(sent.thread_id, sent.message.id))?.state === "started");
     const root = (await w.thread(sent.thread_id)).messages[0]!;
     expect(root.cloud_wake).toMatchObject({ state: "started", name: "Nightly fixer", run_url: "https://claude.ai/code/session_01X" });
-    expect(root.delivery).toMatchObject({ host: "cloud", session: agent.session });
+    expect(root.delivery).toMatchObject({ host: "cloud-claude", session: agent.session });
 
     await Bun.sleep(80);
     const later = await w.reply(sent.message.id, "Also the signup test.", "r1");
@@ -219,7 +219,7 @@ describe("the cloud wake", () => {
     await w.server.cloudWake.sweep();
     await Bun.sleep(200);
     expect(hook.seen).toHaveLength(count);
-    expect((await w.call("/api/inbox/messages", { to: { host: "cloud", session: agent.session }, body: "Hi", idempotency_key: "c9" })).status).toBe(409);
+    expect((await w.call("/api/inbox/messages", { to: { session: agent.session }, body: "Hi", idempotency_key: "c9" })).status).toBe(409);
 
     const frames: string[] = [];
     const read = (async () => {

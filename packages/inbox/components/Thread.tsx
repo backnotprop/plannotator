@@ -70,6 +70,7 @@ import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
 import { CloudWakeLine } from '../cloud/CloudWakeLine';
+import { isInboxCloudHost } from '@plannotator/core/inbox-cloud';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
@@ -1746,7 +1747,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const startedTo = root.started_by_person && root.to ? root.to : null;
   // A paired cloud agent is named by the name its wakes carry (packages/inbox/cloud/), not "Cloud agent".
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
-  const addresseeName = (host: string) => (host === 'cloud' && cloudName ? cloudName : hostName(host));
+  const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
   const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
   // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
   const launched = root.launch ?? null;
@@ -5125,7 +5126,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
   // A message to a paired cloud agent (packages/inbox/cloud/): its own line, from the wake the Inbox wrote on it.
-  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || lastTo?.host === 'cloud') ? last : null;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null
     : heldHandoff && deliveredNow
@@ -7068,7 +7069,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     restartName={restartName}
                   />
                 )}
-                {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName('cloud')} time={whenTime} />}
+                {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
                 {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>

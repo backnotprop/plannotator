@@ -434,6 +434,8 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   cline: "Cline",
   // A paired cloud agent (packages/core/inbox-cloud.ts): its own name shows where the window knows it.
   cloud: "Cloud agent",
+  "cloud-claude": "Claude Code routine",
+  "cloud-grok": "Grok Bot",
 };
 
 /**

@@ -24,3 +24,5 @@
 @media (pointer: coarse) {
   .ib-cl-sub .ib-btn, .ib-cl-row .ib-btn { min-height: 40px; }
 }
+/* Grok Bot's static mark (a Grok Bot cloud agent: To, Settings, a tile): the text colour, as on x.ai/bot. */
+.ib-mk svg.ib-grokbot { color: var(--foreground); }

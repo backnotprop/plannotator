@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { ClaudeIcon, CodexIcon, CursorIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
+import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 
 const PATHS = {
@@ -262,7 +262,12 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'claude-code':
     case 'claude':
     case 'claude-app':
+    // A Claude Code routine paired as a cloud agent keeps Claude Code's mark.
+    case 'cloud-claude':
       return <ClaudeIcon />;
+    // A Grok Bot routine paired as a cloud agent: Grok Bot's own mark (x.ai/bot).
+    case 'cloud-grok':
+      return <GrokBotIcon className="ib-grokbot" />;
     case 'gemini':
     case 'qwen':
     case 'zed':

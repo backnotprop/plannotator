@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { INBOX_CLOUD_PRESET_NAMES, INBOX_CLOUD_PRESETS, INBOX_CLOUD_ROUTINE_BLOCK, type InboxCloudAgentView, type InboxCloudPreset } from '@plannotator/core/inbox-cloud';
+import { inboxCloudHostOf, INBOX_CLOUD_PRESET_NAMES, INBOX_CLOUD_PRESETS, INBOX_CLOUD_ROUTINE_BLOCK, type InboxCloudAgentView, type InboxCloudPreset } from '@plannotator/core/inbox-cloud';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { inboxApi, InboxApiError, type CloudAgentTest, type CloudAgentsModel } from '../api';
 import { HostMark, Icon } from '../icons';
@@ -105,7 +105,7 @@ function AgentRow({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mo
     <div className="ib-cl-agent" data-cloud-agent={agent.session}>
       <div className="ib-prow">
         <span className="ib-tile">
-          <HostMark host="cloud" />
+          <HostMark host={inboxCloudHostOf(agent.preset)} agent={agent.session} />
         </span>
         <span className="ib-txt">
           <span className="ib-l">{agent.name}</span>
@@ -239,7 +239,7 @@ function PairedPanel({ agent, onModel, onDone }: { agent: InboxCloudAgentView; o
   return (
     <div className="ib-mform ib-cl-paired" data-cloud-paired={agent.session}>
       <div className="ib-cl-head" tabIndex={-1} ref={head}>
-        <HostMark host="cloud" />
+        <HostMark host={inboxCloudHostOf(agent.preset)} agent={agent.session} />
         <span className="ib-l">Paired {agent.name}</span>
       </div>
       <p className="ib-cl-p">Paste this into the routine’s instructions, so it knows what a wake is:</p>

@@ -6467,7 +6467,7 @@ export class InboxStore {
    * webhook POST, so every window shows the same line and a wake that may have gone is never sent twice. A `started`
    * wake also records the delivery. No write when nothing changed.
    */
-  recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string): InboxMessage {
+  recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string, host = "cloud"): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);
     const before = message.cloud_wake;
@@ -6475,7 +6475,7 @@ export class InboxStore {
     const at = this.stamp();
     const next: InboxMessage = { ...message, cloud_wake: wake };
     this.appendMessage(next, at);
-    if (wake.state === "started" && session && this.isFor(next, session)) return this.recordDelivery(this.deliveryIdOf(next, session), { host: "cloud", session });
+    if (wake.state === "started" && session && this.isFor(next, session)) return this.recordDelivery(this.deliveryIdOf(next, session), { host, session });
     return next;
   }
 
