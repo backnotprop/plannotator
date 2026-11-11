@@ -4,7 +4,8 @@
 /* ---------- the section: straight on the sidebar's ground, like Projects, with no panel behind it (the owner,
    2026-11-09: "I like it without background"). Closed, its heading alone and nothing under it. ---------- */
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
-.pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
+.pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk,
+.pn-inbox .ib-sheet-now-n > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
 /* Add agent and Add machine: the heading's quiet icon buttons, always shown while the section is open (not only on
    hover), the chevron's place kept. */
 .pn-inbox .ib-agentsec .ib-agents-add { opacity: 1; }

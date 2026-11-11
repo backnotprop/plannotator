@@ -201,6 +201,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -1160,7 +1161,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -2811,6 +2812,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10): on unless the person
+   * ticked "Don't show this again" (config.json `inboxMarkReadWarning: false`). A window preference: nothing an agent
+   * reads changes. `event: capabilities` names it only when it was the change, so every other window stops (or
+   * starts) asking at once, and a frame stays as it was for everyone else.
+   */
+  const markReadWarningOn = () => loadConfig().inboxMarkReadWarning !== false;
+  const saveMarkReadWarning = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "mark_read_warning: { on: boolean }.", { field: "mark_read_warning" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: markReadWarningOn() };
+    const was = markReadWarningOn();
+    saveConfig({ inboxMarkReadWarning: on });
+    if (markReadWarningOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("mark_read_warning");
+    return { on };
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -3353,6 +3374,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bro: { on: broOn() },
     /** Floating reply drafts (config.json `inboxFloatDrafts`): off unless the person turned it on. */
     float_drafts: { on: floatDraftsOn() },
+    /** The warning before a Mark read that sets questions aside (config.json `inboxMarkReadWarning`): on unless turned off. */
+    mark_read_warning: { on: markReadWarningOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
@@ -3542,10 +3565,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -5404,6 +5427,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw error;
         }
       }
+      // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
+      // the same origin as the thread's own read; the phone door carries it (inbox-decision-export.ts).
+      if (INBOX_DECISION_EXPORT_ROUTE.test(path)) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        return (await inboxDecisionExportRoute(url, store, { version }))!;
+      }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -5442,6 +5474,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.steps === undefined &&
           body.bro === undefined &&
           body.float_drafts === undefined &&
+          body.mark_read_warning === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
@@ -5450,7 +5483,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -5461,6 +5494,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.bro !== undefined && !owner) return localOnly();
         // Floating reply drafts: the owner's (a guest's window never floats one).
         if (body.float_drafts !== undefined && !owner) return localOnly();
+        // The Mark read warning: the owner's (a guest's warning offers no "Don't show this again").
+        if (body.mark_read_warning !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
@@ -5516,6 +5551,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
+        if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
@@ -5547,6 +5583,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
+        const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = system.answer(body);
@@ -5554,7 +5591,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
