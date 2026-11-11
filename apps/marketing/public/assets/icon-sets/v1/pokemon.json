@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "name": "Pokémon",
+ "count": 1025,
+ "icon": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{n}.png",
+ "mirrors": ["https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/{n}.png"],
+ "names": "https://pokeapi.co/api/v2/pokemon-species?limit=1025",
+ "zoom": 1.5,
+ "credit": "Sprites and names from PokeAPI (pokeapi.co), fetched by your own Inbox."
+}
