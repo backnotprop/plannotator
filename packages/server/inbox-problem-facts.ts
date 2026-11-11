@@ -9,8 +9,9 @@
  * - `runs`: the newest failed runs of those tools (`createToolLog`, in memory
  *   only, never written anywhere): the command's name (never its arguments),
  *   the exit or the timeout, how long it ran, and the tool's last line,
- *   redacted here (`redactReportText`: home folder, tokens, emails, any host
- *   but the forge's own) before it leaves the Inbox.
+ *   redacted as it is read here (`redactReportText`: home folder, tokens,
+ *   emails, any host but the forge's own the person saw) before it leaves the
+ *   Inbox. Kept with tokens already out, so the log never holds one.
  * - `tools`: `<cli> --version` (its own short deadline, cached 10 min), or
  *   `installed: false` when the tool is not there.
  * - `thread`: the agent session that owns the thread (the last agent that
@@ -73,14 +74,19 @@ export function commandName(cli: string, args: readonly string[]): string {
   return words.join(" ");
 }
 
+/** Every dotted name in a line: kept while the run sits in the log; the read for a report keeps only the forge's own. */
+function hostLike(line: string): string[] {
+  return line.match(/\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b/g) ?? [];
+}
+
 function hostArg(args: readonly string[]): string | null {
   const i = args.indexOf("--hostname");
   return i >= 0 && typeof args[i + 1] === "string" ? args[i + 1]!.toLowerCase() : null;
 }
 
 /**
- * The runner every forge read of the Inbox goes through, keeping each failed run in `log` (redacted at once, so the log
- * itself never holds a secret). `auth token` prints a token on success and its stdout is never read.
+ * The runner every forge read of the Inbox goes through, keeping each failed run in `log` (in memory; tokens, home path and
+ * emails out at once, hosts when it is read for a report). `auth token` prints a token on success and its stdout is never read.
  */
 export function recordingRunner(run: RefRunner, log: ToolLog, options: { now?: () => number; home?: string } = {}): RefRunner {
   const now = options.now ?? Date.now;
@@ -100,7 +106,8 @@ export function recordingRunner(run: RefRunner, log: ToolLog, options: { now?: (
         exit: result.timedOut ? null : result.exitCode,
         ms: now() - started,
         timed_out: result.timedOut === true || new RegExp(`^${cli}: timed out$`, "m").test(result.stderr),
-        line: line ? redactReportText(line, { keepHosts: host ? [host] : [], home }).slice(0, 300) : null,
+        // Every host kept for now (the report decides which host the person saw); everything else out.
+        line: line ? redactReportText(line, { keepHosts: [hostLike(line)].flat(), home }).slice(0, 300) : null,
       });
     }
     return result;
@@ -165,7 +172,7 @@ export function createProblemFacts(options: {
     const host = url.searchParams.get("host")?.trim().toLowerCase() || null;
     const threadId = url.searchParams.get("thread");
     const tools = await Promise.all(clis.map(async (name) => ({ name, ...(await versionOf(name)) })));
-    const runs: ProblemToolRun[] = options.log.recent(clis, host, FACTS_RUNS).map(({ cli: _cli, host: _host, ...run }) => run);
+    const runs: ProblemToolRun[] = options.log.recent(clis, host, FACTS_RUNS).map(({ cli: _cli, host: _host, ...run }) => ({ ...run, line: run.line ? redactReportText(run.line, { keepHosts: host ? [host] : [] }) : null }));
     let thread: { session: string | null; link: string } | undefined;
     if (threadId) {
       const ids = options.store.threadMessageIds(threadId);
