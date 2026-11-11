@@ -3,13 +3,6 @@ import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/in
 import { Icon } from '../icons';
 import { launchChoiceButton, launchModelRows, shortLaunchModel } from './launchChoice';
 
-/**
- * Compose's Model and Effort for a new session (docs/agent-guides/inbox-launch.md "Model and effort"): a quiet button
- * after "in <folder>" on To's line (a phone's start line), and its menu, drawn as the folder menu is (the picker's
- * rows, captions and check). Nothing to press for someone who leaves it: the button reads "Default model", and a Send
- * carries nothing. A pick keeps the menu open (Model and Effort are two picks); a press outside, Escape or the phone's
- * Back closes it. No keys of its own beyond Tab, Enter and Escape.
- */
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
   const words = launchChoiceButton(choice, choices);
   return (
@@ -57,7 +50,6 @@ export function LaunchChoiceMenu({
     event.stopPropagation();
     back();
   };
-  /** Escape and Back: closed, and focus on the button that opened it. */
   const back = () => {
     const button = ref.current?.ownerDocument.querySelector<HTMLButtonElement>('.ib-cp-lchbtn');
     onClose();

@@ -512,13 +512,11 @@ test('model and effort: picked on To\'s line, they go on --bg and show in the he
     const threadId = ((await (await answer).json()) as { thread_id: string }).thread_id;
     return { threadId, start: await waitFor('claude --bg', () => fake.starts()[before]) };
   };
-  // Nothing touched: the button says Default model, and the same clicks as before send.
   const first = await send('Tidy the README.', async (d) => {
     await expect(d.locator('[data-compose-choice]')).toHaveText('Default model');
   });
   expect(first.start.argv).not.toContain('--model');
   expect(first.start.argv).not.toContain('--effort');
-  // Picked: the menu lists what the CLI's help names.
   const picked = await send('Plan the migration.', async (d) => {
     await d.locator('[data-compose-choice]').click();
     await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="opus"]').click();
@@ -532,7 +530,6 @@ test('model and effort: picked on To\'s line, they go on --bg and show in the he
   expect(picked.start.settings!.model).toBeUndefined();
   await openThread(page, picked.threadId);
   await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('opus · high');
-  // Remembered on this machine: the next one starts on opus · high; back to Default sends neither.
   await page.goto(world.url);
   const back = await send('One more pass.', async (d) => {
     await expect(d.locator('[data-compose-choice]')).toHaveText('opus · high');

@@ -225,7 +225,7 @@ function main() {
     process.stdout.write(`${cfg.version || "2.1.314"} (Claude Code)\n`);
     return;
   }
-  // The two options compose's Model and Effort menus read, as 2.1.322 prints them (`helpModels` adds aliases).
+  // As 2.1.322 prints them; `helpModels` adds aliases.
   if (args[0] === "--help") {
     record({});
     const models = (cfg.helpModels || ["fable", "opus", "sonnet"]).map((m) => `'${m}'`);

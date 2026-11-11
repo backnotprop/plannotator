@@ -22,7 +22,6 @@ test("the last choice is kept per agent on this machine; Default clears it; a ha
   expect(readLastLaunchChoice(dir, "claude-code")).toEqual({ model: "opus", effort: "high" });
   expect(readLastLaunchChoice(dir, "pi")).toEqual({ effort: "minimal" });
   expect(statSync(join(dir, "inbox", "launch", "last-choice.json")).mode & 0o777).toBe(0o600);
-  // A Send left on Default: the next New message starts on Default too; Pi's stays.
   writeLastLaunchChoice(dir, "claude-code", {});
   expect(readLastLaunchChoice(dir, "claude-code")).toEqual({});
   expect(readLastLaunchChoice(dir, "pi")).toEqual({ effort: "minimal" });
@@ -48,7 +47,6 @@ test("the lists never hold up an offer: a slow CLI is waited on a moment only, a
   const started = Date.now();
   expect(await withinLaunchWait(read("pi@1.5"), 50)).toBeNull();
   expect(Date.now() - started).toBeLessThan(1000);
-  // The same read is shared, not run twice; it fails (an older CLI), and is not run again for a while.
   void read("pi@1.5");
   finish(null);
   await Bun.sleep(0);

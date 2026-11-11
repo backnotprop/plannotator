@@ -129,10 +129,7 @@ export function piExtensionListed(settingsText: string | null): boolean {
   return names.some((name) => /@plannotator\/pi-extension/i.test(name) || (/plannotator/i.test(name) && /pi-extension/i.test(name)));
 }
 
-/**
- * The argv of one Pi process for a session: RPC mode, its exact session id (made when missing), its name (Pi takes the
- * next argument as it is), then the launch's `--model` / `--thinking` (`launchChoiceArgs`), on every start and restart.
- */
+/** The argv of one Pi process for a session: RPC mode, its exact session id (made when missing), its name (Pi takes the next argument as it is). */
 export function piArgv(pi: string, session: string, name: string, choice: readonly string[] = []): string[] {
   return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox", ...choice];
 }
@@ -707,7 +704,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     const e = await ctx.environment();
     const path = e.which("pi");
     if (!path) return null;
-    // Each call killed at its deadline. A Pi whose help names no `--thinking` lists nothing: no menu, as before.
+    // Help with no `--thinking` (an older Pi) means no menu.
     const help = await e.run([path, "--help"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
     if (help.exitCode !== 0 || help.timedOut || !/--thinking <level>/.test(help.stdout)) return null;
     const models = await e.run([path, "--list-models"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
@@ -734,7 +731,6 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return { ok: true, version };
     },
 
-    /** Pi's own lists: `--thinking` levels from its help, and the models `pi --list-models` says it can use here. Read once per version. */
     choices: () => choiceLists(choiceKey),
 
     /** Pi has no permission modes: nothing to fix on the record. */

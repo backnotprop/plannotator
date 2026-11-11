@@ -121,11 +121,9 @@ export type InboxLaunchTarget = (
   | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
 ) & {
   trust?: InboxLaunchTrust;
-  /** Compose's Model and Effort for this launch (`to.launch.model`, `.effort`), plain tokens; absent: the default. */
   choice?: InboxLaunchChoice;
 };
 
-/** `to.launch.model` / `.effort` as tokens (the effort's level is checked against the agent's list in `prepare`). */
 function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
   try {
     const choice = parseLaunchChoice(value, null);
@@ -1264,8 +1262,7 @@ ${result.text}`);
         return json({ launch: settingsState() });
       }
       if ("settings_file" in body) {
-        // Settings → Agents' "Claude settings file" (#3064): a full path (`~/` is the home), checked now so a typo is said
-        // here rather than at the next start; empty or null clears it. Kept as typed. Its contents never leave this process.
+        // Checked now so a typo is said here rather than at the next start.
         const raw = body.settings_file;
         if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "settings_file: a file path, or null.", { field: "settings_file" });
         const typed = (raw ?? "").trim();
@@ -1678,9 +1675,7 @@ ${result.text}`);
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
-      // Model and effort: the Send's only (none: no flag, the agent's own CLI decides); an effort the agent doesn't
-      // list, or a choice for an agent that offers none, is refused before anything is written.
-      // Waited on a moment at most; lists not read yet (a slow CLI) check the tokens only, never refuse the start.
+      // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
       const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
@@ -1752,12 +1747,11 @@ ${result.text}`);
         ...(effort ? { effort } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
-      // The next New message here starts on this choice (the default too).
       if (host.choices) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
-          // Only where the menu starts.
+          // Only where the menu starts: never worth failing a Send.
         }
       }
       // C1c: the next clone on this machine goes where this one went.
@@ -1847,8 +1841,6 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          // Model and Effort (compose's menu on the row): the CLI's lists and the last choice.
-          // A moment at most: a CLI that can't list them (or is slow to) is offered as before, with no menu.
           const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
           const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;

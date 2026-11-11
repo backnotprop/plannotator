@@ -9,7 +9,6 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-// What the Inbox writes for every launch (inbox-launch-claude.ts `writeSettings`), in short.
 const OURS = {
   env: { PATH: "/login/bin", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k" },
   enableAllProjectMcpServers: true,

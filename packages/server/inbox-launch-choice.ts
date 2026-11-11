@@ -1,9 +1,3 @@
-/**
- * Model and effort at launch, the server's part (docs/agent-guides/inbox-launch.md "Model and effort"): the last
- * choice sent to each agent on this machine, which compose's menu starts on, and a CLI help read kept per version.
- * The values, their check and the arguments they become are packages/core/inbox-launch-choice.ts.
- */
-
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { inboxLaunchTokenOk, type InboxLaunchChoice, type InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
@@ -26,12 +20,10 @@ function readAll(dataDir: string): Record<string, InboxLaunchChoice> {
   }
 }
 
-/** The last choice a Send made for `agent` here; `{}` when it was the default, or none was ever made. */
 export function readLastLaunchChoice(dataDir: string, agent: string): InboxLaunchChoice {
   return readAll(dataDir)[agent] ?? {};
 }
 
-/** A Send's choice for `agent` (the default too, as `{}`), so the next New message starts on it. Atomic. */
 export function writeLastLaunchChoice(dataDir: string, agent: string, choice: InboxLaunchChoice): void {
   const all = { ...readAll(dataDir), [agent]: cleanChoice(choice) };
   const dir = join(dataDir, "inbox", "launch");
@@ -44,14 +36,12 @@ export function writeLastLaunchChoice(dataDir: string, agent: string, choice: In
 
 export type LaunchChoiceLists = Omit<InboxLaunchChoices, "last">;
 
-/** How long a launch offer (compose's read, a Send) waits on a host's lists before going on without them. */
+/** The lists are a nicety: an offer or a Send never waits on them longer than this. */
 export const LAUNCH_CHOICES_WAIT_MS = 250;
-/** How long one help or model-list call may run before it is killed (the run's own deadline). */
 export const LAUNCH_CHOICES_RUN_MS = 5_000;
-/** A CLI that could not list them is not asked again for this long (a compose read comes every few seconds). */
+/** Compose reads every few seconds; a CLI that can't list them is not asked again for this long. */
 const FAILED_AGAIN_MS = 5 * 60_000;
 
-/** `answer`, or null once `ms` passed: the lists are a nicety, never what an offer waits for. The read itself goes on. */
 export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOICES_WAIT_MS): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>((resolve) => {
@@ -60,10 +50,7 @@ export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOIC
   return Promise.race([answer.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
-/**
- * A host's lists, read from its CLI once per `key` (the CLI's path and version): compose reads them every few seconds,
- * and a help read costs a process. One read at a time; a failed read is not tried again for a while.
- */
+/** `key` is the CLI's path and version: a help read costs a process, and compose asks every few seconds. */
 export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now) {
   let kept: { key: string; value: LaunchChoiceLists } | null = null;
   let failed: { key: string; at: number } | null = null;

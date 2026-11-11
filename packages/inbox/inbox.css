@@ -4243,9 +4243,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Settings → Agents' "Scratch folders" path, while it is changed. */
 .ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-/* Settings → Agents' Claude settings file (LaunchSettingsFile.tsx): one line, the value and a short muted hint; a long
-   value is cut in the middle (FileName) so the hint keeps its place. On a phone the hint takes the next line when the
-   line has no room. */
+/* Settings → Agents' one-line rows (LaunchSettingsFile.tsx). */
 .ib-agrow .ib-aglv { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
 .ib-agrow .ib-aglv > .ib-agval { display: block; min-width: 0; max-width: 100%; }
 .ib-agrow .ib-aglv > .ib-agpath { flex: 1 1 200px; width: auto; }
@@ -4733,7 +4731,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-/* Model and effort for a new session (compose/LaunchChoiceMenu.tsx): a quiet button after the folder, muted until opened. */
+/* Compose's model and effort button and menu (compose/LaunchChoiceMenu.tsx). */
 .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn { align-self: center; gap: 4px; height: 30px; padding: 5px 7px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
 .ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

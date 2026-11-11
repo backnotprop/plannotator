@@ -16,11 +16,8 @@
  *   `agents --json --all --cwd <folder>`, matched as a prefix.
  * - Everything we pass lives in the per-launch settings FILE, never as a
  *   variadic flag (they swallow arguments) and never inline (values in `ps`),
- *   but the launch's model and effort: `--model` and `--effort` take one
- *   value each, are no secret, and `claude respawn` applies them again (it
- *   keeps a start's `--model`, `--effort` and `--settings`; 2.1.322's
- *   `respawnFlags`). `--effort max` exists only as a flag (the `effortLevel`
- *   setting stops at xhigh).
+ *   but `--model` and `--effort`: `claude respawn` keeps them, and
+ *   `--effort max` exists only as a flag (`effortLevel` stops at xhigh).
  * - `stop` leaves `done` and drops the session from the list without `--all`.
  *
  * Every run goes through `AgentEnvironment` (packages/server/inbox-agents.ts):
@@ -357,7 +354,6 @@ export function createClaudeHost(options: {
       name: string;
       settingsPath: string;
       mode: ClaudeLaunchMode;
-      /** `--model` / `--effort` (`launchChoiceArgs`), already checked: none for the default. */
       choice?: readonly string[];
       allowBypass: boolean;
       environment: AgentEnvironment;
@@ -395,7 +391,6 @@ export function createClaudeHost(options: {
         output: `${output}\n[not listed: stop ${started.short} exit ${stop.exitCode}, rm exit ${rm.exitCode}]`,
       };
     },
-    /** `claude --help`, for the Model and Effort lists (`parseClaudeChoices`). */
     help: async () => (await run(["--help"], undefined, LAUNCH_CHOICES_RUN_MS)).result,
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
     respawn: async (short: string, environment: AgentEnvironment) => (await run(["respawn", short], undefined, COMMAND_TIMEOUT_MS, environment)).result,
@@ -485,7 +480,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, "settings.json");
     const isDefaultDataDir = resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir));
-    // config.json's hand-set `inboxLaunch.model` (never written by the window; the real-CLI smoke sets haiku).
+    // Hand-set only, never by the window: the real-CLI smoke pins haiku with it.
     const model = ctx.config().model;
     const ours = {
       ...(model ? { model } : {}),
@@ -501,7 +496,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       // Permission prompts come to the launch thread as questions (inbox-launch-claude-permission.ts).
       hooks: launchPermissionHooks(ctx.selfCommand),
     };
-    // Settings → Agents' Claude settings file: its keys under ours (it may hold a secret: only ever written here, 0600).
+    // The person's file may hold a secret: it is only ever copied here, 0600.
     const settings = person ? mergeClaudeLaunchSettings(person, ours) : ours;
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
@@ -510,7 +505,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
 
   let version: string | null = null;
   const choiceLists = launchChoiceCache(async () => {
-    // Killed at its deadline (the CLI itself, never its group). Help that names no `--effort` lists nothing: no menu.
+    // Help with no `--effort` (an older CLI) means no menu, not the fallback lists.
     const help = await cli.help();
     return help.exitCode === 0 && !help.timedOut && /--effort <level>/.test(help.stdout) ? parseClaudeChoices(help.stdout) : null;
   });
@@ -537,17 +532,13 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     checking = { key, answer };
     return answer;
   };
-  /** Settings → Agents' Claude settings file, read (null: none set). Its words name the path only. */
   const personSettings = (): ClaudeSettingsFileRead | null => {
     const typed = ctx.config().settingsFile;
     if (!typed) return null;
     const path = claudeSettingsFilePath(typed, ctx.homeDir);
     return readClaudeSettingsFile(path, ctx.displayFolder(path));
   };
-  /**
-   * The launched session may sign in another way the check can't see: the login shell's token or key, a cloud
-   * provider, or the Claude settings file's key helper or gateway (a gateway user is "signed out" to `claude auth status`).
-   */
+  /** The launched session may sign in another way the check can't see (the login shell's token, a cloud provider, a gateway). */
   const signsInOtherwise = (e: AgentEnvironment) => {
     const shell = ctx.shell();
     if (CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name])) return true;
@@ -582,7 +573,6 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       return { ok: true, version: found };
     },
 
-    /** The Model and Effort lists of the installed CLI (its `--help`, read once per version). */
     choices: () => choiceLists(version),
 
     /** The switch, the person's own Claude setup (with this folder's settings) and the last finished shell read. */
@@ -634,7 +624,6 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      * describes. Full permissions: bypass mode; the person's own default mode: no flag; otherwise auto mode.
      */
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
-      // Settings → Agents' Claude settings file, read now: missing or not JSON, the start says so and nothing runs.
       const person = personSettings();
       if (person && !person.ok) {
         ctx.startLog(launch.id, person.text);
@@ -647,7 +636,6 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         name: input.name,
         settingsPath,
         mode: modeOf(launch),
-        // The launch's model and effort, fixed on the record at Send; none: no flag, Claude Code's own.
         choice: launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),
         allowBypass: launch.bypass_available === true,
         environment: loginEnvironment(input.login),
@@ -705,7 +693,6 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const setup = claudeSetup();
       const start = startNow(setup);
       const follows = setting === null && start.wantsFull ? (setup.defaultMode === "bypassPermissions" ? "claude" : "shell") : null;
-      // Claude settings file (Settings → Agents), as typed and as shown.
       const { settingsFile } = ctx.config();
       return {
         settings_file: settingsFile,

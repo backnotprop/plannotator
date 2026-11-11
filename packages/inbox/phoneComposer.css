@@ -120,8 +120,7 @@
 .ib-cp-startlineb > :is(bdi, s, .ib-cp-on) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-cp-startlineb > svg { flex: none; }
 .ib-cp-startlineb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* Model and effort (compose/LaunchChoiceMenu.tsx): the same pill, unfilled and muted, giving way first when the line is short. */
-/* With no room left on the line it wraps under it, whole, rather than shrink to its chevron. */
+/* Wraps whole onto the next line rather than shrink to its chevron. */
 .ib-cp-startline:has(> .ib-cp-lchbtn) { flex-wrap: wrap; row-gap: 0; }
 .ib-cp-startlineb.ib-cp-lchbtn { flex: none; background: transparent; color: var(--muted-foreground); font-weight: 400; }
 .ib-cp-picker[data-phone].ib-cp-lch { right: 0; }

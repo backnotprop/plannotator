@@ -210,11 +210,7 @@ export interface LaunchHost {
   readonly shellFlags?: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
   available(): Promise<LaunchAvailability>;
-  /**
-   * Compose's Model and Effort menus for this agent (packages/core/inbox-launch-choice.ts): the CLI's own lists. Null: the CLI could not list them (an older CLI, a failing or slow call), and the agent
-   * is offered exactly as without this, with no menu. Never gates the offer: the engine waits on it a moment at most
-   * (`LAUNCH_CHOICES_WAIT_MS`). No member: the agent offers no choice, and a Send's `model` / `effort` is refused.
-   */
+  /** Null: the CLI could not list them, and the agent is offered with no menu. Never gates the offer. */
   choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };

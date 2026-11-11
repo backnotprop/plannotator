@@ -24,7 +24,6 @@ describe("model and effort at launch", () => {
       ["claude-code", { effort: "max" }, ["--effort", "max"]],
       ["claude-code", { model: "claude-opus-4-1[1m]", effort: "high" }, ["--model", "claude-opus-4-1[1m]", "--effort", "high"]],
       ["pi", { model: "openai/gpt-5.5", effort: "minimal" }, ["--model", "openai/gpt-5.5", "--thinking", "minimal"]],
-      // Codex takes neither from the Inbox.
       ["codex", { model: "gpt-5.5", effort: "high" }, []],
       // A record edited by hand: a flag, a shell string or a space never become argv.
       ["claude-code", { model: "--dangerously-skip-permissions", effort: "-p" }, []],
@@ -39,7 +38,6 @@ describe("model and effort at launch", () => {
     expect(parseLaunchChoice({}, efforts)).toEqual({});
     expect(parseLaunchChoice({ model: null, effort: null }, efforts)).toEqual({});
     expect(parseLaunchChoice({ model: "sonnet", effort: "max" }, efforts)).toEqual({ model: "sonnet", effort: "max" });
-    // Before the lists are known: the token check only.
     expect(parseLaunchChoice({ effort: "ultra" }, null)).toEqual({ effort: "ultra" });
     const refused: [Record<string, unknown>, string][] = [
       [{ model: "-m" }, "model"],
@@ -54,7 +52,6 @@ describe("model and effort at launch", () => {
 
   test("the lists come from the installed CLI's help; unreadable help falls back to what 2.1.322 documents", () => {
     expect(parseClaudeChoices(CLAUDE_HELP)).toEqual({ models: ["fable", "opus", "sonnet"], efforts: ["low", "medium", "high", "xhigh", "max"], effort_word: "Effort" });
-    // A newer CLI's list shows as it is.
     expect(parseClaudeChoices(CLAUDE_HELP.replace("'sonnet'", "'sonnet', 'haiku'").replace("max)", "max, ultra)"))).toMatchObject({ models: ["fable", "opus", "sonnet", "haiku"], efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] });
     expect(parseClaudeChoices("Usage: claude [options]")).toEqual(parseClaudeChoices(CLAUDE_HELP));
     expect(parsePiChoices(PI_HELP, PI_MODELS)).toEqual({ models: ["openai/gpt-5.5", "anthropic/claude-opus-4-1"], efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"], effort_word: "Thinking" });

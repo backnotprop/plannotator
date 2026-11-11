@@ -3,13 +3,6 @@ import { inboxApi, type InboxLaunchSettings } from '../api';
 import { Row } from './AgentsSettings';
 import { FileName } from './FileName';
 
-/**
- * Settings → Agents, under Claude Code, while launch is on, per machine (docs/agent-guides/inbox-launch.md "Claude
- * settings file"): a settings file whose keys every new session gets, such as a gateway's profile
- * (`inboxLaunch.settingsFile`). Empty: none, as before. Edited in place (Change, a field, Cancel and Save, as Scratch
- * folders do). One line: the value, cut in the middle when long, and a short muted hint. Model and effort are not
- * here: they are picked when starting a session, and "Default" there is the agent's own.
- */
 export function LaunchSettingsFile({
   launch,
   busy,
@@ -23,7 +16,7 @@ export function LaunchSettingsFile({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // An older Inbox (a linked machine) has no such setting.
+  // A linked machine on an older Inbox has no such setting.
   if (launch.settings_file === undefined) return null;
   const save = async (value: string | null) => {
     if (saving) return;

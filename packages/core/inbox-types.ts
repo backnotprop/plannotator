@@ -1127,10 +1127,7 @@ export interface InboxLaunchRecord {
    * too): no Full permissions.
    */
   bypass_available?: true;
-  /**
-   * Model and effort it started with (compose's choice; `inbox-launch-choice.ts`),
-   * fixed at Send: a start, Try again and every restart pass them. Absent: none, the agent's own default.
-   */
+  /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
   error?: InboxLaunchError | null;
