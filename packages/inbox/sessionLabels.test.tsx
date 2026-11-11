@@ -216,37 +216,33 @@ async function draw(node: ReactNode) {
 }
 
 describe('drawn', () => {
-  test.skipIf(!hasDom)("a named session's message keeps its agent's name and adds the label after it; the unnamed one is untouched; a cleared name goes", async () => {
+  test.skipIf(!hasDom)("several sessions: a named session's message leads with its name, its agent heard after it; the unnamed one is untouched; a cleared name goes", async () => {
+    // A thread of several sessions names each by its session (issue #3108, approval "inbox-thread-session-names");
+    // a thread of one keeps "Claude Code · <label>" (the next tests).
     const { ThreadPane } = await import('./components/Thread');
     const long = 'Fix the login redirect loop for SSO users on the admin console';
     setSessionLabels({ 'ses-login': 'Fix login redirect', 'ses-docs': long, 'ses-other': 'Not in this thread' });
     const el = await draw(<ThreadPane thread={THREAD} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />);
     const nameOf = (id: string) => el.querySelector(`[data-message-article="${id}"] .ib-fl-nm`)!;
-    // Both names, the agent first, the label in its own quieter part.
-    expect(nameOf('msg_1').textContent).toBe('Claude Code · Fix login redirect');
-    expect(nameOf('msg_1').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
-    expect(nameOf('msg_1').querySelector('.ib-fl-lbl [data-author-label]')!.textContent).toBe('Fix login redirect');
-    expect(nameOf('msg_1').hasAttribute('data-session-label')).toBe(true);
-    // A long label is cut in the middle, both ends kept; the agent's name is whole.
-    expect(nameOf('msg_2').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
-    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toBe(shortLabel(long, 32));
-    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toStartWith('Fix the login');
-    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toEndWith('console');
+    // The session's name alone, whole (the line's end cuts it with "…"); no label part.
+    expect(nameOf('msg_1').textContent).toBe('Fix login redirect');
+    expect(nameOf('msg_1').hasAttribute('data-session-name')).toBe(true);
+    expect(nameOf('msg_1').querySelector('.ib-fl-lbl')).toBeNull();
+    expect(nameOf('msg_2').textContent).toBe(long);
     // Unnamed: the same element and words as before.
     expect(nameOf('msg_3').textContent).toBe('Claude Code');
-    expect(nameOf('msg_3').hasAttribute('data-session-label')).toBe(false);
+    expect(nameOf('msg_3').hasAttribute('data-session-name')).toBe(false);
     expect(nameOf('msg_3').querySelector('.ib-fl-lbl')).toBeNull();
     expect(el.querySelector('[data-message-article="msg_3"] [data-fold-head]')!.getAttribute('aria-label')).toStartWith('Claude Code, ');
-    expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(true);
-    // A screen reader hears both names, the whole label, on the fold button (folded and open heads alike).
+    // A screen reader hears the session's name, then its agent, on the fold button (folded and open heads alike).
     for (const id of ['msg_1', 'msg_2']) {
-      const want = id === 'msg_1' ? 'Claude Code (Fix login redirect), ' : `Claude Code (${long}), `;
+      const want = id === 'msg_1' ? 'Fix login redirect, Claude Code, ' : `${long}, Claude Code, `;
       expect(el.querySelector(`[data-message-article="${id}"] [data-fold-head]`)!.getAttribute('aria-label')).toStartWith(want);
     }
 
     act(() => setSessionLabels({}));
     expect(nameOf('msg_1').textContent).toBe('Claude Code');
-    expect(nameOf('msg_1').querySelector('.ib-fl-lbl')).toBeNull();
+    expect(nameOf('msg_1').hasAttribute('data-session-name')).toBe(false);
     expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(false);
   });
 
