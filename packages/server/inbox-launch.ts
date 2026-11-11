@@ -1988,6 +1988,7 @@ async function chooseFolderInFinder(): Promise<string | null> {
     await Bun.sleep(600);
     return stub === "" ? null : stub;
   }
+  // windows-hide-guard: macOS only (osascript).
   const child = Bun.spawn(["/usr/bin/osascript", "-e", "activate", "-e", 'POSIX path of (choose folder with prompt "Pick a folder to start the agent in")'], {
     stdin: "ignore",
     stdout: "pipe",

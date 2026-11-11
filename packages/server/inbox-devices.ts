@@ -392,6 +392,7 @@ function computerName(): string {
   if (named) return named.slice(0, 64);
   if (process.platform === "darwin") {
     try {
+      // windows-hide-guard: macOS only (scutil).
       const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, env: childEnv() });
       const name = out.status === 0 ? out.stdout.trim() : "";
       if (name) return name;

@@ -626,6 +626,7 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
         shell: spawnConfig.shell,
         stdio: ["pipe", "pipe", "pipe"],
         detached,
+        windowsHide: true,
       });
       const spawned = child;
       try {
