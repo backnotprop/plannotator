@@ -98,6 +98,10 @@ describe('marketing security build', () => {
     expect(files).toContain('workspaces/index.html');
     // The install script opens this page after an update (src/lib/plugin-update.ts).
     expect(files).toContain('plugin-update/index.html');
+    // The Inbox's posted decisions comment loads its banner from these paths (packages/shared/inbox/decision-post.ts,
+    // DECISION_POST_BANNER): moving them breaks every comment already posted.
+    expect(files).toContain('assets/decisions/v1/banner-dark.png');
+    expect(files).toContain('assets/decisions/v1/banner-light.png');
     expect(files).toContain('rss.xml');
     expect(files).toContain('sitemap-index.xml');
     expect(files.some((file) => file.startsWith('server/'))).toBe(false);
