@@ -1,9 +1,3 @@
-/**
- * The surface's channel to its shell (adr/implementation/inbox-mobile.md,
- * sections 5 and 10): `window.webkit` first, as the iPhone's WKWebView
- * injects it; else the Android shell's `window.plannotatorShell`, which takes
- * strings; with neither (a desktop browser opening the file), nothing.
- */
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { listenToShell, postToShell } from './bridge';
 
