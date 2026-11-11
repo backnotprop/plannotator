@@ -310,15 +310,16 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
       <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
         {savedGuides.map((entry) => (
           <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
+            {/* On a phone the title takes its own line under the chip and dates, so it is never cut to a letter. */}
             <button
               type="button"
               onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-left sm:flex-nowrap"
             >
               <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                 {entry.label}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground transition-colors group-hover:text-primary">
+              <span className="order-last line-clamp-2 min-w-0 basis-full text-[12.5px] text-foreground transition-colors group-hover:text-primary sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-0 sm:truncate">
                 {entry.title}
               </span>
               <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
@@ -355,6 +356,13 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
           AI features are off, so a new guide can't be started here. Your saved guides still open.
         </p>
         {savedSection}
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-6 rounded-md border border-border/50 px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        >
+          Back to diff
+        </button>
       </div>
     );
   }
@@ -492,7 +500,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 <p className="mt-1 text-[11px] leading-snug text-muted-foreground/60">
                   Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
                   {instructions.length >= GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS - 1000 && (
-                    <span data-guide-instructions-count="" className="ml-1 tabular-nums">
+                    <span data-guide-instructions-count="" className="ml-1 whitespace-nowrap tabular-nums">
                       {instructions.length.toLocaleString('en-US')} / {GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS.toLocaleString('en-US')}
                     </span>
                   )}
