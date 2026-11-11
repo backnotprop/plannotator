@@ -37,6 +37,9 @@ export function sqliteInboxLog(dir: string, file: string = INBOX_DB_FILE): Inbox
 export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite: Database; db: InboxDb } {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const sqlite = new Database(join(dir, file), { create: true, strict: true });
+  // 8 KB pages for a new file (an existing one keeps its own): records are a few KB, and the import writes and
+  // checks about a third faster than with 4 KB pages.
+  sqlite.run("PRAGMA page_size = 8192");
   sqlite.run("PRAGMA journal_mode = WAL");
   sqlite.run("PRAGMA synchronous = NORMAL");
   sqlite.run("PRAGMA busy_timeout = 5000");

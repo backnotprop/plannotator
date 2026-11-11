@@ -93,6 +93,11 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   const table = tableOf(line.kind);
   const current = db.select({ seq: table.seq, record: table.record }).from(table).where(eq(table.id, line.id)).get();
   const actor = line.kind === "message" ? actorOf(db, line.record.author, line.at) : line.kind === "question" && line.record.picked_by ? actorOf(db, { kind: "person" }, line.at) : null;
+  // Typing goes over the row before it: history keeps each change of choice, never each key. Removed before this
+  // line's row goes in, so a repeated line (the same seq twice) keeps one row, not none.
+  if (line.kind === "question" && current && current.seq <= line.seq && continuesTyping(JSON.parse(current.record) as InboxQuestionRecord, line.record)) {
+    db.delete(t.events).where(and(eq(t.events.seq, current.seq), eq(t.events.kind, "question"), eq(t.events.subject_id, line.id))).run();
+  }
   db.insert(t.events)
     .values({
       seq: line.seq,
@@ -120,15 +125,9 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
     case "message":
       writeMessage(db, line.record, current ? (JSON.parse(current.record) as InboxMessage) : undefined, data, seq, line.at, actor!);
       return;
-    case "question": {
-      const prev = current ? (JSON.parse(current.record) as InboxQuestionRecord) : undefined;
-      // Typing goes over the row before it: history keeps each change of choice, never each key.
-      if (prev && continuesTyping(prev, line.record)) {
-        db.delete(t.events).where(and(eq(t.events.seq, current!.seq), eq(t.events.kind, "question"), eq(t.events.subject_id, line.id))).run();
-      }
+    case "question":
       writeQuestion(db, line.record, data, seq, line.at, actor);
       return;
-    }
     case "annotation": {
       const r = line.record;
       const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
