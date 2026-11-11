@@ -18,6 +18,7 @@
 
 @import "../ui/theme.css";
 @import "./comments.css";
+@import "./components/callTree/callTree.css";
 
 /* =====================================================
    Code Review Specific Styles
