@@ -5,6 +5,7 @@ import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
 import InboxPhone from '../components/inbox/InboxPhone.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
+import { videoUrl } from '../lib/media';
 import installPrompt from '../lib/inbox-prompt.md?raw';
 
 // /inbox/ is generated only once the Inbox launches: until then the deployed
@@ -266,7 +267,7 @@ const steps = [
             height="1080"
             aria-label="The Plannotator Inbox film"
           >
-            <source src="/assets/inbox-film.mp4" type="video/mp4" />
+            <source src={videoUrl('inbox-film.mp4')} type="video/mp4" />
           </video>
           <button type="button" class="ib-film-play" aria-label="Play the Inbox film" data-film-play hidden>
             <span class="ib-film-play-dot" aria-hidden="true">
