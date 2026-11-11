@@ -1,7 +1,7 @@
 /**
  * "Animate it" (agent icon dialog, "Your own…"), the critical path in a real browser against the compiled binary
- * (temp data dir and HOME, a fake Claude Code on a PATH of its own, a live session from the bridge's real long-poll,
- * no browser opened, nothing real asked):
+ * (temp data dir and HOME, the test sandbox with a fake Claude Code on its launch PATH, a live session from the
+ * bridge's real long-poll, no browser opened, nothing real asked):
  *
  *  click Animate it → New message opens filled in (the words with a request id, the picture attached, To open on the
  *  running agents and "New Claude Code session") → Send → the agent's command hands an animated SVG back while the
@@ -97,9 +97,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const bin = join(root, 'bin');
   const data = join(root, 'data');
   for (const dir of [home, bin, data]) mkdirSync(dir, { recursive: true });
-  // Plannotator's Claude Code plugin is on in this HOME, and a fake `claude`: New message offers "New Claude Code session".
-  mkdirSync(join(home, '.claude'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  // Plannotator's Claude Code plugin is on in the sandbox's own agent home, and a fake `claude` on its launch PATH:
+  // New message offers "New Claude Code session". The sandbox finds no other agent CLI.
+  mkdirSync(join(data, 'agents-home', '.claude'), { recursive: true });
+  writeFileSync(join(data, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude') });
   markTourDecided(data);
   writeFileSync(join(data, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false }));
@@ -108,6 +109,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_DATA_DIR: data,
+    PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_TEST_LAUNCH_PATH: `${bin}:/usr/bin:/bin`,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
