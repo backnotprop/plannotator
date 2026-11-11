@@ -27,7 +27,11 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A folder holding a fake `cli` (or none: not installed), alone on PATH with the system's basic tools. */
+/**
+ * A folder holding a fake `cli` (or none: not installed), ALONE on PATH. Never /usr/bin or /bin: a CI runner has a
+ * real gh in /usr/bin (GitHub's Linux images do), which "not installed" would then find and run. The fakes need no
+ * PATH: `sh` is named by the shebang, `printf`, `trap` and `exec` are its builtins, and `sleep` is named in full.
+ */
 function fakeTool(cli: ToolCli, script: string | null): void {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-tool-state-"));
   roots.push(dir);
@@ -35,7 +39,7 @@ function fakeTool(cli: ToolCli, script: string | null): void {
     writeFileSync(join(dir, cli), `#!/bin/sh\n${script}\n`);
     chmodSync(join(dir, cli), 0o755);
   }
-  process.env.PATH = `${dir}:/usr/bin:/bin`;
+  process.env.PATH = dir;
 }
 
 const say = (text: string, exit: number) => `printf '%s\\n' "${text.replace(/"/g, '\\"')}" >&2\nexit ${exit}`;
