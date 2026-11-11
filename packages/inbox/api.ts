@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxCloudAgentView, InboxCloudPreset } from '@plannotator/core/inbox-cloud';
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -1272,6 +1273,19 @@ export interface SearchRequest {
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
+/** GET /api/inbox/cloud-agents: the paired cloud agents, and the projects one may work in (most recent first). */
+export interface CloudAgentsModel {
+  agents: InboxCloudAgentView[];
+  projects: { id: string; name: string }[];
+}
+
+/** Send a test's answer: whether a run started, its link, and the plain words to show. */
+export interface CloudAgentTest {
+  started: boolean;
+  run_url?: string;
+  words: string;
+}
+
 export interface ComposeSessionsModel {
   serverSession: string;
   home: string;
@@ -2170,6 +2184,13 @@ export const inboxApi = {
   pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(inboxUrl(`/pairing/checks${fresh ? '?fresh=1' : ''}`)),
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
+  /** Settings → Devices, Cloud agents (packages/server/inbox-cloud-agents.ts): never the address or the key back. */
+  cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; url: string; key: string; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView }>(inboxUrl('/cloud-agents'), fields),
+  testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
+  rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
+  removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),
   tailnet: () => get<{ tailnet: TailnetState }>(inboxUrl('/tailnet')),
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),

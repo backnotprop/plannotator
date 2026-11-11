@@ -189,6 +189,8 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
+  /** A paired cloud agent (packages/server/inbox-cloud-wake.ts): live for as long as it stays paired. */
+  pinned?: boolean;
 }
 
 /**
@@ -581,7 +583,7 @@ export function createInboxLiveSessions(options: {
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
-      ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
+      ? (entry.pinned === true || now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS) && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
       : entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
 
   /**
@@ -660,6 +662,37 @@ export function createInboxLiveSessions(options: {
     if (root !== null) entry.root = root;
     if (typeof projectPath === "string" && projectPath) entry.cwd = projectPath;
     sessions.set(session, entry);
+  };
+
+  /**
+   * A paired cloud agent (packages/server/inbox-cloud-wake.ts): live in its project while it stays paired, under its
+   * name (`label`), so New message's To lists it. `root` null unpins it (Remove).
+   */
+  const pinCloud = (session: string, root: string | null, name: string): void => {
+    if (root === null) {
+      if (sessions.get(session)?.pinned) sessions.delete(session);
+      return;
+    }
+    const at = now();
+    const known = sessions.get(session);
+    sessions.set(session, {
+      host: "cloud",
+      root,
+      startedAt: known?.startedAt ?? at,
+      lastSeen: at,
+      holding: 0,
+      busy: null,
+      idleSince: null,
+      sendNow: false,
+      cwd: null,
+      folder: null,
+      plugin: null,
+      engine: null,
+      tags: true,
+      label: name,
+      wakeOnly: session,
+      pinned: true,
+    });
   };
 
   /** How a session the Inbox wakes itself is connected: it takes the item as its next turn; nothing else is known. */
@@ -1344,6 +1377,7 @@ export function createInboxLiveSessions(options: {
     pollStarted,
     stateChanged,
     seenWakeOnly,
+    pinCloud,
     liveFor,
     askerLive,
     pendingOf,

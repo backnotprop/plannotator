@@ -18,6 +18,7 @@ import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
+import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
@@ -431,6 +432,8 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
   cline: "Cline",
+  // A paired cloud agent (packages/core/inbox-cloud.ts): its own name shows where the window knows it.
+  cloud: "Cloud agent",
 };
 
 /**
@@ -608,6 +611,11 @@ export interface InboxMessage {
    * step 6: older records lack it.
    */
   delivery?: InboxDelivery | null;
+  /**
+   * On a person's message to a cloud agent (packages/core/inbox-cloud.ts): where its webhook wake stands. Written
+   * by the Inbox before and after each POST, so a wake that may have gone is never sent twice. Absent otherwise.
+   */
+  cloud_wake?: InboxCloudWake | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { inboxApi, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
 import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
+import { CloudAgentsSection } from '../cloud/CloudAgents';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
 
@@ -496,6 +497,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
         </>
       )}
       {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      <CloudAgentsSection />
     </>
   );
 }

@@ -130,6 +130,7 @@ import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -6459,6 +6460,23 @@ export class InboxStore {
     const withdrawn: InboxMessage = { ...note, delivery: { state: "delivered", host, session: note.to.session, at } };
     this.appendMessage(withdrawn, at);
     return withdrawn;
+  }
+
+  /**
+   * Where a person message's cloud wake stands (packages/server/inbox-cloud-wake.ts): written before and after each
+   * webhook POST, so every window shows the same line and a wake that may have gone is never sent twice. A `started`
+   * wake also records the delivery. No write when nothing changed.
+   */
+  recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const before = message.cloud_wake;
+    if (before && before.state === wake.state && before.at === wake.at && before.next_at === wake.next_at && before.run_url === wake.run_url) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, cloud_wake: wake };
+    this.appendMessage(next, at);
+    if (wake.state === "started" && session && this.isFor(next, session)) return this.recordDelivery(this.deliveryIdOf(next, session), { host: "cloud", session });
+    return next;
   }
 
   /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */
