@@ -1,29 +1,3 @@
-/**
- * Shape: the format of a board an agent draws, and the rules on it.
- *
- * A shape is one thing being worked out with one agent session. Each time the
- * agent draws it, the store keeps a full snapshot: a version. A version holds
- * its views (Picture, How it works, Code), the numbered
- * references the views cite, and the parts the person can point at.
- *
- * Browser-safe and dependency-free: the store (packages/shared/shape), the
- * CLI and the board's UI (packages/ui/components/shape) all read it.
- *
- *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
- *    update --file`) and names the exact field that is wrong.
- *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every Code step, the title and the claim. Ids
- *    stay the same across versions, which is what lets the board redraw only
- *    what changed.
- *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
- *    since you looked"). The agent never writes what changed; it is worked
- *    out here.
- *  - A board may carry `scenes` (`./shape-scene`): the agent's own SVG in a
- *    drawn view's `<div data-scene="id">…</div>`, whose `data-part` pieces the
- *    board's player moves by the scene's keyframes. Data only, never a script.
- *
- * Spec: the approved Shape design record ("shape-living-board"), sections 3 and 4.
- */
 import type { CodeGuideOutput } from './guide';
 import { ulid } from './ulid';
 import { checkShapeScene, shapeHtmlParts, shapeHtmlSceneSlots, shapeHtmlScenes, shapeScenePieceRefs, type ShapeScene } from './shape-scene';
@@ -33,11 +7,7 @@ export const SHAPE_FORMAT_VERSION = 1;
 
 export type ShapeViewId = 'picture' | 'how' | 'changed' | 'know' | 'code';
 
-/**
- * The views a board may hold. Their labels are the words `shape update` reports to the agent; the bar's words are
- * ShapeSurface's. `changed` and `know` stay so a board that still sends them is accepted; they are never shown, diffed
- * or reported (`SHAPE_HIDDEN_VIEWS`).
- */
+/** The views a board may hold. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
@@ -46,63 +16,30 @@ export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'code', label: 'Code' },
 ];
 
-/** Views a board may carry but nothing shows (approvals shape-know-removed, shape-whats-changed-removed). */
 const SHAPE_HIDDEN_VIEWS: ReadonlySet<string> = new Set(['know', 'changed']);
 
 export function shapeViewLabel(view: ShapeViewId): string {
   return SHAPE_VIEWS.find((v) => v.id === view)?.label ?? view;
 }
 
-// ───────────────────────────── the board an agent writes ─────────────────────────────
-
-/**
- * A drawn view (Picture, How it works): HTML and inline SVG the agent writes,
- * drawn in its own style scope.
- *
- *  - `data-step="N"`: parts with the same N arrive together, in number order.
- *    A `path` or `line` with `class="draw"` and `pathLength="1"` draws on.
- *  - `data-mark="id"`: a part the person can point at (Change it / Ask). Keep
- *    the id across versions for the same part.
- *  - `data-ref="n"`: an empty element that becomes reference bubble n.
- *  - Colours come from the frame's variables (`--ink`, `--paper`, `--mark`,
- *    `--grey`, `--rule`), so light and dark both work.
- */
 export interface ShapeDrawnView {
   html: string;
-  /** Rules for this view only (scoped to it). No `@import`, no outside `url()`. */
   css?: string;
-  /**
-   * A fixed canvas, in CSS pixels, that the board scales to fit. Absent: the
-   * HTML flows like a page.
-   */
   width?: number;
   height?: number;
-  /** A stacked drawing for a narrow board (a phone), shown below 700 px. */
   tall?: { html: string; css?: string };
   /**
    * The Picture only: a fuller drawing behind the board's "Show more", when there is more
    * that must be drawn. It flows and scrolls like a page. Most boards have none.
    */
   more?: { html: string; css?: string };
-  /**
-   * How it works only: examples a person can follow through the drawing
-   * ("Follow an example"), one per way it can go. Each step names the parts it
-   * lights by the drawing's own ids: `data-mark` for a part, `data-edge` for
-   * an arrow (put `data-edge="id"` on the arrow and on its words).
-   */
   examples?: ShapeExample[];
 }
 
-/**
- * One example, followed through How it works: a real case, read from the code
- * (nothing is run). Named by where it ends ("It opens", "Nothing shows").
- */
+/** One example, followed through How it works: a real case, read from the code (nothing is run). */
 export interface ShapeExample {
-  /** Where it ends, for the switch: "It opens". */
   name: string;
-  /** The case, in a line: "You leave a thread you just read". */
   title: string;
-  /** What happens, in a sentence, shown before stepping. */
   lead?: string;
   steps: ShapeExampleStep[];
 }
@@ -111,13 +48,9 @@ export interface ShapeExample {
 export type ShapeExampleSource = { path: string; line: number } | { step: number } | string;
 
 export interface ShapeExampleInput {
-  /** As the code names it: `gate.pageAge`. */
   name: string;
-  /** As the code holds it: `240_000`, `true`, `'open'`. */
   value: string;
-  /** Its type: `number`. */
   type?: string;
-  /** The value in plain words, when the literal is hard to read: `4 min`. */
   reading?: string;
   from: ShapeExampleSource;
 }
@@ -125,64 +58,43 @@ export interface ShapeExampleInput {
 export type ShapeExampleResult = 'pass' | 'fail' | 'not-reached';
 
 export interface ShapeExampleCheck {
-  /** The expression as the code writes it: `gate.pageAge >= SNOOZE_INTRO_TIMES.pageAgeMs`. */
   code: string;
-  /** The constant's value, shown as a comment: `60_000`. */
   constant?: string;
-  /** The value the check saw (absent when it was not reached). */
   saw?: string;
   result: ShapeExampleResult;
-  /** The check that decided which way the step went. One per step. */
   decides?: boolean;
-  /** A failing check's shortfall: `20_000 short (20 s)`. */
   short?: string;
 }
 
 export interface ShapeExampleStep {
-  /** The part it lights (`data-mark`). */
   part?: string;
-  /** The arrow it takes to get there (`data-edge`). */
   arrow?: string;
-  /** The example's value at this step, written on the part: `9 s, past the 5 s it needs`. */
   tag: string;
-  /** Where the tag sits on its part: its top edge (default) or its bottom edge. */
   tagAt?: 'top' | 'bottom';
-  /** What happens, in a plain sentence. */
   text: string;
-  /** The example's numbers against the rule, in words, when they explain the tag. */
   detail?: string;
   inputs: ShapeExampleInput[];
-  /** The function, as declared: `snoozeIntroMayClaim(gate: …, now: Date = new Date()): boolean`. */
   signature: string;
-  /** In code order. */
   checks: ShapeExampleCheck[];
   output: { name: string; value: string; type: string; note?: string };
-  /** The function's line: the card's link into the code. */
   code: { path: string; line: number };
 }
 
-// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them, and nothing shows them.
 export interface ShapeRequirement {
-  /** Stable across versions. */
   id: string;
-  /** One terse line. Inline Markdown: links, `code`, **bold**, and `[^n]` for reference n. */
   text: string;
-  /** Where it is built, for "open the code at this line". */
   code?: { path: string; line: number };
 }
 
 export interface ShapeRequirementGroup {
   id: string;
-  /** "Who gets it", "When it shows"… in reading order. */
   label: string;
   items: ShapeRequirement[];
 }
 
 export interface ShapeRequirements {
-  /** The line over the groups. */
   heading?: string;
   groups: ShapeRequirementGroup[];
-  /** Short labelled lines at the foot (Open, Next). Inline Markdown. */
   foot?: { label: string; text: string }[];
 }
 
@@ -192,60 +104,30 @@ export interface ShapePlannedFile {
   kind: 'new' | 'change';
 }
 
-/**
- * The Code view: a Guided Review (the guide format the review app's guides use).
- * After implementation, `patch` is the real diff and each step lists the files
- * it changed. Before, the steps list the files they plan (`planned`), and a
- * `patch` holds only proposed diffs, which the board marks as not applied.
- */
+/** The Code view: a Guided Review (the guide format the review app's guides use). */
 export interface ShapeCodeView {
   stage: 'before' | 'after';
   guide: CodeGuideOutput;
   patch?: string;
-  /** Before implementation: per step, the files it will add or change. */
   planned?: ShapePlannedFile[][];
-  /** The provenance line under the guide's title. Inline Markdown. */
   source?: string;
-  /** Files the whole-file viewer may open, each at a line. The host reads them. */
   files?: { path: string; line?: number }[];
 }
 
-/**
- * What an agent used to send as "What's changed": the change read as a patch.
- * Still accepted, so no send is refused, but never shown, never a part and
- * never asked for (approval shape-whats-changed-removed).
- *
- * Text fields are inline Markdown (`code`, **bold**, links, `[^n]`), except
- * `was` and `now`, which are diff lines: plain words, with `code` for names.
- * A place in code is `path:line` (or `path#L42`), a path in the project; a
- * guide step is the review's chapter number, from 1.
- */
 export type ShapeChangeKind = 'behaviour' | 'contract' | 'moved' | 'removed' | 'check';
 export const SHAPE_CHANGE_KINDS: readonly ShapeChangeKind[] = ['behaviour', 'contract', 'moved', 'removed', 'check'];
 
 export interface ShapeChangeItem {
-  /** Stable across versions: a part the person can point at. */
   id: string;
-  /**
-   * behaviour: what a person or a program sees happen; contract: a name, an
-   * address, a format others rely on; moved: code that moved unchanged;
-   * removed: what is gone; check: something to look at, with a note.
-   */
   kind: ShapeChangeKind;
   title: string;
-  /** The − lines: what it was. One line, or several. */
   was?: string | string[];
-  /** The + lines: what it is now. */
   now?: string | string[];
-  /** moved: from where, to where (paths or names), and how many lines. */
   from?: string;
   to?: string;
   lines?: number;
-  /** A sentence under the lines; required on check. */
   note?: string;
-  /** Where it is in the code: `path:line`. */
   code?: string[];
-  /** The review's guide step (chapter) that walks through it, from 1. */
   step?: number;
 }
 
@@ -254,7 +136,6 @@ export interface ShapeFlowStep {
   call: string;
   is: 'new' | 'gone' | 'changed' | 'same';
   note?: string;
-  /** `path:line`. */
   at?: string;
 }
 
@@ -270,34 +151,20 @@ export interface ShapeChangeFlow {
   title: string;
   start: string;
   steps?: ShapeFlowStep[];
-  /** Branches after the steps, each with its own steps and end. */
   forks?: { when: string; steps?: ShapeFlowStep[]; end?: ShapeFlowEnd }[];
   end?: ShapeFlowEnd;
 }
 
 export interface ShapeChanged {
-  /** One sentence: what is different now. */
   summary?: string;
   items: ShapeChangeItem[];
-  /** The call paths the change moves. Most changes have one or none. */
   flows?: ShapeChangeFlow[];
-  /** One line for the rest (renames that stay, tests, docs). */
   also?: string;
 }
 
 export type ShapeRefKind = 'message' | 'image' | 'file' | 'pr' | 'diff' | 'link';
 export const SHAPE_REF_KINDS: readonly ShapeRefKind[] = ['message', 'image', 'file', 'pr', 'diff', 'link'];
 
-/**
- * A numbered reference: the views cite it as bubble `n`, and the References
- * list opens it in the real viewer.
- *
- *  - message: `target` is a thread message id (opens in the Thread tab).
- *  - image: `target` is the image (a file the store keeps, under `files/`); `images` steps through several.
- *  - file: `target` is a path in the project; `line` opens it there.
- *  - pr, link: `target` is the URL.
- *  - diff: `target` is a file path in the Code view's patch.
- */
 export interface ShapeRef {
   n: number;
   kind: ShapeRefKind;
@@ -311,33 +178,20 @@ export interface ShapeRef {
 /** What an agent writes: one whole board. */
 export interface ShapeBoard {
   title: string;
-  /** One line: where it stands, and whether anything waits on the person. Inline Markdown. */
   claim: string;
-  /** When the facts were current (ISO 8601). */
   asOf?: string;
-  /** The agent's one line about this version. */
   note?: string;
   views: {
     picture?: ShapeDrawnView;
     how?: ShapeDrawnView;
     /** Once "What's changed". Still accepted and kept; never shown or a part (approval shape-whats-changed-removed). */
     changed?: ShapeChanged;
-    /**
-     * Words an agent used to send as "What to know": at most two short paragraphs of prose. Still accepted, so no send is
-     * refused, but never shown and never a part (approval shape-know-removed). Nothing asks an agent for it.
-     */
     know?: string;
-    /** Only on a version saved before `views.know`. */
     reqs?: ShapeRequirements;
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
-  /** Scenes the agent draws and the board's player plays, by id (`./shape-scene`): where a drawn view puts `<div data-scene="id">…</div>`. */
   scenes?: Record<string, ShapeScene>;
-  /**
-   * A stack review's pull requests (approval "stack-show-me", addendum 2026-11-06): which PR changed each drawn part,
-   * and in the agent's words what it did there. Only a board with two or more `pulls` shows them (`shapeStackBadges`).
-   */
   stack?: ShapeStack;
 }
 
@@ -345,9 +199,7 @@ export interface ShapeBoard {
 export interface ShapeStackPull {
   n: number;
   title: string;
-  /** Its page on the forge (http or https). */
   url?: string;
-  /** The review's chapter (a guide step, from 1) that walks this PR: "Read it in the review" lands there. */
   step?: number;
 }
 
@@ -356,7 +208,6 @@ export interface ShapeStackFile {
   path: string;
   additions?: number;
   deletions?: number;
-  /** New-side line ranges this PR changed (`[from, to]`, inclusive): the code popup shows only the hunks they touch. */
   lines?: [number, number][];
 }
 
@@ -364,7 +215,6 @@ export interface ShapeStackFile {
 export interface ShapeStackChange {
   part: string;
   pr: number;
-  /** One or two plain sentences: what this PR did there. */
   said: string;
   files: ShapeStackFile[];
 }
@@ -374,15 +224,12 @@ export interface ShapeStack {
   changes: ShapeStackChange[];
 }
 
-// ───────────────────────────── what the store keeps ─────────────────────────────
-
 /** Where a part lives: a view, or the header (title, claim). */
 export type ShapePartView = ShapeViewId | 'header';
 
 export interface ShapePart {
   view: ShapePartView;
   id: string;
-  /** Its words, whitespace folded. What a change is compared on. */
   text: string;
 }
 
@@ -395,9 +242,7 @@ export interface ShapeSession {
 export interface ShapeVersion extends ShapeBoard {
   n: number;
   at: string;
-  /** The version the agent started from (null for the first). */
   base: number | null;
-  /** The last thread message this version took in (Inbox shapes). */
   through: string | null;
   by: ShapeSession | null;
   parts: ShapePart[];
@@ -408,7 +253,6 @@ export type ShapeState = 'active' | 'finished';
 export interface ShapeProject {
   name: string;
   root: string;
-  /** The linked worktree the board was written from, when that folds into the project at `root`. */
   worktree?: string;
 }
 
@@ -419,45 +263,31 @@ export interface ShapeRecord {
   title: string;
   project: ShapeProject;
   session: ShapeSession | null;
-  /** The Inbox thread it hangs off (`msg_…`), or null for a standalone shape. */
   thread: string | null;
   state: ShapeState;
   created: string;
   updated: string;
   latest: number;
-  /** The agent said it is drawing: until the next version, or `until`. */
   drawing: { at: string; until: string } | null;
 }
 
 export type ShapeNoteKind = 'change' | 'ask' | 'answer';
 
-/**
- * A line of a shape's chat: the person's Change it and Ask, and the agent's
- * answers. A note with no `part` is on the whole board (`view` null) or on a
- * whole view: a general comment.
- */
+/** A line of a shape's chat: the person's Change it and Ask, and the agent's answers. */
 export interface ShapeNote {
   id: string;
   at: string;
   kind: ShapeNoteKind;
-  /** The version it was written on. */
   v: number;
   view: ShapeViewId | null;
   part: string | null;
-  /** The marked words, as shown. */
   quote: string | null;
   text: string;
-  /** `you`, or the agent session that answered. */
   from: 'you' | ShapeSession;
-  /** An answer's question or change. */
   re: string | null;
-  /** When an agent picked it up (`shape read`); null while it waits. */
   delivered: string | null;
-  /** A box dragged over the board: where it sits. `part` then names every part inside it, comma-separated. */
   box?: ShapeNoteBox;
-  /** The `data-code` places inside the box ("src/a.ts#L42"). */
   code?: string[];
-  /** A picture of the box, grown to the whole of the parts it picked, the box drawn on it: `files/…` in the store, its full path in `shape read --notes`. */
   picture?: string;
 }
 
@@ -475,8 +305,6 @@ export interface ShapeNoteBox {
 export function shapeNoteWaits(note: ShapeNote): boolean {
   return note.kind === 'change' && note.from === 'you' && !note.delivered;
 }
-
-// ───────────────────────────── ids ─────────────────────────────
 
 const SHAPE_ID_RE = /^shp_[0-9A-HJKMNP-TV-Z]{26}$/;
 const NOTE_ID_RE = /^shn_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -497,11 +325,8 @@ export function isShapeNoteId(value: unknown): value is string {
   return typeof value === 'string' && NOTE_ID_RE.test(value);
 }
 
-// ───────────────────────────── limits ─────────────────────────────
-
 /** The most a board may hold. A refusal names the field and the limit. */
 export const SHAPE_LIMITS = {
-  /** Scenes a board holds (`./shape-scene`). */
   scenes: 8,
   title: 140,
   claim: 400,
@@ -532,9 +357,7 @@ export const SHAPE_LIMITS = {
   exampleSteps: 12,
   exampleRows: 12,
   exampleCode: 600,
-  /** A box's picture, as a data: URL. */
   notePicture: 6_000_000,
-  /** A stack's pull requests, its part changes, the files of one change, and one file's line ranges. */
   stackPulls: 20,
   stackChanges: 200,
   stackFiles: 30,
@@ -543,21 +366,8 @@ export const SHAPE_LIMITS = {
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
 
-// ───────────────────────────── validation ─────────────────────────────
-
 export type ShapeCheck<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
-// ─── what a drawing may load: only what the board holds ───
-//
-// One allowlist, used twice: here on the store side, so the agent hears at
-// once which field is wrong, and by the board's sanitizer when it draws.
-
-/**
- * Tags a drawing may not hold. `animate` and `set` can rewrite an href after
- * the sanitizer; `dialog` and `select` (its picker) open in the top layer,
- * over the whole app, past the frame's containment and clip.
- */
-// `area` and `map`: an image map's `<area href>` is a link the board's guard would have to know too; a drawing has `<a>`.
 const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform', 'dialog', 'select', 'area', 'map'];
 export const SHAPE_FORBIDDEN_TAGS: readonly string[] = FORBIDDEN_TAGS;
 
@@ -576,15 +386,9 @@ function urlKey(value: string): string {
 }
 
 const DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|gif|webp)[;,]/;
-/** A file the board keeps: `files/<name>`, one name (the store's own rule: no folder, no dot first) and no escapes. */
 const BOARD_FILE_RE = /^files\/[^/\\%?#.][^/\\%?#]*$/;
 
-/**
- * May a drawing's URL attribute hold this value? Only what the board holds:
- * `files/<name>`, `#fragment`, or a `data:image/` PNG, JPEG, GIF or WebP. A
- * link (`<a href>`) may also point out, over https. Anything else (another
- * scheme, `//host`, `\\host`, `https:host`, a path) is refused.
- */
+/** May a drawing's URL attribute hold this value? */
 export function shapeUrlAllowed(value: string, link = false): boolean {
   const key = urlKey(value);
   if (key.startsWith('#') || DATA_IMAGE_RE.test(key) || BOARD_FILE_RE.test(key)) return true;
@@ -597,11 +401,7 @@ export function shapeUrlAllowed(value: string, link = false): boolean {
   }
 }
 
-/**
- * A reference's URL as the board opens it: http(s) with a host, else null.
- * The store checks this too; the board checks again where it opens one,
- * since a host can hand it a board from anywhere.
- */
+/** A reference's URL as the board opens it: http(s) with a host, else null. */
 export function shapeLinkUrl(target: string): string | null {
   if (!/^https?:\/\//.test(urlKey(target))) return null;
   try {
@@ -617,10 +417,6 @@ function codePoint(hex: string): string {
   return n > 0 && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff) ? String.fromCodePoint(n) : '\ufffd';
 }
 
-/**
- * CSS without its comments. A `/*` inside a string is text, not a comment,
- * so strings are stepped over (with their escapes) while comments go.
- */
 function stripCssComments(css: string): string {
   let out = '';
   let quote: string | null = null;
@@ -643,12 +439,6 @@ function stripCssComments(css: string): string {
   return out;
 }
 
-/**
- * CSS as its tokenizer reads it: escapes read (`u\72l(` is `url(`), lower
- * case, and comments gone outside strings. `keepComments` reads it with them
- * left in, a second look the checks also take, so no comment reading of ours
- * can hide a url.
- */
 function cssKey(css: string, keepComments = false): string {
   return (keepComments ? css : stripCssComments(css))
     .replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(\r\n|[\n\r\f])|([\s\S]))/g, (_, hex?: string, _nl?: string, ch?: string) =>
@@ -657,15 +447,13 @@ function cssKey(css: string, keepComments = false): string {
     .toLowerCase();
 }
 
-/** The values a CSS text hands to `url(…)`, read as a URL parser reads them. */
 function cssUrls(key: string): string[] {
   return [...key.matchAll(/url\s*\(\s*["']?([^)"']*)/g)].map((m) => urlKey(m[1] ?? ''));
 }
 
 /**
- * What a view's CSS (or a `style` attribute) may not hold: imports, fonts,
- * scripted CSS and anything that loads from outside. `url()` may name only a
- * `#fragment` or a data:image. Escapes and comments are read first.
+ * What a view's CSS (or a `style` attribute) may not hold: imports, fonts, scripted CSS and
+ * anything that loads from outside.
  */
 export function shapeCssProblems(css: string): string[] {
   const out: string[] = [];
@@ -677,15 +465,14 @@ export function shapeCssProblems(css: string): string[] {
   if (any((k) => /(?:^|[^\w-])src\s*\(/.test(k))) out.push('src() is not allowed; use url() with a data:image');
   if (any((k) => cssUrls(k).some((u) => !u.startsWith('#') && !DATA_IMAGE_RE.test(u)))) out.push('url() may name only a #fragment or a data:image (png, jpeg, gif, webp)');
   if (any((k) => /expression\s*\(|-moz-binding|behavior\s*:/.test(k))) out.push('scripted CSS is not allowed');
-  // A customizable select's picker opens in the top layer, over the app.
   if (any((k) => /base-select|::?picker\s*\(/.test(k))) out.push('a select picker (base-select, ::picker) is not allowed');
   if (/<\/style/i.test(css)) out.push('</style> is not allowed');
   return out;
 }
 
 /**
- * A presentation attribute (`fill`, `mask`, `filter`, `clip-path`,
- * `marker-*`…) may use `url(#id)` and nothing else that loads.
+ * A presentation attribute (`fill`, `mask`, `filter`, `clip-path`, `marker-*`…) may use `url(#id)`
+ * and nothing else that loads.
  */
 export function shapePaintAllowed(value: string): boolean {
   return [cssKey(value), cssKey(value, true)].every(
@@ -693,34 +480,25 @@ export function shapePaintAllowed(value: string): boolean {
   );
 }
 
-/** Attributes that only ever hold words. */
 const TEXT_ATTRS = new Set(['title', 'alt', 'class', 'id', 'role', 'lang', 'dir']);
 
 /**
- * The tags in HTML as `/<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g`
- * finds them, in order: each tag's name and the text between the name and
- * its `>`. A quote opens a value that runs to the same quote, so a `>` in it
- * does not close the tag; a tag whose quote or `>` never comes is no tag.
- *
- * That regex scans to the end of the input from every `<` that is never
- * closed, which is quadratic. This reads it in one pass instead: one
- * backward pass finds, for every place a tag's text could go on from, where
- * that tag would close (or that it never does).
+ * The tags in HTML as `/<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g` finds them, in order:
+ * each tag's name and the text between the name and its `>`.
  */
 export function shapeHtmlTags(html: string): { name: string; attrs: string }[] {
   const n = html.length;
-  // close[i]: the `>` a tag's text, read from i outside any quote, ends at; -1 for none.
   const close = new Int32Array(n + 1);
   close[n] = -1;
   let nextDouble = -1;
   let nextSingle = -1;
   for (let i = n - 1; i >= 0; i--) {
     const c = html.charCodeAt(i);
-    if (c === 62 /* > */) close[i] = i;
-    else if (c === 34 /* " */) {
+    if (c === 62 ) close[i] = i;
+    else if (c === 34 ) {
       close[i] = nextDouble < 0 ? -1 : close[nextDouble + 1]!;
       nextDouble = i;
-    } else if (c === 39 /* ' */) {
+    } else if (c === 39 ) {
       close[i] = nextSingle < 0 ? -1 : close[nextSingle + 1]!;
       nextSingle = i;
     } else close[i] = close[i + 1]!;
@@ -735,7 +513,6 @@ export function shapeHtmlTags(html: string): { name: string; attrs: string }[] {
     while (end < n && /[\w:-]/.test(html[end]!)) end++;
     const gt = close[end]!;
     if (gt < 0) {
-      // Not a tag; a later `<` inside it still may be one, as the regex finds.
       lt = html.indexOf('<', lt + 1);
       continue;
     }
@@ -746,10 +523,8 @@ export function shapeHtmlTags(html: string): { name: string; attrs: string }[] {
 }
 
 /**
- * Whether some tag in HTML holds an event handler, as
- * `/<[^>]*\son[a-z]+\s*=/i` finds one: from a `<` up to the next `>` (or the
- * end), with no regard for quotes. Each stretch is read once, from its first
- * `<`, where that regex reads it again from every `<`.
+ * Whether some tag in HTML holds an event handler, as `/<[^>]*\son[a-z]+\s*=/i` finds one: from a
+ * `<` up to the next `>` (or the end), with no regard for quotes.
  */
 export function shapeHtmlHasEventHandler(html: string): boolean {
   for (let lt = html.indexOf('<'); lt >= 0; ) {
@@ -764,9 +539,8 @@ export function shapeHtmlHasEventHandler(html: string): boolean {
 const ATTR_RE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 
 /**
- * What a drawn view's HTML may not hold: scripts, event handlers, and anything
- * that loads from outside the board. The board sanitizes again when it draws;
- * this refusal tells the agent at once, by field.
+ * What a drawn view's HTML may not hold: scripts, event handlers, and anything that loads from
+ * outside the board.
  */
 export function shapeHtmlProblems(html: string): string[] {
   const out: string[] = [];
@@ -821,14 +595,8 @@ export function shapeHtmlProblems(html: string): string[] {
 
 const isHtmlSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
 const isAsciiAlpha = (c: string | undefined) => !!c && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
-/** A value longer than this is no file and line; it is kept cut, with a mark, so it still fails as one. */
 const DATA_CODE_READ_MAX = 512;
 
-/**
- * For each place in `html`, the next place at or after it whose character
- * `stop` takes (`html.length` when none): one pass from the end, so every jump
- * in the scan below costs one step.
- */
 function nextWhere(html: string, stop: (c: string) => boolean): Int32Array {
   const n = html.length;
   const next = new Int32Array(n + 2).fill(n);
@@ -836,22 +604,6 @@ function nextWhere(html: string, stop: (c: string) => boolean): Int32Array {
   return next;
 }
 
-/**
- * Every `data-code` value a browser could read in drawn HTML, and maybe more:
- * the check that uses it must never miss a code the board draws, and a code
- * it reads that the board does not draw only makes the check stricter. So it
- * reads a start tag at every `<` followed by a letter, wherever it stands:
- * in text, in a comment, in the content of script, style, textarea, title,
- * noscript and the like, in a CDATA section, inside another tag's attribute.
- * Where a browser starts a tag, it reads it from there by the tokenizer's own
- * rules (a value quoted or not, a stray quote inside an unquoted one kept, an
- * attribute after `/` or straight after another's closing quote), and those
- * rules do not depend on what is around the tag, so whatever the parser and
- * the sanitizer make of the rest (scripting on or off, svg and math, a
- * misnested end tag), a code the board draws was written here as such a tag.
- * Named references decoded; in order. Linear: a scan that comes to an
- * attribute another scan already read stops, as the rest is the same.
- */
 export function shapeHtmlDataCodes(html: string): string[] {
   const out: string[] = [];
   const n = html.length;
@@ -871,7 +623,7 @@ export function shapeHtmlDataCodes(html: string): string[] {
       i = nextAttr[i]!;
       if (i >= n || html[i] === '>' || read[i]) break;
       read[i] = 1;
-      const nameEnd = attrNameEnd[i + 1]!; // A name may start with `=`.
+      const nameEnd = attrNameEnd[i + 1]!;
       const isCode = nameEnd - i === 9 && html.slice(i, nameEnd).toLowerCase() === 'data-code';
       i = nextSolid[nameEnd]!;
       if (html[i] !== '=') continue;
@@ -892,32 +644,15 @@ export function shapeHtmlDataCodes(html: string): string[] {
   return out;
 }
 
-// HTML start tags that end an <svg> where they stand (the spec's "breakout" tags in foreign content);
-// `font` only with color, face or size. Of them, the ones with no end tag and no picture.
 const SVG_BREAKOUT_TAGS = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
 const SVG_BREAKOUT_VOID = new Set(['br', 'embed', 'hr', 'meta']);
-// Inside these SVG parts the page reads HTML again.
 const SVG_HTML_POINTS = new Set(['foreignobject', 'desc', 'title']);
-// Outside SVG, the page reads these elements' content as text: an `<svg` in it is no drawing.
 const HTML_RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes']);
 
-/**
- * The drawing with the HTML tags the page would let end an `<svg>` renamed to
- * SVG ones where they stand, so the page keeps the rest of the drawing in the
- * SVG instead of dropping it. Inside a `<text>` such a tag becomes a `tspan`,
- * which still shows its words. Elsewhere only a tag that holds nothing (an
- * empty `<span data-ref="1"></span>` among the shapes, a `<br>`) becomes a
- * `g`, keeping its attributes (a `data-ref` stays a number): SVG would not
- * show the words of a `<div>Legend</div>` or the picture of an `<img>`, so
- * those are left as written and the page shows them as HTML, as it always
- * did. Everything else, HTML inside a foreignObject included, is left as
- * written.
- */
 export function shapeKeepSvgWhole(html: string): string {
   if (!/<svg/i.test(html)) return html;
   const n = html.length;
   const lower = html.toLowerCase();
-  // What is open inside the outermost <svg>, as written (`name`) and as now written (`as`).
   const open: { name: string; as: string }[] = [];
   const inSvg = () => open.length > 0 && !SVG_HTML_POINTS.has(open[open.length - 1]!.name);
   const inText = () => {
@@ -927,10 +662,8 @@ export function shapeKeepSvgWhole(html: string): string {
   let out = '';
   let copied = 0;
   for (let lt = html.indexOf('<'); lt >= 0 && lt < n; lt = html.indexOf('<', lt + 1)) {
-    // Deeper than any page nests a drawing: the rest stays as written.
     if (open.length > 512) break;
     if (html.startsWith('<!--', lt)) {
-      // A comment ends at `-->` or `--!>`; `<!-->` and `<!--->` end at once.
       if (html.startsWith('>', lt + 4) || html.startsWith('->', lt + 4)) {
         lt = html.indexOf('>', lt + 4);
         continue;
@@ -948,7 +681,6 @@ export function shapeKeepSvgWhole(html: string): string {
     const at = lt;
     const end = html[lt + 1] === '/';
     const start = end ? lt + 2 : lt + 1;
-    // `<!…>`, `<?…>` and `</` with no name are comments to the next `>`.
     if (html[lt + 1] === '!' || html[lt + 1] === '?' || (end && !isAsciiAlpha(html[start]))) {
       const e = html.indexOf('>', lt + 1);
       lt = e < 0 ? n : e;
@@ -959,7 +691,6 @@ export function shapeKeepSvgWhole(html: string): string {
     while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
     const nameEnd = i;
     const name = html.slice(start, nameEnd).toLowerCase();
-    // The tag's attributes, read as the page reads them, up to its `>`.
     for (;;) {
       while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
       if (i >= n || html[i] === '>') break;
@@ -1003,7 +734,6 @@ export function shapeKeepSvgWhole(html: string): string {
         empty = lower.startsWith(`</${name}`, k) && /^[\s/>]?$/.test(html[k + 2 + name.length] ?? '');
       }
       if (name === 'img' || (!words && !empty)) {
-        // Left as written, it ends the SVG here: what follows is HTML again.
         while (inSvg()) open.pop();
         continue;
       }
@@ -1014,11 +744,9 @@ export function shapeKeepSvgWhole(html: string): string {
       if (!selfClosing && !close) open.push({ name, as });
       continue;
     }
-    // An end tag closes the nearest part of its name, as written or as now written.
     let k = open.length - 1;
     while (k >= 0 && open[k]!.name !== name && open[k]!.as !== name) k--;
     if (k < 0) {
-      // `</p>` or `</br>` with nothing to close would end the SVG too: an empty part instead.
       if (name !== 'p' && name !== 'br') continue;
       out += html.slice(copied, at) + `<${inText() ? 'tspan' : 'g'}/>`;
       copied = Math.min(gt + 1, n);
@@ -1034,11 +762,7 @@ export function shapeKeepSvgWhole(html: string): string {
   return copied ? out + html.slice(copied) : html;
 }
 
-/**
- * A path in the project, relative to its root: `src/a.ts`. Not absolute
- * (`/x`, `C:/x`, `~/x`), no `.` or `..` part, no backslash (a UNC path or a
- * Windows `..\`), no `%` escape, no URL scheme and no control character.
- */
+/** A path in the project, relative to its root: `src/a.ts`. */
 export function isShapeProjectPath(path: string): boolean {
   if (!path || path.length > 500 || path !== path.trim()) return false;
   if (/[\u0000-\u001f\u007f\\%]/.test(path)) return false;
@@ -1099,7 +823,6 @@ class Checker {
     }
     return value;
   }
-  /** A path in the project (`isShapeProjectPath`). */
   path(value: unknown, field: string): string | undefined {
     const path = this.text(value, field, 500);
     if (path === undefined) return undefined;
@@ -1183,13 +906,6 @@ export function shapeHtmlEdges(html: string): Set<string> {
 
 const EXAMPLE_RESULTS: readonly ShapeExampleResult[] = ['pass', 'fail', 'not-reached'];
 
-/**
- * How it works' examples. Each step lights a part (`data-mark`) or an arrow
- * (`data-edge`) the drawing has, in the wide drawing and in the tall one when
- * there is one (a phone follows the same path). A value handed on names an
- * earlier step; a step's checks are in code order, with the one that decided
- * it marked, and none after a failing check ran.
- */
 function checkExamples(c: Checker, value: unknown, field: string, html: string, tallHtml: string | undefined): ShapeExample[] | undefined {
   const list = c.list(value, field, SHAPE_LIMITS.examples);
   if (!list) return undefined;
@@ -1442,7 +1158,6 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
   };
 }
 
-/** A place in code, `path:line` or `path#L42`, kept as written. */
 function checkCodePlace(c: Checker, value: unknown, field: string): string | undefined {
   const text = c.text(value, field, 520);
   if (text === undefined) return undefined;
@@ -1455,10 +1170,6 @@ function checkCodePlace(c: Checker, value: unknown, field: string): string | und
 
 const CITE_RE = /\[\^\d{1,3}\]/;
 
-/**
- * Words `views.changed` held as plain text (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
- * there is refused, naming the field, as it was when What's changed drew them.
- */
 function plainText(c: Checker, value: string | undefined, field: string): string | undefined {
   if (value !== undefined && CITE_RE.test(value)) {
     c.fail(field, 'shows a [^n] as written: cite a reference in a title, a note, the summary or also');
@@ -1467,7 +1178,6 @@ function plainText(c: Checker, value: string | undefined, field: string): string
   return value;
 }
 
-/** `was` or `now`: one line, or a list of lines. Kept as written. */
 function checkDiffLines(c: Checker, value: unknown, field: string): string | string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (Array.isArray(value)) {
@@ -1514,7 +1224,6 @@ function checkFlowSteps(c: Checker, value: unknown, field: string): ShapeFlowSte
   });
 }
 
-/** The fields of a change the board draws only for some kinds, and what each kind shows instead. */
 const CHANGE_FIELDS_NOT_DRAWN: Record<ShapeChangeKind, readonly ('was' | 'now' | 'from' | 'to' | 'lines')[]> = {
   behaviour: ['from', 'to', 'lines'],
   contract: ['from', 'to', 'lines'],
@@ -1561,18 +1270,15 @@ function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged |
     const to = plainText(c, c.text(it.to, `${f}.to`, 500, false), `${f}.to`);
     const lines = c.int(it.lines, `${f}.lines`, 1, 10_000_000, false);
     const note = c.text(it.note, `${f}.note`, 1000, false);
-    // A kind's own rule only on a field the agent left out: one that is there but wrong already has its error.
     const absent = (name: string) => it[name] === undefined || it[name] === null;
     if (kind === 'moved' && (absent('from') || absent('to'))) c.fail(f, 'a moved change needs from and to');
     if (kind === 'removed' && absent('was')) c.fail(`${f}.was`, 'a removed change needs was: what is gone');
     if (kind === 'check' && absent('note')) c.fail(`${f}.note`, 'a check needs a note: what to look at, and why');
     if ((kind === 'behaviour' || kind === 'contract') && absent('was') && absent('now')) c.fail(f, `a ${kind} change needs was, now or both`);
-    // A field the board does not draw for this kind is refused, not stored unseen.
     if (kind) {
       for (const name of CHANGE_FIELDS_NOT_DRAWN[kind]) if (!absent(name)) c.fail(`${f}.${name}`, `is not shown on a ${kind} change (${CHANGE_FIELDS_DRAWN[kind]})`);
     }
     const codeList = c.list(it.code, `${f}.code`, 8);
-    // The same place twice is one link.
     const code = codeList && [...new Set(codeList.map((p, j) => checkCodePlace(c, p, `${f}.code[${j}]`)).filter((p): p is string => p !== undefined))];
     const step = c.int(it.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
     if (id === undefined || !kind || title === undefined) return;
@@ -1663,7 +1369,6 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
   return out.sort((a, b) => a.n - b.n);
 }
 
-/** Every `data-mark` the Picture (and its Show more and tall drawings) and How it works draw: where a stack badge may sit. */
 function drawnMarks(views: ShapeBoard['views']): Set<string> {
   const marks = new Set<string>();
   for (const v of [views.picture, views.how]) {
@@ -1761,15 +1466,6 @@ export function shapeStackBadges(stack: ShapeStack | undefined): Map<string, num
   return badges;
 }
 
-/**
- * The PRs' hues (OKLCH degrees), by place in the stack (owner, 2026-11-07: "Dude why limit."): every PR its own, and
- * fixed by its place, so a stack that grows never recolours the PRs already on the board. #1 to #3 keep the first look:
- * teal, amber, rose. Each next one is the hue that looks farthest from all before it (the most distant by eye, OKLab
- * distance of the colours as drawn, light and dark), picked once and written here; hues between 235 and 330 are never
- * picked, so the board's purple (about 280) stays out. PRs next to each other in the stack are at least 24° apart.
- * The UI turns a hue into a colour at one lightness and chroma (`--shp-h`, shape.css), so every hue holds the same
- * contrast. One per allowed pull (`SHAPE_LIMITS.stackPulls`).
- */
 const STACK_HUES = [186, 72, 357, 125, 235, 33, 155, 330, 99, 209, 15, 51, 171, 140, 344, 112, 86, 221, 197, 24] as const;
 
 /** The hues of a stack of `count` PRs, in landing order (`STACK_HUES`): the first `count` of one fixed sequence. */
@@ -1783,12 +1479,6 @@ export function shapeStackHue(stack: ShapeStack, n: number): number | null {
   return i < 0 ? null : STACK_HUES[i % STACK_HUES.length]!;
 }
 
-/** Validate what an agent writes. Every problem is named by its field. */
-/**
- * One drawn view on its own, as another surface takes it (code review's
- * pictures): `{ html, css?, width?, height?, tall? }`, with the same checks a
- * board's Picture gets. Each problem names its field under `field`.
- */
 export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<ShapeDrawnView> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: [`${field}: must be an object with html`] };
@@ -1799,18 +1489,11 @@ export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<
 
 const SHAPE_SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 
-/**
- * A board's scenes, by id, each checked by its own format; then the drawings: a `data-scene` slot
- * must name a scene the board has, and a scene's pieces (its tracks, `to` and `along`) must be
- * `data-part` names in a drawing, so a typo is named here instead of a piece that never moves.
- * Ids are matched with `Object.hasOwn`, so `constructor` and other prototype keys never resolve.
- */
 function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Record<string, ShapeScene> | undefined {
   const htmlOf = (v: 'picture' | 'how') => {
     const view = views[v];
     return view ? [view.html, view.tall?.html ?? '', view.more?.html ?? ''] : [];
   };
-  // Which views play each scene (a slot is a <div data-scene>; the player finds pieces in the view that holds it).
   const playedIn = new Map<string, ('picture' | 'how')[]>();
   for (const v of ['picture', 'how'] as const) {
     const slots = htmlOf(v).flatMap(shapeHtmlSceneSlots);
@@ -1848,7 +1531,6 @@ function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Re
       continue;
     }
     for (const ref of shapeScenePieceRefs(checked.value, `scenes.${id}`)) {
-      // Every view that plays the scene needs the piece: the player looks for it in that view only.
       if (where.some((v) => !partsOf[v].has(ref.id))) c.fail(ref.at, `the drawing has no data-part="${ref.id}"; put data-part="${ref.id}" on that piece of your SVG in <div data-scene="${id}">`);
     }
     out[id] = checked.value;
@@ -1899,20 +1581,10 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   return { ok: true, value: board };
 }
 
-// ───────────────────────────── parts ─────────────────────────────
-
 const VOID = new Set(['area', 'br', 'col', 'hr', 'img', 'input', 'source', 'track', 'wbr', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'use', 'stop']);
 
-/** The named references read here; any other stays as written (and a check that cares refuses it). */
 const NAMED_REFS: Readonly<Record<string, string>> = { nbsp: '\u00a0', lt: '<', LT: '<', gt: '>', GT: '>', quot: '"', QUOT: '"', apos: "'", amp: '&', AMP: '&', rarr: '→' };
 
-/**
- * Character references decoded once, as a browser does (`&#38;#x2F;` is
- * `&#x2F;`, not `/`): numeric ones with or without their `;`, the named ones
- * above; and a NULL is U+FFFD, as a browser reads it in an attribute. A
- * numeric one in 128–159 is the windows-1252 character, as a browser reads it
- * (`&#150;` is an en dash, not a C1 control).
- */
 function decodeEntities(text: string): string {
   return text
     .replace(/\0/g, '\ufffd')
@@ -1932,15 +1604,12 @@ function numericRef(hex: string): string {
 const fold = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 /**
- * The marked parts of a drawn view's HTML, in document order: each element
- * with `data-mark`, and the words inside it (a nested mark's words count for
- * both). A mark id seen again (the wide and the tall drawing name the same
- * part) keeps its first words. No DOM: the store runs in Node.
+ * The marked parts of a drawn view's HTML, in document order: each element with `data-mark`, and
+ * the words inside it (a nested mark's words count for both).
  */
 export function shapeHtmlMarks(html: string): { id: string; text: string }[] {
   const out = new Map<string, string>();
   const stack: { tag: string; mark: string | null; text: string[] }[] = [];
-  // `<[!]--`, not the bare comment opener: some JS parsers (Semgrep's) read `<!--` as an HTML-like comment.
   const re = /<[!]--[\s\S]*?-->|<(\/?)([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|([^<]+)/g;
   let m: RegExpExecArray | null;
   const close = (frame: { mark: string | null; text: string[] }) => {
@@ -2005,11 +1674,7 @@ export interface ShapeCodeTarget {
   lineEnd?: number;
 }
 
-/**
- * Reads a part's `data-code` ("src/snooze.ts#L42", "src/snooze.ts#L42-L48"
- * or "src/snooze.ts:42"). Null when it is not one: a path outside the
- * project (`isShapeProjectPath`: absolute, `..`, a backslash), a URL or no line.
- */
+/** Reads a part's `data-code` ("src/snooze.ts#L42", "src/snooze.ts#L42-L48" or "src/snooze.ts:42"). */
 export function parseShapeCodeTarget(value: string | null | undefined): ShapeCodeTarget | null {
   const m = (value ?? '').trim().match(/^([^#:\s][^#:]*?)(?:#L(\d+)(?:-L?(\d+))?|:(\d+)(?:-(\d+))?)$/);
   if (!m) return null;
@@ -2051,8 +1716,6 @@ export function shapeCitedRefs(board: ShapeBoard): Set<number> {
   return out;
 }
 
-// ───────────────────────────── diff ─────────────────────────────
-
 export interface ShapeChange {
   view: ShapePartView;
   id: string;
@@ -2086,8 +1749,6 @@ type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<P
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
   const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
-  // A version saved while `views.know` or `views.changed` was shown has parts in them: they are not parts now, so the
-  // diff skips them.
   const shown = (p: ShapePart) => !SHAPE_HIDDEN_VIEWS.has(p.view);
   const partsA = a.parts.map(now).filter(shown);
   const partsB = b.parts.map(now).filter(shown);
@@ -2138,8 +1799,6 @@ export function summarizeShapeDiff(diff: ShapeDiff): string[] {
   return lines;
 }
 
-// ───────────────────────────── notes ─────────────────────────────
-
 export interface ShapeNoteInput {
   kind: 'change' | 'ask';
   v: number;
@@ -2149,7 +1808,6 @@ export interface ShapeNoteInput {
   text: string;
   box?: ShapeNoteBox;
   code?: string[];
-  /** A PNG as a data: URL; the store keeps it as a file. */
   picture?: string;
 }
 
@@ -2221,17 +1879,13 @@ function shapeDrawingSpan(html: string): { w: number; h: number } | null {
   return { w: (Math.max(...xs) - Math.min(...xs)) / Number(box[3]), h: (Math.max(...ys) - Math.min(...ys)) / Number(box[4]) };
 }
 
-/**
- * What `shape update` tells the agent about a stored board: how it will behave, not a verdict.
- * Each note says what to change. It never refuses: the board is stored either way.
- */
+/** What `shape update` tells the agent about a stored board: how it will behave, not a verdict. */
 export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): string[] {
   const notes: string[] = [];
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
   if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to your message to the person.`);
-  // A Picture that plays a scene: the player sizes the drawing and its controls to the screen, so it wants no canvas.
   const scene = shapeHtmlScenes(picture.html).length > 0;
   if (scene) {
     if (picture.width !== undefined) notes.push('The Picture plays a scene, so leave its width and height off: the player fits the drawing and its controls to the screen.');
@@ -2246,15 +1900,12 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
-  // A name `shape update` has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing),
-  // in any drawing, the phone's and the more's too; each once.
   const how = board.views.how;
   for (const view of [picture, picture.tall, picture.more, how, how?.tall, how?.more])
     for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) {
       const note = m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
       if (!notes.includes(note)) notes.push(note);
     }
-  // A real logo keeps its own colours: the kit's marks say so with data-brand.
   const colours = [picture.html.replace(/<svg data-brand\b.*?<\/svg>/gs, ''), picture.css ?? ''].join(' ').match(/#[0-9a-f]{3,8}\b(?=[^<>]*[;"'}])|\brgba?\(/gi);
   if (colours?.length) notes.push(`The Picture has ${colours.length} fixed colours (such as ${colours[0]}), which break in light or dark. Use var(--ink), var(--grey), var(--mark) and the rest.`);
   return notes;

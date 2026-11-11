@@ -1,11 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { GUIDE_NO_SECTIONS_ERROR, validateGuideOutput } from "./guide-prompt";
 
-// Moved from packages/server/guide/guide-review.test.ts with the validator
-// itself. Pins the behaviors the PR-993 review rounds fixed: the validator is
-// pure logic otherwise exercised only end-to-end through live agent runs,
-// which is exactly where regressions hide.
-
 const FILES = ["src/a.ts", "src/b.ts", "src/c.ts"];
 
 function guideJson(sections: unknown, extra: Record<string, unknown> = {}): string {
@@ -41,10 +36,6 @@ describe("validateGuideOutput", () => {
   });
 
   it("explains a fully-invalidated guide whose refs were outside the changeset (count + example paths)", () => {
-    // The model guided a different commit than the one under review — the
-    // failure card must say so instead of the bare generic message. Asserts
-    // the data the message carries (count, example paths, the Commits-panel
-    // pointer), not the surrounding prose.
     const raw = JSON.parse(
       guideJson([
         { title: "X", overview: "o", diffs: [{ file: "other/one.ts" }, { file: "other/two.ts" }] },
@@ -56,7 +47,6 @@ describe("validateGuideOutput", () => {
     expect(result.error).toContain("4 file(s) outside the changeset");
     expect(result.error).toContain("other/one.ts");
     expect(result.error).toContain("Commits panel");
-    // Examples are capped at 3 — the fourth path must not be listed.
     expect(result.error).not.toContain("other/four.ts");
   });
 
@@ -91,7 +81,6 @@ describe("validateGuideOutput", () => {
   it("unplacedFiles = unplaced changed files, deduped against placements, ignoring fabricated entries", () => {
     const raw = JSON.parse(
       guideJson([{ title: "S", overview: "o", diffs: [{ file: "src/a.ts" }] }], {
-        // a.ts is placed (must not double-render); fake.ts is not a changed file.
         unplacedFiles: ["src/a.ts", "fake.ts", "src/b.ts"],
       }),
     );

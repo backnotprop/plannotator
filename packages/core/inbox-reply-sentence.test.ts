@@ -1,6 +1,3 @@
-// The reply's first line counts skips apart from answers, by the same rule as
-// the answers section's "x of y answered" line. A Send made only of skips used
-// to open with "Answered 3 questions." above "0 of 3 questions answered.".
 import { describe, expect, test } from 'bun:test';
 import { composeInboxReplyBody, INBOX_STILL_OPEN_LINE } from './inbox-questions';
 import type { InboxQuestionRecord } from './inbox-types';
@@ -52,7 +49,6 @@ describe('the reply sentence', () => {
     expect(body(qs, [answer('q1', { selected: ['Yes'] }), answer('q2', { skipped: true }), answer('q3', { skipped: true })]).first).toBe('Answered 1 question, skipped 2.');
   });
 
-  // Every combination: the first line's "Answered N" equals the section's "N of M answered".
   const cases: Array<[string, InboxQuestionRecord[], QuestionAnswer[]]> = [
     ['note only, open question', [question('q1')], [answer('q1', { note: 'later' })]],
     ['note only, settled question', [question('q1', true)], [answer('q1', { note: 'still yes' })]],

@@ -1,13 +1,3 @@
-/**
- * A stack's badges in the board data (approval "stack-show-me", addendum 2026-11-06). What regresses if these fail:
- * - a board loses the stack the agent wrote (the store keeps only what checkShapeBoard returns);
- * - a badge names a part the drawings do not have, or a PR the stack does not list, and the board draws a tag on
- *   nothing or a card with no PR;
- * - a board of one PR shows badges (the record: "a single-PR board has none");
- * - tags come in another order than landing order, or a PR changes colour between the row and its tags;
- * - two PRs of a stack share a colour (owner, 2026-11-07: no cycle, every PR its own), a PR takes the board's purple,
- *   or PRs next to each other in the stack get hues too close to tell apart.
- */
 import { expect, test } from 'bun:test';
 import { checkShapeBoard, shapeStackBadges, shapeStackHue, shapeStackHues, type ShapeStack } from './shape';
 
@@ -90,9 +80,7 @@ test('a PR has one colour, by its place in the stack: teal, amber, rose, then on
     const hues = shapeStackHues(count);
     expect(hues.length).toBe(count);
     expect(new Set(hues).size).toBe(count);
-    // Off the board's purple (the default theme's primary is hue 280).
     for (const h of hues) expect(apart(h, 280)).toBeGreaterThanOrEqual(45);
-    // PRs next to each other in the stack never take hues close enough to mistake.
     for (let i = 1; i < count; i++) expect(apart(hues[i]!, hues[i - 1]!)).toBeGreaterThanOrEqual(24);
   }
 });

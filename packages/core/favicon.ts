@@ -1,20 +1,10 @@
-// The style ids, their names and the default live in favicon-style.ts, which
-// holds no icon bytes: the settings store imports that, so a bundle that never
-// draws a favicon (the guides.show viewer, which has a size budget) carries
-// none of the icons below. Each icon is also marked pure, so a bundle drops
-// the ones it never reads.
-
 import type { FaviconStyle } from './favicon-style';
 
 export { DEFAULT_FAVICON_STYLE, FAVICON_STYLE_CHOICES, isFaviconStyle, type FaviconStyle } from './favicon-style';
 
 /**
- * The Glass favicon, the default, as the tab shows it: the brand studio's
- * web/favicon.ico (16, 32 and 48, each frame hand-pixelled), embedded byte for
- * byte. It is the same file plannotator.ai serves. The browser picks the 16 on
- * a 1x screen and the 32 on a retina one, so the tab shows the studio's pixels,
- * never a resample of a bigger icon.
- * Source SHA-256: 7402e8509ac4ab49194fa387ab0722766cfab5ab94230c798facfd0e97771c59
+ * The Glass favicon, the default, as the tab shows it: the brand studio's web/favicon.ico (16, 32
+ * and 48, each frame hand-pixelled), embedded byte for byte.
  */
 export const FAVICON_ICO_BASE64 = /* @__PURE__ */ [
   "AAABAAMAEBAAAAEAIABoBAAANgAAACAgAAABACAAqBAAAJ4EAAAwMAAAAQAgAKglAABGFQAAKAAAABAAAAAgAAAAAQAgAAAAAAAA",
@@ -229,11 +219,8 @@ export const FAVICON_ICO_BYTES = /* @__PURE__ */ Uint8Array.from(
 );
 
 /**
- * The Glass favicon as one PNG: the studio's pixel/fav-32.png (32x32, the
- * .ico's 32 frame), embedded byte for byte. `/favicon.png` answers with it for
- * anything that still links that URL, and the Inbox draws its tab-count badge
- * over it.
- * Source SHA-256: 02dd9afe0ab91344168142cc4aa7cdac952e2f88e1cd55c089798b7f79520d2b
+ * The Glass favicon as one PNG: the studio's pixel/fav-32.png (32x32, the .ico's 32 frame),
+ * embedded byte for byte.
  */
 export const FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACe0lEQVR4AcXBT2tUVxzH4c+Jx8QSrW0XlWIWNoLVVEhWtmhU4kso",
@@ -263,11 +250,6 @@ export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
   <image width="64" height="64" href="${FAVICON_PNG_DATA_URL}"/>
 </svg>`;
 
-/**
- * The Face favicon: the goggles face icon PR 2975 replaced as the default
- * (64x64 PNG), embedded byte for byte from FAVICON_PNG_BASE64 at eede4aecf^1.
- * Source SHA-256: 8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073
- */
 export const FACE_FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAYhklEQVR42u2be7hdZX3nP7/3XWvty7mfkxu5UUJuJAFFiVIU",
   "QS2d4gUrTuIUSisdBkZQEerz1Gr1cNqq1YoOF9vn6eA4M0adSWxBvFC1ToowyCVcDEkgGELI/SQ5J+e6L+vy/uaPtfY+e+9z",
@@ -367,11 +349,8 @@ export const FACE_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
 );
 
 /**
- * The Yellow favicon: the glass icon with a yellow glass (the brand studio's
- * yellow glass set, candidate B: an ink face on a yellow lens). Its
- * web/favicon.ico (16, 32 and 48, each frame hand-pixelled), embedded byte for
- * byte, as Glass's is.
- * Source SHA-256: 2c5bbca9b41885f9d07b8b17b50b65e88e236760888ede779192ccb59ff1f8e4
+ * The Yellow favicon: the glass icon with a yellow glass (the brand studio's yellow glass set,
+ * candidate B: an ink face on a yellow lens).
  */
 export const YELLOW_FAVICON_ICO_BASE64 = /* @__PURE__ */ [
   "AAABAAMAEBAAAAEAIABoBAAANgAAACAgAAABACAAqBAAAJ4EAAAwMAAAAQAgAKglAABGFQAAKAAAABAAAAAgAAAAAQAgAAAAAAAA",
@@ -586,10 +565,8 @@ export const YELLOW_FAVICON_ICO_BYTES = /* @__PURE__ */ Uint8Array.from(
 );
 
 /**
- * The Yellow favicon as one PNG: the set's pixel/fav-32.png (32x32, the .ico's
- * 32 frame), embedded byte for byte. `/favicon.png` answers with it, and the
- * Inbox draws its tab-count badge over it.
- * Source SHA-256: 22f9b788ee9ce33caf76521b7c1e8962b82964805c54cbc139b072e7b2ba73db
+ * The Yellow favicon as one PNG: the set's pixel/fav-32.png (32x32, the .ico's 32 frame), embedded
+ * byte for byte.
  */
 export const YELLOW_FAVICON_PNG_BASE64 = /* @__PURE__ */ [
   "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACaUlEQVR4AcXBT2tUVxzH4c8tZ63pTgaVdCG4cGEF0xhBJDTaTdFQ",
@@ -610,13 +587,7 @@ export const YELLOW_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
   (character) => character.charCodeAt(0),
 );
 
-/**
- * Exact historical pre-Totman dark-navy favicon SVG with gold highlight.
- * Byte-identical to the FAVICON_SVG that shipped at 5b91c543^.
- * No longer offered, and 'classic' is no longer a style (favicon-style.ts).
- * Kept exported so published @plannotator/core consumers keep the export.
- * Source SHA-256: 27d33cff3d4515801f48e1cbaceec777ba802a7d341b22b2c0444d82b303cb49
- */
+/** Exact historical pre-Totman dark-navy favicon SVG with gold highlight. */
 export const CLASSIC_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="14" fill="#070b14"/>
   <rect x="12" y="28" width="40" height="14" rx="3" fill="#E0BA55" opacity="0.35"/>
@@ -626,8 +597,8 @@ export const CLASSIC_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" view
 export const CLASSIC_FAVICON_DATA_URL = `data:image/svg+xml;base64,${/* @__PURE__ */ btoa(CLASSIC_FAVICON_SVG)}`;
 
 /**
- * What a `<link rel="icon">` points at for a style: Glass and Yellow are their
- * .ico (the tab picks the 16 or 32 frame), Face is its PNG.
+ * What a `<link rel="icon">` points at for a style: Glass and Yellow are their .ico (the tab picks
+ * the 16 or 32 frame), Face is its PNG.
  */
 export function faviconDataUrl(style: FaviconStyle): string {
   if (style === 'yellow') return YELLOW_FAVICON_ICO_DATA_URL;
@@ -659,11 +630,6 @@ export function faviconBody(style: unknown): { body: Uint8Array<ArrayBuffer>; co
   return { body: FAVICON_PNG_BYTES, contentType: 'image/png' };
 }
 
-/**
- * What `/favicon.ico` answers for a style, the URL every app page links first:
- * Glass and Yellow are their .ico; Face has no .ico, so its PNG (a browser reads an
- * icon by its bytes and Content-Type, not by the URL's extension).
- */
 export function faviconIcoBody(style: unknown): { body: Uint8Array<ArrayBuffer>; contentType: 'image/png' | 'image/x-icon' } {
   if (style === 'yellow') return { body: YELLOW_FAVICON_ICO_BYTES, contentType: 'image/x-icon' };
   if (style === 'totman') return faviconBody(style);

@@ -51,8 +51,6 @@ describe("extractCandidateCodePaths", () => {
 	});
 
 	test("URLs containing parens or brackets do not leak path-shaped substrings", () => {
-		// Wikipedia-style URL ends in `).ts` — earlier extractor erroneously
-		// stopped its URL match at `(`, leaving `bar).ts` as a path candidate.
 		const md = "see https://en.wikipedia.org/wiki/Foo_(bar).ts in the docs";
 		expect(extractCandidateCodePaths(md)).toEqual([]);
 	});

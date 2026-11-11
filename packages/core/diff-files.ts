@@ -1,19 +1,5 @@
-/**
- * Unified diff → per-file records. The one splitter/path resolver shared by
- * the review app, the guide chain, and the portable-format helpers
- * (`listGuidePatchFiles`, language preload detection), so every consumer
- * agrees on which files a patch contains.
- *
- * Browser-safe and dependency-free.
- */
-
 import { parseDiffFilePathLines, parseDiffGitHeader, parseDiffMetadataPathLines } from "./diff-paths";
 
-/**
- * Change type derived from the diff's metadata lines. 'modified' is the
- * default and is deliberately NOT decorated in the UI (mirroring Pierre's
- * diffshub: most files are modifications, so only A/D/R stand out).
- */
 export type DiffFileStatus = "added" | "deleted" | "renamed" | "modified";
 
 /** One file of a unified diff, as the guide and the review app both consume it. */
@@ -26,27 +12,14 @@ export interface DiffFile {
   status: DiffFileStatus;
 }
 
-/** ANSI CSI sequences (SGR color/bold `\x1b[1;31m`, the bare reset `\x1b[m`, …). */
 const ANSI_CSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
-/** A file header line that a terminal color code was wrapped around. */
 const COLORED_DIFF_HEADER = /^(?:\x1b\[[0-9;:?]*[A-Za-z])+diff --git /m;
 
-/**
- * True when the patch's own headers carry ANSI color codes, the shape a VCS
- * produces when the user's config forces color into a pipe (`color.diff =
- * always`, jj `ui.color = "always"`; #1661). A normal patch never matches:
- * its `diff --git` headers are plain, and escape bytes inside a changed file's
- * content sit after a `+`/`-`/space prefix, never at the start of a header.
- */
 export function isColorizedPatch(rawPatch: string): boolean {
   return rawPatch.includes("\x1b[") && !/^diff --git /m.test(rawPatch) && COLORED_DIFF_HEADER.test(rawPatch);
 }
 
-/**
- * Remove terminal color codes from a colorized patch so it still parses.
- * Returns any other patch unchanged, byte for byte, so content that really
- * contains escape bytes is never altered.
- */
+/** Remove terminal color codes from a colorized patch so it still parses. */
 export function stripPatchColor(rawPatch: string): string {
   return isColorizedPatch(rawPatch) ? rawPatch.replace(ANSI_CSI, "") : rawPatch;
 }
@@ -60,11 +33,6 @@ function splitDiffChunks(rawPatch: string): string[] {
   });
 }
 
-/**
- * Change type from the chunk's git metadata lines. Scans only the extended
- * header (everything before the first hunk/--- line) so file content that
- * happens to contain "rename from" etc. can't misclassify.
- */
 function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFileStatus {
   for (const line of lines) {
     if (line.startsWith("@@") || line.startsWith("--- ") || line.startsWith("+++ ")) break;
@@ -72,16 +40,12 @@ function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFi
     if (line.startsWith("deleted file mode")) return "deleted";
     if (line.startsWith("rename from ") || line.startsWith("copy from ")) return "renamed";
   }
-  // Reconstructed/odd patches may carry distinct paths without rename lines.
   return oldPath !== newPath ? "renamed" : "modified";
 }
 
 export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   const files: DiffFile[] = [];
 
-  // A patch that arrived colorized would otherwise parse to 0 files and look
-  // exactly like "no changes" (#1661). The VCS runners turn color off; this
-  // covers patches from anywhere else (piped patch files, older servers).
   for (const chunk of splitDiffChunks(stripPatchColor(rawPatch))) {
     const lines = chunk.split("\n");
     const fromFileLines = parseDiffFilePathLines(lines);
@@ -131,11 +95,7 @@ export type DiffHunkLine =
   | { kind: "add"; newLine: number; text: string }
   | { kind: "del"; oldLine: number; text: string };
 
-/**
- * One `@@` hunk. Each side is the half-open line range `[start, end)` it
- * covers; an empty side (`-3,0`) has `start === end`, placed after the line
- * its header names. Lines past the hunk move by `newEnd - oldEnd`.
- */
+/** One `@@` hunk. */
 export interface DiffHunk {
   oldStart: number;
   oldEnd: number;
@@ -146,15 +106,7 @@ export interface DiffHunk {
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
-/**
- * The hunks of one file's patch (a `DiffFile.patch`), in order, with every
- * line numbered. The file header before the first hunk is skipped, and so is
- * `\ No newline at end of file`. Returns null for anything else it cannot
- * account for: a hunk whose lines do not add up to its header, hunks that
- * overlap, an `@@` row it cannot read (combined `@@@` diffs included), or a
- * line of content outside a hunk. A truncated or hand-edited patch is never
- * read as a shorter valid one.
- */
+/** The hunks of one file's patch (a `DiffFile.patch`), in order, with every line numbered. */
 export function diffHunkLines(patch: string): DiffHunk[] | null {
   const rows = patch.split("\n");
   const hunks: DiffHunk[] = [];
@@ -174,18 +126,12 @@ export function diffHunkLines(patch: string): DiffHunk[] | null {
   return hunks;
 }
 
-/**
- * True for a row that may stand outside a hunk. Before the first hunk that is
- * the file header (`---`/`+++` included, but no other content row and no
- * `@@` row); after it, only the blank row that ends the patch.
- */
 function isFileHeaderRow(row: string, pastFirstHunk: boolean): boolean {
   if (pastFirstHunk) return row === "";
   if (row.startsWith("--- ") || row.startsWith("+++ ")) return true;
   return !/^(?:@@|[ +-])/.test(row);
 }
 
-/** First line number a hunk side covers: an empty side's header names the line before it. */
 function sideStart(start: number, count: number): number {
   return count === 0 ? start + 1 : start;
 }

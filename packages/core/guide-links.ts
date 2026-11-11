@@ -1,21 +1,3 @@
-/**
- * Links from a guide's prose and diagrams into code: the small syntax the
- * agent writes in a guide overview (approved spec "Guided Reviews in VS Code",
- * section 3.5).
- *
- *   code:src/webhooks/deliver.ts#L24      a file, at a line
- *   code:src/webhooks/deliver.ts#L24-L40  a file, at a range
- *   code:src/webhooks/deliver.ts          a file
- *   symbol:deliverWebhook                 a symbol
- *   symbol:src/webhooks/deliver.ts#deliverWebhook   a symbol in one file
- *   chapter:2                             a chapter of this guide (1-based)
- *
- * In prose they are markdown links (`[label](symbol:name)`), in Mermaid
- * `click` lines (`click del "symbol:deliverWebhook"`), in HTML `href`s.
- *
- * Browser-safe and dependency-free.
- */
-
 export type GuideLinkScheme = "code" | "symbol" | "chapter";
 
 export const GUIDE_LINK_SCHEMES: readonly GuideLinkScheme[] = ["code", "symbol", "chapter"];
@@ -42,7 +24,6 @@ function decode(text: string): string {
   }
 }
 
-/** A repo-relative path as the change names it: no leading slash or `./`, no `..` segment. */
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 function pathProblem(path: string): string | null {
@@ -55,10 +36,7 @@ function pathProblem(path: string): string | null {
   return null;
 }
 
-/**
- * Parse one guide link. Returns null when `href` is not a guide link at all
- * (an ordinary URL), so callers can leave those alone.
- */
+/** Parse one guide link. */
 export function parseGuideLink(rawHref: string): GuideLinkParse | null {
   const href = rawHref.trim();
   const scheme = /^(code|symbol|chapter):/i.exec(href);
@@ -95,7 +73,6 @@ export function parseGuideLink(rawHref: string): GuideLinkParse | null {
     };
   }
 
-  // symbol:
   const hash = rest.lastIndexOf("#");
   const name = decode(hash >= 0 ? rest.slice(hash + 1) : rest).trim();
   const path = hash >= 0 ? decode(rest.slice(0, hash)) : undefined;
@@ -116,16 +93,9 @@ export type GuideLinkSource = "markdown" | "mermaid" | "html";
 /** One link as written. */
 export interface GuideLinkOccurrence {
   readonly href: string;
-  /** The link text, for markdown links. */
   readonly label?: string;
 }
 
-/**
- * The target of a markdown guide link: no spaces, and parentheses only in
- * balanced pairs, one level deep, so a Next.js route group
- * (`code:app/(shop)/page.tsx`) is read whole. Shared with the viewer's inline
- * renderer so both read a link the same way.
- */
 export const GUIDE_LINK_TARGET_SOURCE = String.raw`(?:code|symbol|chapter):(?:[^()\s]|\([^()\s]*\))*`;
 
 const MARKDOWN_LINK = new RegExp(String.raw`\[([^\]\n]*)\]\(\s*(${GUIDE_LINK_TARGET_SOURCE})\s*\)`, "gi");

@@ -1,15 +1,3 @@
-/**
- * A recommendation written into a choice's own label (`- [ ] Foo
- * (Recommended) — why`), the way other tools teach it (Claude Code's
- * AskUserQuestion appends "(Recommended)" to the label), with no
- * `Recommended:` line.
- *
- * What regresses if this fails: the card shows "(Recommended)" as label text
- * with no Recommended tag, no Accept recommended and no "(your
- * recommendation)" in the answer; or the marker changes the question's key;
- * or an answer stored against the raw label stops selecting its choice; or a
- * block that has a `Recommended:` line reads differently than before.
- */
 import { describe, expect, test } from "bun:test";
 import {
   canonicalQuestionAnswer,
@@ -40,20 +28,17 @@ describe("a recommendation marked in a choice label, with no Recommended: line",
     ["- [ ] **Only block on ours (recommended)**", "**Only block on ours**", undefined],
     ["- [ ] Only block on ours — recommended", "Only block on ours", undefined],
     ["- [ ] Only block on ours — (Recommended) a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
-    // The separator written after a bracketed marker leaves with it.
     ["- [ ] Only block on ours — (Recommended): a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
     ["- [ ] Only block on ours — [recommended] — a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
     ["- [ ] Only block on ours — (Recommended) - a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
     ["- [ ] Only block on ours — (Recommended) –", "Only block on ours", undefined],
     ["- [ ] Only block on ours — (Recommended) -1 day of retention", "Only block on ours", "-1 day of retention"],
     ["- Only block on ours (Recommended) — a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
-    // Leading markers.
     ["- [ ] [Recommended] Only block on ours", "Only block on ours", undefined],
     ["- [ ] (Recommended) Only block on ours — a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
     ["- [ ] (Recommended): Only block on ours", "Only block on ours", undefined],
     ["- [ ] **[Recommended]** Only block on ours", "Only block on ours", undefined],
     ["- [ ] **(Recommended) Only block on ours**", "**Only block on ours**", undefined],
-    // The marker then a colon inside the label.
     ["- [ ] Only block on ours (Recommended): a stray file stays a warning", "Only block on ours", "a stray file stays a warning"],
     ["- [ ] Only block on ours [recommended]: a stray file — stays a warning", "Only block on ours", "a stray file — stays a warning"],
   ];
@@ -66,7 +51,6 @@ describe("a recommendation marked in a choice label, with no Recommended: line",
       expect(q.choices[0]!.recommended).toBe(true);
       expect(q.choices[1]!.recommended).toBe(false);
       expect(q.suggestedText).toBeUndefined();
-      // The key is kind + prompt: the marker never changes it.
       expect(q.key).toBe(parseQuestionBlock("question", block(["- [ ] Only block on ours", plain]))!.key);
     });
   }

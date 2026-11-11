@@ -1,18 +1,3 @@
-/**
- * Plannotator Inbox: the window's list read sends only what changed (#2593).
- *
- * The window reads `GET /api/inbox/threads` again after every agent message.
- * With a few hundred open threads that answer was about 0.35 MB, and a
- * browser keeps each answer's bytes long after it was read. So the window
- * names the list it holds (`since=<list_version>`) and the server answers with
- * the rows that changed since then, the order of every row by its id, and the
- * rest of the model as it is. The window puts the two together into the very
- * model a full read gives (`applyInboxListDelta`).
- *
- * Pure, so the server's tests and the window build the same thing. The server
- * side (which rows changed since a version) is `packages/server/inbox-list-delta.ts`.
- */
-
 import type { InboxListRow, InboxListSection } from "./inbox-types";
 
 /** The model's lists of rows besides the sections: kept in order by id in a delta. */
@@ -24,12 +9,9 @@ export type InboxListDeltaSection = Omit<InboxListSection, "threads"> & { thread
 
 /** The `delta` of a list read answered as a change (`?since=` named a version the server still knows). */
 export interface InboxListDelta {
-  /** The version this change is from: the list the window holds. */
   since: string;
-  /** Every row that is new or different since then (each thread once). */
   rows: InboxListRow[];
   sections: InboxListDeltaSection[];
-  /** `snoozed` and `pins` by thread id, in order; absent when the full model has no such list. */
   lists: Partial<Record<InboxListDeltaList, string[]>>;
 }
 
@@ -64,12 +46,6 @@ export function inboxListDeltaShape(model: InboxListDeltaModel): Pick<InboxListD
   return { sections: model.sections.map((section) => ({ ...section, threads: section.threads.map((row) => row.thread_id) })), lists };
 }
 
-/**
- * The model a full read would have given: `answer` (a delta answer: the rest
- * of the model as it is now, and `delta`) over `base` (the model the window
- * holds, at `delta.since`). Null when the two do not fit (a row the delta
- * names is in neither): the window then reads the whole list.
- */
 export function applyInboxListDelta<M extends InboxListDeltaModel>(base: M, answer: Omit<M, keyof InboxListDeltaModel> & { delta: InboxListDelta }): M | null {
   const rows = inboxListRowsById(base, () => true);
   if (!rows) return null;

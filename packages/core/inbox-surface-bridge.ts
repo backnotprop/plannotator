@@ -1,25 +1,6 @@
 /**
- * The surface bridge (adr/implementation/inbox-mobile.md, section 5): the
- * messages between a native shell (the iPhone app's WKWebView) and the
- * surface, the single-file build of Plannotator's viewers that the shell
- * loads (`apps/hook/dist/surface.html`, built by `apps/inbox`'s
- * `build:surface`).
- *
- * The surface has no network: the shell fetches every byte through the
- * Inbox's device door and hands it over here. Picks and Send are native and
- * never cross the bridge.
- *
- * - Shell to surface: `window.plannotatorSurface.receive(message)`.
- * - Surface to shell: `window.webkit.messageHandlers.plannotatorSurface.postMessage(message)`
- *   on iOS; on Android (no `window.webkit`), `window.plannotatorShell.postMessage(JSON.stringify(message))`
- *   (section 10). The shell takes messages from the main frame only, so an agent's HTML,
- *   drawn in its sandboxed frame, cannot reach the bridge.
- *
- * Every message is `{ v: 1, type, ... }`. A surface given another `v`
- * answers `error` with `code: "bridge_version"`.
- *
- * Reaches the Inbox through `@plannotator/core/inbox-types` (re-exported
- * there), so core's export map is unchanged.
+ * `window.webkit.messageHandlers.plannotatorSurface.postMessage(message)` on iOS; on Android (no
+ * `window.webkit`), `window.plannotatorShell.postMessage(JSON.stringify(message))` (section 10).
  */
 
 import type { InboxAnnotationRecord, InboxAttachmentState } from "./inbox-attachments";
@@ -28,30 +9,19 @@ import type { InboxGuideRef } from "./inbox-types";
 /** The version both sides speak; `ready` carries it as `bridge`. */
 export const INBOX_SURFACE_BRIDGE_VERSION = 1 as const;
 
-/**
- * Plannotator's `Annotation` (`packages/ui/types.ts`), as the viewer made it.
- * Opaque here, as in the store (`InboxAnnotationRecord.annotation`). A draft
- * is one with an empty `text`: the shell fills the person's words in and
- * saves it through the door (exchange 7.17).
- */
+/** Plannotator's `Annotation` (`packages/ui/types.ts`), as the viewer made it. */
 export type SurfaceAnnotation = Record<string, unknown>;
-
-// ─────────────────────────────── Shell to surface ───────────────────────────────
 
 /** The person opens a file (3.6, 4.1 to 4.4). */
 export interface SurfaceOpenAttachment {
   v: 1;
   type: "open_attachment";
   attachment: InboxAttachmentState;
-  /** `"current"` or the sent sha256: the annotations' key, as the door's `view` answers it. */
   version: string;
-  /** The version's text (for HTML, the page as the agent wrote it). */
   text: string;
   /** For HTML: the page with its `<base href>` rewritten onto the shell's asset scheme; null otherwise. */
   html: string | null;
-  /** This file and version's annotations, waiting for a Send. */
   annotations: InboxAnnotationRecord[];
-  /** An annotation id to scroll to (the "3 annotations" sheet's file name), or null. */
   focus: string | null;
 }
 
@@ -61,9 +31,7 @@ export interface SurfaceOpenGuide {
   type: "open_guide";
   message_id: string;
   guide: InboxGuideRef;
-  /** The stored snapshot, exactly as the door answers it (exchange 7.19). */
   snapshot: unknown;
-  /** The person's ticks kept on the message, or null for none yet. */
   reviewed: boolean[] | null;
 }
 
@@ -75,8 +43,8 @@ export interface SurfaceOpenSection {
 }
 
 /**
- * The wrap button in 6.2's bar: a guide's diffs wrapped (the default), or one
- * code line per row, scrolled sideways.
+ * The wrap button in 6.2's bar: a guide's diffs wrapped (the default), or one code line per row,
+ * scrolled sideways.
  */
 export interface SurfaceSetWrap {
   v: 1;
@@ -103,7 +71,6 @@ export interface SurfaceSetAppearance {
   v: 1;
   type: "set_appearance";
   theme: "light" | "dark";
-  /** The Dynamic Type size as a multiple of the default (`UIFontMetrics`); 1 is the default. */
   text_scale: number;
 }
 
@@ -122,33 +89,19 @@ export interface SurfaceRemoveAnnotation {
 }
 
 /**
- * Send asks for the annotations as Plannotator's feedback text (the window's
- * `attachmentFeedback`): the reply's `feedback` field (exchange 7.11). The
- * text is built here because only Plannotator's parser can number the lines
- * the person read; nothing is drawn.
+ * Send asks for the annotations as Plannotator's feedback text (the window's `attachmentFeedback`):
+ * the reply's `feedback` field (exchange 7.11).
  */
 export interface SurfaceExportFeedback {
   v: 1;
   type: "export_feedback";
-  /** Echoed by the answer. */
   id: string;
-  /** The annotations riding the Send. */
   annotations: InboxAnnotationRecord[];
-  /** The thread's attachments (exchange 7.14). */
   attachments: InboxAttachmentState[];
-  /** Each annotated file version's text, read through `view` just before the Send. */
   texts: { attachment_id: string; version: string; text: string }[];
-  /** The thread's project root, so a path inside it reads relative. */
   project_root: string;
 }
 
-/**
- * Comment in the edit menu (4.1): the text selected in a markdown or text
- * file becomes a draft now, answered by `selection` (both fields null when
- * nothing is selected). On a touch screen the surface does not paint a
- * selection as it settles: that would replace the system selection and close
- * its edit menu before the person reached Comment.
- */
 export interface SurfaceCommentSelection {
   v: 1;
   type: "comment_selection";
@@ -167,14 +120,11 @@ export type SurfaceShellMessage =
   | SurfaceCommitAnnotation
   | SurfaceRemoveAnnotation;
 
-// ─────────────────────────────── Surface to shell ───────────────────────────────
-
 /** The bundle loaded; the shell sends nothing before it. */
 export interface SurfaceReady {
   v: 1;
   type: "ready";
   bridge: typeof INBOX_SURFACE_BRIDGE_VERSION;
-  /** The Plannotator version the surface was built from. */
   build: string;
 }
 
@@ -190,7 +140,6 @@ export interface SurfaceSelection {
 export interface SurfacePin {
   v: 1;
   type: "pin";
-  /** `label` is the element as the sheet names it (Plannotator's pinpoint label: "Button", a heading's words); `selector` finds it again. */
   target: { label: string; selector: string };
   draft: SurfaceAnnotation;
 }
@@ -250,11 +199,6 @@ export interface SurfaceError {
   message: string;
 }
 
-/**
- * - `bridge_version`: the message's `v` is not this surface's.
- * - `bad_message`: not a message this surface knows, or missing what it needs.
- * - `guide_invalid`: the snapshot did not parse as a guided review.
- */
 export type SurfaceErrorCode = "bridge_version" | "bad_message" | "guide_invalid";
 
 export type SurfaceMessage =
@@ -285,10 +229,7 @@ const SHELL_TYPES: ReadonlySet<string> = new Set<SurfaceShellMessage["type"]>([
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * Read a message from the shell. The shell is the app itself, so this checks
- * the envelope and what the surface needs to draw, not every field.
- */
+/** Read a message from the shell. */
 export function readSurfaceShellMessage(value: unknown): { ok: true; message: SurfaceShellMessage } | { ok: false; code: SurfaceErrorCode; message: string } {
   if (!isObject(value) || typeof value.type !== "string") return { ok: false, code: "bad_message", message: "A bridge message is an object with a type." };
   if (value.v !== INBOX_SURFACE_BRIDGE_VERSION) {

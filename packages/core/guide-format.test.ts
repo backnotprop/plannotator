@@ -27,11 +27,6 @@ const VIEWER = {
   langs: { typescript: "langs/typescript.ab12.js", json: "langs/json.cd34.js", python: "langs/python.ef56.js" },
 };
 
-/**
- * Read the embedded snapshot back the way the viewer boots: through
- * `readEmbeddedGuideSnapshot` over a document that resolves elements by id, so a
- * writer/reader script-id divergence fails every export test below.
- */
 function snapshotFromHtml(html: string): GuideSnapshot {
   const doc = {
     getElementById(id: string) {
@@ -46,9 +41,6 @@ function snapshotFromHtml(html: string): GuideSnapshot {
 }
 
 describe("compatibility: every shipped fixture parses with the current parser", () => {
-  // This is the promise behind pinned exports (D8/D10). If this fails, an old
-  // export would no longer open in the newest viewer — bump the version, don't
-  // edit the fixture.
   for (const { name, snapshot } of GUIDE_SNAPSHOT_FIXTURES) {
     test(name, () => {
       const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(snapshot)));
@@ -57,7 +49,6 @@ describe("compatibility: every shipped fixture parses with the current parser", 
         expect(parsed.value.guide.reviewed).toHaveLength(parsed.value.guide.sections.length);
         expect(parsed.value.source.kind).toBe(snapshot.source.kind);
         expect(parsed.value.version).toBe(snapshot.version);
-        // Parsing a shipped document gives it back unchanged.
         expect(parsed.value).toEqual(JSON.parse(JSON.stringify(snapshot)));
       }
     });
@@ -70,7 +61,6 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["unknown guide field", (s) => (s.guide.saved = true), "$.guide"],
     ["unknown section field", (s) => (s.guide.sections[0].order = 1), "$.guide.sections[0]"],
     ["unknown version", (s) => (s.version = 6), "$.version"],
-    // Version 1 has no overview: a v1 reader never sees one.
     ["overview on a version-1 snapshot", (s) => (s.guide.overview = { text: "x" }), "$.guide"],
     ["empty overview text", (s) => { s.version = 2; s.guide.overview = { text: "  " }; }, "$.guide.overview.text"],
     ["unknown overview field", (s) => { s.version = 2; s.guide.overview = { text: "x", links: [] }; }, "$.guide.overview"],
@@ -83,7 +73,6 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["bad source kind", (s) => (s.source.kind = "branch"), "$.source.kind"],
     ["pr without url", (s) => (s.source.pr = { number: 1 }), "$.source.pr.url"],
     ["bad platform", (s) => (s.source.pr = { url: "https://x", platform: "bitbucket" }), "$.source.pr.platform"],
-    // Rendered into an href on hosted pages: only web URLs.
     ["pr url with a script scheme", (s) => (s.source.pr = { url: "javascript:alert(1)" }), "$.source.pr.url"],
     ["missing rawPatch", (s) => delete s.review.rawPatch, "$.review.rawPatch"],
     ["bad exportedAt", (s) => (s.exportedAt = "yesterday"), "$.exportedAt"],
@@ -118,9 +107,7 @@ describe("parseGuideSnapshot rejects what it must", () => {
 describe("createGuideHtml", () => {
   test("a patch line containing </script> cannot terminate the snapshot element", () => {
     const html = createGuideHtml(FIXTURE_V1_LOCAL, { viewer: VIEWER });
-    // The raw string must not appear anywhere in the document…
     expect(html).not.toContain("'</script><!--'");
-    // …and the embedded JSON must round-trip byte-for-byte.
     expect(snapshotFromHtml(html).review.rawPatch).toBe(FIXTURE_PATCH_TS_JSON);
   });
 
@@ -359,7 +346,6 @@ describe("format version 4: the guide author's context notes", () => {
   }
 
   test("checkGuideNotes keeps each note inside one hunk of its file, on its side", () => {
-    // src/auth.ts: new lines 1-6 and old lines 1-4 are one hunk each.
     expect(checkGuideNotes(withNotes([note]), FIXTURE_PATCH_TS_JSON)).toEqual([]);
     expect(checkGuideNotes(withNotes([{ lineStart: 2, lineEnd: 2, side: "old", text: "x" }]), FIXTURE_PATCH_TS_JSON)).toEqual([]);
     const outside = checkGuideNotes(withNotes([{ lineStart: 5, lineEnd: 9, text: "x" }]), FIXTURE_PATCH_TS_JSON);

@@ -1,18 +1,3 @@
-/**
- * The line under the person's last reply or message: where it is now.
- *
- * The owner's request (2026-10-16): "The message should be less deceiving.
- * It should say this message is queued up or something. And then maybe an
- * option just to send it immediately." A reply to a session whose connection
- * wakes it (the Claude Code mod, Pi, OpenCode 2) is delivered as a turn by
- * itself once the session is idle, so the line says what it waits for, from
- * what the Inbox knows about that session's connection right now (its poll's
- * `busy`), and offers Send now while the session works and its connection
- * can put the reply into the running turn (`send_now`). A reply to an agent
- * that only reads the thread (MCP, OpenCode 1) keeps the truthful "it sees
- * it when it next reads this thread". Pure: Thread.tsx draws it.
- */
-
 import {
   inboxAutoSendInMinutes,
   inboxDeliveryState,
@@ -31,27 +16,12 @@ export interface RecipientConnection {
   busy: boolean | null;
   idle_since: string | null;
   send_now: boolean;
-  /** It runs an older Plannotator plugin than a restart loads (packages/server/inbox-restart.ts). Absent from an older Inbox. */
   outdated?: InboxSessionOutdated | null;
-  /** Claude Code holds this session's replies until the person types there (absent: no). The line says "Stopped". */
   held?: boolean;
-  /** Claude Code's version as its poll said (absent or null: unknown). */
   engine?: string | null;
-  /** `cd <folder> && claude --resume <id>`, when the Inbox knows the folder. Absent from an older Inbox. */
   restart_command?: string | null;
-  /** How long a reply waits on this busy session before it goes in by itself. Absent from an older Inbox (never). */
   auto_send_after_ms?: number;
-  /**
-   * The server's clocks for the items waiting on this session, by id: since
-   * when each waits on the busy session, and since when it may go in by
-   * itself (null: not yet). Absent from an older Inbox.
-   */
   waits?: Record<string, { since: string; auto_since: string | null }>;
-  /**
-   * Items that may not have reached this session (a Codex thread whose
-   * `codex queue` call ran out of time): their line says saved, not queued.
-   * Absent from an older Inbox and when none.
-   */
   uncertain?: string[];
 }
 
@@ -76,32 +46,16 @@ export function waitInputs(
   };
 }
 
-/**
- * Why Send now is not offered for a busy session, and what brings it back
- * (owner approval "restart-warning", 2026-10-19, the "Steps" line): the
- * session runs an older plugin than a restart loads (`restart`), or the
- * installed plugin is itself behind this Inbox (`update_plugin`).
- */
 export interface RestartNote {
   fix: InboxSessionOutdated['fix'];
-  /** The command that brings the session back as itself (Claude Code); null when the Inbox does not know its folder. */
   command: string | null;
-  /** The plugin update command (`update_plugin`, `update_extension`). */
   updateCommand: string | null;
-  /**
-   * The runtime and its reload (owner approval "reload-hosts"): Claude Code
-   * `/reload-plugins`, Pi `/reload`, Oh My Pi `/restart` (typed in the
-   * session), OpenCode 2 `opencode2 reload` or `opencode2 plugin update` (run
-   * in a shell), with OpenCode's fallback `opencode2 service restart`.
-   */
   runtime: InboxReloadRuntime;
   reloadCommand: string;
   reloadWhere: 'session' | 'shell';
   fallbackCommand: string | null;
-  /** OpenCode 2: the config pins this exact spec; it changes to `pinTo`, then `opencode2 reload`. */
   pinnedSpec: string | null;
   pinTo: string | null;
-  /** OpenCode 2's `opencode2 plugin update` with no target: it updates every outdated plugin. */
   updatesAll: boolean;
 }
 
@@ -109,18 +63,13 @@ export interface RestartNote {
 export const CLAUDE_RELOAD_COMMAND = '/reload-plugins';
 
 /**
- * The restart note for a session that works now and has no Send now
- * because it runs an older plugin. Only then: an idle session gets the reply
- * at once anyway, and a session with Send now is not missing anything. An
- * engine too old for Send now stays quiet (a restart would not bring it; the
- * owner chose to say nothing about that, 2026-10-19).
+ * The restart note for a session that works now and has no Send now because it runs an older
+ * plugin.
  */
 export function restartNote(connection: RecipientConnection | null | undefined): RestartNote | null {
   const outdated = connection?.outdated;
   if (!connection || !outdated || connection.busy !== true || connection.send_now) return null;
   if (inboxEngineTooOldForSendNow(connection.engine)) return null;
-  // A session that loaded a plugin with Send now lacks it for another reason (its own Ask question holds the
-  // turn, the engine refused a row): a restart would not change that, so the line never blames the plugin.
   if (!inboxLoadedPredatesSendNow(outdated.loaded)) return null;
   const command = connection.restart_command ?? null;
   const runtime = outdated.runtime ?? 'claude-code';
@@ -138,7 +87,6 @@ export function restartNote(connection: RecipientConnection | null | undefined):
     if (outdated.fix !== 'restart') return null;
     return { fix: outdated.fix, command, updateCommand: null, ...reload };
   }
-  // Pi, Oh My Pi, OpenCode 2: a reload alone, or the update first.
   if (outdated.fix === 'reload') return { fix: outdated.fix, command: null, updateCommand: null, ...reload };
   if (outdated.fix === 'update_extension' && (outdated.update_command || outdated.pinned_spec)) {
     return { fix: outdated.fix, command: null, updateCommand: outdated.update_command ?? null, ...reload };
@@ -151,39 +99,22 @@ export type DeliveryLineState = InboxDeliveryState;
 export interface DeliveryLine {
   state: DeliveryLineState;
   text: string;
-  /** The asking session ended: a clock, not a check. */
   ended?: boolean;
   /** Its session's connection took it and stopped while delivering it: that session never gets it, so it may move. */
   stuck?: boolean;
-  /** Offer Send now: the session works and its connection can take the reply mid-turn. */
   sendNow?: boolean;
-  /**
-   * It waits on a busy session (approval "inbox-busy-agent-reply"): since
-   * when, whether it can go in now (`steerable`), and when it goes in by
-   * itself (null: it will not). The band under the reply draws it with its
-   * own minute clock (`undeliveredWords`).
-   */
   wait?: { since: string; steerable: boolean; autoSendAt: string | null };
-  /** It went into the turn by itself after this many minutes ("went into its turn by itself after 5 min"). */
   autoAfterMin?: number;
-  /** Marked to go in by itself, but it went in when the turn ended (the session's own Ask question held it). */
   turnEnded?: boolean;
 }
 
 /** The parts of the "Undelivered" band at `now`: "Undelivered 3 min", and what happens next. */
 export interface UndeliveredWords {
-  /** "Undelivered 3 min" (whole minutes, then hours, then days; "Undelivered" under a minute). */
   label: string;
-  /** "goes in by itself in 2 min" / "in under a minute", or "it gets this when its turn ends". */
   next: string;
-  /** It goes in by itself (the countdown shows). */
   auto: boolean;
 }
 
-/**
- * How long a reply has waited, in the Inbox's age units (a board card's "5m", "3h", "2d"): whole minutes under an
- * hour, whole hours under a day, then whole days; never seconds. Null under a minute.
- */
 function undeliveredAge(since: string, now: number): { short: string; long: string } | null {
   const minutes = wholeMinutes(since, now);
   if (minutes < 1) return null;
@@ -217,48 +148,28 @@ export function undeliveredWords(wait: NonNullable<DeliveryLine['wait']>, now: n
 }
 
 export interface DeliveryLineInput {
-  /** "Claude Code", "Pi (another session)". */
   name: string;
-  /** Delivered (or read by the agent) at; null while it waits. */
   deliveredAt: string | null;
-  /** Formats a time for the line ("5:12 PM"). */
   time: (iso: string) => string;
-  /** The session it goes to is woken by its connection (a waking agent message, or a message addressed to a live session). */
   wakes: boolean;
-  /** The person pressed Send now (`deliver_now_at`). */
   sendingNow: boolean;
-  /**
-   * That session's connection as the Inbox knows it now: undefined while not
-   * read yet or from an older Inbox (no `connection`), null when it does not
-   * poll now.
-   */
   connection: RecipientConnection | null | undefined;
-  /** The asking session ended (a reply), with the asker's name for the line. */
   askerEnded?: { name: string } | null;
-  /** Delivered, but what settled it was another agent's read: that agent's name ("Read by Claude Code, 6:25 PM"). */
   readBy?: string | null;
-  /** A message addressed to a session that stopped before it took it (compose). */
   undelivered?: { host: string } | null;
-  /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
   stuck?: boolean;
-  /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
-  /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
   autoSince?: string | null;
-  /** Delivered after the Inbox's own mark: whether it went into the running turn (`delivery.into_turn`). */
   intoTurn?: boolean | null;
   /** Override the connection's wait before it goes in by itself (null: never, e.g. a 👍 note while they wait for the turn). */
   autoSendAfterMs?: number | null;
-  /** Who asked for it to go now (`deliver_now_by`), and when (`deliver_now_at`). */
   nowBy?: InboxDeliverNowBy | null;
   nowAt?: string | null;
-  /** `now`: the clock the words are written at (default `Date.now()`). */
   now?: number;
 }
 
 export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
   const { name } = input;
-  // The state is the shared rule's (packages/core/inbox-delivery.ts, through @plannotator/core/inbox-types), which also decides the list row's glyph.
   const decision = inboxDeliveryState({
     delivered: !!input.deliveredAt,
     undelivered: !!input.undelivered,
@@ -306,14 +217,10 @@ export function deliveryText(
     at: string | null;
     time: (iso: string) => string;
     undeliveredHost: string;
-    /** Delivered by another agent's read: its name. */
     readBy?: string | null;
     endedName: string;
-    /** It waits on a busy session (approval "inbox-busy-agent-reply"): "Undelivered 3 min · …". */
     wait?: DeliveryLine['wait'];
-    /** It went into the turn by itself after this many minutes. */
     autoAfterMin?: number;
-    /** Marked to go in by itself, it went in when the turn ended instead. */
     turnEnded?: boolean;
     now?: number;
   },
@@ -321,7 +228,6 @@ export function deliveryText(
   const { name } = words;
   switch (reason) {
     case 'delivered': {
-      // Honest about a reply no connection wakes: another agent read it, which is not the agent it was for taking it.
       if (words.readBy && words.at) return `Read by ${words.readBy}, ${words.time(words.at)}`;
       const base = words.at ? `Delivered to ${name}, ${words.time(words.at)}` : `Delivered to ${name}`;
       if (words.autoAfterMin !== undefined) return `${base} · ${autoAfterText(words.autoAfterMin)}`;
@@ -361,19 +267,14 @@ export function sentRowLine(name: string, wakes: boolean | undefined): string {
 }
 
 /**
- * A Sent row whose last message is the person's Re-ask note (approval
- * "inbox-reask"): it stays Sent until the agent asks again, read or not.
+ * A Sent row whose last message is the person's Re-ask note (approval "inbox-reask"): it stays Sent
+ * until the agent asks again, read or not.
  */
 export function reaskRowLine(name: string, checkedAt: string | null, wakes: boolean | undefined): string {
   if (checkedAt) return `Asked ${name} to re-ask; waiting for its message.`;
   return wakes === true ? `Re-ask queued for ${name}; it gets this as its next turn.` : `Re-ask saved for ${name}. It sees it when it next reads this thread.`;
 }
 
-/**
- * A reply Claude Code refused because the person stopped that session: it
- * goes in once they type there (approval "inbox-stopped-reply", the owner's
- * exact words).
- */
 export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that session';
 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */

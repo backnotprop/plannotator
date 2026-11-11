@@ -1,17 +1,4 @@
-/**
- * AES-256-GCM encryption for zero-knowledge paste storage.
- *
- * Uses Web Crypto API — works in browsers, Bun, and edge runtimes.
- * The key never leaves the client; it lives in the URL fragment.
- */
-
-/**
- * Encrypt a compressed base64url string with a fresh AES-256-GCM key.
- *
- * Returns { ciphertext, key } where:
- * - ciphertext: base64url-encoded (12-byte IV prepended to GCM output)
- * - key: base64url-encoded 256-bit key for the URL fragment
- */
+/** Encrypt a compressed base64url string with a fresh AES-256-GCM key. */
 export async function encrypt(
   compressedData: string
 ): Promise<{ ciphertext: string; key: string }> {
@@ -30,7 +17,6 @@ export async function encrypt(
     plaintext
   );
 
-  // Prepend IV to ciphertext (IV || ciphertext+tag)
   const combined = new Uint8Array(iv.length + encrypted.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(encrypted), iv.length);
@@ -43,12 +29,7 @@ export async function encrypt(
   };
 }
 
-/**
- * Decrypt a ciphertext string using a base64url-encoded AES-256-GCM key.
- *
- * Expects ciphertext format: base64url(IV || encrypted+tag)
- * Returns the original compressed base64url string.
- */
+/** Decrypt a ciphertext string using a base64url-encoded AES-256-GCM key. */
 export async function decrypt(
   ciphertext: string,
   key: string
@@ -76,12 +57,6 @@ export async function decrypt(
   return new TextDecoder().decode(decrypted);
 }
 
-/**
- * The Inbox relay's envelope (adr/implementation/inbox-mobile.md, section 4):
- * the same byte layout as `encrypt`, `base64url(IV || ciphertext || tag)`
- * with a fresh 12-byte IV, under a key the caller holds (base64url, 32 bytes).
- * The plaintext is UTF-8 text, JSON in practice.
- */
 export async function encryptWithKey(plaintext: string, key: string): Promise<string> {
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
@@ -108,16 +83,6 @@ const RELAY_AUTH_INFO = 'plannotator-inbox relay auth v1';
 const RELAY_UP_INFO = 'plannotator-inbox relay up v1';
 const RELAY_COLLAPSE_INFO = 'plannotator-inbox relay collapse v1';
 
-/**
- * The values a pairing secret gives one phone at the relay (section 4,
- * "Keys"), each HKDF-SHA256 over the secret with the device id as salt:
- * `key`, the AES-256-GCM key of every envelope the Inbox sends the phone
- * (down items and pushes); `upKey`, the key of every command the phone sends
- * up, so the relay cannot reflect one direction's envelope into the other;
- * `collapseKey`, the HMAC key of the push's collapse id (the Inbox's alone:
- * a MAC under the envelope key would reuse one key for two jobs); and `relaySecret`, the phone's bearer at the relay (which keeps only the
- * SHA-256 of that string). All base64url without padding.
- */
 export async function deriveRelayKeys(pairingSecret: string, deviceId: string): Promise<{ key: string; upKey: string; collapseKey: string; relaySecret: string }> {
   const ikm = await crypto.subtle.importKey('raw', base64urlToBytes(pairingSecret).buffer as ArrayBuffer, 'HKDF', false, ['deriveBits']);
   const salt = new TextEncoder().encode(deviceId);
@@ -128,10 +93,7 @@ export async function deriveRelayKeys(pairingSecret: string, deviceId: string): 
   return { key: await derive(RELAY_KEY_INFO), upKey: await derive(RELAY_UP_INFO), collapseKey: await derive(RELAY_COLLAPSE_INFO), relaySecret: await derive(RELAY_AUTH_INFO) };
 }
 
-// --- Helpers ---
-
 function bytesToBase64url(bytes: Uint8Array): string {
-  // Loop to avoid RangeError on large payloads (same approach as compress.ts)
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);

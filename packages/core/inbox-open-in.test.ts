@@ -1,9 +1,4 @@
-/**
- * The per-kind "Open in" policy (inbox-open-in.ts) the window and the
- * launch route share. The route's own tests (packages/server/inbox-open-in.test.ts)
- * prove it end to end on macOS and Linux; these pin the edges that are
- * easy to get wrong: Windows, SVG, extension case, a kind from a newer store.
- */
+/** Windows, SVG, extension case, a kind from a newer store. */
 import { describe, expect, test } from "bun:test";
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInAllows, inboxOpenInPolicy } from "./inbox-open-in";
 
@@ -31,7 +26,6 @@ describe("inboxOpenInPolicy", () => {
   test("a video opens in the OS default player only when its own extension says video", () => {
     expect(inboxOpenInPolicy({ kind: "video", path: "/p/clip.mov" }, "mac")).toEqual({ browser: false, editors: false, systemDefault: true });
     expect(inboxOpenInPolicy({ kind: "video", path: "/p/cut.webm" }, "linux").systemDefault).toBe(true);
-    // The bytes said video; a name that does not would have the OS pick another app by it.
     expect(inboxOpenInPolicy({ kind: "video", path: "/p/clip.bin" }, "mac").systemDefault).toBe(false);
   });
 

@@ -1,17 +1,3 @@
-/**
- * External Annotations — shared types, store logic, and SSE helpers.
- *
- * Runtime-agnostic: no node:fs, no node:http, no Bun APIs.
- * Both the Bun server handler and Pi server handler import this module
- * and wrap it with their respective HTTP transport layers.
- *
- * The store is generic — plan servers store Annotation objects,
- * review servers store CodeAnnotation objects. The mode-specific
- * input transformers handle validation and field assignment.
- */
-
-// Reply-threading validation for PATCH ingest, re-exported so both HTTP
-// adapters import it from the module they already use.
 export { validateReplyTarget } from "./annotation-threads";
 
 import {
@@ -27,10 +13,6 @@ import {
   parseHtmlElementContext,
 } from "./html-anchor";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /** Constraint for any annotation type the store can hold. */
 export type StorableAnnotation = { id: string; source?: string };
 
@@ -40,18 +22,7 @@ export type ExternalAnnotationEvent<T = unknown> =
   | { type: "remove"; ids: string[] }
   | { type: "clear"; source?: string }
   | { type: "update"; id: string; annotation: T }
-  /**
-   * Not an annotation change: the agent session that opened this review
-   * closed it (`POST /api/host/close`, packages/shared/host-control.ts). The
-   * tab shows it; the reviewer's unsent comments stay in the draft. `by`:
-   * "agent" when the agent asked to close it, "session" when plan mode or the
-   * agent session itself ended (Pi's plan review).
-   */
   | { type: "session-closed"; by: "agent" | "session"; unsentAnnotations: number };
-
-// ---------------------------------------------------------------------------
-// SSE helpers
-// ---------------------------------------------------------------------------
 
 /** Heartbeat comment to keep SSE connections alive (sent every 30s). */
 export const HEARTBEAT_COMMENT = ":\n\n";
@@ -64,21 +35,10 @@ export function serializeSSEEvent<T>(event: ExternalAnnotationEvent<T>): string 
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-// ---------------------------------------------------------------------------
-// Input validation — shared helpers
-// ---------------------------------------------------------------------------
-
 export interface ParseError {
   error: string;
 }
 
-/**
- * Unwrap a POST body into an array of raw input objects.
- *
- * Accepts either:
- *   - A single annotation object: `{ source: "...", ... }`
- *   - A batch wrapper: `{ annotations: [{ source: "...", ... }, ...] }`
- */
 function unwrapBody(body: unknown): Record<string, unknown>[] | ParseError {
   if (!body || typeof body !== "object") {
     return { error: "Request body must be a JSON object" };
@@ -86,7 +46,6 @@ function unwrapBody(body: unknown): Record<string, unknown>[] | ParseError {
 
   const obj = body as Record<string, unknown>;
 
-  // Batch format: { annotations: [...] }
   if (Array.isArray(obj.annotations)) {
     if (obj.annotations.length === 0) {
       return { error: "annotations array must not be empty" };
@@ -102,7 +61,6 @@ function unwrapBody(body: unknown): Record<string, unknown>[] | ParseError {
     return items;
   }
 
-  // Single format: { source: "...", ... }
   if (typeof obj.source === "string") {
     return [obj as Record<string, unknown>];
   }
@@ -118,28 +76,18 @@ function requireString(obj: Record<string, unknown>, field: string, index: numbe
   return val;
 }
 
-// ---------------------------------------------------------------------------
-// Plan mode transformer — produces Annotation objects
-// ---------------------------------------------------------------------------
-
-/** The Annotation type shape for plan mode (mirrors packages/ui/types.ts). */
 interface PlanAnnotation {
   id: string;
   blockId: string;
   startOffset: number;
   endOffset: number;
-  type: string; // AnnotationType value
+  type: string;
   text?: string;
   originalText: string;
   createdA: number;
   author?: string;
   source?: string;
-  /** A comment on a rendered diagram part (see `diagram-anchor.ts`). The
-   *  diagram blocks resolve it against their render; a row that resolves in
-   *  no diagram lists as unanchored. */
   diagramAnchor?: DiagramAnchor;
-  /** A comment on part of an image (see `image-region.ts`): the viewer
-   *  draws its box; the export names the image, its line and the box. */
   imageRegion?: ImageRegion;
 }
 
@@ -163,7 +111,6 @@ export function transformPlanInput(
       return { error: `annotations[${i}] missing required "text" field` };
     }
 
-    // Validate type if provided, default to GLOBAL_COMMENT
     const type = typeof obj.type === "string" ? obj.type : "GLOBAL_COMMENT";
     if (!VALID_PLAN_TYPES.includes(type)) {
       return {
@@ -171,24 +118,19 @@ export function transformPlanInput(
       };
     }
 
-    // DELETION requires originalText (the text to remove)
     if (type === "DELETION" && (typeof obj.originalText !== "string" || obj.originalText.length === 0)) {
       return { error: `annotations[${i}] DELETION type requires non-empty "originalText" field` };
     }
 
-    // COMMENT requires originalText so the renderer can pin it to a phrase.
-    // External agents that want sidebar-only feedback should use GLOBAL_COMMENT
-    // instead — without a phrase to anchor to, a COMMENT renders as an empty
-    // quote bubble in the sidebar and exports as `Feedback on: ""`.
+    // External agents that want sidebar-only feedback should use GLOBAL_COMMENT instead — without a
+    // phrase to anchor to, a COMMENT renders as an empty quote bubble in the sidebar and exports as
+    // `Feedback on: ""`.
     if (type === "COMMENT" && (typeof obj.originalText !== "string" || obj.originalText.length === 0)) {
       return {
         error: `annotations[${i}] COMMENT requires non-empty "originalText" field. Use GLOBAL_COMMENT for sidebar-only feedback.`,
       };
     }
 
-    // A diagram anchor is validated by the same fail-closed parser the ui
-    // codec and the feedback archive run; a malformed one is refused rather
-    // than stored as an anchor nothing can restore.
     let diagramAnchor: DiagramAnchor | undefined;
     if (obj.diagramAnchor !== undefined) {
       const parsed = parseDiagramAnchor(obj.diagramAnchor);
@@ -228,14 +170,9 @@ export function transformPlanInput(
   return { annotations };
 }
 
-// ---------------------------------------------------------------------------
-// Review mode transformer — produces CodeAnnotation objects
-// ---------------------------------------------------------------------------
-
-/** The CodeAnnotation type shape for review mode (mirrors packages/ui/types.ts). */
 interface ReviewAnnotation {
   id: string;
-  type: string; // CodeAnnotationType value
+  type: string;
   scope?: string;
   filePath: string;
   lineStart: number;
@@ -247,10 +184,9 @@ interface ReviewAnnotation {
   createdAt: number;
   author?: string;
   source?: string;
-  // Agent review metadata (optional — only set by agent review findings)
-  severity?: string; // "important" | "nit" | "pre_existing"
-  reasoning?: string; // Validation chain explaining how the issue was confirmed
-  reviewProfileLabel?: string; // Custom review profile that produced this finding
+  severity?: string;
+  reasoning?: string;
+  reviewProfileLabel?: string;
   prUrl?: string;
   prNumber?: number;
   prTitle?: string;
@@ -276,15 +212,6 @@ export type FindingPlacement = {
   lineEnd: number;
 };
 
-/**
- * Classify an agent review finding by what it carries, so nothing is dropped:
- *   file + a usable line → a line comment
- *   file, no line        → a whole-file comment
- *   neither              → a general (review-level) comment
- *
- * For file and general placements the line is 0; for general the path is "".
- * Consumers branch on `scope`, never on the sentinel values.
- */
 export function classifyFindingPlacement(
   filePath: string,
   lineStart: number | null | undefined,
@@ -319,7 +246,6 @@ export function transformReviewInput(
     const source = requireString(obj, "source", i);
     if (typeof source !== "string") return source;
 
-    // scope: optional, defaults to "line"
     const scope = typeof obj.scope === "string" ? obj.scope : "line";
     if (!VALID_SCOPES.includes(scope)) {
       return {
@@ -327,12 +253,6 @@ export function transformReviewInput(
       };
     }
 
-    // Location requirements depend on scope:
-    //   line    → filePath + lineStart + lineEnd required. A finding that claims
-    //             a line must carry one, so a broken line finding is rejected
-    //             rather than quietly passing as a vaguer comment.
-    //   file    → filePath required; line ignored (defaults to 0).
-    //   general → no file, no line (review-level; defaults to "" / 0).
     let filePath = "";
     let lineStart = 0;
     let lineEnd = 0;
@@ -355,7 +275,6 @@ export function transformReviewInput(
       }
     }
 
-    // side: optional, defaults to "new"
     const side = typeof obj.side === "string" ? obj.side : "new";
     if (!VALID_SIDES.includes(side)) {
       return {
@@ -363,7 +282,6 @@ export function transformReviewInput(
       };
     }
 
-    // type: optional, defaults to "comment"
     const type = typeof obj.type === "string" ? obj.type : "comment";
     if (!VALID_REVIEW_TYPES.includes(type)) {
       return {
@@ -406,7 +324,6 @@ export function transformReviewInput(
       createdAt: Date.now(),
       author: typeof obj.author === "string" ? obj.author : undefined,
       source,
-      // Agent review metadata (optional — only set by agent review findings)
       ...(typeof obj.severity === "string" && { severity: obj.severity }),
       ...(typeof obj.reasoning === "string" && { reasoning: obj.reasoning }),
       ...(typeof obj.reviewProfileLabel === "string" && { reviewProfileLabel: obj.reviewProfileLabel }),
@@ -427,43 +344,20 @@ export function transformReviewInput(
   return { annotations };
 }
 
-// ---------------------------------------------------------------------------
-// Annotation Store (generic)
-// ---------------------------------------------------------------------------
-
 type MutationListener<T> = (event: ExternalAnnotationEvent<T>) => void;
 
 export interface AnnotationStore<T extends StorableAnnotation> {
-  /** Add fully-formed annotations. Returns the added annotations. */
   add(items: T[]): T[];
-  /** Remove an annotation by ID. Returns true if found. */
   remove(id: string): boolean;
-  /** Remove all annotations from a specific source. Returns count removed. */
   clearBySource(source: string): number;
-  /**
-   * Update an annotation by ID. Returns the updated annotation, or null if
-   * not found. The identity fields `id` and `source` are pinned — values for
-   * them in `fields` are ignored (`source` gates verbatim skill-instruction
-   * injection in exported feedback and must not be clearable via PATCH).
-   */
   update(id: string, fields: Partial<T>): T | null;
-  /** Remove all annotations. Returns count removed. */
   clearAll(): number;
-  /** Get all annotations (snapshot). */
   getAll(): T[];
-  /** Monotonic version counter — incremented on every mutation. */
   readonly version: number;
-  /** Register a listener for mutation events. Returns unsubscribe function. */
   onMutation(listener: MutationListener<T>): () => void;
 }
 
-/**
- * Create an in-memory annotation store.
- *
- * The store is runtime-agnostic — it holds data and emits events.
- * HTTP transport (SSE broadcasting, request parsing) is handled by
- * the server-specific adapter (Bun or Pi).
- */
+/** Create an in-memory annotation store. */
 export function createAnnotationStore<T extends StorableAnnotation>(): AnnotationStore<T> {
   const annotations: T[] = [];
   const listeners = new Set<MutationListener<T>>();
@@ -503,13 +397,6 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
     update(id, fields) {
       const idx = annotations.findIndex((a) => a.id === id);
       if (idx === -1) return null;
-      // Identity fields are pinned and can never be set, cleared, or changed
-      // by an update: `id` addresses the annotation, and `source` is the
-      // security marker the feedback exporters key on — a tool-submitted
-      // annotation (one carrying a `source`) must never receive verbatim
-      // SKILL.md injection (#1229). PATCH is an unauthenticated localhost
-      // surface, so allowing `{"source": ""}` through the merge would let
-      // any local process strip the external marker and re-arm injection.
       const patch = { ...fields } as Record<string, unknown>;
       delete patch.id;
       delete patch.source;
@@ -562,34 +449,10 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
   };
 }
 
-// ---------------------------------------------------------------------------
-// PATCH validation (shared by both runtimes)
-// ---------------------------------------------------------------------------
-
-/**
- * `PATCH /api/external-annotations?id=…` used to merge its body into the
- * stored annotation verbatim: an unauthenticated localhost surface could
- * write `{"diagramAnchor": null}` — a value POST refuses — and the renderer
- * then read `.family` off it and took the page down (#1560 follow-up).
- *
- * The patch is now allowlisted and field-validated with the SAME validators
- * POST applies: a structured field goes through its own fail-closed parser
- * and a bad value is a 400, never a stored one. Unknown keys are dropped
- * (the wire shape is additive, so an unknown key is a newer or foreign
- * writer, not a reason to refuse the whole patch); `id` and `source` stay
- * immutable — the store pins them too, this is the outer layer.
- *
- * Empty after filtering is fine: the PATCH is then a no-op that still
- * answers 200 with the annotation, exactly as a patch of unknown keys did.
- * `null` on an optional field keeps its established meaning — clear it — and
- * is normalized to `undefined` so the stored row never holds a nullish value
- * a consumer could read a property off; a required field refuses it.
- */
 export type AnnotationPatchMode = "plan" | "review";
 
 type FieldValidator = (value: unknown) => { value: unknown } | ParseError;
 
-/** Cap mirrors the viewer's own diagram multi-select ceiling. */
 const MAX_DIAGRAM_ADDITIONAL_TARGETS = 16;
 const MAX_PATCH_IMAGES = 50;
 const MAX_PATCH_IMAGE_STRING = 4096;
@@ -626,7 +489,6 @@ const cappedStr =
       ? ok(value)
       : { error: `must be a string of at most ${max} characters` };
 
-/** Attached images: `{ path, name }` pairs. */
 const imageList: FieldValidator = (value) => {
   if (!Array.isArray(value)) return { error: "must be an array" };
   if (value.length > MAX_PATCH_IMAGES) {
@@ -649,8 +511,6 @@ const imageList: FieldValidator = (value) => {
   return ok(out);
 };
 
-/** Parser-backed validators: the stored value is REPLACED by what the parser
- *  returns, so a merged field is always one the renderer can read. */
 const viaParser =
   <T>(parse: (value: unknown) => T | null | undefined, hint: string): FieldValidator =>
   (value) => {
@@ -748,13 +608,6 @@ const REVIEW_PATCH_FIELDS: Record<string, FieldValidator> = {
   gitButlerSnapshotId: str,
 };
 
-/**
- * Fields that carry the annotation's structure rather than its content: a
- * PATCH may change them, never clear them. An annotation with no `type`, or a
- * line comment with no `filePath`, is not a thing the UI can render — and the
- * anchors are the crash vector this validator exists for, so `null` on one is
- * the caller error it looks like (400), not a silent un-anchoring.
- */
 const NON_CLEARABLE_FIELDS = new Set([
   "type",
   "originalText",
@@ -774,11 +627,7 @@ const NON_CLEARABLE_FIELDS = new Set([
   "elementContext",
 ]);
 
-/**
- * Validate and narrow a PATCH body for `mode`. Returns the fields that may be
- * merged into the stored annotation, or a `ParseError` naming the field whose
- * value failed its validator.
- */
+/** Validate and narrow a PATCH body for `mode`. */
 export function validateAnnotationPatch(
   mode: AnnotationPatchMode,
   body: unknown,
@@ -789,13 +638,9 @@ export function validateAnnotationPatch(
   const fieldsByName = mode === "plan" ? PLAN_PATCH_FIELDS : REVIEW_PATCH_FIELDS;
   const fields: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    // Identity fields are pinned (the store deletes them too).
     if (key === "id" || key === "source" || key === "__proto__") continue;
     const validator = fieldsByName[key];
-    // Unknown key: dropped, not fatal — the wire shape is additive.
     if (!validator) continue;
-    // `undefined` never survives JSON, but a host calling the validator
-    // directly may pass it: treat it as "not provided".
     if (value === undefined) continue;
     if (value === null) {
       if (NON_CLEARABLE_FIELDS.has(key)) {

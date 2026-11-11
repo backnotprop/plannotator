@@ -1,8 +1,3 @@
-/**
- * System's setup contract: what the dialog and the server accept as a repo and a doc site, and the save's check.
- * What regresses: a pasted link or remote that names a repo refused, a non-repo or a non-web address taken, the
- * project's own repo or a duplicate saved twice, or a setup.json of another shape read as format 1.
- */
 import { describe, expect, test } from 'bun:test';
 import { parseSystemDocSite, parseSystemRepo, parseSystemSetup, systemAgentOfLaunch, systemSetupFromInput } from './inbox-system-setup';
 
@@ -45,7 +40,6 @@ describe('parseSystemRepo', () => {
     expect(repo('https://bitbucket.org/acme/docs/src/main/')).toBe('bitbucket.org/acme/docs');
     expect(repo('https://gitlab.example.com/group/sub/project/-/merge_requests/3')).toBe('gitlab.example.com/group/sub/project');
     expect(repo('ghe.example.com/acme/docs/tree/main')).toBe('ghe.example.com/acme/docs');
-    // A trailing slash after `.git`.
     expect(repo('https://github.com/acme/docs.git/')).toBe('github.com/acme/docs');
     expect(repo('https://ghe.example.com/acme/docs.git/')).toBe('ghe.example.com/acme/docs');
     expect(repo('git@ghe.example.com:acme/docs.git/')).toBe('ghe.example.com/acme/docs');

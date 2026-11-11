@@ -3,26 +3,12 @@ export interface DiffPathPair {
   newPath?: string;
 }
 
-/** Single-char C escapes git emits (see git's quote.c) mapped to their byte. */
 const C_ESCAPES: Record<string, number> = {
   '"': 0x22, "\\": 0x5c, a: 0x07, b: 0x08, f: 0x0c,
   n: 0x0a, r: 0x0d, t: 0x09, v: 0x0b,
 };
 
-/**
- * Undo git's C-style path quoting (core.quotePath): `"caf\303\251.txt"` →
- * `café.txt`. Octal escapes are RAW BYTES of the UTF-8 encoded path —
- * consecutive octal escapes are collected into a byte buffer and decoded as
- * one UTF-8 sequence. JSON.parse cannot do this: octal escapes are invalid
- * JSON, so non-ASCII names silently kept their literal `\303\251` form and
- * broke every downstream file access.
- *
- * Literal (non-escaped) characters are appended as-is, NOT pushed through the
- * byte decoder — our own quoteGitPath (JSON.stringify, used when synthesizing
- * workspace patch headers) leaves unicode unescaped inside quotes, and those
- * headers round-trip through this function too. Unquoted values pass through
- * untouched.
- */
+/** Undo git's C-style path quoting (core.quotePath): `"caf\303\251.txt"` → `café.txt`. */
 export function unquoteGitPath(value: string): string {
   if (!value.startsWith('"') || !value.endsWith('"')) return value;
   const inner = value.slice(1, -1);
@@ -37,15 +23,12 @@ export function unquoteGitPath(value: string): string {
   };
   for (let i = 0; i < inner.length; i++) {
     if (inner[i] !== "\\") {
-      // Appending code units in order preserves any literal unicode,
-      // including surrogate pairs.
       flush();
       out += inner[i];
       continue;
     }
     const next = inner[i + 1];
     if (next >= "0" && next <= "7") {
-      // Octal escape: up to 3 digits, one raw byte of the UTF-8 path.
       let oct = "";
       let j = i + 1;
       while (j < inner.length && oct.length < 3 && inner[j] >= "0" && inner[j] <= "7") {
@@ -59,16 +42,10 @@ export function unquoteGitPath(value: string): string {
       out += String.fromCharCode(C_ESCAPES[next]);
       i++;
     } else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(inner.slice(i + 2, i + 6))) {
-      // \uXXXX: never emitted by git, but our own quoteGitPath is
-      // JSON.stringify, which uses it for control chars lacking a short
-      // JSON escape (e.g. a vertical tab, \u000b) — synthesized workspace headers round-trip
-      // through here, so this must decode or the path keeps a literal
-      // backslash and file access breaks.
       flush();
       out += String.fromCharCode(parseInt(inner.slice(i + 2, i + 6), 16));
       i += 5;
     } else {
-      // Unknown escape — keep the backslash literally.
       flush();
       out += "\\";
     }
@@ -181,28 +158,12 @@ export function parseDiffFilePathLines(lines: string[]): DiffPathPair {
 }
 
 /**
- * Extended-header line the review core injects into the display-only stub it
- * emits for a file whose bytes exceed the review size cap. Without it the stub
- * is indistinguishable from a genuine binary file, and the UI could only show
- * a header-only card with no counts and no explanation — which reads as broken.
- *
- * Lives here (rather than in review-core) so the browser bundle can detect the
- * shape without pulling the whole node-facing review core in. Both server
- * runtimes get it from review-core, which is vendored to Pi alongside this file.
- *
- * The `#` prefix is what makes detection unambiguous: diff CONTENT lines are
- * always prefixed with `+`, `-`, or a space, so a bare match on this exact line
- * can only come from the extended header we wrote. Git ignores unknown
- * extended-header lines, and @pierre/diffs parses the stub identically with or
- * without it.
+ * Extended-header line the review core injects into the display-only stub it emits for a file whose
+ * bytes exceed the review size cap.
  */
 export const OVERSIZED_REVIEW_STUB_MARKER = "#plannotator-oversized-file";
 
-/**
- * Human-readable form of the cap for UI copy. The authoritative byte value is
- * `MAX_REVIEW_FILE_CONTENT_BYTES` in review-core, which is node-facing; a
- * review-core test asserts the two never drift.
- */
+/** Human-readable form of the cap for UI copy. */
 export const OVERSIZED_REVIEW_STUB_LIMIT_LABEL = "5 MB";
 
 /** True when `patch` is one of our oversized-file stubs (see the marker above). */
@@ -211,22 +172,8 @@ export function isOversizedReviewStubPatch(patch: string): boolean {
 }
 
 /**
- * True when a single file's patch chunk carries a binary marker and no hunks,
- * so a diff renderer has literally nothing to draw for it.
- *
- * The GENERAL case, of which `isOversizedReviewStubPatch` above is the one
- * specific case we can name: git emits this shape for real binary files, and
- * the review core emits it for files it declined to read. Either way the card
- * renders as a bare header with no counts and no body, which reads as a broken
- * or empty diff rather than as content that was deliberately not shown.
- *
- * Callers that can say something more specific should ask the marker predicate
- * FIRST and fall back to this one, so a marker-carrying stub is explained once,
- * by the message that knows why.
- *
- * Scanning stops at the first hunk header: content lines always carry a `+`,
- * `-`, or space prefix, so a `Binary files ` line at column zero before any
- * `@@ ` can only be the extended header git (or the stub builder) wrote.
+ * True when a single file's patch chunk carries a binary marker and no hunks, so a diff renderer
+ * has literally nothing to draw for it.
  */
 export function isContentlessBinaryPatch(patch: string): boolean {
   let hasBinaryMarker = false;
@@ -239,11 +186,6 @@ export function isContentlessBinaryPatch(patch: string): boolean {
   return hasBinaryMarker;
 }
 
-/**
- * File extensions the code-review image preview (#1598) renders as Before /
- * After images: the formats every evergreen browser decodes. tiff and heic are
- * Safari-only, so they keep the plain binary notice.
- */
 export const REVIEW_IMAGE_PREVIEW_EXTENSIONS: readonly string[] = [
   "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "apng",
 ];
@@ -264,12 +206,6 @@ export function isReviewImagePath(path: string | undefined | null): boolean {
   return REVIEW_IMAGE_PREVIEW_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
 }
 
-/**
- * True when a single file's patch chunk has no hunks to draw and either side's
- * path is a previewable image. "No hunks" rather than "has a binary marker":
- * the GitHub files-API and GitLab JSON fallbacks emit header-only chunks for
- * binaries with no marker at all, and those deserve a preview too.
- */
 export function isImagePreviewCandidate(
   patch: string,
   path: string,

@@ -1,16 +1,3 @@
-/**
- * "Tell your agent" for Settings → Rows (approval "inbox-rows-settings-page"): the one place for every word an agent
- * reads about the Inbox list's rows. The instruction block a Rows ask carries, the setting names and values an agent
- * can use, what `plannotator inbox rows` / `rows set` / `rows undo` print, and their help text all live here, so an
- * edit of the owner's is one line in this file. The record of the approved words is
- * `.product/approved/inbox-rows-settings-page/`; they change only with the owner.
- *
- * The rules are core's own: a value is a change over the stored option names (`INBOX_ROWS_OPTIONS`), settled by
- * `inboxRowsCanonical`, exactly as a click on the page (packages/inbox/rowsControls.ts; rowsWords.test.ts holds the
- * two together).
- */
-// inbox-types.ts re-exports this file (core adds no export of its own for it: a new one needs a published core), so the
-// two import each other: nothing of inbox-types is read while this file loads, only inside functions.
 import { inboxRowsCanonical, type InboxRowsOption } from "./inbox-types";
 
 /** The markers around what an agent receives with an ask from Settings → Rows, each on its own line. */
@@ -34,17 +21,11 @@ type On = ReadonlySet<InboxRowsOption>;
 type Change = Partial<Record<InboxRowsOption, boolean>>;
 
 export interface InboxRowsSetting {
-  /** The name an agent writes: `spacing`. */
   name: string;
-  /** The page's label: "Spacing". */
   label: string;
-  /** Each value an agent can write, with the page's word for it. */
   values: readonly { value: string; label: string }[];
-  /** What it changes, for the listing. */
   changes: string;
-  /** The value now; null for a choice with none picked (Badge shape while badges are off). */
   get: (on: On) => string | null;
-  /** The options a value turns on and off. */
   set: (value: string, on: On) => Change;
 }
 
@@ -52,9 +33,7 @@ const ON_OFF = [
   { value: "on", label: "on" },
   { value: "off", label: "off" },
 ] as const;
-/** A switch that is on while its option is. */
 const onSetting = (name: string, key: InboxRowsOption, label: string, changes: string): InboxRowsSetting => ({ name, label, values: ON_OFF, changes, get: (on) => (on.has(key) ? "on" : "off"), set: (value) => ({ [key]: value === "on" }) });
-/** A switch that shows a part: on while its `hide…` option is off. */
 const showSetting = (name: string, key: InboxRowsOption, label: string, changes: string): InboxRowsSetting => ({ name, label, values: ON_OFF, changes, get: (on) => (on.has(key) ? "off" : "on"), set: (value) => ({ [key]: value !== "on" }) });
 const badges = (on: On) => (on.has("marksThreads") ? (on.has("marksProjects") ? "both" : "threads") : on.has("marksProjects") ? "projects" : "off");
 
@@ -177,7 +156,6 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
 
 /** The whole looks (`look=`): the page's "Start from". */
 export const INBOX_ROWS_LOOKS: readonly { value: string; label: string; rows: readonly InboxRowsOption[] }[] = [
-  // The defaults (`INBOX_ROWS_DEFAULT`), written out for the reason above; rowsWords.test.ts holds them equal.
   { value: "balanced", label: "Balanced", rows: ["smallNames"] },
   { value: "dense", label: "Dense", rows: ["compact", "smallNames", "relativeTime", "dividers", "statusMark"] },
   { value: "minimal", label: "Minimal", rows: ["smallNames", "hidePreview", "titleFirst"] },
@@ -217,8 +195,8 @@ const quoted = (values: readonly { value: string }[]) => {
 };
 
 /**
- * `rows set`'s pairs applied to a look: `look=` first, then each option in the order given, one result for one save.
- * Any pair refused refuses them all.
+ * `rows set`'s pairs applied to a look: `look=` first, then each option in the order given, one
+ * result for one save.
  */
 export function inboxRowsApply(rows: readonly InboxRowsOption[], pairs: readonly string[]): { rows: InboxRowsOption[] } | { error: string } {
   const seen = new Set<string>();

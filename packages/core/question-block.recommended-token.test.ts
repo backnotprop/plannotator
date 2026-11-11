@@ -1,12 +1,3 @@
-/**
- * A `Recommended:` line that is only a choice label's leading letter or
- * number (`Recommended: A` for `- [ ] A · Yes`) names that choice when the
- * token is followed by ` · ` and exactly one choice has it.
- *
- * What regresses if this fails: the card draws the bare token as a stray
- * extra option (the agent's own answer, `suggestedText`) and marks no choice,
- * or a token shared by two choices picks one of them.
- */
 import { describe, expect, test } from "bun:test";
 import { parseQuestionBlock, type ParsedQuestion } from "./question-block";
 
@@ -54,7 +45,6 @@ describe("a Recommended: line names a choice by its leading token and a middle d
         expect(q.suggestedText).toBe("Fast");
       });
 
-      // Written without spaces: a spaced ` — ` splits the label from its description.
       for (const [sep, written, label] of [
         [":", "Unpin it: the toast says so", "Unpin it: the toast says so"],
         ["—", "Unpin it—the toast says so", "Unpin it—the toast says so"],

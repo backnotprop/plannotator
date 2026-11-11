@@ -9,12 +9,10 @@ describe("parseGuideLink", () => {
       ok: true,
       link: { kind: "code", href: "code:src/a.ts#L10-L20", path: "src/a.ts", startLine: 10, endLine: 20 },
     });
-    // `#L10-20` is read the same as `#L10-L20`; a one-line range is a line.
     const short = parseGuideLink("code:src/a.ts#L10-20");
     expect(short?.ok && short.link).toMatchObject({ startLine: 10, endLine: 20 });
     const one = parseGuideLink("code:src/a.ts#L7-L7");
     expect(one?.ok && one.link).toEqual({ kind: "code", href: "code:src/a.ts#L7-L7", path: "src/a.ts", startLine: 7 });
-    // Percent-encoded spaces decode to the real path.
     const spaced = parseGuideLink("code:docs/my%20notes.md");
     expect(spaced?.ok && spaced.link.kind === "code" && spaced.link.path).toBe("docs/my notes.md");
   });
@@ -80,7 +78,6 @@ describe("findGuideLinks", () => {
     expect(findGuideLinks(text, "markdown").map((l) => l.href)).toEqual(["code:app/(shop)/[id]/page.tsx#L4", "code:app/(shop)/layout.tsx"]);
     const parsed = parseGuideLink("code:app/(shop)/[id]/page.tsx#L4");
     expect(parsed?.ok && parsed.link).toMatchObject({ kind: "code", path: "app/(shop)/[id]/page.tsx", startLine: 4 });
-    // An unbalanced parenthesis still ends the link, as in markdown.
     expect(findGuideLinks("[x](code:a.ts) (aside)", "markdown").map((l) => l.href)).toEqual(["code:a.ts"]);
   });
 

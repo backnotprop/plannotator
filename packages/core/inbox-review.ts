@@ -1,41 +1,11 @@
-/**
- * Code review in the Plannotator Inbox (approval "inbox-code-review-direction",
- * 2026-11-03; phase 1). Every word an agent can receive because of it lives
- * here, so one file holds the whole agent-facing surface:
- *
- * - the review skills the reply box's "/" list offers while the person has
- *   Settings → Capabilities → Code review on (`INBOX_REVIEW_SKILLS`), whose
- *   instructions go only with the reply that names one;
- * - submit_guide's `review` field (`INBOX_REVIEW_FIELD_DESCRIPTION`), served
- *   only while the switch is on;
- * - the words of the person's verdict reply (`inboxReviewVerdictWords`).
- *
- * - Show me (approval "code-review-launch-build", item 1: Show me makes a
- *   Shape): the request the window sends, the refusal an old `plannotator
- *   review draw` gets, and the guide brief's and the skills' lines for the
- *   overview's drawing. These ride Shape's own switch as well (approval
- *   "code-review-029-shape-off"): with Code review on and Shape off, an agent
- *   reads no word of Shape and no drawing.
- *
- * With the switch off, or never set, none of these reach an agent.
- * Browser-safe, no dependencies outside core: the server and the window both read it.
- */
-
 import { checkShapeDrawnView, parseShapeCodeTarget, shapeHtmlDataCodes, SHAPE_LIMITS, type ShapeDrawnView } from './shape';
 
 /** One built-in review skill: its name in the "/" list, the list's description, and the instructions it sends. */
 export interface InboxReviewSkill {
-  /** The name typed after `/`. Every name starts with `review-`. */
   name: string;
-  /** The "/" list's one line. */
   description: string;
   /** The instructions, pasted into the reply that names the skill (never sent otherwise). */
   body: string;
-  /**
-   * Offered only in a thread where a review already happened: the person sent
-   * a verdict, or comments on a review (`inboxThreadHadReview`). Elsewhere the
-   * "/" list hides it and a typed name is plain text.
-   */
   afterReview?: true;
 }
 
@@ -43,28 +13,19 @@ export interface InboxReviewSkill {
 export const INBOX_WALKTHROUGH_FIELD_DESCRIPTION =
   'true sends a walkthrough of the code as it is now, not a change: no `patch`, each `diffs` entry names `file` and `lines` ("10-40, 80-95", or none for the whole file), and the Inbox reads them from the project. It takes no verdict.';
 
-/** Shared tail of every skill: what to do when there is nothing to review, and the fallback for a session that started before the switch. */
 const NO_CODE = 'If you changed no code for this thread, say so in one sentence instead.';
 const OLD_SESSION = 'If submit_guide takes no `review` field in this session, send it without one.';
 
 /**
- * /review-curate's line for a chapter's diagram (approval "guide-chapter-diagrams": diagrams go in chapters, not the
- * overview), at the end of its instructions. AGENT TEXT: these words await the owner's OK and a clean-room test.
+ * /review-curate's line for a chapter's diagram (approval "guide-chapter-diagrams": diagrams go in
+ * chapters, not the overview), at the end of its instructions.
  */
 export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one diagram (`sections[].diagram`, Mermaid preferred). The guide brief has the format.';
 /** The same line with Shape off: Mermaid is the only kind, so nothing is "preferred" (no word of Shape's html kind). */
 export const INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one Mermaid diagram (`sections[].diagram`). The guide brief has the format.';
 
-/** /review-recheck's line for a chapter's diagram, after "Give one chapter to each comment you acted on…". AGENT TEXT: awaits the owner's OK. */
 export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If a chapter of the earlier review had a diagram and you changed what it shows, draw it again in the chapter of this review that covers that change (`sections[].diagram`).";
 
-/**
- * Every review skill Plannotator knows, by name, as an agent reads it with Shape off or on. A chapter's diagram is
- * offered either way (Mermaid needs no Shape; approval "guide-chapter-diagrams"); with Shape off the curate line names
- * Mermaid only, and no skill asks for an overview drawing (approval "code-review-029-shape-off").
- * `diagrams` false (Settings → Capabilities → Chapter diagrams off): the curate and recheck diagram lines are left
- * out, with the blank line before each, and nothing takes their place.
- */
 function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<string, InboxReviewSkill>> {
   return {
     'review-curate': {
@@ -103,7 +64,6 @@ function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<stri
         `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} If you changed nothing since that review, say so in one sentence instead.`,
       ].join('\n'),
     },
-    // Built, and not offered: the owner decides whether it ships (add its name to INBOX_REVIEW_SKILL_NAMES).
     'review-guide': {
       name: 'review-guide',
       description: 'A review of the whole change, the riskiest part first',
@@ -118,20 +78,14 @@ function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<stri
 
 /** Every review skill, as an agent reads it with Shape off (chapter diagrams in Mermaid only). Adding or removing one is one entry above. */
 export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false);
-/** Every review skill, as an agent reads it with Shape on too ("Mermaid preferred": the brief offers Shape's html kind as well). */
 export const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true);
 
 /** The review skills the "/" list offers, in the list's order. One entry adds or removes a skill. */
 export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-walkthrough', 'review-recheck'];
 
-/** Every review skill with Chapter diagrams off (no diagram line), Shape off and on. */
 const INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false, false);
 const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true, false);
 
-/**
- * The review skills' choices of text: Shape (`shape`, off unless true) and Chapter diagrams (`diagrams`, on unless
- * false: Settings → Capabilities → Chapter diagrams, config.json `inboxChapterDiagrams`).
- */
 export interface InboxReviewSkillOptions {
   shape?: boolean;
   diagrams?: boolean;
@@ -152,7 +106,6 @@ export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = inboxReviewSkill
 /** The skill catalog's root for a built-in skill (the "/" list's right column: "Plannotator"). */
 export const INBOX_BUILTIN_SKILL_ROOT = 'plannotator';
 
-/** A built-in review skill by name, or undefined (offered skills only); its instructions as read with Shape off unless `shape`, with diagram lines unless `diagrams` is false. */
 export function inboxReviewSkill(name: string, options: InboxReviewSkillOptions = {}): InboxReviewSkill | undefined {
   return inboxReviewSkills(options).find((skill) => skill.name === name);
 }
@@ -175,12 +128,6 @@ export interface InboxReviewThreadMessage {
   review_comments_of?: readonly string[];
 }
 
-/**
- * Whether a review already happened in a thread: the person sent a verdict
- * on a review, or a reply that carried their comments on a review's diff
- * (`review_comments_of`, marked by the store whichever message the reply
- * answers). `/review-recheck` is offered only then.
- */
 export function inboxThreadHadReview(messages: readonly InboxReviewThreadMessage[]): boolean {
   const reviews = new Set(messages.filter((message) => message.guide?.review).map((message) => message.id));
   if (reviews.size === 0) return false;
@@ -191,10 +138,7 @@ export function inboxThreadHadReview(messages: readonly InboxReviewThreadMessage
   );
 }
 
-/**
- * submit_guide's `review` field, served only while the person has Code review
- * on. A field description does not count toward Claude Code's 2,048 characters.
- */
+/** submit_guide's `review` field, served only while the person has Code review on. */
 export const INBOX_REVIEW_FIELD_DESCRIPTION =
   'true asks the person for a verdict on this change: they read your guide beside the full diff, comment on lines, then Approve or Send feedback. The verdict and their comments come back as their reply in this thread.';
 
@@ -202,10 +146,8 @@ export const INBOX_REVIEW_FIELD_DESCRIPTION =
 export const INBOX_REVIEW_TITLE_MAX = 120;
 
 /**
- * An agent's title as one line of at most `max` characters (runs of
- * whitespace, newlines included, become one space; a longer one is cut with
- * "…"). The agent writes the title; the verdict words are the person's, so
- * the title can never add lines of its own to them.
+ * An agent's title as one line of at most `max` characters (runs of whitespace, newlines included,
+ * become one space; a longer one is cut with "…").
  */
 export function inboxReviewTitleLine(title: string, max = INBOX_REVIEW_TITLE_MAX): string {
   const line = title.replace(/\s+/g, ' ').trim();
@@ -218,18 +160,11 @@ export type InboxReviewVerdict = 'approved' | 'changes_requested';
 
 /** What a person's verdict reply records (on the reply: `review_verdict`). */
 export interface InboxReviewVerdictRecord {
-  /** The review's message id. */
   of: string;
   verdict: InboxReviewVerdict;
-  /** How many of the person's comments on the review rode the reply. */
   comments: number;
 }
 
-/**
- * The first words of the person's verdict reply, before their note and their
- * comments (which follow under "Feedback on the guided review", the review
- * app's export). The agent reads this; the window shows it as the reply.
- */
 export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: string, comments: number): string {
   const name = `"${inboxReviewTitleLine(title)}"`;
   if (verdict === 'approved') {
@@ -242,39 +177,22 @@ export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: stri
     : `I reviewed ${name} and I am asking for changes.`;
 }
 
-// ───────────────────────────── Show me (approval "code-review-launch-build", item 1) ─────────────────────────────
-//
-// Show me asks the session that wrote the review for a Shape: the same board,
-// store and commands as Shape on its own. The details are `plannotator shape
-// --help`'s. None of it reaches an agent while Code review is off: the window
-// offers no Show me, and `plannotator shape` is off unless a switch is on.
-
 /** What a Show me points at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
 export interface InboxShowMeTarget {
-  /** The review's message id; null: a Show me from a board with no review behind it (a Shape on its own). */
   review: string | null;
   file: string | null;
   lines: [number, number] | null;
   round: number;
   words?: string;
-  /** Show me on a part of a board: `file` and `lines` are null, and the part says where. */
   part?: InboxShowMePart;
 }
 
 /** What a Show me from a board is on: a part, words picked, a file's lines, or the whole board. */
 export interface InboxShowMePart {
-  /** The board it was pressed on. */
   board: string;
-  /** What the person calls it: a part's heading, the words picked, or a file and its lines. */
   name: string;
-  /** Its `data-code` value, when it has one. */
   code?: string;
-  /** A box over several parts: their names, and `name` is "A part of the board". */
   parts?: string[];
-  /**
-   * A box's picture, the box drawn on it: a PNG `data:` URL as the window sends it; once the Inbox keeps it in the
-   * board's folder, that file's full path, which the request names.
-   */
   picture?: string;
 }
 
@@ -298,21 +216,14 @@ function quoted(text: string): string {
   return text.replace(/[\\"]/g, '\\$&').replace(/\s+/g, ' ').trim();
 }
 
-/**
- * The Show me request, the words the window sends as an Ask turn. The bridge
- * puts its own session header first. `threadId` and the review tie the board to
- * this thread, so it opens over the review. `again`: Show me again, a new
- * version of that board.
- */
+/** The Show me request, the words the window sends as an Ask turn. */
 export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: string; threadId: string; again?: string }): string {
   const { target, threadId } = input;
   const title = quoted(inboxReviewTitleLine(input.title));
   const words = target.words?.trim() ? `: "${quoted(target.words)}"` : '';
   const tie = `--thread ${threadId}${target.review ? ` --through ${target.review}` : ''}`;
   const part = target.part;
-  // A box over several parts names them; a part on its own, its code.
   const after = part?.parts?.length ? ` (parts: ${part.parts.map(quoted).join(', ')})` : part?.code ? ` (${quoted(part.code)})` : '';
-  // The picture's line only once the Inbox kept it: the window's request, before, has none.
   const picture = part?.picture && !part.picture.startsWith('data:') ? [`A picture of what they boxed, the box drawn on it: ${part.picture}.`] : [];
   const where = part
     ? `on "${quoted(part.name)}"${after} in your Shape ${part.board}, from`
@@ -330,7 +241,6 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
         ? `Make a new Shape of that part, so they can see it the way you see it, and leave ${part.board} as it is. It can show code the board doesn't. \`plannotator shape --help\` has how.`
         : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
     `Store it with \`${tie}\`: it opens ${target.review ? 'over the review ' : ''}by itself, so don't open a page.`,
-    // A board with no review behind it has no diff for a click to land in: the agent draws it as any board.
     ...(target.review ? ['On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.'] : []),
     'Then answer here in one or two sentences.',
   ].join('\n');
@@ -346,11 +256,6 @@ export function inboxDrawnViewOf(d: { source: string; css?: string; width?: numb
   };
 }
 
-/**
- * Every `data-code` value in a drawing's HTML (the wide and the tall one), in
- * order, once each: read by Shape's own tag and attribute tokenizer, so a
- * value unquoted, or after `/` or another attribute's closing quote, is read.
- */
 export function inboxDrawingCodes(view: { html: string; tall?: { html: string } }): string[] {
   const out: string[] = [];
   for (const html of [view.html, view.tall?.html ?? '']) {
@@ -369,10 +274,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A drawing as the agent sent it, checked by Shape's own rules (the board's
- * Picture) plus one of the review's: a part's code must be a file of the
- * review's diff. Field names are the agent's (`source`, `tall.source`).
- * `title`: allowed (a drawing has one) unless `withTitle` is false (the guide's overview diagram).
+ * A drawing as the agent sent it, checked by Shape's own rules (the board's Picture) plus one of
+ * the review's: a part's code must be a file of the review's diff.
  */
 export function checkInboxDrawing(
   input: unknown,
@@ -413,7 +316,6 @@ export function checkInboxDrawing(
     }
   }
   const view = 'value' in checked ? checked.value : null;
-  // Every part's code, even when Shape found other problems: the agent hears them all at once.
   const sources = {
     html: typeof d.source === 'string' ? d.source : '',
     ...(isPlainObject(tall) && typeof tall.source === 'string' ? { tall: { html: tall.source } } : {}),
@@ -428,18 +330,11 @@ export function checkInboxDrawing(
 }
 
 /**
- * What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are on: Show me makes a
- * Shape now. With Shape off the review parse takes them, as with Code review off (approval "code-review-029-shape-off").
+ * What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are
+ * on: Show me makes a Shape now.
  */
 export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
 
-/**
- * get_guide_brief's field doc for a chapter's diagram, served only while Code review is on (it replaces the overview
- * diagram's doc: approval "guide-chapter-diagrams"). The Mermaid kind is offered whether Shape is on or off; the html
- * kind (a drawing by Shape's rules), its words and its drawing only while Shape is on too (approval
- * "code-review-029-shape-off": with Shape off an agent reads no word of Shape). get_guide_brief passes `shapeOn`.
- * AGENT TEXT: the rule's words are the owner's (clean-room verdict, "Candidate entry"); the html lines are the PR's.
- */
 export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
   return [
     '- **sections[].diagram** (optional): one diagram at the top of a chapter, when a',
@@ -460,10 +355,6 @@ export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
 /** The doc with Shape on (Mermaid and the html kind). */
 export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = inboxReviewChapterDiagramDoc(true);
 
-/**
- * Context notes (issue #2588, approval "inbox-context-notes"): get_guide_brief's rule for a guide's notes, served only
- * while Code review is on, after the overview's drawing. Wording awaits the owner's OK (AGENT-TEXT, writer 1).
- */
 export const INBOX_REVIEW_NOTES_RULE =
   'Optional `diffs[].notes`: your notes on lines of the diff, `[{ lineStart, lineEnd, side?, text }]`. Line numbers come from the patch\'s hunk headers (`side: "old"` for removed lines), and a note must sit inside one hunk. Write a note only where a hunk needs its why, in one or two sentences: why the change is there and where that reason comes from (the PR description, a commit, a decision record, or your own reading). Notes are yours, not the person\'s comments: they are never counted, sent back to you or posted to a pull request.';
 
@@ -475,8 +366,8 @@ export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRI
 export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM = INBOX_GUIDE_FIELD_DESCRIPTION.replace('overview, diffs: [{ file, summary }]', 'overview, diffs: [{ file, summary, notes? }]');
 
 /**
- * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`, served only while
- * Code review is on. An Ask's answer is never pinned by itself (the owner, 2026-11-07: it stays in the thread).
+ * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`,
+ * served only while Code review is on.
  */
 export const INBOX_NOTE_BLOCK_LINE =
   'In a thread with a review, a `:::note path#L42-L48` … `:::` block pins its words to those lines of the newest review (` old` after the lines for removed lines): your note, not the person\'s comment. Pin a note only when your words are about those lines; answer the rest in the message.';

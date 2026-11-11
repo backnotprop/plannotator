@@ -54,20 +54,12 @@ export function supportsAnnotateAgentTerminalMode(
 }
 
 /**
- * The user's durable placement preference for the annotate-mode Agent TUI:
- * which edge it docks against, or `hidden` to keep it out of the layout.
- *
- * `hidden` is a preference, not a lock — the rail toggle, the Shift Shift
- * shortcut and Settings all still open the panel for the current session.
- * It only decides that nothing is docked until the user asks for it.
+ * The user's durable placement preference for the annotate-mode Agent TUI: which edge it docks
+ * against, or `hidden` to keep it out of the layout.
  */
 export type AnnotateAgentTerminalSide = "left" | "right" | "hidden";
 
-/**
- * The edge the panel actually docks against once it is on screen. `hidden`
- * owns no slot, so it is not a placement — see
- * `resolveAnnotateAgentTerminalPlacement`.
- */
+/** The edge the panel actually docks against once it is on screen. */
 export type AnnotateAgentTerminalPlacement = "left" | "right";
 
 /** Every selectable side, in the order the Position control presents them. */
@@ -83,22 +75,14 @@ export function isAnnotateAgentTerminalSide(
   return value === "left" || value === "right" || value === "hidden";
 }
 
-/**
- * Coerce a stored or server-supplied value to a side. Anything unrecognized
- * (including an older release's value, or a hand-edited config.json) falls
- * back to `left`, which is where the panel docked before it was configurable.
- */
+/** Coerce a stored or server-supplied value to a side. */
 export function resolveAnnotateAgentTerminalSide(
   value: unknown,
 ): AnnotateAgentTerminalSide {
   return isAnnotateAgentTerminalSide(value) ? value : "left";
 }
 
-/**
- * Which edge to dock against when the panel is on screen. A `hidden`
- * preference has no edge of its own, so an explicit session open lands on the
- * historic left placement rather than nowhere.
- */
+/** Which edge to dock against when the panel is on screen. */
 export function resolveAnnotateAgentTerminalPlacement(
   side: AnnotateAgentTerminalSide,
 ): AnnotateAgentTerminalPlacement {

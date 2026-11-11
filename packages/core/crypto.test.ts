@@ -1,17 +1,8 @@
-/**
- * End-to-end encryption tests for the paste service.
- *
- * Tests the full pipeline: compress → encrypt → store → retrieve → decrypt → decompress
- * Run: bun test packages/shared/crypto.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { encrypt, decrypt, decryptWithKey, deriveRelayKeys, encryptWithKey } from "./crypto";
 import vectors from "./fixtures/inbox-relay-vectors.json";
 import { deflateSync, inflateSync } from "bun";
 
-// Bun's test runner doesn't have CompressionStream (browser API).
-// Use Bun's native zlib for the same deflate-raw + base64url pipeline.
 function compress(data: unknown): string {
   const json = JSON.stringify(data);
   const compressed = deflateSync(new TextEncoder().encode(json));
@@ -32,7 +23,6 @@ function decompress(b64: string): unknown {
 
 const PASTE_API = "https://plannotator-paste.plannotator.workers.dev";
 
-// Realistic plan payload matching SharePayload shape
 const SAMPLE_PAYLOAD = {
   p: "# Implementation Plan\n\n## Step 1: Add authentication\n\nWe'll use JWT tokens stored in httpOnly cookies.\n\n## Step 2: Create middleware\n\nAdd auth middleware to all protected routes.\n\n```typescript\nconst authMiddleware = async (req: Request) => {\n  const token = getCookie(req, 'auth');\n  if (!token) throw new UnauthorizedError();\n  return verify(token, SECRET);\n};\n```\n\n## Step 3: Update database schema\n\nAdd users table with email, password_hash, created_at columns.",
   a: [
@@ -41,8 +31,6 @@ const SAMPLE_PAYLOAD = {
     ["D", "Add users table with email, password_hash, created_at columns.", null, []],
   ],
 };
-
-// --- Unit tests (no network) ---
 
 describe("encrypt / decrypt round-trip", () => {
   test("encrypts and decrypts a string", async () => {
@@ -75,7 +63,6 @@ describe("encrypt / decrypt round-trip", () => {
   test("tampered ciphertext fails to decrypt", async () => {
     const { ciphertext, key } = await encrypt("secret");
 
-    // Flip a character in the middle of the ciphertext
     const mid = Math.floor(ciphertext.length / 2);
     const tampered = ciphertext.slice(0, mid) +
       (ciphertext[mid] === 'A' ? 'B' : 'A') +
@@ -97,7 +84,6 @@ describe("full pipeline: compress → encrypt → decrypt → decompress", () =>
     const compressed = await compress(SAMPLE_PAYLOAD);
     const { ciphertext, key } = await encrypt(compressed);
 
-    // Ciphertext should not contain the original plan text
     expect(ciphertext).not.toContain("Implementation Plan");
 
     const decrypted = await decrypt(ciphertext, key);
@@ -107,17 +93,12 @@ describe("full pipeline: compress → encrypt → decrypt → decompress", () =>
   });
 });
 
-// --- Integration tests (hit live paste service) ---
-
 describe("live paste service E2E", () => {
   test("encrypt → POST → GET → decrypt → decompress", async () => {
-    // 1. Compress
     const compressed = await compress(SAMPLE_PAYLOAD);
 
-    // 2. Encrypt
     const { ciphertext, key } = await encrypt(compressed);
 
-    // 3. Store — server sees only ciphertext
     const postRes = await fetch(`${PASTE_API}/api/paste`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -127,23 +108,18 @@ describe("live paste service E2E", () => {
     const { id } = (await postRes.json()) as { id: string };
     expect(id).toMatch(/^[A-Za-z0-9]{8}$/);
 
-    // 4. Retrieve
     const getRes = await fetch(`${PASTE_API}/api/paste/${id}`);
     expect(getRes.status).toBe(200);
 
-    // Verify Cache-Control header
     expect(getRes.headers.get("cache-control")).toBe("private, no-store");
 
     const { data: storedData } = (await getRes.json()) as { data: string };
 
-    // 5. Verify server stores only ciphertext (not readable plan data)
     expect(storedData).toBe(ciphertext);
     expect(storedData).not.toContain("Implementation Plan");
 
-    // 6. Decrypt
     const decrypted = await decrypt(storedData, key);
 
-    // 7. Decompress
     const result = await decompress(decrypted);
     expect(result).toEqual(SAMPLE_PAYLOAD);
   });
@@ -162,7 +138,6 @@ describe("live paste service E2E", () => {
     const getRes = await fetch(`${PASTE_API}/api/paste/${id}`);
     const { data } = (await getRes.json()) as { data: string };
 
-    // Data is opaque — cannot be decompressed without decryption
     expect(() => decompress(data)).toThrow();
   });
 
@@ -172,17 +147,10 @@ describe("live paste service E2E", () => {
   });
 });
 
-/**
- * The Inbox relay's keys and envelope (adr/implementation/inbox-mobile.md,
- * section 4) against the committed vectors, which the iPhone app checks in
- * Swift too (M5): if either side derives or lays out bytes differently, a
- * phone cannot open what the Inbox sends.
- */
 describe("the Inbox relay's vectors", () => {
   test("the pairing secret and device id derive the vectors' key and relay secret", async () => {
     const derived = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
     expect(derived).toMatchObject({ key: vectors.derived.key, upKey: vectors.derived.up_key, relaySecret: vectors.derived.relay_secret });
-    // The collapse id's HMAC key is the Inbox's alone (the phone never computes it), so it has no vector; it is its own key.
     expect(new Set([derived.key, derived.upKey, derived.collapseKey, derived.relaySecret]).size).toBe(4);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(derived.relaySecret)));
     expect(Buffer.from(digest).toString("hex")).toBe(vectors.derived.relay_secret_sha256);

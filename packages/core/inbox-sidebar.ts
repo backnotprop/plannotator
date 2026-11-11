@@ -1,34 +1,12 @@
-/**
- * The Inbox sidebar's layout (approval "inbox-sidebar-customize", 2026-11-08): which items show, their order, and
- * whether each sits in the top stack or the bottom one. One layout per person, saved in config.json `inboxSidebar`
- * and shared by every window, the phone's included.
- *
- * The registry below is the one list of items. A new sidebar row (a future Artifacts row, say) is one more entry:
- * its place in the default layout, whether it hides, and its words. Starred and Projects are not items: they
- * always sit between the two stacks and scroll. Agents scrolls there with them and is an item, so it hides (the
- * owner, 2026-11-09); it does not move. The notices (Update, What's new, Can't check, Reload agents) are not items.
- *
- * Pure functions only, shared by the window and the server.
- */
-
-/**
- * Where an item lives:
- * - `brand`: the logo row, always first at the top. It hides; it does not move.
- * - `stack`: a row in the top or bottom stack. It moves, and hides unless it is locked.
- * - `settings-row`: an icon button on the Settings row. It hides; it rides with Settings.
- * - `middle`: a section that scrolls between the two stacks (Agents). It hides; it does not move.
- */
+/** Where an item lives: - `brand`: the logo row, always first at the top. */
 export type InboxSidebarPlace = 'brand' | 'stack' | 'settings-row' | 'middle';
 export type InboxSidebarStack = 'top' | 'bottom';
 
 export interface InboxSidebarItemSpec {
   id: string;
-  /** The item's name in the right-click menu and the Customize panel. */
   label: string;
   place: InboxSidebarPlace;
-  /** Where a `stack` item sits in the default layout. */
   stack?: InboxSidebarStack;
-  /** False for Inbox (the way home) and Settings (the way back to everything, this panel included). */
   hideable: boolean;
 }
 
@@ -55,11 +33,8 @@ export const INBOX_SIDEBAR_ITEMS = [
 export type InboxSidebarItem = (typeof INBOX_SIDEBAR_ITEMS)[number]['id'];
 
 export interface InboxSidebarLayout {
-  /** The top stack's items, in order (stack items only). */
   top: InboxSidebarItem[];
-  /** The bottom stack's items, in order (stack items only). */
   bottom: InboxSidebarItem[];
-  /** The hidden items, in registry order (never Inbox or Settings). */
   hidden: InboxSidebarItem[];
 }
 
@@ -83,12 +58,6 @@ export const INBOX_SIDEBAR_DEFAULT: InboxSidebarLayout = Object.freeze({
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 
-/**
- * A saved layout, read leniently: a name this build does not know (a newer build's item, a hand edit) is dropped, a
- * repeated one counts once, a locked item is never hidden, and an item the layout does not name (one this build
- * added) takes its default place: after the item before it by default, if that is in the same stack. Null when
- * nothing was saved (not an object).
- */
 export function inboxSidebarRead(value: unknown): InboxSidebarLayout | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
@@ -114,12 +83,11 @@ export function inboxSidebarRead(value: unknown): InboxSidebarLayout | null {
   return { top, bottom, hidden };
 }
 
-/** At most this many names in a saved list: a stack holds every item at most once. */
 const MAX_NAMES = 64;
 
 /**
- * A layout sent to be saved, read strictly: `{ top, bottom, hidden }`, each a list of item names this build knows.
- * Null for anything else (the server answers `422`). Then read as `inboxSidebarRead` reads it.
+ * A layout sent to be saved, read strictly: `{ top, bottom, hidden }`, each a list of item names
+ * this build knows.
  */
 export function inboxSidebarCheck(value: unknown): InboxSidebarLayout | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -166,8 +134,8 @@ export function inboxSidebarToStack(layout: InboxSidebarLayout, id: InboxSidebar
 }
 
 /**
- * Move up or Move down within the item's stack, past the next item this Inbox draws (`drawn`: Board with the Board
- * off is skipped, and keeps its place). At the end of its stack nothing changes: Move to top / bottom crosses.
+ * Move up or Move down within the item's stack, past the next item this Inbox draws (`drawn`: Board
+ * with the Board off is skipped, and keeps its place).
  */
 export function inboxSidebarStep(layout: InboxSidebarLayout, id: InboxSidebarItem, by: -1 | 1, drawn: (id: InboxSidebarItem) => boolean = () => true): InboxSidebarLayout {
   if (!inboxSidebarMovable(id)) return layout;

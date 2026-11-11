@@ -1,25 +1,13 @@
-/**
- * Shortening text without breaking a character. `String.prototype.slice`
- * counts UTF-16 code units, so a cut can land inside an emoji (half a
- * surrogate pair draws as "�") or between a letter and its marks, or split
- * a joined emoji (a family, a flag) into its parts. These helpers count code
- * units like `slice` (so a caller's limit means what it did) but only ever
- * cut between grapheme clusters, the characters a person sees. Pure and
- * browser-safe.
- */
-
 const graphemes: Intl.Segmenter | null =
   typeof Intl !== "undefined" && typeof (Intl as { Segmenter?: unknown }).Segmenter === "function"
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
     : null;
 
-/** A cluster longer than this is cut at the limit anyway (no real character is). */
 const LOOKAHEAD = 32;
 
 /**
- * The longest start of `text` that is at most `max` UTF-16 code units and
- * ends between two characters. Without `Intl.Segmenter` it still never ends
- * on half a surrogate pair.
+ * The longest start of `text` that is at most `max` UTF-16 code units and ends between two
+ * characters.
  */
 export function sliceText(text: string, max: number): string {
   if (max <= 0) return "";

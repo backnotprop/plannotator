@@ -1,19 +1,3 @@
-/**
- * Shape's animation text (approval "shape-animated-scenes", 2026-11-07): the owner's
- * approved words, byte for byte. Never edit them here alone.
- *
- *   - `SHAPE_PICTURE_LOOK`: "the Picture is the system itself" (not a dashboard) and the
- *     art direction. The main guide (`SHAPE_GUIDE`, ./shape-skill.ts) carries them at the end
- *     of its stance, so a still board gets them too, and the animate help repeats them.
- *   - `SHAPE_ANIMATIONS_SECTION`: the "## Animations" section at the end of `SHAPE_GUIDE`:
- *     when to animate, and the pointer to the topic below.
- *   - `SHAPE_ANIMATE_HELP`: `plannotator shape --help animate` (also `shape animate`), what an
- *     agent reads once it has decided to animate: the person's brief, the look, and the scene
- *     format (`checkShapeScene` in ./shape-scene.ts; `shape-animate.test.ts` stores its example).
- *
- * Browser-safe, no dependencies.
- */
-
 const BRIEF = `Use the Shape board to help me understand what we're discussing. Show me with big pictures and little words without withholding key details. Use your own taste, avoid lazy design, integrate real-world pictures/icons/visuals as needed but only selectively when it makes sense. When you do use prose/detail: Be clear, concise/terse, and avoid jargon. Explain things as if the viewer is new here, but don't use weird metaphors.`;
 
 const TOTALS = `Data that is only totals stays a still picture unless there is real timing to show.`;

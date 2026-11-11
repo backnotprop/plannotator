@@ -23,7 +23,6 @@ describe("tool definitions", () => {
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(tool.description.length).toBeGreaterThan(20);
-      // MCP clients cut long descriptions (Claude Code at 2,048 characters).
       expect(tool.description.length).toBeLessThan(2_048);
       for (const key of tool.inputSchema.required ?? []) expect(Object.keys(tool.inputSchema.properties)).toContain(key);
     }
@@ -36,7 +35,6 @@ describe("tool definitions", () => {
       const props = Object.keys(tool.inputSchema.properties);
       const takes = /It takes: (.*)\./.exec(answer.text)?.[1]?.split(", ") ?? [];
       expect(takes.sort()).toEqual(props.sort());
-      // A tool with required arguments refuses a call without them.
       if ((tool.inputSchema.required ?? []).length > 0) {
         const missing = await runGuideBuilderTool(draft, tool.name, {});
         expect(missing.text).toContain(`${tool.name} needs \`${tool.inputSchema.required![0]}\``);
@@ -52,7 +50,6 @@ describe("tool definitions", () => {
 
 describe("prompt pieces", () => {
   test("every passage the builder methodology rewrites is still in the source prompt", () => {
-    // If this fails the in-app methodology changed: update the rewrite pair in guide-builder-tools.ts.
     for (const passage of GUIDE_BUILDER_METHODOLOGY_SOURCE_PASSAGES) expect(GUIDE_REVIEW_PROMPT).toContain(passage);
   });
 
@@ -70,7 +67,6 @@ describe("prompt pieces", () => {
     expect(m).not.toMatch(/\bdiffs\b/);
     expect(m).not.toContain("unplacedFiles");
     expect(m).not.toMatch(/JSON|split it into two/);
-    // The builder keeps a file whole, in one chapter.
     expect(m).toContain("A file\nbelongs to exactly one chapter, whole");
     expect(m).toContain("`guide_add_chapter`");
     expect(m).toContain("`guide_place_file`");

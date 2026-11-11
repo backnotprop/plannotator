@@ -1,16 +1,3 @@
-/**
- * Contract for the host-facing raw-HTML anchor helpers.
- *
- * `buildPersistedHtmlAnchor`: a host persists what it gets back, so the
- * failures to catch are (1) an in-bounds anchor being rewritten (a stored
- * anchor that no longer equals the composed one breaks host fingerprints),
- * (2) the product cap and the byte budget being confused for each other in
- * the drop counts, and (3) the budget eating the quote before the extras.
- *
- * `projectHostThreads`: the output order IS the marker numbering, so the
- * failures to catch are a reordered or dropped row, a resolved row painting,
- * and an anchor-only row being demoted to a document-level comment.
- */
 import { describe, expect, test } from "bun:test";
 import {
   buildPersistedHtmlAnchor,
@@ -26,8 +13,6 @@ const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)
 
 describe("buildPersistedHtmlAnchor", () => {
   test("an anchor already within every bound comes back byte-identical", () => {
-    // Kept-target key order is text, label, anchor (the reference host's
-    // wire order), so a stored anchor's serialization is stable on adoption.
     const input = {
       originalText: "Quoted text with an emoji \u{1F600}",
       htmlAnchor: { selector: "#hero > p:nth-of-type(2)", tagName: "p", text: "Quoted", point: { x: 0.25, y: 0.75 } },
@@ -41,7 +26,6 @@ describe("buildPersistedHtmlAnchor", () => {
     expect(result.droppedTargets).toBe(0);
     expect(result.capDroppedTargets).toBe(0);
     expect(result.sizeDroppedTargets).toBe(0);
-    // A composer-ordered target (label first) is re-keyed to the wire order.
     const reordered = buildPersistedHtmlAnchor({
       originalText: "q",
       htmlAdditionalTargets: [{ label: "Button", text: "Go", anchor: { selector: "#go", tagName: "button" } }],
@@ -50,8 +34,6 @@ describe("buildPersistedHtmlAnchor", () => {
   });
 
   test("rows without elementContext serialize byte-identically and pin wire fingerprint", () => {
-    // Failure caught: changing the serialization format or introducing undefined/extra keys
-    // for rows that do not carry elementContext, which breaks host wire fingerprints.
     const withoutContext = {
       originalText: "Text quote",
       htmlAnchor: { selector: "p.lead", tagName: "p", text: "Text" },
@@ -64,7 +46,6 @@ describe("buildPersistedHtmlAnchor", () => {
     expect(Object.keys(result.anchor)).toEqual(["originalText", "htmlAnchor", "htmlAdditionalTargets"]);
     expect("elementContext" in result.anchor).toBe(false);
 
-    // When elementContext IS present, it serializes strictly after htmlAdditionalTargets
     const withContext = {
       ...withoutContext,
       elementContext: { tag: "p", id: "lead-para" },
@@ -79,8 +60,6 @@ describe("buildPersistedHtmlAnchor", () => {
   });
 
   test("shed order: per-target contexts shed first, then primary context, before dropping targets under small maxBytes", () => {
-    // Failure caught: dropping targets prematurely while expendable contexts remain,
-    // losing user-selected targets instead of shedding descriptive context.
     const targetContext1 = { tag: "button", path: "body > form > button:nth-of-type(1)", outline: "<button>1</button>" };
     const targetContext2 = { tag: "button", path: "body > form > button:nth-of-type(2)", outline: "<button>2</button>" };
     const primaryContext = { tag: "form", path: "body > form#action-form", outline: "<form>…</form>" };
@@ -95,7 +74,6 @@ describe("buildPersistedHtmlAnchor", () => {
       elementContext: primaryContext,
     };
 
-    // Full anchor with all contexts
     const full = buildPersistedHtmlAnchor(source);
     const fullBytes = bytes(full.anchor);
     expect(full.anchor.elementContext).toBeDefined();
@@ -103,18 +81,15 @@ describe("buildPersistedHtmlAnchor", () => {
     expect(full.anchor.htmlAdditionalTargets?.[1]?.context).toBeDefined();
     expect(full.anchor.htmlAdditionalTargets?.length).toBe(2);
 
-    // Budget just small enough to force shedding the last target's context
     const budget1 = fullBytes - 30;
     const res1 = buildPersistedHtmlAnchor(source, { maxBytes: budget1 });
     expect(bytes(res1.anchor)).toBeLessThanOrEqual(budget1);
     expect(res1.anchor.htmlAdditionalTargets?.length).toBe(2);
     expect(res1.anchor.htmlAdditionalTargets?.[0]?.context).toBeDefined();
-    // Last target's context was shed first
     expect(res1.anchor.htmlAdditionalTargets?.[1]?.context).toBeUndefined();
     expect(res1.anchor.elementContext).toBeDefined();
     expect(res1.droppedTargets).toBe(0);
 
-    // Budget small enough to shed all per-target contexts and primary context, but keep targets
     const baseWithoutContexts = buildPersistedHtmlAnchor({
       originalText: source.originalText,
       htmlAnchor: source.htmlAnchor,
@@ -126,14 +101,12 @@ describe("buildPersistedHtmlAnchor", () => {
     const budgetNoContexts = bytes(baseWithoutContexts.anchor) + 10;
     const res2 = buildPersistedHtmlAnchor(source, { maxBytes: budgetNoContexts });
     expect(bytes(res2.anchor)).toBeLessThanOrEqual(budgetNoContexts);
-    // Both target contexts and primary context shed, but targets remain
     expect(res2.anchor.htmlAdditionalTargets?.length).toBe(2);
     expect(res2.anchor.htmlAdditionalTargets?.[0]?.context).toBeUndefined();
     expect(res2.anchor.htmlAdditionalTargets?.[1]?.context).toBeUndefined();
     expect(res2.anchor.elementContext).toBeUndefined();
     expect(res2.droppedTargets).toBe(0);
 
-    // Even smaller budget: now targets are dropped from the end
     const budgetDropTarget = bytes(baseWithoutContexts.anchor) - 20;
     const res3 = buildPersistedHtmlAnchor(source, { maxBytes: budgetDropTarget });
     expect(bytes(res3.anchor)).toBeLessThanOrEqual(budgetDropTarget);
@@ -171,9 +144,6 @@ describe("buildPersistedHtmlAnchor", () => {
   });
 
   test("the byte budget truncates the quote to its useful floor before shedding targets", () => {
-    // 16 in-bounds targets of 400 chars each (~6.9 KB) plus a 12 KB quote
-    // overflow the default 16 KiB budget by well under the quote's slack
-    // above the 400-char floor, so the quote alone absorbs the squeeze.
     const targets = Array.from({ length: 16 }, (_, i) => ({
       label: `Target ${i}`,
       text: "t".repeat(400),
@@ -187,7 +157,6 @@ describe("buildPersistedHtmlAnchor", () => {
     expect(result.anchor.htmlAdditionalTargets?.length).toBe(16);
     expect(result.sizeDroppedTargets).toBe(0);
     expect(result.capDroppedTargets).toBe(0);
-    // A prefix, so text-search restore still matches it in the document.
     expect(result.anchor.originalText.length).toBeGreaterThanOrEqual(400);
     expect("q".repeat(12_000).startsWith(result.anchor.originalText)).toBe(true);
   });
@@ -203,7 +172,6 @@ describe("buildPersistedHtmlAnchor", () => {
       { maxBytes: 4096 },
     );
     expect(bytes(result.anchor)).toBeLessThanOrEqual(4096);
-    // The quote survives at its floor: the squeeze cost targets, not the quote.
     expect(result.anchor.originalText).toBe("q".repeat(400));
     const kept = result.anchor.htmlAdditionalTargets ?? [];
     expect(kept.length).toBeGreaterThan(0);
@@ -230,7 +198,7 @@ describe("buildPersistedHtmlAnchor", () => {
   });
 
   test("quote truncation never splits a surrogate pair", () => {
-    const quote = "\u{1F600}".repeat(9_000); // 18,000 UTF-16 units, 4 bytes each
+    const quote = "\u{1F600}".repeat(9_000);
     const result = buildPersistedHtmlAnchor({ originalText: quote });
     expect(bytes(result.anchor)).toBeLessThanOrEqual(DEFAULT_HTML_ANCHOR_MAX_BYTES);
     const last = result.anchor.originalText.charCodeAt(result.anchor.originalText.length - 1);
@@ -267,16 +235,11 @@ describe("projectHostThreads", () => {
   });
 
   test("documentLevel: 'unanchored' keeps nothing-restorable rows as textless page COMMENTs", () => {
-    // The host that treats a document-level note as a comment that lost its
-    // place opts in; the row then has an empty quote and no anchor, which is
-    // exactly what the viewer's unanchored union reports.
     const byId = new Map(projectHostThreads(rows, { documentLevel: "unanchored" }).map((a) => [a.id, a]));
     expect(byId.get("t4")).toMatchObject({ type: "COMMENT", originalText: "" });
     expect(byId.get("t4")?.htmlAnchor).toBeUndefined();
-    // Anchored and quoted rows are untouched by the mode.
     expect(byId.get("t3")?.type).toBe("COMMENT");
     expect(byId.get("t1")?.type).toBe("COMMENT");
-    // The default and the explicit 'global' agree.
     expect(projectHostThreads(rows, { documentLevel: "global" })).toEqual(projectHostThreads(rows));
   });
 
@@ -319,8 +282,6 @@ describe("projectHostThreads", () => {
   });
 
   test("projection carries validated primary elementContext and target contexts", () => {
-    // Failure caught: host panels and copy actions dropping elementContext and per-target
-    // context during projection from stored host rows onto viewer annotations.
     const threadWithContext: HostThread = {
       id: "ctx1",
       originalText: "Quoted",
@@ -353,7 +314,6 @@ describe("projectHostThreads", () => {
       id: "s1",
     });
 
-    // Malformed context fails closed to undefined without dropping the annotation
     const threadWithGarbage: HostThread = {
       id: "ctx2",
       originalText: "Quoted 2",
@@ -379,8 +339,6 @@ describe("projectHostThreads", () => {
 
 describe("parseHtmlElementContext", () => {
   test("accepts what the bridge builds and fails closed on garbage", () => {
-    // Failure caught: forged or malformed bridge context messages crashing the host
-    // or injecting unvalidated page-controlled content into storage.
     expect(parseHtmlElementContext(null)).toBeUndefined();
     expect(parseHtmlElementContext(undefined)).toBeUndefined();
     expect(parseHtmlElementContext("not-an-object")).toBeUndefined();
@@ -388,7 +346,6 @@ describe("parseHtmlElementContext", () => {
     expect(parseHtmlElementContext({ tag: "" })).toBeUndefined();
     expect(parseHtmlElementContext({ tag: "   " })).toBeUndefined();
 
-    // Valid context with lowercased tag and parsed fields
     const valid = parseHtmlElementContext({
       tag: "BUTTON",
       id: "submit-btn",
@@ -413,13 +370,10 @@ describe("parseHtmlElementContext", () => {
     expect(valid?.path).toBe("body > form > button");
     expect(valid?.role).toBe("button");
     expect(valid?.name).toBe("Submit form");
-    // Non-allowlisted attribute onclick was dropped
     expect(valid?.attrs).toEqual([["type", "submit"], ["aria-label", "Submit form"]]);
     expect(valid?.text).toBe("Submit");
-    // Fenced backticks defused
     expect(valid?.outline).not.toContain("```");
     expect(valid?.outline).toContain("'''");
-    // Children floored
     expect(valid?.children).toBe(1);
     expect(valid?.rect).toEqual({ x: 10, y: 20, w: 100, h: 40, vw: 1280, vh: 800 });
     expect(valid?.landmark).toBe("main");
@@ -427,16 +381,13 @@ describe("parseHtmlElementContext", () => {
     expect(valid?.component).toBe("data-component=SubmitBtn");
     expect(valid?.page).toEqual({ url: "/checkout?step=2", title: "Checkout" });
 
-    // Non-finite rect is dropped whole
     const badRect = parseHtmlElementContext({ tag: "div", rect: { x: NaN, y: 0, w: 10, h: 10, vw: 100, vh: 100 } });
     expect(badRect?.rect).toBeUndefined();
 
-    // Unknown keys dropped
     const extraKeys = parseHtmlElementContext({ tag: "div", unknownKey: "evil", innerHTML: "<script>" });
     expect(extraKeys).toEqual({ tag: "div" });
     expect("unknownKey" in (extraKeys ?? {})).toBe(false);
 
-    // Bounds enforced: contextBytes <= MAX_ELEMENT_CONTEXT_BYTES
     const huge = "x".repeat(5000);
     const oversized = parseHtmlElementContext({
       tag: "div",
@@ -450,14 +401,11 @@ describe("parseHtmlElementContext", () => {
     expect(bytes(oversized)).toBeLessThanOrEqual(MAX_ELEMENT_CONTEXT_BYTES);
   });
 
-  // Failure to catch: an image pin on a long live-app route whose context
-  // only fits WITHOUT `sourceName` being dropped whole (undefined) because
-  // `sourceName` was not in the shed order.
+  // Failure to catch: an image pin on a long live-app route whose context only fits WITHOUT
+  // `sourceName` being dropped whole (undefined) because `sourceName` was not in the shed order.
   test("an oversized context sheds sourceName before it drops the whole context", () => {
     const base = { tag: "img", role: "img", name: "Hero" };
     const sourceName = "hero-banner-with-a-long-name.webp";
-    // A route sized so the context fits with a few bytes to spare, then
-    // overflows once sourceName rides along.
     const slack = 8;
     const urlLength = MAX_ELEMENT_CONTEXT_BYTES - bytes({ ...base, page: { url: "" } }) - slack;
     const page = { url: `/${"r".repeat(urlLength - 1)}` };
@@ -470,7 +418,6 @@ describe("parseHtmlElementContext", () => {
     expect(shed?.page?.url).toBe(page.url);
     expect(shed?.name).toBe("Hero");
 
-    // With room to spare it is kept.
     expect(parseHtmlElementContext({ ...base, sourceName, page: { url: "/home" } })?.sourceName).toBe(sourceName);
   });
 });

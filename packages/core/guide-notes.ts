@@ -1,11 +1,3 @@
-/**
- * Notes a guided review's author pins to lines of a file it places
- * (`sections[].diffs[].notes`, guide snapshot version 4; approval
- * "inbox-context-notes"): the note's shape, its read and its hunk check.
- * Browser-safe and free of the Inbox, so the guide format (and the Pi
- * extension, which vendors it) can read version 4.
- */
-
 import { isLineRangeInPatch, parseDiffToFiles } from "./diff-files";
 
 /** A side of a diff a note sits on: added and unchanged lines are `new`, removed lines `old`. */
@@ -13,12 +5,9 @@ export type InboxNoteSide = "new" | "old";
 
 /** One note the guided review's author pins to lines of a file it places (`sections[].diffs[].notes`). */
 export interface GuideDiffNote {
-  /** First and last line, numbered as the patch's hunk headers number that side. */
   lineStart: number;
   lineEnd: number;
-  /** Absent: `new`. */
   side?: InboxNoteSide;
-  /** One or two plain sentences. */
   text: string;
 }
 
@@ -38,11 +27,7 @@ export function inboxNoteLinesWord(side: InboxNoteSide, start: number, end: numb
   return side === "old" ? `removed ${range}` : range;
 }
 
-/**
- * Reads one diff reference's `notes` as an agent sent them. Problems are
- * returned in words that name the note (`sections[1].diffs[0].notes[2]`);
- * a note is kept only when it has none.
- */
+/** Reads one diff reference's `notes` as an agent sent them. */
 export function readGuideDiffNotes(input: unknown, path: string): { notes: GuideDiffNote[]; problems: string[] } {
   const problems: string[] = [];
   const notes: GuideDiffNote[] = [];
@@ -78,9 +63,8 @@ export interface GuideNotesInput {
 }
 
 /**
- * What is wrong with a guide's notes against its patch: each note must sit
- * inside one hunk of its file, on the side it names. Empty when nothing is.
- * Each problem names the note and its lines.
+ * What is wrong with a guide's notes against its patch: each note must sit inside one hunk of its
+ * file, on the side it names.
  */
 export function checkGuideNotes(guide: GuideNotesInput, rawPatch: string): string[] {
   const files = new Map(parseDiffToFiles(rawPatch).map((file) => [file.path, file.patch] as const));

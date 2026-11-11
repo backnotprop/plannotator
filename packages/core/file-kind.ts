@@ -1,41 +1,19 @@
-/**
- * The kind of a changed file: code, tests, or generated. One rule for the code
- * review file tree, diff headers and Guided Reviews (approved design record
- * "review-file-kinds"). Pure and browser-safe: it reads the path only.
- *
- * - **Generated:** the host's generated set when it has one (the review
- *   server's `generatedFiles`, which already applies `.gitattributes`);
- *   without one, the built-in name list below.
- * - **Tests:** a test file name (`*.test.<code>`, `*.spec.<code>`,
- *   `*.cy.<code>`, `*.e2e.<code>`, `*.test-d.ts`, `*_test.<code>`,
- *   `test_*.py`, `conftest.py`, `tests.py`, `*.stories.*`, `*.snap`) or a file
- *   under a test folder (`__tests__`, `test`, `tests`, `spec`, `e2e`,
- *   `fixtures`, `src/<name>Test`, `testFixtures`, `Acme.Tests`, ...).
- * - **Code:** everything else, docs and config included.
- */
-
 export type FileKind = 'code' | 'test' | 'generated';
 
 /** Display order of the kinds: code first, then tests, then generated. */
 export const FILE_KINDS: readonly FileKind[] = ['code', 'test', 'generated'];
 
 /**
- * Built-in name-based generated defaults: files GitHub's linguist collapses
- * without any `.gitattributes`. Exact entries match a path's last segment
- * verbatim; `*.`-prefixed entries match by extension suffix (at least one
- * character before the suffix, so a bare `.min.js` dotfile does not match).
- * The review server refines this list with `.gitattributes`
- * (`packages/shared/generated-files.ts`).
+ * Built-in name-based generated defaults: files GitHub's linguist collapses without any
+ * `.gitattributes`.
  */
 export const DEFAULT_GENERATED_PATTERNS: readonly string[] = [
-  // JavaScript ecosystems
   'package-lock.json',
   'npm-shrinkwrap.json',
   'yarn.lock',
   'pnpm-lock.yaml',
   'bun.lock',
   'bun.lockb',
-  // Other language ecosystems
   'Cargo.lock',
   'Gemfile.lock',
   'composer.lock',
@@ -45,7 +23,6 @@ export const DEFAULT_GENERATED_PATTERNS: readonly string[] = [
   'go.sum',
   'flake.lock',
   'packages.lock.json',
-  // Build artifacts
   '*.min.js',
   '*.min.css',
   '*.map',
@@ -79,33 +56,15 @@ const TEST_FOLDERS = new Set([
   'e2e',
   'fixtures',
   'testdata',
-  'testfixtures', // Gradle test fixtures (src/testFixtures)
+  'testfixtures',
 ]);
 
-/**
- * Test folders by shape rather than name:
- * - Gradle / Kotlin source sets `src/<name>Test` (`androidTest`, `commonTest`,
- *   `integrationTest`), only directly under `src`;
- * - .NET test projects `Acme.Tests`, `Acme.UnitTests`.
- */
 const SOURCE_SET_TEST = /^[a-z][A-Za-z0-9]*Test$/;
 const DOTNET_TEST_PROJECT = /^.+\.(Unit)?Tests$/;
 
-/** Extensions of source code, for the name markers below: a marker counts only
- *  before one of these, so `openapi.spec.yaml` and `load_test.md` stay code. */
 const CODE_EXT =
   '(?:[cm]?[jt]sx?|rb|py|go|rs|java|kts?|swift|cs|fs|ex|exs|php|scala|dart|groovy|clj[cs]?|lua|erl|hs|ml|jl|r|c|cc|cpp|h|hpp|m|mm|vue|svelte)';
 
-/**
- * Test file names. Each marker needs a name before it, so `test.ts`,
- * `contest.ts`, `latest.ts` and `testing-library.config.js` stay code:
- * - `foo.test.ts`, `foo.spec.rb`, `login.cy.ts`, `app.e2e.ts`, `types.test-d.ts`
- *   (the marker followed by a code extension);
- * - Go and Python `foo_test.go`, `foo_test.py` (a code extension too);
- * - Storybook `Button.stories.tsx`, any extension;
- * - Python `test_foo.py`, pytest `conftest.py`, Django `tests.py`;
- * - Jest snapshots `foo.snap`.
- */
 const TEST_NAME = new RegExp(
   `^[^.].*\\.(?:test|spec|cy|e2e|test-d)\\.${CODE_EXT}$|^.+_test\\.${CODE_EXT}$|` +
     `^[^.].*\\.stories\\.[^/]+$|^test_.+\\.py$|^(?:conftest|tests)\\.py$|^.+\\.snap$`,
@@ -125,10 +84,7 @@ export function isTestPath(path: string): boolean {
   );
 }
 
-/**
- * The kind of one changed file. `generated` is the host's generated set when
- * it has one; without it the built-in name list decides.
- */
+/** The kind of one changed file. */
 export function fileKind(path: string, generated?: ReadonlySet<string> | null): FileKind {
   if (generated ? generated.has(path) : isDefaultGeneratedPath(path)) return 'generated';
   return isTestPath(path) ? 'test' : 'code';
@@ -140,8 +96,8 @@ export interface FileKindGroup<T> {
 }
 
 /**
- * Split items into kind groups, in `FILE_KINDS` order, keeping each item's
- * original order within its group. Empty groups are left out.
+ * Split items into kind groups, in `FILE_KINDS` order, keeping each item's original order within
+ * its group.
  */
 export function groupByFileKind<T>(
   items: readonly T[],

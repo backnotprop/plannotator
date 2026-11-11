@@ -1,17 +1,3 @@
-/**
- * The diagram anchor codec, pure half.
- *
- * What regresses if these fail:
- * - the anchor a viewer writes is not what `parseDiagramAnchor` reads back,
- *   so every diagram comment lists as unanchored on the next load;
- * - a foreign, partial or unversioned value throws instead of degrading to
- *   null (the standing rule: unanchored but listed) — the external-annotation
- *   POST, the feedback archive and the export all run this parser on data
- *   another writer produced;
- * - `diagramSourceLine` points at the wrong line (`D` matching `DR`), so the
- *   Source pane's gutter mark and an agent's grep land on the wrong text;
- * - the export's location line loses the part id an agent greps the fence for.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   buildDiagramAnchor,
@@ -94,7 +80,6 @@ describe('the wire codec', () => {
     expect(diagramTargetName(node)).toBe('node D');
     expect(diagramTargetName(edge)).toBe('edge D → M');
     expect(diagramTargetName({ family: 'state', kind: 'edge', id: 'edge3', label: '' })).toBe('edge edge3');
-    // The export line names the label, the id in parentheses, and the line.
     expect(diagramAnchorLocationLine(buildDiagramAnchorValue(node, [4, 4]))).toBe('Diagram node Approve? (D), line 4');
     expect(diagramAnchorLocationLine(buildDiagramAnchorValue(edge, [5, 6]))).toBe('Diagram edge Yes (D → M), lines 5–6');
     expect(diagramAnchorLocationLine(buildDiagramAnchorValue({ ...edge, label: '' }, null))).toBe('Diagram edge D → M');
@@ -126,8 +111,6 @@ describe('diagramSourceLine', () => {
     expect(diagramSourceLine(source, { family: 'flowchart', kind: 'node', id: 'DR', label: '' })).toEqual([6, 6]);
     expect(diagramSourceLine(source, { family: 'flowchart', kind: 'node', id: 'Z', label: '' })).toBeNull();
     expect(diagramSourceLine(source, { family: 'state', kind: 'edge', id: 'edge2', label: '' })).toBeNull();
-    // Plain string scanning: an id with a regex metacharacter is a token,
-    // not a pattern.
     expect(lineMentions('  A.b(1) --> C', 'A.b(1)')).toBe(true);
     expect(lineMentions('  Ab1 --> C', 'A.b(1)')).toBe(false);
   });
@@ -161,8 +144,6 @@ describe('the sequence family and the whole-diagram kind (additive within v: 1)'
   });
 
   test('a whole-diagram anchor has no id, spans the source, and round-trips', () => {
-    // What regresses: a click that resolves no part does nothing, or the
-    // parser refuses the id-less anchor and the comment lists as unanchored.
     const whole: DiagramTarget = { family: 'sequence', kind: 'diagram', label: diagramFirstSourceLine(source) };
     expect(whole.label).toBe('sequenceDiagram');
     expect(diagramSourceLine(source, whole)).toEqual([1, 10]);
@@ -172,7 +153,6 @@ describe('the sequence family and the whole-diagram kind (additive within v: 1)'
     expect(diagramTargetName(whole)).toBe('whole diagram');
     expect(sameTarget(whole, { family: 'other', kind: 'diagram', label: 'pie' })).toBe(true);
     expect(sameTarget(whole, node)).toBe(false);
-    // A part still needs its id: only the whole-diagram kind may omit it.
     expect(parseDiagramAnchor({ v: 1, family: 'sequence', kind: 'node', label: 'x' })).toBeNull();
   });
 });

@@ -1,15 +1,3 @@
-/**
- * The guide builder's tools, as an MCP server lists them: names, short
- * descriptions and JSON Schemas, from one place, so the VS Code extension's
- * MCP server and (later) the web app's job runner hand agents the same text.
- * The descriptions are the agent's reference: there is no schema dump in the
- * prompt (approved spec "Guided Reviews in VS Code", sections 4.3 and 4.4).
- *
- * Also the prompt pieces that go with the tools: the methodology without the
- * one-shot "keep exploration short" paragraph, and the paragraph on the
- * guide's shape. Browser-safe, no dependencies beyond core.
- */
-
 import { GUIDE_REVIEW_PROMPT } from "./guide-prompt";
 
 export const GUIDE_BUILDER_TOOL_NAMES = [
@@ -38,11 +26,9 @@ export interface GuideBuilderJsonSchema {
 
 export interface GuideBuilderToolDefinition {
   readonly name: GuideBuilderToolName;
-  /** Human title (MCP `title`). */
   readonly title: string;
   readonly description: string;
   readonly inputSchema: GuideBuilderJsonSchema;
-  /** MCP tool annotations. */
   readonly annotations: { readonly readOnlyHint: boolean; readonly destructiveHint: boolean; readonly idempotentHint: boolean };
 }
 
@@ -53,7 +39,6 @@ const LINKS =
 
 const edit = { readOnlyHint: false, destructiveHint: false, idempotentHint: false } as const;
 
-/** A chapter's one diagram (AGENT TEXT: awaits the owner's OK of these words). */
 const CHAPTER_DIAGRAM = {
   type: "object",
   description:
@@ -86,7 +71,6 @@ export const GUIDE_BUILDER_TOOLS: readonly GuideBuilderToolDefinition[] = [
   {
     name: "guide_set_overview",
     title: "Set the overview",
-    // The overview no longer offers a diagram (diagrams go in chapters); the builder still reads one an older draft has.
     description: `Set the overview shown above the chapters: a few sentences on how the change fits together. Replaces any earlier overview. ${LINKS}`,
     inputSchema: {
       type: "object",
@@ -246,11 +230,6 @@ export const GUIDE_BUILDER_PROMPT_PARAGRAPH =
 export const GUIDE_BUILDER_RESUME_PARAGRAPH =
   "A draft of this guide already exists. Continue it: call `guide_read` first, then finish what is left.";
 
-/**
- * Exact passages of `GUIDE_REVIEW_PROMPT` and what the builder prompt says
- * instead. `guide-builder-tools.test.ts` fails when a passage is no longer
- * found (the methodology changed): update the pair, never the source prompt.
- */
 const BUILDER_METHODOLOGY_REWRITES: ReadonlyArray<readonly [string, string]> = [
   [
     "### sections\nEach section is a chapter of the review: a title, an overview, and one or\nmore diff references.",
@@ -296,7 +275,6 @@ function deriveBuilderMethodology(prompt: string): string {
   const speedEnd = prompt.indexOf("## Output structure");
   let text = speedStart >= 0 && speedEnd > speedStart ? prompt.slice(0, speedStart) + prompt.slice(speedEnd) : prompt;
   for (const [from, to] of BUILDER_METHODOLOGY_REWRITES) text = text.replace(from, to);
-  // What is left says "section" for what the builder calls a chapter.
   return text
     .replace(/\bsections\b/g, "chapters")
     .replace(/\bSections\b/g, "Chapters")
@@ -304,23 +282,11 @@ function deriveBuilderMethodology(prompt: string): string {
     .replace(/\bSection\b/g, "Chapter");
 }
 
-/**
- * The organizer methodology for an agent that reads the change itself and
- * builds the guide with the tools: `GUIDE_REVIEW_PROMPT` (left byte for byte
- * as the in-app jobs send it) without its "Speed" section (the one-shot
- * exploration limit), with the output described as chapters and files placed
- * through the tools instead of JSON `sections`, `diffs` and `unplacedFiles`,
- * and without the rule to split one file across two sections, which the
- * builder (one chapter per file, like format version 1) refuses.
- */
 export const GUIDE_BUILDER_METHODOLOGY = deriveBuilderMethodology(GUIDE_REVIEW_PROMPT);
 
 export interface GuideBuilderPromptInput {
-  /** What to review: the PR URL, `base..head` (plus "and the uncommitted changes"), or a stack's branches. */
   readonly target: string;
-  /** The reader's instructions for this guide, if any. */
   readonly instructions?: string;
-  /** True when continuing a saved draft. */
   readonly resume?: boolean;
 }
 

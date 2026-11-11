@@ -21,7 +21,6 @@ describe("diagramRenderKindForPath", () => {
 	test("is not fooled by a lookalike name or another text extension", () => {
 		expect(diagramRenderKindForPath("notes.md")).toBeNull();
 		expect(diagramRenderKindForPath("deploy.yaml")).toBeNull();
-		// .mmd must match the extension, not an infix.
 		expect(diagramRenderKindForPath("flow.mmd.bak")).toBeNull();
 		expect(diagramRenderKindForPath("dotfiles")).toBeNull();
 		expect(diagramRenderKindForPath(".env")).toBeNull();
@@ -59,7 +58,6 @@ describe("shouldStripFrontmatter", () => {
 		expect(shouldStripFrontmatter("flow.mmd")).toBe(false);
 		expect(shouldStripFrontmatter("flow.mermaid")).toBe(false);
 		expect(shouldStripFrontmatter("graph.dot")).toBe(false);
-		// The markdown branch is unchanged.
 		expect(shouldStripFrontmatter("notes.md")).toBe(true);
 	});
 });

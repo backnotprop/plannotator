@@ -49,7 +49,6 @@ export interface SourceSaveRequest {
 	baseMtimeMs?: number;
 	baseEol?: SourceFileEol;
 	allowMissingBase?: boolean;
-	/** The stale-tab guard's nonce (server-session.ts); absent from older clients. */
 	serverSession?: string;
 }
 
@@ -77,11 +76,6 @@ export type SourceSaveResponse =
 			message: string;
 	  };
 
-/**
- * The refusal a source save gets once the review is decided (feedback,
- * approve, Close, or the agent's close), answered with status 409: a tab left
- * open after the decision can no longer write the reviewer's files.
- */
 export function sourceSaveDecidedResponse(): SourceSaveResponse & { decided: true } {
 	return {
 		ok: false,

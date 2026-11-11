@@ -31,10 +31,8 @@ describe('Inbox attachment names and kinds', () => {
 
   test('the dotenv family is the one name refused; any other name is taken', () => {
     expect(inboxAttachmentNameRefusal('/repo/.env')).toContain('.env');
-    // NTFS reads these as the real .env.
     for (const name of ['.env::$DATA', '.env:x', 'config/.env .', '.env.', '.ENV.LOCAL::$DATA']) expect([name, inboxAttachmentNameRefusal(name)]).toEqual([name, expect.stringContaining('never attached')]);
     expect(inboxAttachmentNameRefusal('notes.md')).toBeNull();
-    // The dotenv family under any other name is refused too; the .env.example doc is not.
     expect(inboxAttachmentNameRefusal('/repo/.env.ts')).toContain('never attached');
     expect(inboxAttachmentNameRefusal('/repo/.env.local')).toContain('never attached');
     expect(inboxAttachmentNameRefusal('/repo/.env.local.sh')).toContain('never attached');
@@ -81,7 +79,6 @@ describe('Inbox attachment names and kinds', () => {
     expect(inboxAttachmentKindLabel('audio', 'take.ogg', 'audio/ogg')).toBe('Ogg audio');
     expect(inboxAttachmentKindLabel('audio', 'voice.webm', 'audio/webm')).toBe('WebM audio');
     expect(inboxAttachmentKindLabel('audio', 'clip')).toBe('Audio');
-    // A recording's meta is its length alone.
     expect(inboxVideoMeta({ duration_ms: 83_000 })).toBe('1:23');
   });
 

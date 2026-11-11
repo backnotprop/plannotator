@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { derivePersonThreadSubject, PERSON_THREAD_SUBJECT_COLUMNS } from "./inbox-questions";
 import { deriveInboxSubject } from "./inbox-questions";
 
-/** Display columns as the rule counts them (CJK and emoji two). */
 function columns(text: string): number {
   let n = 0;
   for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
@@ -17,7 +16,6 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     const body =
       "I want to explore what adding a board would look like. Kanban specifically. And the kanban needs to be well thought out, with a column for every state a thread can be in, and drag and drop between them so I can move things along.";
     expect(derivePersonThreadSubject(body)).toBe("I want to explore what adding a board would look like");
-    // Agents' subjects keep today's rule: the whole first line, cut at 120.
     expect(deriveInboxSubject(body, [])!.length).toBe(120);
   });
 
@@ -32,7 +30,6 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     const subject = derivePersonThreadSubject(body)!;
     expect(subject).toBe("the inbox needs a way to see every thread by state…");
     expect(columns(subject)).toBeLessThanOrEqual(PERSON_THREAD_SUBJECT_COLUMNS);
-    // Never ends on a dangling small word before the ellipsis.
     expect(derivePersonThreadSubject("please look at the way the list sorts rows when two threads have the same time and the")).not.toMatch(/\s(the|and|a)…$/);
   });
 
@@ -49,11 +46,8 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     expect(derivePersonThreadSubject("So, I want a board view for the inbox.")).toBe("I want a board view for the inbox");
     expect(derivePersonThreadSubject("okay so um the toolbar covers the first line of the file.")).toBe("The toolbar covers the first line of the file");
     expect(derivePersonThreadSubject("hey can you rerun the e2e suite")).toBe("Can you rerun the e2e suite");
-    // An agent's name needs no comma after it (Qwen Code is one the Inbox connects).
     expect(derivePersonThreadSubject("Hey Qwen can you rerun the e2e suite")).toBe("Can you rerun the e2e suite");
-    // "So" is kept where it is part of what the person says.
     expect(derivePersonThreadSubject("So many tests fail on CI today.")).toBe("So many tests fail on CI today");
-    // A greeting alone is still a name.
     expect(derivePersonThreadSubject("Hey")).toBe("Hey");
   });
 
@@ -74,7 +68,6 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     const long = derivePersonThreadSubject("カンバン方式でスレッドの状態ごとに列を作りドラッグで移動できるようにしたいのですがどう思いますかちょっと考えてみてください")!;
     expect(long.endsWith("…")).toBe(true);
     expect(columns(long)).toBeLessThanOrEqual(PERSON_THREAD_SUBJECT_COLUMNS);
-    // Never inside a character: a long run of emoji (each one cluster) is cut between clusters.
     const emoji = derivePersonThreadSubject("👨‍👩‍👧‍👦".repeat(40))!;
     expect(emoji.replace("…", "").length % "👨‍👩‍👧‍👦".length).toBe(0);
     expect(derivePersonThreadSubject("한국어로 된 긴 문장도 단어 경계에서 잘라야 합니다 칸반 보드를 추가하면 어떻게 될지 살펴보고 싶어요")!.endsWith("…")).toBe(true);
@@ -87,7 +80,6 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     expect(derivePersonThreadSubject("- [ ] add a board view")).toBe("add a board view");
     expect(derivePersonThreadSubject("> Quote me on this.")).toBe("Quote me on this");
     expect(derivePersonThreadSubject("```ts\nconst x = 1\n```\n\nWhy does this compile?")).toBe("Why does this compile?");
-    // snake_case and inline code survive.
     expect(derivePersonThreadSubject("Rename `read_thread` to read_threads.")).toBe("Rename read_thread to read_threads");
   });
 
@@ -107,7 +99,6 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
     expect(derivePersonThreadSubject("Hi-DPI screenshots look blurry in the viewer.")).toBe("Hi-DPI screenshots look blurry in the viewer");
     expect(derivePersonThreadSubject("Well-known paths should resolve from the root.")).toBe("Well-known paths should resolve from the root");
     expect(derivePersonThreadSubject("So-called drafts never sync to the phone.")).toBe("So-called drafts never sync to the phone");
-    // A dash with spaces around it still ends a filler.
     expect(derivePersonThreadSubject("So — I want a board view.")).toBe("I want a board view");
   });
 

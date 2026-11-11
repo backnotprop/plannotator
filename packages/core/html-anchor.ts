@@ -1,24 +1,3 @@
-/**
- * Raw-HTML annotation anchors: the pure, host-facing helpers a consumer of
- * `@plannotator/ui`'s HtmlViewer needs on either side of its own storage.
- *
- * - `buildPersistedHtmlAnchor` trims a composed comment's anchor into a
- *   bounded record a host can persist (target cap, byte budget).
- * - `projectHostThreads` projects stored host rows back onto the viewer's
- *   `annotations` prop shape, in the order that becomes the marker numbering.
- * - `parseHtmlElementAnchor` and `parseHtmlElementContext` are the pure,
- *   fail-closed validators both of those run on the way through.
- *
- * Browser-safe and dependency-free (this package is `@plannotator/core`).
- * The types below are structurally identical to `HtmlElementAnchor`,
- * `HtmlAnnotationTarget` and `HtmlElementContext` in `@plannotator/ui/types`,
- * and the caps here ARE the caps enforced at `@plannotator/ui`'s own parent
- * trust boundary (`components/html-viewer/useHtmlAnnotation.ts`), which
- * imports and re-exports these validators rather than keeping its own copy —
- * one definition, never mirrored — so nothing persisted here is ever refused
- * on read.
- */
-
 export interface HtmlAnchorPoint {
   x: number;
   y: number;
@@ -41,38 +20,19 @@ export interface HtmlAnnotationTarget {
 export interface HtmlElementContext {
   tag: string;
   id?: string;
-  /** Author classes, generated/hashed ones skipped; may end in "+N more". */
   classes?: string[];
-  /** Ancestor path, e.g. `body > div#root > header.site-header > nav#site-nav`. */
   path?: string;
-  /** Explicit `role` or the tag's implicit ARIA role. */
   role?: string;
-  /** Accessible name: aria-label, aria-labelledby, alt, title, <label for>, own short text. */
   name?: string;
-  /** Allowlisted attributes in a fixed order (href/src scrubbed of query and fragment). */
   attrs?: Array<[string, string]>;
-  /** Rendered text (innerText), whitespace-collapsed, word-boundary truncated. */
   text?: string;
-  /** Collapsed HTML skeleton: opening tag with allowlisted attributes, then children as bare tags. */
   outline?: string;
-  /** Number of element children (after skipping script/style/template and viewer overlays). */
   children?: number;
-  /** Viewport-relative bounding box plus the viewport it was seen at. */
   rect?: { x: number; y: number; w: number; h: number; vw: number; vh: number };
-  /** Nearest enclosing landmark/region, e.g. `header.site-header "Primary"`. */
   landmark?: string;
-  /** Nearest preceding heading, e.g. `h2 "Usage"`. */
   heading?: string;
-  /** Nearest author component marker, e.g. `data-component=AppNav`. */
   component?: string;
-  /** Live-app sessions only: the route the element was seen on and the page title. */
   page?: { url: string; title?: string };
-  /**
-   * Media elements only: the file the element shows (`team.jpg`,
-   * `data:image/png`), resolved by the bridge the same way the composer quote
-   * names it — `src`, a lazy `data-src`, `srcset`, `<picture><source>`, a
-   * `<video>`'s `<source>` or `poster` — after the query/fragment scrub.
-   */
   sourceName?: string;
 }
 
@@ -84,11 +44,6 @@ export const MAX_HTML_ANCHOR_TAG_LENGTH = 64;
 export const MAX_HTML_ANCHOR_TEXT_LENGTH = 400;
 /** Mirrors `MAX_TARGET_LABEL_LENGTH` in `@plannotator/ui`. */
 export const MAX_HTML_TARGET_LABEL_LENGTH = 64;
-/**
- * Persisted bound for an additional target's display text: the anchor
- * snapshot bound, not the viewer's 10,000-char draft bound (a handful of
- * draft-sized texts alone would blow a 16 KiB anchor budget).
- */
 export const MAX_HTML_TARGET_TEXT_LENGTH = 400;
 /** Mirrors `MAX_ADDITIONAL_TARGETS` in `@plannotator/ui` (the draft cap). */
 export const MAX_HTML_ADDITIONAL_TARGETS = 16;
@@ -96,15 +51,11 @@ export const MAX_HTML_ADDITIONAL_TARGETS = 16;
 export const DEFAULT_HTML_ANCHOR_MAX_BYTES = 16 * 1024;
 /** Serialized bound for one element context (2 KiB of UTF-8 JSON). */
 export const MAX_ELEMENT_CONTEXT_BYTES = 2048;
-/**
- * Cap for live-app page identity strings (mirrors the bridge's own slice).
- * The single definition: `@plannotator/ui`'s parent trust boundary imports
- * and re-exports it from here rather than keeping its own copy.
- */
+/** Cap for live-app page identity strings (mirrors the bridge's own slice). */
 export const MAX_PAGE_URL_LENGTH = 2048;
 const MAX_CONTEXT_TAG_LENGTH = 32;
 const MAX_CONTEXT_ID_LENGTH = 100;
-const MAX_CONTEXT_CLASSES = 9; // 8 + the "+N more" marker
+const MAX_CONTEXT_CLASSES = 9;
 const MAX_CONTEXT_CLASS_LENGTH = 48;
 const MAX_CONTEXT_PATH_LENGTH = 512;
 const MAX_CONTEXT_ROLE_LENGTH = 32;
@@ -119,7 +70,6 @@ const MAX_CONTEXT_LANDMARK_LENGTH = 80;
 const MAX_CONTEXT_HEADING_LENGTH = 130;
 const MAX_CONTEXT_COMPONENT_LENGTH = 100;
 const MAX_CONTEXT_PAGE_TITLE_LENGTH = 200;
-/** The bridge caps the name at 60; headroom for the parent's own collapse. */
 const MAX_CONTEXT_SOURCE_NAME_LENGTH = 80;
 
 /** Attribute names the context may carry (mirrors CONTEXT_ATTRS in the bridge). */
@@ -134,8 +84,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Truncate to at most `max` UTF-16 units without splitting a surrogate pair
- * (a lone high surrogate becomes U+FFFD once UTF-8-encoded on the wire).
+ * Truncate to at most `max` UTF-16 units without splitting a surrogate pair (a lone high surrogate
+ * becomes U+FFFD once UTF-8-encoded on the wire).
  */
 export function truncateSurrogateSafe(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -153,12 +103,7 @@ function parseHtmlAnchorPoint(value: unknown): HtmlAnchorPoint | undefined {
   return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
 }
 
-/**
- * Validate a stored element anchor; `null` fails closed to text-only restore.
- * A malformed `point` is dropped without rejecting the anchor it rides on
- * (the marker then falls back to the element rect's center), the same
- * additive rule the viewer applies to bridge messages.
- */
+/** Validate a stored element anchor; `null` fails closed to text-only restore. */
 export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null {
   if (!isRecord(value)) return null;
   const { selector, tagName, text } = value;
@@ -178,7 +123,6 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
   return { selector, tagName, text, ...(point ? { point } : {}) };
 }
 
-/** Collapse control characters and whitespace runs, then cap. */
 function collapseContextScalar(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const collapsed = value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim();
@@ -186,9 +130,6 @@ function collapseContextScalar(value: unknown, max: number): string | undefined 
   return collapsed.length > max ? truncateSurrogateSafe(collapsed, max) : collapsed;
 }
 
-/** The outline keeps its line breaks (it is fenced on export) but nothing
- *  else: control characters go, each line is whitespace-collapsed, and a
- *  backtick run that could close the export's fence is defused. */
 function collapseContextOutline(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const lines = value
@@ -196,7 +137,6 @@ function collapseContextOutline(value: unknown): string | undefined {
     .replace(/`{3,}/g, "'''")
     .split("\n")
     .map((line) => {
-      // Keep the skeleton's indentation (capped), collapse everything else.
       const indent = (/^ */.exec(line)?.[0] ?? "").slice(0, 12);
       return indent + line.slice(indent.length).replace(/\s+/g, " ").trim();
     })
@@ -212,23 +152,14 @@ function contextBytes(value: unknown): number {
 }
 
 /**
- * Fields an over-budget context sheds, first to last; mirrors `CTX_SHED_ORDER`
- * in the bridge (a test keeps the two in step). `sourceName` goes last: the
- * export heading falls back to the `src` attribute without it, and shedding it
- * is still better than losing the whole context.
+ * Fields an over-budget context sheds, first to last; mirrors `CTX_SHED_ORDER` in the bridge (a
+ * test keeps the two in step).
  */
 export const ELEMENT_CONTEXT_SHED_ORDER: ReadonlyArray<keyof HtmlElementContext> = [
   "outline", "text", "attrs", "classes", "path", "heading", "landmark", "component", "sourceName",
 ];
 
-/**
- * Validate a bridge-posted element context. Pure and fail-closed: returns
- * `undefined` if `value` is not a valid element context or tag is missing/empty.
- * Every scalar is re-collapsed (control characters and whitespace runs),
- * attributes are filtered to the allowlist, and unknown keys are dropped.
- * If the serialized context exceeds MAX_ELEMENT_CONTEXT_BYTES, expendable
- * fields are shed in order until it fits.
- */
+/** Validate a bridge-posted element context. */
 export function parseHtmlElementContext(value: unknown): HtmlElementContext | undefined {
   if (!isRecord(value)) return undefined;
   const tag = collapseContextScalar(value.tag, MAX_CONTEXT_TAG_LENGTH);
@@ -297,7 +228,6 @@ export function parseHtmlElementContext(value: unknown): HtmlElementContext | un
       if (title) context.page.title = title;
     }
   }
-  // Serialized bound: shed the expendable fields in the bridge's order until the whole fits.
   for (const field of ELEMENT_CONTEXT_SHED_ORDER) {
     if (contextBytes(context) <= MAX_ELEMENT_CONTEXT_BYTES) break;
     delete context[field];
@@ -305,13 +235,7 @@ export function parseHtmlElementContext(value: unknown): HtmlElementContext | un
   return contextBytes(context) <= MAX_ELEMENT_CONTEXT_BYTES ? context : undefined;
 }
 
-/**
- * Validate stored additional targets. A target needs its display text; a
- * broken per-target anchor or label is dropped, not fatal (the target still
- * lists in the composer and export; only its marker restore is lost). The
- * count is capped on read too: rows can come from arbitrary API clients, and
- * the viewer slices to its own cap before the bridge anyway.
- */
+/** Validate stored additional targets. */
 export function parseHtmlAdditionalTargets(
   value: unknown,
   maxTargets: number = MAX_HTML_ADDITIONAL_TARGETS,
@@ -339,9 +263,10 @@ export function parseHtmlAdditionalTargets(
   return targets;
 }
 
-/** The anchor record a host persists for a raw-HTML comment: the legacy
- * text quote plus, additively, the durable element fields when the viewer
- * captured them. */
+/**
+ * The anchor record a host persists for a raw-HTML comment: the legacy text quote plus, additively,
+ * the durable element fields when the viewer captured them.
+ */
 export interface PersistedHtmlAnchor {
   originalText: string;
   htmlAnchor?: HtmlElementAnchor;
@@ -350,19 +275,14 @@ export interface PersistedHtmlAnchor {
 }
 
 export interface BuildPersistedHtmlAnchorOptions {
-  /** Byte budget for the serialized (UTF-8 JSON) anchor. Default 16 KiB. */
   maxBytes?: number;
-  /** Product cap on persisted additional targets. Default 16 (the viewer's draft cap). */
   maxTargets?: number;
 }
 
 export interface PersistedHtmlAnchorResult {
   anchor: PersistedHtmlAnchor;
-  /** Every target not persisted: `capDroppedTargets + sizeDroppedTargets`. */
   droppedTargets: number;
-  /** Targets dropped by `maxTargets` (reported against the product cap). */
   capDroppedTargets: number;
-  /** Targets shed to keep the serialized anchor under `maxBytes` (a different reason, said separately). */
   sizeDroppedTargets: number;
 }
 
@@ -370,33 +290,9 @@ function serializedAnchorBytes(anchor: PersistedHtmlAnchor): number {
   return new TextEncoder().encode(JSON.stringify(anchor)).length;
 }
 
-/**
- * The quote length below which the byte budget stops eating the quote and
- * starts shedding targets instead. A 400-unit prefix (the anchor-snapshot
- * bound) is still a solid text-search restore key and panel context line;
- * truncating past it to make room for targets would trade the row's primary
- * anchor text for its extras.
- */
 const MIN_USEFUL_QUOTE_LENGTH = MAX_HTML_ANCHOR_TEXT_LENGTH;
 
-/**
- * Build the anchor a host persists for a raw-HTML comment. Additive over the
- * legacy `{ originalText }` shape: a drag capture without an element anchor
- * writes exactly that shape, and an input already within every bound comes
- * back byte-identical. Enforces the persistence bounds:
- *
- * - `htmlAnchor` is validated by the same fail-closed parser the read path
- *   uses (never persist what would be refused on read back);
- * - additional targets are capped at `maxTargets` in draft order, the cap
- *   drop counted separately from the size drop so a host's notice never
- *   reports a size-driven drop as its product cap;
- * - the serialized anchor is kept under `maxBytes`: the quote (the elastic
- *   field) is truncated first, but only down to MIN_USEFUL_QUOTE_LENGTH;
- *   below that, targets are shed from the end before the quote gives up
- *   another character, so a size squeeze can never silently annihilate the
- *   quoted text while extras survive. Truncation is surrogate-safe and
- *   yields a PREFIX, so text-search restore still matches it.
- */
+/** Build the anchor a host persists for a raw-HTML comment. */
 export function buildPersistedHtmlAnchor(
   source: {
     originalText: string;
@@ -408,14 +304,9 @@ export function buildPersistedHtmlAnchor(
 ): PersistedHtmlAnchorResult {
   const maxBytes = options.maxBytes ?? DEFAULT_HTML_ANCHOR_MAX_BYTES;
   const maxTargets = options.maxTargets ?? MAX_HTML_ADDITIONAL_TARGETS;
-  // Persist-side validation mirrors the read side: bounds and shape are
-  // enforced on what is written, not only on what is later read back.
   const htmlAnchor = parseHtmlElementAnchor(source.htmlAnchor) ?? undefined;
   let elementContext = parseHtmlElementContext(source.elementContext);
   const drafted = source.htmlAdditionalTargets ?? [];
-  // Kept-target key order is text, label, anchor, context: the order the reference
-  // host implementation persisted, so a stored anchor's serialization (and
-  // any fingerprint over it) does not change when a host adopts this helper.
   let kept = drafted.slice(0, Math.max(0, maxTargets)).map((target) => {
     const entry: HtmlAnnotationTarget = {
       text: truncateSurrogateSafe(target.text, MAX_HTML_TARGET_TEXT_LENGTH),
@@ -444,9 +335,6 @@ export function buildPersistedHtmlAnchor(
   const truncateQuoteWhileOver = (floor: number): void => {
     while (serializedAnchorBytes(anchor) > maxBytes && originalText.length > floor) {
       const over = serializedAnchorBytes(anchor) - maxBytes;
-      // Each removed UTF-16 unit frees at least one byte; remove in honest
-      // chunks and re-measure (escaping and multi-byte make exact math
-      // per-character; the loop converges in a handful of passes).
       const cut = Math.min(
         originalText.length - floor,
         Math.max(1, Math.ceil(over / 4)),
@@ -456,11 +344,8 @@ export function buildPersistedHtmlAnchor(
     }
   };
 
-  // Byte budget, exact over the serialized JSON, in four stages:
-  // 1. Quote down to its useful floor.
   truncateQuoteWhileOver(Math.min(MIN_USEFUL_QUOTE_LENGTH, originalText.length));
 
-  // 2. Shed contexts (per-target first from the end, then primary) before dropping targets.
   for (let i = kept.length - 1; i >= 0 && serializedAnchorBytes(anchor) > maxBytes; i--) {
     if (kept[i]?.context !== undefined) {
       const { context: _, ...rest } = kept[i]!;
@@ -473,14 +358,11 @@ export function buildPersistedHtmlAnchor(
     anchor = compose();
   }
 
-  // 3. Targets from the end.
   while (serializedAnchorBytes(anchor) > maxBytes && kept.length > 0) {
     kept = kept.slice(0, kept.length - 1);
     anchor = compose();
   }
 
-  // 4. Rest of the quote (only reachable if the base anchor plus a floor-length quote alone
-  // overflow, which validated bounds make unreachable with the default budget).
   truncateQuoteWhileOver(0);
   const sizeDroppedTargets =
     drafted.length - capDroppedTargets - (anchor.htmlAdditionalTargets?.length ?? 0);
@@ -495,15 +377,11 @@ export function buildPersistedHtmlAnchor(
 /** One stored host row, in the host's own thread order. */
 export interface HostThread {
   id: string;
-  /** The quoted text; empty for element-only pinpoints and document-level notes. */
   originalText: string;
   htmlAnchor?: HtmlElementAnchor | null;
   htmlAdditionalTargets?: readonly HtmlAnnotationTarget[] | null;
-  /** Agent-facing element context for the primary target. */
   elementContext?: HtmlElementContext | null;
-  /** Thread state. Absent means the host has no state concept: the row is open. */
   state?: "open" | "resolved" | string;
-  /** Optional presentational fields carried verbatim onto the projection. */
   text?: string;
   author?: string;
   createdA?: number;
@@ -511,35 +389,11 @@ export interface HostThread {
 }
 
 export interface ProjectHostThreadsOptions {
-  /** Keep only rows whose `state` is `"open"` (or absent). Default false: every row projects. */
   openOnly?: boolean;
-  /**
-   * How a row with nothing restorable (no quoted text, no element anchor)
-   * projects. `'global'` (default, Plannotator's model): a document-level
-   * `GLOBAL_COMMENT`, rendered by the panel's global card grammar and never
-   * reported as unanchored. `'unanchored'`: a page `COMMENT` with an empty
-   * quote and no anchor, which the viewer's unanchored report then names
-   * (the panel renders it with an empty quote line), for hosts that treat
-   * such rows as comments that lost their place.
-   */
   documentLevel?: 'global' | 'unanchored';
-  /**
-   * Read-side cap on additional targets per row. Default undefined: the
-   * viewer's own 16 applies (rows from arbitrary API clients can carry
-   * more; the viewer slices before the bridge anyway). A host with a
-   * smaller persisted cap passes it so the projection matches its store.
-   */
   maxTargets?: number;
 }
 
-/**
- * The viewer-facing annotation shape, structurally the `Annotation` of
- * `@plannotator/ui/types` restricted to what the raw-HTML surface reads:
- * paint fields (`originalText`, `htmlAnchor`, `htmlAdditionalTargets`), the
- * type that decides marker versus document-level card, and the optional
- * presentational fields. `@plannotator/ui` re-exports the projection typed
- * as `Annotation[]`.
- */
 export interface ProjectedHostAnnotation {
   id: string;
   blockId: "";
@@ -556,30 +410,7 @@ export interface ProjectedHostAnnotation {
   elementContext?: HtmlElementContext;
 }
 
-/**
- * Project stored host rows onto the viewer's `annotations` prop. The OUTPUT
- * ORDER IS THE INPUT ORDER (minus filtered rows), and the viewer numbers
- * markers by array position, so pass rows in the order the host's panel
- * lists them and bubble N is card N.
- *
- * - A row with nothing restorable at all (no quoted text and no element
- *   anchor, e.g. an agent's document-level note) projects by
- *   `documentLevel`: `'global'` (default) makes it a `GLOBAL_COMMENT`, a
- *   document-level comment the panel renders without a quote line and the
- *   viewer never reports as unanchored; `'unanchored'` keeps it a page
- *   `COMMENT` with an empty quote, which the viewer's unanchored report
- *   names. An element anchor is a page location even without quoted text
- *   (a pinpoint on an image or chart), so such rows stay `COMMENT` in both
- *   modes; projecting them global would drop their marker and number.
- * - Anchors are validated fail-closed on the way through (a malformed stored
- *   anchor degrades to text-only restore, never a crash); additional targets
- *   validate per entry and cap at `maxTargets` (default: the viewer's 16).
- * - `openOnly` keeps rows whose `state` is `"open"` or absent, so resolved
- *   rows unpaint and give their number up.
- *
- * Pure: no clock, no randomness. `createdA` defaults to 0 when the row
- * carries none; hosts that sort by time supply it.
- */
+/** Project stored host rows onto the viewer's `annotations` prop. */
 export function projectHostThreads(
   threads: readonly HostThread[],
   options: ProjectHostThreadsOptions = {},

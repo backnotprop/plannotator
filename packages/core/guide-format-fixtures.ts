@@ -1,13 +1,3 @@
-/**
- * Historical snapshot fixtures. One entry per shipped snapshot version, plus
- * one per `source.kind`. `guide-format.test.ts` parses every fixture with the
- * CURRENT parser — that test is the compatibility promise behind pinned
- * exports (decision record D8/D10): a viewer released today must still open
- * every document ever exported.
- *
- * Add fixtures; never edit or delete one that shipped.
- */
-
 import type { GuideSnapshot, GuideSnapshotV1, GuideSnapshotV2 } from "./guide-format";
 
 export const FIXTURE_PATCH_TS_JSON = `diff --git a/src/auth.ts b/src/auth.ts
@@ -91,7 +81,6 @@ export const FIXTURE_V1_WORKSPACE: GuideSnapshotV1 = {
     reviewed: [false, false],
   },
   review: {
-    // Folder-prefixed paths, as multi-repo workspace reviews emit them.
     rawPatch: FIXTURE_PATCH_TS_JSON.replaceAll("/src/auth.ts", "/api/src/auth.ts").replaceAll("/package.json", "/web/package.json"),
     gitRef: "api | web",
     diffType: "workspace-current",

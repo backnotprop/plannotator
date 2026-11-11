@@ -1,33 +1,6 @@
-/**
- * Plannotator Inbox: question blocks in a message, their derived state, the
- * person's picks, and the reply text a Send writes.
- *
- * The blocks are found and read with Plannotator's own parser
- * (`./question-block`), so the card the window draws and the record the store
- * keeps are one and the same, with one key. Two plain lines inside a block are
- * read here, as Workspaces reads them (they stay in the block's context, so
- * Plannotator renders them as text):
- *
- *   Stopped: <why>                the asker cannot go on until this is answered
- *   Holds up: <name>; <name>      the asker goes on; these pieces of work wait
- *
- * One guard on top of Workspaces' reading: a value that is only a negative
- * word (`Stopped: no`, a `Holds up:` entry `none`) is no stop and holds
- * nothing up; see `isNegativeWaitValue`. An empty `Stopped:` is still a stop
- * (a claim with no why), as Workspaces reads it.
- *
- * A third, `Replaces: <message id>/<key>`, is read by core's parser itself
- * (`ParsedQuestion.replaces`) when every token on it is id-shaped: it is then
- * never the prompt and never context. Any other `Replaces:` line is prose.
- *
- * Pure: no I/O, no clock unless passed in. Never throws on any input.
- */
-
 import { resolveReferenceLinks } from "./markdown-structure";
 import { cutText } from "./text-cut";
-// The grapheme-safe cuts, re-exported here: core's export map is checked against the published package, and the Inbox is what uses them.
 export { cutText, sliceText } from "./text-cut";
-// The subject of a thread the person starts: beside deriveInboxSubject, so the store and compose's preview share it.
 export {
   derivePersonThreadSubject,
   PERSON_THREAD_SUBJECT_COLUMNS,
@@ -79,7 +52,6 @@ export interface ParsedInboxQuestion {
   parsed: InboxQuestionFacts;
   stopped: string | null;
   holds_up: string[];
-  /** The block's `Replaces:` tokens, as written (checked by the store). */
   replaces: string[];
 }
 
@@ -87,12 +59,6 @@ const STOPPED_RE = /^stopped\s*:\s*(.*)$/i;
 const HOLDS_UP_RE = /^holds up\s*:\s*(.*)$/i;
 const CLOSE_RE = /^\s*:::\s*$/;
 
-/**
- * The keys of a body's questions written with a recommended marker in a
- * choice label or description (`Foo (Recommended)`, `[Recommended] Foo`),
- * whether or not the block also has a `Recommended:` line: the Inbox nudges
- * the agent to keep labels plain.
- */
 export function inboxQuestionKeysWithRecommendedMarker(markdown: string): string[] {
   return questionBlocksOf(markdown).flatMap(({ key, parsed }) => (parsed.recommendedMarker ? [key] : []));
 }
@@ -101,32 +67,15 @@ export function inboxQuestionKeysWithRecommendedMarker(markdown: string): string
 export interface InboxQuestionToCheck {
   key: string;
   position: number;
-  /** A pick-one or pick-several block (`:::question`, `:::question-multi`) with no choices, as written: the person answers in words. */
   no_choices: string;
 }
 
-/**
- * The questions of a body that likely do not ask what the agent meant (the
- * send result says so; the send goes through): a `:::question` or
- * `:::question-multi` block with no choices, which the person answers in
- * words. (An `id:` label before the question line is no mistake: the parser
- * reads the next line as the question and shows the label as context, see
- * "Id label" in `./question-block`.) Pure; never throws.
- */
 export function inboxQuestionsToCheck(markdown: string): InboxQuestionToCheck[] {
   return questionBlocksOf(markdown).flatMap(({ key, parsed }, index) =>
     parsed.directiveKind !== "question-text" && parsed.choices.length === 0 ? [{ key, position: index + 1, no_choices: `:::${parsed.directiveKind}` }] : [],
   );
 }
 
-/**
- * A prototype a body's questions name (approval "inbox-question-tradeoffs"):
- * where it was written (the question's prompt, and the option's label, or
- * null for the question's shared `Prototype:` line) and the target as
- * written. `app` is an address with a scheme (`http://localhost:3000/…`, an
- * app running on this computer, checked and probed at send); `file` is a
- * path (an HTML file the message attaches).
- */
 export interface PrototypeAppTarget {
   target: string;
   prompt: string;
@@ -151,12 +100,8 @@ export function prototypeTargets(markdown: string): PrototypeTarget[] {
   return out;
 }
 
-/** Each question block of a body (or an attached file, `frontmatter` as its viewer reads it), parsed as the Inbox reads it. */
 function questionBlocksOf(markdown: string, frontmatter = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];
-  // Each block is read over the markdown with reference links resolved, as
-  // the renderer reads it, so a prompt written with a reference link keeps
-  // the key the card computes.
   const resolved = resolveReferenceLinks(markdown).split("\n");
   const out: { key: string; startLine: number; parsed: ParsedQuestion }[] = [];
   for (const location of findQuestionBlocks(markdown, { frontmatter })) {
@@ -166,21 +111,13 @@ function questionBlocksOf(markdown: string, frontmatter = false): { key: string;
       .replace(/\r\n?/g, "\n")
       .split("\n");
     const inner = lines.slice(1, CLOSE_RE.test(lines.at(-1) ?? "") && lines.length > 1 ? -1 : undefined);
-    // The Inbox records no decisions: a `Decision:` line is context. It reads the option lines
-    // (`Pros:`, `Cons:`, `Prototype:`; approval "inbox-question-tradeoffs").
     const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true });
     if (parsed !== null) out.push({ key: location.key, startLine: location.startLine, parsed });
   }
   return out;
 }
 
-/**
- * The question blocks of a message body, in block order. A body is read like
- * a comment: no frontmatter. A body with no block (or none that parses)
- * answers []. An attached Markdown file (issue #2828) is read as its viewer
- * reads it: `frontmatter: true` for a `.md` file, whose leading `--- … ---`
- * block the viewer strips (lines stay the file's).
- */
+/** The question blocks of a message body, in block order. */
 export function parseInboxQuestionBlocks(markdown: string, options: { frontmatter?: boolean } = {}): ParsedInboxQuestion[] {
   const out: ParsedInboxQuestion[] = [];
   for (const { key, startLine, parsed } of questionBlocksOf(markdown, options.frontmatter === true)) {
@@ -216,8 +153,6 @@ export function parseInboxQuestionBlocks(markdown: string, options: { frontmatte
   return out;
 }
 
-/** The block's contract lines as the record keeps them (each only when present). */
-/** A prototype as stored: the target as written, and the link's name when it has one. */
 function prototypeFact(prototype: { target: string; label?: string }): { target: string; label?: string } {
   return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
 }
@@ -232,7 +167,6 @@ function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" |
   };
 }
 
-/** A record's contract lines for the wire (copies; absent when absent). */
 function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
   return {
     ...(typeof facts.stakes === "string" && facts.stakes ? { stakes: facts.stakes } : {}),
@@ -243,17 +177,6 @@ function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
   };
 }
 
-/**
- * A `Stopped:` value or `Holds up:` entry that is only a negative word: no,
- * none, n/a, na, nothing, false, nil, null, or a dash, in any case, with
- * trailing punctuation and whitespace allowed. An agent filling in a template
- * writes `Stopped: no`; that is not a stop.
- *
- * Only a bare negative word counts, and the guard errs toward a stop:
- * `no API key yet`, `none of the fixtures load`, `No; I need the DB password
- * first`, `no, the key is missing` are all real stops. An empty value is not
- * a negative word (an empty `Stopped:` is a claim with no why, still a stop).
- */
 const NEGATIVE_WAIT_RE = /^(?:no|none|n\/a|na|nothing|false|nil|null|[-\u2013\u2014]+)[\s.,;:!?\-\u2013\u2014]*$/i;
 
 /** Whether a `Stopped:` value or `Holds up:` entry is only a negative word. */
@@ -261,12 +184,6 @@ export function isNegativeWaitValue(value: string): boolean {
   return NEGATIVE_WAIT_RE.test(value.trim());
 }
 
-/**
- * The `Stopped:` and `Holds up:` lines of a block's context; the first of each
- * wins. A first `Stopped:` that is a bare negative (`Stopped: no`) decides
- * there is no stop; bare-negative `Holds up:` entries are dropped. The lines
- * stay in the context either way.
- */
 function waitsOf(context: string): { stopped: string | null; holds_up: string[] } {
   let stopped: string | null = null;
   let sawStopped = false;
@@ -295,18 +212,12 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
   return { stopped, holds_up: holdsUp ?? [] };
 }
 
-/**
- * Derived, never stored: superseded when an agent replaced or withdrew it,
- * else closed when the thread is resolved or the person's Mark read closed
- * it (`set_aside`), else open / picked / sent.
- */
 export function inboxQuestionState(
   record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by" | "set_aside"> &
     Partial<Pick<InboxQuestionRecord, "kind" | "action_result">>,
   threadResolved: boolean,
 ): InboxQuestionState {
   if (record.superseded_by) return "superseded";
-  // An action item the agent saw done itself is closed: nothing waits on the person, nothing is sent.
   if (record.kind === "action" && record.action_result?.by === "agent") return "closed";
   if (threadResolved || record.set_aside) return "closed";
   if (record.kind === "action") {
@@ -320,17 +231,10 @@ export function inboxQuestionState(
   return "picked";
 }
 
-// Where a build through 0.28.26 may have joined a `Context:` line onto the
-// plain bullet above it: `Keep it pinned forever Context: an archived thread…`.
-// A build from before contract lines joined one (`Stakes:`, `Shows:`, `Why:`,
-// `Reversible:`) onto it the same way.
 const STORED_CONTEXT_SPLIT_RE = /\s+(?:[*_]{1,2})?(?:context|stakes|shows|why|reversible)(?:[*_]{1,2})?\s*:/gi;
 
-/** A label holding `![` with no complete `![alt](src)` after it: what an older parser stored when a dash in the alt text split the label. */
 const UNCLOSED_IMAGE_RE = /!\[(?![^\]\n]*\]\([^)\n]+\))/;
 
-/** Every label before a ` Context:` in a stored label (each split point:
- *  the bullet's own words may hold the word too). */
 function storedContextHeads(label: string): string[] {
   const heads: string[] = [];
   for (const match of label.matchAll(STORED_CONTEXT_SPLIT_RE)) {
@@ -340,36 +244,18 @@ function storedContextHeads(label: string): string[] {
   return heads;
 }
 
-/**
- * The choices with their older names, for `canonicalQuestionAnswer`. A label
- * stored with a `Context:` line joined on (a record from 0.28.26 or older)
- * also answers to the part before it, which is the label the card reads
- * today, so the card's pick is not refused as an unknown choice. A head is
- * added only when no other choice has that name and no other choice yields
- * the same head, so two choices never share a name.
- */
 function storedChoices(record: Pick<InboxQuestionRecord, "parsed">): QuestionChoice[] {
   const names = record.parsed.choices.map((choice, index) =>
     new Set([choice.label, ...(record.parsed.aliases[index] ?? [])].map(normalizeQuestionText)),
   );
-  // A label stored with an image in it (a record from before picture
-  // choices: `![B](b.png) B`) also answers to the plain label the card reads
-  // today, as a `Context:` head does.
   const heads = record.parsed.choices.map((choice) => {
     const list = storedContextHeads(choice.label);
     const plain = questionLabelWithoutImage(choice.label);
     const out = plain ? [...list, plain, ...list.flatMap((head) => questionLabelWithoutImage(head) ?? [])] : [...list];
-    // An older parser split a label at a dash inside an image's alt text:
-    // `- [ ] ![Drawer A - closest](a.png) Drawer A` was stored as the label
-    // `![Drawer A` and the description `closest](a.png) Drawer A`. Joined
-    // again and read as the card reads it today, it answers to `Drawer A`.
     if (UNCLOSED_IMAGE_RE.test(choice.label) && choice.description) {
       const rebuilt = parseQuestionChoiceText(`${choice.label} — ${choice.description}`).label;
       if (rebuilt && rebuilt !== choice.label && !out.includes(rebuilt)) out.push(rebuilt);
     }
-    // A label stored with a recommended marker in it (a record from before
-    // the parser read `Foo (Recommended)` as the recommendation) also
-    // answers to the label without it, which the card reads today.
     const unmarked = questionChoiceWithoutRecommendedMarker({ label: choice.label })?.label;
     if (unmarked && unmarked !== choice.label && !out.includes(unmarked)) out.push(unmarked);
     return out;
@@ -401,10 +287,6 @@ function storedChoices(record: Pick<InboxQuestionRecord, "parsed">): QuestionCho
   });
 }
 
-/**
- * Whether an answer is exactly what the stored question recommended: the rule the reply's "Answers" section marks
- * `(recommended)` with, and the decision export's "Took the recommendation".
- */
 export function inboxAnswerTookRecommendation(record: Pick<InboxQuestionRecord, "parsed">, answer: QuestionAnswer): boolean {
   const recommended = record.parsed.choices.filter((c) => c.recommended).map((c) => c.label);
   const suggested = record.parsed.suggested_text ?? undefined;
@@ -457,18 +339,6 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
   };
 }
 
-// ─────────────────────── Questions in attached files ───────────────────────
-
-/**
- * The record key of a question inside an attached file (issue #2828): its key
- * in the file when no question of the message has it yet, else the first
- * free `-N` (N from 2) on the key the file's parser hashed. Every key keeps
- * the shape `parseInboxSupersedeRef` reads (`q-<hash8>` with an optional
- * `-N` of up to three digits), so the agent supersedes or replaces it like
- * any other. `taken` holds the message's keys so far (its body's first);
- * the key returned is added to it. Null when no free key is left (the
- * question is not recorded, its card stays read-only).
- */
 export function inboxFileQuestionKey(fileKey: string, taken: Set<string>): string | null {
   if (!taken.has(fileKey)) {
     taken.add(fileKey);
@@ -489,12 +359,6 @@ export function inboxQuestionPlace(q: { attachment?: { id: string } | null }): s
   return q.attachment?.id ?? null;
 }
 
-/**
- * A message's questions in the order its places show them: the body's by
- * position, then each attached file's by position, the files in the order
- * they first appear in `list` (the store keeps them in the message's
- * attachment order). Stable; a new array.
- */
 export function inboxQuestionsInPlaceOrder<T extends { position: number; attachment?: { id: string } | null }>(list: readonly T[]): T[] {
   const rank = new Map<string | null, number>([[null, 0]]);
   for (const q of list) {
@@ -504,16 +368,8 @@ export function inboxQuestionsInPlaceOrder<T extends { position: number; attachm
   return [...list].sort((a, b) => rank.get(inboxQuestionPlace(a))! - rank.get(inboxQuestionPlace(b))! || a.position - b.position);
 }
 
-// ─────────────────────────────── Superseding ───────────────────────────────
-
-// `q-` a question, `a-` an action item (an Inbox `:::action`).
 const SUPERSEDE_REF_RE = /^(msg_[0-9A-HJKMNP-TV-Z]{26})(?:\/((?:q|a)-[0-9a-f]{8}(?:-\d{1,3})?))?$/;
 
-/**
- * One id an agent supersedes with (send_message's `supersedes`, or a token of
- * a `Replaces:` line): `<message id>` (every open question of that message)
- * or `<message id>/<key>` (one). Null when it is neither.
- */
 export function parseInboxSupersedeRef(value: unknown): { message_id: string; key: string | null } | null {
   if (typeof value !== "string") return null;
   const match = SUPERSEDE_REF_RE.exec(value.trim());
@@ -526,43 +382,19 @@ export function isInboxQuestionSupersedable(state: InboxQuestionState): boolean 
   return state === "open" || state === "picked";
 }
 
-/**
- * What waits on the person, as the list counts it (its sections, the
- * Stopped / Holding / Waiting badges, "Answered, not sent"): a question or
- * action item that is `open`, or a question `picked` and not sent (its answer
- * waits only for a Send). An action item the person marked is on its way (its
- * Undo window: `picked`) and waits on nobody. Never an orphaned record.
- *
- * A kind this build does not know (written by a newer Inbox) still counts
- * here, exactly as the list counted it before decision mode: the thread still
- * waits on the person, who answers it in a newer window. Only the readers that
- * answer (decision mode, the thread's open-questions list) leave it out, through
- * `inboxQuestionWaitsOnPerson`. Whether the message is still live (not closed
- * by an archive) is already in `state`, which the store derives.
- */
 export function inboxQuestionWaitsForList(q: Pick<InboxQuestion, "state" | "kind" | "orphaned">): boolean {
   if (q.orphaned) return false;
   if (q.state === "open") return true;
   return q.state === "picked" && q.kind !== "action";
 }
 
-/**
- * The one rule for "this waits on the person and can be answered here"
- * (approval "inbox-decision-mode", brief §10): decision mode's queue and a
- * thread's open-questions list read it. It is the list's rule
- * (`inboxQuestionWaitsForList`) without the kinds this build does not know,
- * since no reader here may answer one. So the Decide count, the list and the
- * popover agree on every known kind.
- */
 export function inboxQuestionWaitsOnPerson(q: Pick<InboxQuestion, "state" | "kind" | "orphaned">): boolean {
   return inboxQuestionWaitsForList(q) && readInboxQuestionKind(q.kind) !== "unknown";
 }
 
 /**
- * How urgently a waiting question holds an agent up: 0 Stopped (the agent
- * cannot go on), 1 Holds up named work, 2 neither. The list's sections
- * (Stopped on you, Holding up work, Waiting on you) and decision mode's order
- * read it.
+ * How urgently a waiting question holds an agent up: 0 Stopped (the agent cannot go on), 1 Holds up
+ * named work, 2 neither.
  */
 export type InboxUrgency = 0 | 1 | 2;
 
@@ -589,7 +421,6 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
       for (const name of q.holds_up) if (!holdsUp.includes(name)) holdsUp.push(name);
       continue;
     }
-    // The list's rule: a kind this build does not know still counts (see inboxQuestionWaitsForList).
     if (!inboxQuestionWaitsForList(q)) continue;
     if (q.state === "picked") picked += 1;
     if (q.state !== "open") continue;
@@ -602,13 +433,6 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
   return { open, picked, stopped, holds_up: holdsUp, prompt, actions, ...(staged > 0 ? { staged } : {}) };
 }
 
-/**
- * What a row's Stopped / Holds up badge holds (approval "inbox-row-badges"):
- * the open questions and action items that stop the agent or hold something
- * up, in the order given (thread order), capped. The same open rule as the
- * badges' summary (`summarizeInboxQuestions`), so the card never lists a
- * question the badge does not count.
- */
 export function inboxRowWaits(questions: readonly InboxQuestion[]): InboxRowWait[] {
   const out: InboxRowWait[] = [];
   for (const q of questions) {
@@ -627,8 +451,6 @@ export function inboxRowWaits(questions: readonly InboxQuestion[]): InboxRowWait
   return out;
 }
 
-// ─────────────────────────────── Picks ───────────────────────────────
-
 export type InboxAnswerRefusal =
   | { code: "validation_error"; field: string; message: string }
   | { code: "question_not_found"; key: string }
@@ -636,11 +458,6 @@ export type InboxAnswerRefusal =
   | { code: "question_already_sent"; key: string }
   | { code: "question_superseded"; key: string; superseded_by: { message_id: string; key: string | null } };
 
-/**
- * Plannotator's record checked against its question: the fail-closed parser
- * first, then key, kind and prompt, then every picked label (read through the
- * choice's older names first). Returns the canonical answer to store.
- */
 export function checkInboxAnswer(
   record: Pick<InboxQuestionRecord, "key" | "kind" | "prompt" | "parsed">,
   raw: unknown,
@@ -651,7 +468,6 @@ export function checkInboxAnswer(
   if (parsed === null) return invalid("not a valid QuestionAnswer v1 record");
   if (parsed.key !== record.key) return invalid("key does not match the question");
   if (parsed.kind !== record.kind) return invalid("kind does not match the question");
-  // The cut every build makes now, or the plain 400-unit cut a client from before it made (the phone app's, until it updates).
   if (parsed.prompt !== capQuestionPrompt(record.prompt) && parsed.prompt !== record.prompt.slice(0, MAX_QUESTION_PROMPT_CHARS)) {
     return invalid("prompt does not match the question");
   }
@@ -665,12 +481,8 @@ export function checkInboxAnswer(
   return { ok: true, answer };
 }
 
-// ─────────────────────────────── Send ───────────────────────────────
-
 function exportItem(record: InboxQuestionRecord, number: number): QuestionExportItem {
   const settled = record.parsed.choices.filter((c) => c.settled).map((c) => c.label);
-  // The export prints current labels for answers stored under an older name
-  // or cut at 200 characters by a build through 0.28.17.
   const needsChoices = questionChoicesNeedCanonicalLabels(storedChoices(record));
   return {
     key: record.key,
@@ -692,41 +504,13 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
   };
 }
 
-/**
- * The body a Send writes: "Answered N questions.", "Skipped N questions." or
- * "Answered N questions, skipped M." when it carries answers or skips,
- * the person's words if any, then the line saying which questions stay open
- * (when any do), then Plannotator's "Answers to your questions" section over
- * every question of the message, with the answers this Send carries and
- * earlier sent answers that still stand. Empty when there is nothing to send.
- *
- * A Send never skips on its own (approval "inbox-explicit-skip",
- * 2026-10-21): every question it neither answers nor skips stays open, and
- * the reply says so, so the agent does not guess or ask again.
- */
 function composeReplyParts(input: {
   questions: readonly InboxQuestionRecord[];
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
   words: string | undefined;
-  /**
-   * The questions the still-open line counts. Default: the questions of
-   * every message the reply answers. The Inbox passes every question the
-   * replied-to message's session asked in the thread, so a reply to one
-   * message also tells the agent about its questions in the others. The
-   * questions this reply sends are never counted.
-   */
   stillOpen?: readonly InboxQuestionRecord[];
-  /**
-   * One reply for one session (approval "inbox-explicit-skip", 2026-10-21):
-   * every message of the session the reply answers questions on, in thread
-   * order, each with its questions, the answers this reply sends on it and
-   * its earlier sent answers. Replaces `questions` / `sent` / `earlier` when
-   * given. When the reply sends answers on a message other than `replyTo`
-   * (or on several), the answers section names each message by its id.
-   */
   messages?: readonly InboxReplyMessageAnswers[];
-  /** The message the reply answers (`reply_to`), for `messages`. */
   replyTo?: string;
 }): { head: string; stillOpen: string; section: string } {
   // Action items (`kind: "action"`) are reported in their own section ("Actions
@@ -738,12 +522,7 @@ function composeReplyParts(input: {
     ]
   )
     .map((g) => ({ ...g, questions: questionsOnly(g.questions), sent: questionsOnly(g.sent), earlier: questionsOnly(g.earlier) }))
-    // A message's questions inside an attached file (issue #2828) are answered in a group of their own, numbered as that file's cards.
     .flatMap(splitByPlace);
-  // The same rule as the answers section's "x of y answered" line
-  // (formatQuestionAnswersSection): a pick, Other or text answers; a note
-  // alone answers only a settled question; a skip that answers nothing is a
-  // skip; a note alone on an open question is neither.
   let answered = 0;
   let skipped = 0;
   for (const group of groups) {
@@ -763,7 +542,6 @@ function composeReplyParts(input: {
   if (sentGroups.length === 1 && !labelled) {
     section = answersSection(sentGroups[0]!, 2);
   } else if (sentGroups.length > 0) {
-    // One section, a sub-heading per message: the agent can tell which "Q1" is which.
     const parts = sentGroups.flatMap((g) => {
       const body = answersSection(g, 3).replace(/^### [^\n]*\n\n/, "");
       return body === "" ? [] : [`${answersGroupHeading(g)}\n\n${body}`];
@@ -798,18 +576,11 @@ export interface InboxReplyMessageAnswers {
   earlier: readonly QuestionAnswer[];
 }
 
-/** A group of the answers section: a message's body questions (`file` null), or its questions inside one attached file. */
 type PlaceAnswers = InboxReplyMessageAnswers & { file: InboxQuestionRecord["attachment"] | null };
 
 /** A file's name as one line of the reply (a name never holds a newline, but a reply's grammar must not break if one did). */
 const fileNameLine = (name: string): string => name.replace(/\s+/g, " ").trim() || "file";
 
-/**
- * One message's questions split by where they were asked (issue #2828): the
- * body's first, then each attached file's, in the order the store keeps them.
- * Each answer goes with its question's place; one whose question is not
- * listed stays with the body (as before).
- */
 function splitByPlace(group: InboxReplyMessageAnswers): PlaceAnswers[] {
   if (!group.questions.some((q) => q.attachment)) return [{ ...group, file: null }];
   const places = new Map<string | null, PlaceAnswers>([[null, { message_id: group.message_id, questions: [], sent: [], earlier: [], file: null }]]);
@@ -825,15 +596,11 @@ function splitByPlace(group: InboxReplyMessageAnswers): PlaceAnswers[] {
   return [...places.values()].filter((p) => p.file === null || p.questions.length > 0);
 }
 
-/** A labelled group's heading: "### Your message <id>", or for an attached file's questions "### Your file <name>, attached to message <id>". */
 function answersGroupHeading(group: PlaceAnswers): string {
   return group.file ? `### Your file ${fileNameLine(group.file.name)}, attached to message ${group.message_id}` : `### Your message ${group.message_id}`;
 }
 
-/** One message's "Answers to your questions" section, at a heading level (its questions numbered as its cards are). */
 function answersSection(group: InboxReplyMessageAnswers, headingLevel: 2 | 3): string {
-  // A superseded question is neither answered nor "Unanswered": the agent
-  // withdrew it. The others keep their numbers ("Q2" stays the card's 2).
   const items = [...group.questions]
     .sort((a, b) => a.position - b.position)
     .map((q, i) => (q.superseded_by ? null : exportItem(q, i + 1)))
@@ -841,28 +608,15 @@ function answersSection(group: InboxReplyMessageAnswers, headingLevel: 2 | 3): s
   return formatQuestionAnswersSection(items, [...group.sent, ...group.earlier], { headingLevel }).trimEnd();
 }
 
-/**
- * The body of the person's Re-ask note (approval "inbox-reask"): what the
- * agent is asked to do with its open questions, then the answers the person
- * had picked and not sent, which go with the note. `noteId` is the note's
- * own id, the `reply_to` of the agent's new message.
- */
 export function composeInboxReaskBody(input: {
-  /** The open questions and action items (`kind: "action"`, approval "inbox-next-actions") asked again. */
   reask: readonly (Pick<InboxQuestionRecord, "id" | "prompt"> & { kind?: string })[];
   answered: readonly { record: Pick<InboxQuestionRecord, "id" | "prompt" | "parsed">; answer: QuestionAnswer }[];
   noteId: string;
-  /**
-   * The agent that asked, when the note goes to another session because the
-   * asking one ended: named from its host ("Claude Code"), so the note says
-   * whose questions they are instead of "your".
-   */
   askedBy?: string | null;
 }): string {
   const n = input.reask.length;
   const actions = input.reask.filter((r) => r.kind === "action").length;
   const questions = n - actions;
-  // Questions alone keep their words; with action items the note names both.
   const items =
     actions === 0
       ? n === 1
@@ -910,18 +664,10 @@ export function composeInboxReaskBody(input: {
   return lines.join("\n");
 }
 
-/**
- * The line a reply that answers and skips nothing carries (approval
- * "inbox-words-only-reply", 2026-10-13): the message's questions are still
- * open and the person will answer them in the Inbox. Empty when none is left
- * waiting on the person. `INBOX_STILL_OPEN_LINE` matches it, so the window
- * can tell it from the person's own words.
- */
 export function inboxStillOpenLine(questions: readonly InboxQuestionRecord[]): string {
   const states = questions.map((q) => inboxQuestionState(q, false));
   const open = states.filter((s) => s === "open" || s === "picked").length;
   if (open === 0) return "";
-  // Some were answered in an earlier reply: "No questions answered yet" would not be true.
   if (states.includes("sent")) {
     return `No new answers in this reply; ${questionsWord(open)} ${open === 1 ? "is" : "are"} still open. Don't re-ask ${open === 1 ? "it" : "them"}; the person will answer in the Inbox.`;
   }
@@ -929,12 +675,6 @@ export function inboxStillOpenLine(questions: readonly InboxQuestionRecord[]): s
   return `No questions answered yet; all ${open} are still open. Don't re-ask them; the person will answer in the Inbox.`;
 }
 
-/**
- * The line a reply that answers or skips some questions carries when others
- * stay open (approval "inbox-explicit-skip", 2026-10-21): how many, that they
- * stay open, and not to ask them again. Empty when none is left waiting on
- * the person. `INBOX_STILL_OPEN_LINE` matches it too.
- */
 export function inboxOtherStillOpenLine(questions: readonly InboxQuestionRecord[]): string {
   const open = questions.filter((q) => {
     const state = inboxQuestionState(q, false);
@@ -957,18 +697,6 @@ export const INBOX_REPLY_SENTENCE_LINE = /^(?:Answered \d+ questions?(?:, skippe
 const ANSWERS_SECTION_HEADING_LINE = `## ${QUESTION_ANSWERS_HEADING}`;
 const ANSWERS_GROUP_LINE = /^### Your (?:message|file .+, attached to message) msg_[A-Za-z0-9]+$/;
 
-/**
- * Where a reply's "Answers to your questions" section that starts at line
- * `at` ends, read by the grammar `formatQuestionAnswersSection` and
- * `composeInboxReplyBody` write: the heading, a blank line, the "N of M
- * questions answered." line, a blank line, then `### …` blocks of answer
- * lines (`Answer…`, `- …`, `> …`, `  > …` (a multi-line Other under its
- * bullet), `Note…`, `Skipped…`), each ended by a blank
- * line; or, for answers on several messages, `### Your message <id>`
- * sub-sections with the same grammar one level down. Returns the index of the
- * first line after it, or null when the text does not follow that grammar
- * exactly (then nothing may be cut).
- */
 export function inboxAnswersSectionEnd(lines: readonly string[], at: number): number | null {
   if (lines[at] !== ANSWERS_SECTION_HEADING_LINE || lines[at + 1] !== "") return null;
   if (ANSWERS_GROUP_LINE.test(lines[at + 2] ?? "")) {
@@ -986,7 +714,6 @@ export function inboxAnswersSectionEnd(lines: readonly string[], at: number): nu
   return answerBlocksEnd(lines, at + 2, "###");
 }
 
-/** The "N of M questions answered." line at `from`, a blank line, then `<h> …` blocks of answer lines; the index after them. */
 function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "####"): number | null {
   if (!/^\d+ of \d+ questions? answered\./.test(lines[from] ?? "") || lines[from + 1] !== "") return null;
   let i = from + 2;
@@ -1001,7 +728,6 @@ function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "###
     }
     if (body === 0 && lines[i - 1] !== `${h} Unanswered`) return null;
     blocks += 1;
-    // The block's closing blank line; the section ends at the end of the text.
     if (i < lines.length) i += 1;
   }
   return blocks > 0 ? i : null;
@@ -1009,30 +735,12 @@ function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "###
 
 /** A person's reply body in its parts (`splitInboxReplyBody`). */
 export interface InboxReplyBodyParts {
-  /** The person's own words (without the reply's first line and the still-open line). */
   words: string;
-  /** The "Answers to your questions" section was found (and is not in `words` or `rest`). */
   answers: boolean;
-  /** What follows: the annotations' feedback and the skills block, as sent. */
   rest: string;
-  /** Anything was taken out (the first line, the still-open line or the answers section). */
   changed: boolean;
 }
 
-/**
- * A person's reply as `composeInboxReplyBody` (plus the feedback and skills
- * block the reply route appends) wrote it, in its parts, for showing the
- * person what they sent: their words, then (drawn by the window from the
- * questions themselves) the answers, then the rest. The parts the store
- * writes for the agent come out: the first line ("Answered 2 questions."),
- * the still-open line ("You have 1 other question open…") and the answers
- * section, cut only when it follows its grammar exactly
- * (`inboxAnswersSectionEnd`). The folded line (`replyWords`) and search
- * (`inboxSearchReplyText`) read the words with their own, looser rule (they
- * cut at the first heading or still-open line, grammar or not); for a body
- * the store wrote the three give the same words (reply-display.test.ts checks
- * search). Display only: the stored body and what agents receive never change.
- */
 export function splitInboxReplyBody(body: string): InboxReplyBodyParts {
   const lines = body.split("\n");
   let start = 0;
@@ -1049,18 +757,12 @@ export function splitInboxReplyBody(body: string): InboxReplyBodyParts {
   }
   const head = lines.slice(start, sectionAt >= 0 ? sectionAt : lines.length);
   const tail = sectionAt >= 0 ? lines.slice(sectionEnd) : [];
-  // The still-open line is a paragraph of its own, after the words.
   const open = head.findIndex((line, i) => INBOX_STILL_OPEN_LINE.test(line) && (i === 0 || head[i - 1] === "") && (i === head.length - 1 || head[i + 1] === ""));
   const words = (open >= 0 ? head.slice(0, open) : head).join("\n").trim();
   const rest = [...(open >= 0 ? head.slice(open + 1) : []), ...tail].join("\n").trim();
   return { words, answers: sectionAt >= 0, rest, changed: start > 0 || open >= 0 || sectionAt >= 0 };
 }
 
-/**
- * The reply's first line: "Answered 2 questions.", "Skipped 3 questions.", or
- * "Answered 1 question, skipped 2." A skip is not an answer, so a Send of
- * skips alone never opens with "Answered".
- */
 function replySentence(answered: number, skipped: number): string {
   if (answered > 0 && skipped > 0) return `Answered ${questionsWord(answered)}, skipped ${skipped}.`;
   if (answered > 0) return `Answered ${questionsWord(answered)}.`;
@@ -1068,12 +770,6 @@ function replySentence(answered: number, skipped: number): string {
   return "";
 }
 
-/**
- * A skip the Inbox writes for the person: a Send's, for a question the person
- * chose to skip with "Skip them" (`by_reply`: the agent reads "Skipped by
- * the person", the card "Skipped · <time>"), or a Mark read's for a question
- * it closed.
- */
 export function inboxSkipAnswer(record: { key: string; kind: QuestionKind; prompt: string }, options: { byReply: boolean }): QuestionAnswer {
   return {
     v: 1,
@@ -1086,9 +782,7 @@ export function inboxSkipAnswer(record: { key: string; kind: QuestionKind; promp
   };
 }
 
-/** Questions as `- Q1. <prompt>`, then action items as `- A1. <what to do>` (each numbered as its card). */
 function numberedLines(records: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string[] {
-  // A question inside an attached file is numbered as that file's cards, and says which file (issue #2828).
   const line = (prefix: string) => (q: Pick<InboxQuestionRecord, "position" | "prompt" | "attachment">) =>
     `- ${prefix}${q.position + 1}. ${q.prompt.replace(/\s+/g, " ").trim()}${q.attachment ? ` (in your file ${fileNameLine(q.attachment.name)})` : ""}`;
   return [
@@ -1100,11 +794,6 @@ function numberedLines(records: readonly (Pick<InboxQuestionRecord, "position" |
 /** The first line of a Mark read's note to the asking agent. */
 export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:";
 
-/**
- * The note a Mark read sends the agent that asked the questions it closed
- * (approval 2026-10-11: "tells the asking agent once"): the heading, then
- * each question with its card number.
- */
 export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
@@ -1113,26 +802,16 @@ export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestion
 /** The first line of the note an Undo of Mark read sends once the agent was told. */
 export const INBOX_REOPENED_HEADING = "The person reopened these:";
 
-/**
- * The note an Undo of Mark read sends when the asking agent was already told
- * not to wait on those questions: they are open again, and wait on the
- * person, so the agent must not go on as if they were set aside.
- */
 export function composeInboxReopenedBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_REOPENED_HEADING, "", ...lines, "", "They are open again in the Inbox; wait for the person's answer before you rely on them."].join("\n");
 }
 
-// ─────────────────────────────── Subject ───────────────────────────────
-
 const SUBJECT_MAX = 120;
 
 /**
- * A thread's subject when the agent gave none: the first open question's
- * prompt, else the first heading or non-empty line of the body, plain.
- * A thread the PERSON starts (compose) is named by
- * `derivePersonThreadSubject` instead (./inbox-thread-subject, re-exported
- * below): a short name, not the first 120 characters of a dictated paragraph.
+ * A thread's subject when the agent gave none: the first open question's prompt, else the first
+ * heading or non-empty line of the body, plain.
  */
 export function deriveInboxSubject(body: string, questions: readonly Pick<ParsedInboxQuestion, "prompt">[]): string | null {
   const pick = questions[0]?.prompt ?? firstLine(body);

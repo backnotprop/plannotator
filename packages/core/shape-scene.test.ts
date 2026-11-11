@@ -49,7 +49,6 @@ describe('checkShapeScene', () => {
     const all = errorsOf(s);
     expect(all).toContain('scene.tracks.w2[0].color: must be a board colour');
     expect(all).toContain('scene.tracks.w2[0].fill: is not part of a keyframe');
-    // var(--alert) is read as alert.
     const t = scene() as any;
     t.tracks.w2[0].color = 'var(--alert)';
     expect(checkShapeScene(t).ok).toBe(true);
@@ -78,8 +77,6 @@ describe('checkShapeScene', () => {
 });
 
 describe('the limits a scene is held to', () => {
-  // What regresses: a scene too big to play smoothly (or a caption too long to read) is stored, and the
-  // player is left to choke on it. Each limit is refused by its field, with the number to fix.
   test('more pieces than the limit is refused at tracks, with the count', () => {
     const s = scene() as any;
     for (let i = 0; i < SHAPE_SCENE_LIMITS.tracks; i++) s.tracks[`p${i}`] = [{ at: 0, opacity: 1 }];
@@ -159,7 +156,6 @@ describe('a board with scenes', () => {
     expect(all).not.toContain('"old"');
   });
 
-  // What the player and `shape frame` cannot play is refused at `shape update`, not shown broken later.
   test('a data-scene on anything but a <div> is refused by name', () => {
     const r = checkShapeBoard(board(scene(), '<svg viewBox="0 0 200 100"><g data-scene="pool"><path data-part="wire"/><circle data-part="job"/><g data-part="w2"/></g></svg>'));
     expect(r.ok ? '' : r.errors.join('\n')).toContain('views.picture.html: data-scene="pool" is on a <g>; put it on a <div> around your SVG: <div data-scene="pool"><svg>…</svg></div>');
@@ -174,7 +170,6 @@ describe('a board with scenes', () => {
       },
     });
     expect(r.ok ? '' : r.errors.join('\n')).toContain('scenes.pool.tracks.w2: the drawing has no data-part="w2"');
-    // In the same view's tall or more drawing it counts: the player finds it there.
     const more = checkShapeBoard({
       ...board(scene()),
       views: { picture: { html: '<div data-scene="pool"><svg viewBox="0 0 200 100"><path data-part="wire"/><circle data-part="job"/></svg></div>', more: { html: '<svg><g data-part="w2"/></svg>' } } },
@@ -189,8 +184,6 @@ describe('a board with scenes', () => {
 });
 
 describe('the notes shape update prints for a board with a scene', () => {
-  // What regresses: the store tells an agent to give a scene's view a fixed canvas, which pushes the
-  // player's controls out of the drawing's box (the animate help says to leave the height off).
   test('no fixed-canvas advice for a scene; a canvas on one is called out', () => {
     const html = '<div data-scene="pool"><svg viewBox="0 0 200 100"><path data-part="wire" d="M10 50H190"/></svg></div>';
     expect(shapeBoardNotes({ views: { picture: { html } } }).join('\n')).not.toContain('Give it a fixed canvas');

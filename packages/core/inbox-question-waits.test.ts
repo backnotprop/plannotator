@@ -1,11 +1,3 @@
-/**
- * `Stopped:` values and `Holds up:` entries that are only a negative word. An
- * agent filling in a template wrote `Stopped: no`, and the thread jumped to
- * "Stopped on you" (found by eval, 2026-10-12). A bare negative word is no
- * stop; everything else errs toward a stop: a real reason (even one that
- * starts with "no " or "none of"), a negative word followed by a remark, and
- * an empty `Stopped:` (a claim with no why, as Workspaces reads it).
- */
 import { describe, expect, test } from "bun:test";
 import { isNegativeWaitValue, parseInboxQuestionBlocks } from "./inbox-questions";
 

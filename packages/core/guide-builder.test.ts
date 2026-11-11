@@ -89,7 +89,6 @@ function lastLine(text: string): string {
   return text.split("\n").pop()!;
 }
 
-/** A draft with a header and two chapters (c1 "Retry budget", c2 "Tests"). */
 async function twoChapters(): Promise<GuideDraft> {
   let d = newDraft();
   d = ok(await guideSetHeader(d, { title: "Webhook backoff", intent: "Retries back off instead of hammering the endpoint." }, hooks));
@@ -210,7 +209,6 @@ describe("chapters", () => {
     const removed = await guideRemoveChapter(d, { chapter: "c1" }, hooks);
     expect(removed.text).toContain('`chapter:1` in the overview now points at c2 "Tests" (was c1 "Retry budget").');
     expect(removed.text).toContain('`chapter:2` in the overview now points at c3 "Glue" (was c2 "Tests").');
-    // A move that changes no link target says nothing about links.
     let e = await twoChapters();
     e = ok(await guideAddChapter(e, { title: "Glue", overview: "Wiring." }, hooks));
     e = ok(await guideSetOverview(e, { text: "Start at [budget](chapter:1)." }, hooks));
@@ -352,14 +350,12 @@ describe("guide_set_overview", () => {
 
   test("symbols: the host decides when it can; otherwise the changed lines are searched", async () => {
     const d = await twoChapters();
-    // No hook: found in the changed lines → no note; not found → accepted, unchecked.
     const found = await guideSetOverview(d, { text: "[x](symbol:computeBackoff)" }, hooks);
     expect(found.ok).toBe(true);
     expect(found.text).not.toContain("not checked");
     const unchecked = await guideSetOverview(d, { text: "[x](symbol:somewhereElse)" }, hooks);
     expect(unchecked.ok).toBe(true);
     expect(unchecked.text).toContain("`symbol:somewhereElse` is not in the changed lines and was not checked.");
-    // With a hook: ambiguous and missing are refused with candidates and suggestions.
     const lsp: GuideBuilderHooks = {
       ...hooks,
       resolveSymbol: ({ name }) =>
@@ -379,7 +375,6 @@ describe("guide_set_overview", () => {
 
   test("lines in a modified file are checked against its length at the head when the host knows it", async () => {
     const d = await twoChapters();
-    // Without the hook only the hunks are known, so a line past them is accepted.
     expect((await guideSetOverview(d, { text: "[x](code:src/webhooks/deliver.ts#L90)" }, hooks)).ok).toBe(true);
     const fs: GuideBuilderHooks = { ...hooks, resolveFile: ({ path }) => (path === "src/webhooks/deliver.ts" ? { exists: true, lineCount: 50 } : { exists: false }) };
     const past = await guideSetOverview(d, { text: "[x](code:src/webhooks/deliver.ts#L40-L90)" }, fs);
@@ -427,13 +422,12 @@ describe("guide_set_overview", () => {
     expect(a.ok).toBe(true);
     expect(a.text).toContain("Removed from the HTML: a <script> element.");
     expect(a.draft.overview?.diagram?.source).not.toContain("<script>");
-    // The cap applies to what is stored too: a sanitizer may grow its input (entity escaping).
     const growing: GuideBuilderHooks = { ...hooks, sanitizeHtml: () => ({ html: `<svg>${"x".repeat(70 * 1024)}</svg>`, removed: [] }) };
     const grown = await guideSetOverview(d, { text: "x", diagram: { kind: "html", source: "<svg>small</svg>" } }, growing);
     expect(grown.ok).toBe(false);
     expect(grown.text).toMatch(/The sanitized HTML is \d+ KB; keep it under 64 KB\./);
     const broken = await guideSetOverview(d, { text: "x", diagram: { kind: "html", source: '<a href="code:missing/file.tsx">x</a>' } }, sanitize);
-    expect(broken.ok).toBe(true); // outside the change, no resolveFile hook: noted, not refused
+    expect(broken.ok).toBe(true);
     expect(broken.text).toContain("not checked");
   });
 
@@ -579,7 +573,6 @@ describe("save as is", () => {
   });
 
   test("a refused save leaves the caller's draft exactly as it was", async () => {
-    // An empty chapter would be dropped by the save; the refusal must not hand back that rewritten draft.
     let d = newDraft();
     d = ok(await guideAddChapter(d, { title: "Empty", overview: "Nothing placed." }, hooks));
     const a = await guideSaveAsIs(d, hooks);
@@ -630,7 +623,6 @@ describe("runGuideBuilderTool", () => {
     expect(added.chapterId).toBe("c1");
     d = added.draft;
     d = ok(await runGuideBuilderTool(d, "guide_place_file", { file: "src/old.ts", chapter: "c1", summary: "Gone.", focus: [] }, hooks));
-    // A numeric chapter is explained, not crashed on.
     const numeric = await runGuideBuilderTool(d, "guide_move_file", { file: "src/old.ts", chapter: 1 }, hooks);
     expect(numeric.text).toContain("chapter 1 in reading order is c1");
     const read = await runGuideBuilderTool(d, "guide_read", undefined, hooks);
@@ -648,7 +640,6 @@ describe("runGuideBuilderTool", () => {
     expect((await runGuideBuilderTool(d, "guide_set_overview", { text: "a", diagram: { kind: "mermaid", source: "x", alt: "y" } })).text).toContain("`diagram` takes only `kind` and `source`");
     expect((await runGuideBuilderTool(d, "guide_place_file", { file: "a", chapter: "c1", summary: "s", focus: [{ line: 3 }] })).text).toContain("not `line`");
     expect((await runGuideBuilderTool(d, "guide_set_header", "nope")).text).toContain("The arguments of guide_set_header are an object.");
-    // Every refusal still ends with the progress line.
     expect(lastLine((await runGuideBuilderTool(d, "guide_finish", {})).text)).toBe("0 chapters · 0 of 4 files placed");
   });
 });
@@ -662,7 +653,6 @@ describe("chapter diagrams", () => {
     expect(a.ok).toBe(true);
     expect(a.text).toContain('Added chapter c3 "Picture" at position 3 with a Mermaid diagram.');
     expect(a.draft.chapters[2].diagram).toEqual({ kind: "mermaid", source: FLOW });
-    // Without a diagram the chapter carries no diagram key at all.
     expect("diagram" in a.draft.chapters[0]).toBe(false);
   });
 
@@ -702,7 +692,6 @@ describe("chapter diagrams", () => {
     d = ok(await guideUpdateChapter(d, { chapter: "c2", title: "Tests, renamed", diagram: null }, hooks));
     expect(d.chapters[1].title).toBe("Tests, renamed");
     expect("diagram" in d.chapters[1]).toBe(false);
-    // Removing a diagram that is not there changes nothing.
     const none = await guideUpdateChapter(d, { chapter: "c2", diagram: null }, hooks);
     expect(none.ok).toBe(true);
     expect(none.changed).toBe(false);
@@ -726,7 +715,6 @@ describe("chapter diagrams", () => {
     expect((await runGuideBuilderTool(d, "guide_update_chapter", { chapter: "c3", diagram: { kind: "mermaid", source: FLOW, alt: "y" } }, hooks)).text).toContain("`diagram` takes only `kind` and `source`");
     d = ok(await runGuideBuilderTool(d, "guide_update_chapter", { chapter: "c3", diagram: null }, hooks));
     expect(d.chapters[2].diagram).toBeUndefined();
-    // The overview still takes a diagram from an older session, but no longer offers one.
     const overview = await runGuideBuilderTool(d, "guide_set_overview", { text: "x", diagram: { kind: "mermaid", source: FLOW } }, hooks);
     expect(overview.draft.overview?.diagram?.source).toBe(FLOW);
     expect((await runGuideBuilderTool(d, "guide_set_overview", {})).text).toContain("It takes: text.");
