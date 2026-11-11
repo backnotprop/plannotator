@@ -7,8 +7,9 @@
  * skips the thread read. Failures to catch: the skip that no longer reads the
  * open thread's files again (a file edited on disk, an image captured later);
  * a thread deleted elsewhere (no record says so) left on screen because the
- * list read that no longer has it does not read it; and, the other way, the
- * open thread's own record not reading it.
+ * list read that no longer has it does not read it; and the open thread's
+ * own record (an agent's message in it) not drawn in place from the record,
+ * or read the whole thread again (data/apply/stream.ts).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -190,7 +191,7 @@ function openAt(threadId: string): HTMLElement {
 const pane = (el: HTMLElement, id: string) => el.querySelector(`section.ib-pane[data-thread-id="${id}"]`);
 const listReads = () => reads.filter((p) => p === '/api/inbox/threads').length;
 
-test("another thread's record reads the open thread's files, not the thread; its own record reads the thread", async () => {
+test("another thread's record reads the open thread's files, not the thread; its own record draws in place, with no read", async () => {
   if (!hasDom) return;
   const el = openAt(world.waiting);
   await until(() => pane(el, world.waiting) !== null && sendRecord !== null && filesReads(world.waiting) > 0, 'the open thread and its files');
@@ -205,8 +206,12 @@ test("another thread's record reads the open thread's files, not the thread; its
   expect(threadReads(world.waiting)).toBe(thread);
   expect(filesReads(world.waiting)).toBe(files + 1);
 
+  const drawn = () => pane(el, world.waiting)?.querySelectorAll('[data-message-article]').length ?? 0;
+  const before = drawn();
   await agentWrites(world.waiting);
-  await until(() => threadReads(world.waiting) > thread, "the open thread's own record reading it");
+  await until(() => drawn() > before, "the open thread's own record drawn");
+  await wait(300);
+  expect(threadReads(world.waiting)).toBe(thread);
 }, 15000);
 
 test('a thread deleted elsewhere: the next record of another thread reads it once the list lacks it, and the pane says it is gone', async () => {

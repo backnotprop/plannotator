@@ -29,7 +29,7 @@ import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestion
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
-import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -94,7 +94,9 @@ import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model'
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
-import { shareUnchanged } from '../shareUnchanged';
+import { usePickSave } from '../data/actions/picks';
+import { useThreadAttachments } from '../data/queries/files';
+import { useSendReply } from '../data/actions/send';
 import { pickComposerMode } from '../fullScreenComposer';
 import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
@@ -1499,39 +1501,6 @@ export interface ThreadPaneProps {
   openedWith?: ReadonlySet<string> | null;
 }
 
-/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh (read again when `revision` or `again` changes). */
-function useThreadAttachments(threadId: string, revision: unknown, again: number, signal: Signal | null = null) {
-  const [model, setModel] = useState<AttachmentsModel | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const next = await inboxApi.attachments(threadId);
-      // Read again on every record: what did not change stays the same objects (shareUnchanged.ts), so an earlier
-      // read a kept callback still reaches does not hold a full copy of every file's record.
-      setModel((current) => (current === null ? next : current.serverSession === next.serverSession ? shareUnchanged(current, next) : current));
-    } catch {
-      // The thread went away; the pane closes with it.
-    }
-  }, [threadId]);
-  useEffect(() => {
-    setModel(null);
-  }, [threadId]);
-  useEffect(() => {
-    void load();
-  }, [load, revision, again]);
-  // A file edited on disk shows as changed when the person comes back to the window.
-  useEffect(() => {
-    const onFocus = () => void load();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [load]);
-  // Read again when the window says so (a record that needs only the files, a re-read of the thread).
-  useEffect(() => signal?.subscribe(() => void load()), [signal, load]);
-  const patch = useCallback((update: (records: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => {
-    setModel((current) => (current ? { ...current, annotations: update(current.annotations) } : current));
-  }, []);
-  return { model, load, patch };
-}
-
 /**
  * The in-thread New message button (record 5.1 to 5.3) is off since 👍 Looks
  * good (approval "inbox-acknowledge", 2026-10-15). Its route, phone door row
@@ -1860,6 +1829,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const paneGone = useRef(false);
   /** Words typed in an answer, waiting for their pause (typedAnswers.ts); a click, Send, blur, close or the page going saves them. */
   const [typedSaves] = useState(() => createTypedSaves());
+  /** A pick's save and a Send's replies (data/actions): their answers go into the held thread. */
+  const pickSave = usePickSave();
+  const sendReply = useSendReply();
   const [pickQueue] = useState(() =>
     createPickQueue(
       (ids) => {
@@ -4003,12 +3975,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
        * not saved, they are still the person's answer, and the next wait saves them.
        */
       let kept = false;
+      // Each question's state as this save found it: its answer goes into the held thread before the save's promise
+      // settles (data/actions/picks.ts), so the state it changed is read now, not after.
+      const statesBefore = new Map((threadRef.current.messages.find((m) => m.id === messageId)?.questions ?? []).map((q) => [`${q.message_id}/${q.key}`, q.state] as const));
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
         let result: Awaited<ReturnType<typeof inboxApi.pick>>;
         for (let tries = 0; ; tries += 1) {
           try {
-            result = await inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: options.keepalive && tries === 0 });
+            result = await pickSave.mutateAsync({ messageId, key, revision, answer, keepalive: options.keepalive && tries === 0 });
             break;
           } catch (cause) {
             // Another window's answer landed first (pickConflict.ts holds the rule): this one goes again on top of it,
@@ -4036,8 +4011,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         savesLanded.current += 1;
         // Only words changed (each question's state as before): what the list and drafts show did not move.
         const stateKept = result.questions.every((q) => {
-          const was = questionById(`${q.message_id}/${q.key}`);
-          return !!was && was.state === q.state;
+          const was = statesBefore.get(`${q.message_id}/${q.key}`) ?? questionById(`${q.message_id}/${q.key}`)?.state;
+          return was !== undefined && was === q.state;
         });
         // A Send waiting on this save reads the thread right after it, before
         // React draws the saved picks: give it the saved questions now, or it
@@ -4971,7 +4946,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         if (request.input.words) wordsKey = request.input.idempotency_key;
         postingTo = request.input.to;
         const last = index === requests.length - 1;
-        const answer = await inboxApi.reply(request.messageId, last && !machine ? { ...request.input, with_thread: true } : request.input);
+        const answer = await sendReply.mutateAsync({ messageId: request.messageId, input: last && !machine ? { ...request.input, with_thread: true } : request.input });
         const written = answer.reply as InboxMessageWire | null;
         if (written?.handoff && !answer.replayed) handedReply = written;
         if (last) sentRead = answer.thread_read ?? null;

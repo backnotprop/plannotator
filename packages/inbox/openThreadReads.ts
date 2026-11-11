@@ -1,7 +1,9 @@
 /**
  * After records arrive on the event stream, the window reads the list, the
  * drafts and the decisions again, and reads the open thread again only when
- * those records can change what the thread shows (perf study, item 4a').
+ * those records can change what the thread shows (perf study, item 4a') and
+ * the cache could not apply them in place (data/apply/stream.ts: a record the
+ * held thread took is `applied`, and owes no read of the thread).
  *
  * What the open thread's read carries, and what changes it:
  *  - its messages, their questions and their annotations: a message, question
@@ -46,14 +48,16 @@ export function listsThread(list: { sections: readonly InboxListSection[]; snooz
 export interface RecordBatch {
   /** A record that can change any thread, or one that could not be placed. */
   any: boolean;
-  /** The threads the records belong to. */
+  /** The threads the records belong to that the cache could not apply them to (a read shows them). */
   threads: Set<string>;
+  /** The threads whose records the cache applied in place: no read of the thread, only what a read did besides. */
+  applied: Set<string>;
   /** The threads of records that only echo this window's own question saves (not in `threads` for them alone). */
   own: Set<string>;
 }
 
 export function newRecordBatch(): RecordBatch {
-  return { any: false, threads: new Set(), own: new Set() };
+  return { any: false, threads: new Set(), applied: new Set(), own: new Set() };
 }
 
 /** Note a record of this window's own question save, already drawn from the save's answer. */
@@ -63,13 +67,17 @@ export function noteOwnRecord(batch: RecordBatch, threadId: string): void {
 
 /** The batch holds only echoes of this window's own saves: nothing another window, device or agent did. */
 export function onlyOwnRecords(batch: RecordBatch): boolean {
-  return !batch.any && batch.threads.size === 0 && batch.own.size > 0;
+  return !batch.any && batch.threads.size === 0 && batch.applied.size === 0 && batch.own.size > 0;
 }
 
-/** Note one record in the batch. `null`: a malformed frame, or a read owed with no record (a pick save's). */
-export function noteRecord(batch: RecordBatch, event: InboxEvent | null): void {
+/**
+ * Note one record in the batch. `null`: a malformed frame, or a read owed with no record (a pick save's). `applied`:
+ * the cache took it into the held thread in place.
+ */
+export function noteRecord(batch: RecordBatch, event: InboxEvent | null, applied = false): void {
   const threadId = event ? threadOfRecord(event) : null;
   if (threadId === null) batch.any = true;
+  else if (applied) batch.applied.add(threadId);
   else batch.threads.add(threadId);
 }
 
