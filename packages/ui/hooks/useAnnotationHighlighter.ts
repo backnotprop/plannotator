@@ -22,8 +22,7 @@ import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 import { useHighlightCopy } from '../utils/highlightCopy';
-import { TOUCH_PRIMARY_QUERY, touchHighlightDueAt } from '../utils/touchSelection';
-import { restoreSelection, sameSelection, saveSelection, type SavedSelection } from '../utils/selectionTextOffsets';
+import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_OFFER_SELECTOR, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
 import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
@@ -40,11 +39,6 @@ export interface ToolbarState {
    *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
    *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
   getAnchorRect?: () => ToolbarRect | null;
-  /** A selection made with a finger whose END was the one moving: the touch
-   *  toolbar goes above it when there is room, clear of the end handle and of
-   *  the lines the finger may drag on to (`AnnotationToolbar` `touchSide`).
-   *  Absent: below, as before. */
-  touchSide?: 'above';
 }
 
 export interface CommentPopoverState {
@@ -69,6 +63,33 @@ export interface QuickLabelPickerState {
   cursorHint?: { x: number; y: number };
   source?: any;
 }
+
+/**
+ * A text selection made with a finger that has come to rest, waiting for the
+ * person to act on it (see `UseAnnotationHighlighterReturn.touchSelectionOffer`):
+ * what `AnnotationToolbar` needs for a selection that is not painted. A button
+ * takes the selection, then does what it does on a painted one.
+ */
+export interface TouchSelectionOffer {
+  /** An element of the selection's start: it anchors host actions and keys. Nothing is painted. */
+  element: HTMLElement;
+  /** The selected words (Copy, a host's actions). */
+  selectionText: string;
+  /** The whole selection's rect, read live: it moves with the page. Null: nowhere to anchor. */
+  getAnchorRect: () => ToolbarRect | null;
+  /** The selection's rich-text copy, built from the live range when Copy is pressed. */
+  getRichCopy: () => RichCopySource | Promise<RichCopySource>;
+  /** The annotation mode: Comment mode offers Comment alone. */
+  mode: EditorMode;
+  onAnnotate: (type: AnnotationType) => void;
+  onRequestComment: (initialChar?: string) => void;
+  onQuickLabel: (label: QuickLabel) => void;
+  /** Dismiss the offer; the page's selection is left alone. */
+  onClose: () => void;
+}
+
+/** What the offer holds before the hook adds the mode and what its buttons do. */
+type TouchOfferView = Pick<TouchSelectionOffer, 'element' | 'selectionText' | 'getAnchorRect' | 'getRichCopy'>;
 
 type MathAnnotationSource = {
   kind: 'math';
@@ -644,6 +665,9 @@ const selectionRanAway = (length: number, last: number): boolean => length > las
 /** Pointer travel, in CSS px, under which a press and its release are a click, not a drag. */
 const DRAG_SLOP_PX = 4;
 
+/** How long after the lift of a press on the touch offer its click, and the selection change a tap can bring, may still follow. */
+const TOUCH_OFFER_PRESS_MS = 600;
+
 /** A press on these is theirs (a click, a native drag, typing), never the start of a text selection to repair. */
 const NOT_A_TEXT_PRESS = 'a, button, input, textarea, select, label, summary, img, svg, canvas, video, [role="button"], [draggable="true"], [contenteditable]:not([contenteditable="false"])';
 
@@ -775,6 +799,27 @@ const rangeTextPieces = (range: Range): RangeTextPiece[] | null => {
     if (text === endContainer) return pieces;
   }
   return null;
+};
+
+/**
+ * A range's words as the library quotes a selection it paints
+ * (`getTextFromRange`: block breaks as newlines, where `innerText` exists),
+ * for a selection that is not painted.
+ */
+const rangeQuote = (range: Range): string => {
+  try {
+    const holder = document.createElement('div');
+    // Kept off screen but rendered: `innerText` of a hidden element is empty.
+    holder.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
+    holder.appendChild(range.cloneContents());
+    document.body.appendChild(holder);
+    const text = holder.innerText;
+    holder.remove();
+    if (text) return text;
+  } catch {
+    // Fall through to the range's own string.
+  }
+  return range.toString();
 };
 
 /**
@@ -1003,6 +1048,19 @@ export interface UseAnnotationHighlighterReturn {
   applyAnnotations: (annotations: Annotation[]) => void;
   /** For a host that composes on a touch screen: the page selection as a draft now (see `ViewerHandle.takeSelection`). */
   takeSelection?: () => boolean;
+  /**
+   * On a touch screen (the main pointer is a finger): a selection that has
+   * come to rest, waiting for the person to act on it; null otherwise. Nothing
+   * is painted for it, so the system selection, its handles and its edit menu
+   * stay theirs until a button is tapped. It is what `AnnotationToolbar`
+   * shows under the selection (`TouchSelectionToolbar` draws it): each button
+   * takes the selection, then does what it does on a painted one. The offer is
+   * gone while the selection moves and back when it rests again. A host that
+   * composes (`onHostDraft`) never gets one: its own Comment action takes the
+   * selection (`takeSelection`). Every other host renders
+   * `<TouchSelectionToolbar offer={touchSelectionOffer} />`.
+   */
+  touchSelectionOffer: TouchSelectionOffer | null;
   /** Composers kept as draft marks (`commentDraftShelf`), oldest first. Empty without that option. */
   commentDrafts: CommentPopoverState[];
   /** Open the composer of a draft mark again (by its highlight id); an open composer closes first, as a close. */
@@ -1061,6 +1119,9 @@ export function useAnnotationHighlighter({
   const pendingRangeRunsRef = useRef<RangeTextPiece[] | null>(null);
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
+  // The painted selection's toolbar, read from listeners (a touch offer closes it).
+  const toolbarStateRef = useRef(toolbarState);
+  toolbarStateRef.current = toolbarState;
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
   // The open composer, read from callbacks and listeners (visible drafts, `peekComment`).
   const commentPopoverRef = useRef(commentPopover);
@@ -1075,6 +1136,10 @@ export function useAnnotationHighlighter({
   /** Paint the shelf's waiting drafts as draft marks (the highlighter has just started). */
   const paintShelvedDraftsRef = useRef<() => void>(() => {});
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
+  // A selection made with a finger that has come to rest, offered and not painted (see the Mobile bridge below).
+  const [touchOffer, setTouchOffer] = useState<TouchOfferView | null>(null);
+  // The range offered (snapped as it is painted): what the offer's tap takes if the press cleared the page's selection.
+  const offeredTouchRef = useRef<Range | null>(null);
 
   // Ctrl+C / Cmd+C while the highlight stands in for the selection: the
   // toolbar is up (web-highlighter cleared the selection on mouseup), or that
@@ -1123,6 +1188,39 @@ export function useAnnotationHighlighter({
   hostComposesRef.current = onHostDraft !== undefined;
   const takeTouchSelectionRef = useRef<() => boolean>(() => false);
   const takeSelection = useCallback(() => takeTouchSelectionRef.current(), []);
+
+  const hideTouchOffer = useCallback(() => {
+    if (!offeredTouchRef.current) return;
+    offeredTouchRef.current = null;
+    setTouchOffer(null);
+  }, []);
+
+  // A button of the offer was tapped: take the selection as `action` (a mode:
+  // comment opens the composer, redline deletes, selection paints it for the
+  // toolbar's own handlers) and clear the system selection. False when nothing was taken.
+  const takeTouchSelectionOffer = useCallback((action: EditorMode): boolean => {
+    const offered = offeredTouchRef.current;
+    offeredTouchRef.current = null;
+    setTouchOffer(null);
+    const selection = window.getSelection();
+    if (!offered || !selection) return false;
+    // A press on the toolbar can take the selection off the page (iOS does when
+    // a press lands off its text): the words offered are the words meant.
+    if (selection.isCollapsed || selection.rangeCount === 0) {
+      selection.removeAllRanges();
+      selection.addRange(offered.cloneRange());
+    }
+    pendingModeOverrideRef.current = action;
+    let taken = false;
+    try {
+      taken = takeTouchSelectionRef.current();
+    } finally {
+      pendingModeOverrideRef.current = null;
+    }
+    // As the library does once it has painted a selection: the marks are the selection now.
+    if (taken) selection.removeAllRanges();
+    return taken;
+  }, []);
 
   // `reopenComment`: the words a reopened comment's composer opens with (read
   // by the CREATE handler's comment branch while the range is painted), and
@@ -1792,8 +1890,6 @@ export function useAnnotationHighlighter({
 
     /** The selection string of a drag let go outside the document, while its highlight is made. */
     let releasedOutsideQuote: string | null = null;
-    /** While the touch bridge paints a finger's selection: where its toolbar goes first (ToolbarState.touchSide). */
-    let touchSideForCreate: 'above' | undefined;
 
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
@@ -1901,7 +1997,6 @@ export function useAnnotationHighlighter({
               getAnchorRect: () => unionToolbarRect(
                 marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
               ),
-              ...(touchSideForCreate ? { touchSide: touchSideForCreate } : {}),
             });
           }
         }
@@ -1921,32 +2016,11 @@ export function useAnnotationHighlighter({
     // the range it paints and quotes has to be corrected before that handler
     // runs: registered on the capture phase of the same element, and before
     // `run()` so registration order settles the at-target case too.
-    // The library's handler sits out one release (a listener removed during
-    // dispatch never runs) and listens again on the next task.
-    const sitOutThisRelease = () => {
-      if (!listening) return;
-      highlighter.stop();
-      listening = false;
-      window.setTimeout(() => {
-        if (disposed) return;
-        highlighter.run();
-        listening = true;
-      }, 0);
-    };
-    const handlePointerEndCapture = (event: Event) => {
+    const handlePointerEndCapture = () => {
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
         pendingRangeRunsRef.current = null;
-        return;
-      }
-      // On a touch screen a finger's selection is the touch bridge's (below):
-      // highlighted once it is finished, with the selection kept. The library
-      // would paint it at the lift and take the selection away, and paint
-      // again a selection the bridge has already highlighted.
-      if (touchBridgeOwnsRelease(event, selection)) {
-        pendingRangeRunsRef.current = null;
-        sitOutThisRelease();
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
@@ -1968,9 +2042,18 @@ export function useAnnotationHighlighter({
         // card under text comments, a diagram): the selection is the
         // person's to copy. The library's own pointer-end handler paints
         // nothing for it and then removes the DOM selection anyway, so it
-        // sits this one event out.
+        // sits this one event out (a listener removed during dispatch never
+        // runs) and listens again on the next task.
         pendingRangeRunsRef.current = null;
-        sitOutThisRelease();
+        if (listening) {
+          highlighter.stop();
+          listening = false;
+          window.setTimeout(() => {
+            if (disposed) return;
+            highlighter.run();
+            listening = true;
+          }, 0);
+        }
         return;
       }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
@@ -2232,11 +2315,14 @@ export function useAnnotationHighlighter({
     };
     container.addEventListener('mousedown', handlePressStart, true);
 
-    // On a touch screen a host that composes takes the selection when the
-    // person chooses its Comment (takeSelection); the library painting it at
-    // touchend would end the system selection and its edit menu first.
+    // On a touch screen the selection is the system's until the person takes
+    // it: with the offer's Comment button (`touchSelectionOffer`), or a host's
+    // own Comment action (`takeSelection`). The library painting it at
+    // touchend would end the system selection, its handles and its edit menu
+    // first, so its pointer-end listener stays off (`run()` binds only that:
+    // a tap on a highlight is still heard).
     const isTouchPrimary = window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
-    if (!(isTouchPrimary && hostComposesRef.current)) {
+    if (!isTouchPrimary) {
       highlighter.run();
       listening = true;
     }
@@ -2333,21 +2419,34 @@ export function useAnnotationHighlighter({
     containerRef.current.addEventListener('mousedown', handleMathMouseDown, true);
     containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
 
-    // Mobile bridge
-    // The page's selection, painted as a pending highlight; false when there is none to take.
-    const takeTouchSelection = (): boolean => {
+    // Mobile bridge: a selection made with a finger is read from
+    // `selectionchange` once it rests, and offered (`touchSelectionOffer`), not
+    // painted: painting it would end the system selection before the person
+    // could reach for a handle. Taking it is their tap on the offer.
+    let selectionTimer: ReturnType<typeof setTimeout>;
+    // The page's selection as the range to paint, snapped as the pointer-end
+    // guard snaps it; null where there is nothing to annotate in it.
+    const readTouchSelection = (): Range | null => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
-      if (!containerRef.current?.contains(sel.anchorNode)) return false;
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+      if (!containerRef.current?.contains(sel.anchorNode)) return null;
       const range = sel.getRangeAt(0).cloneRange();
       // Nothing to annotate there: the system selection and its copy menu stay the person's.
-      if (rangeInsideExcluded(containerRef.current, range)) return false;
+      if (rangeInsideExcluded(containerRef.current, range)) return null;
       // Same fail-closed rule as the pointer-end guard (#881): touch
       // selections settle on block boundaries just as often.
-      if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
+      if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return null;
       snapRangeOutOfBelowTitle(containerRef.current, range);
       snapRangeStartPastExcluded(range);
       snapRangeEndBeforeSkipped(containerRef.current, range);
+      // Snapped off everything it held.
+      if (range.collapsed || isBlankQuote(range.toString())) return null;
+      return range;
+    };
+    // The page's selection, painted as a pending highlight; false when there is none to take.
+    const takeTouchSelection = (): boolean => {
+      const range = readTouchSelection();
+      if (!range) return false;
       pendingRangeRunsRef.current = rangeTextPieces(range);
       try {
         highlighter.fromRange(range);
@@ -2359,148 +2458,93 @@ export function useAnnotationHighlighter({
       }
     };
     takeTouchSelectionRef.current = takeTouchSelection;
-
-    // --- Touch: a finger's selection is highlighted once it is finished, and stays selected ---
-    // The rules and their reasons: utils/touchSelection.ts. While the finger is
-    // on the screen nothing is painted; every change to the selection starts
-    // the wait again; the highlight is painted under the selection and the
-    // selection is put back over the same words (utils/selectionTextOffsets.ts),
-    // so its handles stay and a handle dragged later makes one new highlight,
-    // replacing this one, once that drag is finished too.
-    const clock = () => performance.now();
-    let touches = 0;
-    const pointersDown = new Set<number>();
-    let lastTouchAt = 0;
-    let liftAt: number | null = null;
-    let lastChangeAt = 0;
-    let restTimer: ReturnType<typeof setTimeout> | undefined;
-    /** The selection as it was put back over the highlight just painted: not painted again while it is the same. */
-    let committed: { saved: SavedSelection; sourceId: string } | null = null;
-    const fingerDown = () => touches > 0 || pointersDown.size > 0;
-    const dueAt = () => touchHighlightDueAt({ fingerDown: fingerDown(), lastTouchAt, liftAt, lastChangeAt });
-    const committedStillSelected = (selection: Selection): boolean => {
-      const root = containerRef.current;
-      if (!committed || !root) return false;
-      // Its highlight was closed, made into an annotation or replaced: the selection is new again.
-      if (pendingSourceRef.current?.id !== committed.sourceId) {
-        committed = null;
-        return false;
-      }
-      return sameSelection(root, selection, committed.saved);
-    };
-    const touchBridgeOwnsRelease = (event: Event, selection: Selection) =>
-      isTouchPrimary && !hostComposesRef.current && (event.type === 'touchend' || committedStillSelected(selection));
-    /** Which end of the selection the finger moved last: the toolbar keeps clear of it. */
-    const movedEnd = (saved: SavedSelection | null): 'start' | 'end' => {
-      const order = (s: SavedSelection) => {
-        const { offset: a } = s.anchor;
-        const { offset: f } = s.focus;
-        return a === null || f === null ? null : { start: Math.min(a, f), end: Math.max(a, f), focusAtEnd: f >= a };
-      };
-      const now = saved ? order(saved) : null;
-      if (!now) return 'end';
-      const before = committed ? order(committed.saved) : null;
-      if (before && now.start !== before.start && now.end === before.end) return 'start';
-      if (before && now.end !== before.end) return 'end';
-      return now.focusAtEnd ? 'end' : 'start';
-    };
-    const commitTouchSelection = () => {
-      const root = containerRef.current;
-      const selection = window.getSelection();
-      if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
-      if (committedStillSelected(selection)) return;
-      const saved = saveSelection(root, selection);
-      const before = pendingSourceRef.current;
-      touchSideForCreate = movedEnd(saved) === 'end' ? 'above' : undefined;
-      let took = false;
-      try {
-        took = takeTouchSelection();
-      } finally {
-        touchSideForCreate = undefined;
-      }
-      const created = pendingSourceRef.current;
-      // Nothing painted, or painted straight into an annotation (redline): nothing to keep selected.
-      if (!took || !saved || !created || created === before || typeof created.id !== 'string') {
-        committed = null;
+    // A press on the offer is not the person changing the selection, even when
+    // it takes the selection away (iOS can). From its pointerdown, and for a
+    // moment after its lift (the click, and what a tap does to the selection,
+    // come after it), nothing hides or replaces the offer. If the selection
+    // moved meanwhile, it is read again once the press is over (a press that
+    // took nothing, a new selection made at once); if it did not, the offer
+    // stands as it is, and a toolbar dismissed by that press stays dismissed.
+    let offerPressed = false;
+    let selectionMovedWhilePressed = false;
+    let offerPressEnd: ReturnType<typeof setTimeout>;
+    // A selection that rests becomes the offer; the rect it anchors to is read
+    // from the range each time, so it follows the page as it scrolls.
+    const offerTouchSelection = () => {
+      if (offerPressed) return;
+      let range = readTouchSelection();
+      if (!range) {
+        hideTouchOffer();
         return;
       }
-      if (!restoreSelection(root, selection, saved)) {
-        committed = null;
-        return;
+      // One selection toolbar at a time: the toolbar of a painted selection still
+      // open (a pinpoint tap) closes, with its highlight, as when another
+      // selection is made. The page's selection is not touched. Its marks go
+      // first, so the range is read after them.
+      const painted = toolbarStateRef.current;
+      if (painted) {
+        if (painted.source && !isMathAnnotationSource(painted.source)) highlighter.remove(painted.source.id);
+        clearPendingSelection();
+        setToolbarState(null);
+        range = readTouchSelection();
+        if (!range) {
+          hideTouchOffer();
+          return;
+        }
       }
-      const kept = saveSelection(root, selection);
-      committed = kept ? { saved: kept, sourceId: created.id } : null;
+      offeredTouchRef.current = range;
+      const start = range.startContainer;
+      const element = (start.nodeType === Node.ELEMENT_NODE ? start : start.parentElement) as HTMLElement | null;
+      // As the painted toolbar's: the quote without text the highlighter skips
+      // (#1511). The repair checks itself against the text a painted highlight
+      // would hold, which is the range's text outside the skipped runs.
+      const pieces = rangeTextPieces(range);
+      const paintedText = (pieces ?? []).filter((piece) => !piece.excluded).map((piece) => piece.text).join('');
+      const selectionText = quoteWithoutExcludedText(pieces, rangeQuote(range), paintedText);
+      setTouchOffer({
+        element: element ?? container,
+        selectionText,
+        getAnchorRect: () => unionToolbarRect(Array.from(range.getClientRects())),
+        getRichCopy: () => richCopySourceFromRange(range.cloneRange(), selectionText),
+      });
     };
-    const armTouchHighlight = () => {
-      clearTimeout(restTimer);
-      if (disposed || hostComposesRef.current) return;
-      restTimer = setTimeout(onTouchRest, Math.max(0, dueAt() - clock()));
+    const endOfferPress = () => {
+      clearTimeout(offerPressEnd);
+      offerPressed = false;
+      if (!selectionMovedWhilePressed) return;
+      selectionMovedWhilePressed = false;
+      offerTouchSelection();
     };
-    const onTouchRest = () => {
-      restTimer = undefined;
-      if (disposed || hostComposesRef.current) return;
-      // A finger went down, or the selection changed, since this was armed.
-      if (dueAt() > clock()) {
-        armTouchHighlight();
-        return;
-      }
-      commitTouchSelection();
+    const noteOfferPress = (event: Event) => {
+      if (!(event.target instanceof Element) || !event.target.closest(TOUCH_SELECTION_OFFER_SELECTOR)) return;
+      clearTimeout(offerPressEnd);
+      offerPressed = true;
+      selectionMovedWhilePressed = false;
+    };
+    const liftOfferPress = () => {
+      if (!offerPressed) return;
+      clearTimeout(offerPressEnd);
+      offerPressEnd = setTimeout(endOfferPress, TOUCH_OFFER_PRESS_MS);
+    };
+    const cancelOfferPress = () => {
+      if (offerPressed) endOfferPress();
     };
     const handleSelectionChange = isTouchPrimary
       ? () => {
-          if (hostComposesRef.current) {
-            clearTimeout(restTimer);
-            return;
-          }
-          const selection = window.getSelection();
-          if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-            // Nothing selected: nothing to paint, and a later selection of the same words is new.
-            clearTimeout(restTimer);
-            committed = null;
-            return;
-          }
-          lastChangeAt = clock();
-          armTouchHighlight();
+          clearTimeout(selectionTimer);
+          if (hostComposesRef.current) return;
+          // The selection is moving (a handle dragged, a tap elsewhere): no offer until it rests.
+          if (offerPressed) selectionMovedWhilePressed = true;
+          else hideTouchOffer();
+          selectionTimer = setTimeout(offerTouchSelection, TOUCH_SELECTION_SETTLE_MS);
         }
       : null;
-    /** A finger is up when the last one lifts; a lift (not a cancel) is the person letting go. */
-    const fingersChanged = (wasDown: boolean, lifted: boolean) => {
-      if (!wasDown || fingerDown()) return;
-      if (lifted) liftAt = lastTouchAt;
-      armTouchHighlight();
-    };
-    const handleTouch = (event: TouchEvent) => {
-      lastTouchAt = clock();
-      const wasDown = fingerDown();
-      touches = event.touches?.length ?? 0;
-      // The touch list is every finger on the screen: no pointer is still down without one.
-      if (touches === 0) pointersDown.clear();
-      fingersChanged(wasDown, event.type === 'touchend');
-    };
-    const handlePointer = (event: PointerEvent) => {
-      if (event.type === 'pointermove' && !pointersDown.has(event.pointerId)) return;
-      lastTouchAt = clock();
-      const wasDown = fingerDown();
-      if (event.type === 'pointerdown') pointersDown.add(event.pointerId);
-      else if (event.type !== 'pointermove') pointersDown.delete(event.pointerId);
-      fingersChanged(wasDown, event.type === 'pointerup');
-    };
-    /** The page put away (another app, another tab): no finger is on it any more. */
-    const forgetFingers = () => {
-      const wasDown = fingerDown();
-      touches = 0;
-      pointersDown.clear();
-      fingersChanged(wasDown, false);
-    };
-    const TOUCH_EVENTS = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const;
-    const POINTER_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const;
-    const watching = { capture: true, passive: true } as const;
 
     if (handleSelectionChange) {
       document.addEventListener('selectionchange', handleSelectionChange);
-      for (const type of TOUCH_EVENTS) document.addEventListener(type, handleTouch, watching);
-      for (const type of POINTER_EVENTS) document.addEventListener(type, handlePointer, watching);
-      window.addEventListener('blur', forgetFingers);
+      document.addEventListener('pointerdown', noteOfferPress, true);
+      document.addEventListener('pointerup', liftOfferPress, true);
+      document.addEventListener('pointercancel', cancelOfferPress, true);
     }
 
     // Visible drafts waiting from another mount of this document come back as draft marks.
@@ -2512,12 +2556,14 @@ export function useAnnotationHighlighter({
 
     return () => {
       if (handleSelectionChange) {
-        clearTimeout(restTimer);
+        clearTimeout(selectionTimer);
+        clearTimeout(offerPressEnd);
         document.removeEventListener('selectionchange', handleSelectionChange);
-        for (const type of TOUCH_EVENTS) document.removeEventListener(type, handleTouch, watching);
-        for (const type of POINTER_EVENTS) document.removeEventListener(type, handlePointer, watching);
-        window.removeEventListener('blur', forgetFingers);
+        document.removeEventListener('pointerdown', noteOfferPress, true);
+        document.removeEventListener('pointerup', liftOfferPress, true);
+        document.removeEventListener('pointercancel', cancelOfferPress, true);
       }
+      hideTouchOffer();
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       container.removeEventListener('mouseup', handlePointerEndCapture, true);
@@ -3101,6 +3147,35 @@ export function useAnnotationHighlighter({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commentPopover, toolbarState, hostDraftOn, clearPendingSelection]);
 
+  // The touch offer's toolbar: its buttons take the selection, then do what
+  // they do on a painted one (a painted selection's handlers read the toolbar
+  // state of a render that has not happened yet, so they are not called here).
+  const touchSelectionOffer: TouchSelectionOffer | null = touchOffer && {
+    ...touchOffer,
+    mode,
+    onAnnotate: (type) => { takeTouchSelectionOffer(type === AnnotationType.DELETION ? 'redline' : 'comment'); },
+    onRequestComment: (initialChar) => {
+      if (!takeTouchSelectionOffer('comment') || !initialChar) return;
+      setCommentPopover((open) => (open ? { ...open, initialText: initialChar } : open));
+    },
+    onQuickLabel: (label) => {
+      const highlighter = highlighterRef.current;
+      const before = pendingSourceRef.current;
+      if (!highlighter || !takeTouchSelectionOffer('selection')) return;
+      const source = pendingSourceRef.current;
+      // Nothing was made of the selection (a blank quote): there is nothing to label.
+      if (!source || source === before) return;
+      createAnnotationFromSource(
+        highlighter, source, AnnotationType.COMMENT,
+        `${label.emoji} ${label.text}`, undefined, true, label.tip,
+      );
+      clearPendingSelection();
+      setToolbarState(null);
+      window.getSelection()?.removeAllRanges();
+    },
+    onClose: hideTouchOffer,
+  };
+
   return {
     highlighterRef,
     toolbarState,
@@ -3120,6 +3195,7 @@ export function useAnnotationHighlighter({
     clearAllHighlights,
     applyAnnotations: applyAnnotationsInternal,
     takeSelection,
+    touchSelectionOffer,
     commentDrafts,
     reopenCommentDraft,
     reopenComment,

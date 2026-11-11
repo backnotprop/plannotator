@@ -25,6 +25,7 @@ import { CodePathValidationContext } from './CodePathValidationContext';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
 import { AnnotationToolbar } from './AnnotationToolbar';
+import { TouchSelectionToolbar } from './TouchSelectionToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
 
 /**
@@ -1162,6 +1163,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     clearAllHighlights,
     applyAnnotations,
     takeSelection,
+    touchSelectionOffer,
     highlighterRef,
     commentDrafts,
     reopenCommentDraft,
@@ -2261,9 +2263,24 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}
               touchAnchorRect={toolbarState.getAnchorRect}
-              touchSide={toolbarState.touchSide}
               hideCopyButton={!isTouchDevice}
               closeOnScrollOut
+            />
+          </ToolbarErrorBoundary>
+        )}
+
+        {/* A text selection made with a finger: the same toolbar, under the selection while it is still the system's */}
+        {selectionCommentsOn && !hostComposes && touchSelectionOffer && (
+          <ToolbarErrorBoundary>
+            <TouchSelectionToolbar
+              offer={touchSelectionOffer}
+              commentOnly={textCommentsOnly || undefined}
+              showDelete={textCommentsOnly && textDeletions ? true : undefined}
+              selectionActions={selectionActions}
+              selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
+              sideButton={sideButton}
+              quickLabels={quickLabels}
             />
           </ToolbarErrorBoundary>
         )}

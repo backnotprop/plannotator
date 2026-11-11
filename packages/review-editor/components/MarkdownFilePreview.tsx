@@ -4,6 +4,7 @@ import type { Annotation, Block, CodeAnnotation, ImageAttachment, MarkdownPrevie
 import { AnnotationType } from '@plannotator/ui/types';
 import { BlockRenderer } from '@plannotator/ui/components/BlockRenderer';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { TouchSelectionToolbar } from '@plannotator/ui/components/TouchSelectionToolbar';
 import { LocalLinkContext, type LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { PlanCleanDiffView, type PlanDiffSide } from '@plannotator/ui/components/plan-diff/PlanCleanDiffView';
@@ -552,6 +553,10 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
           />,
           document.body,
         )}
+
+      {hook.touchSelectionOffer && (
+        <TouchSelectionToolbar offer={hook.touchSelectionOffer} />
+      )}
     </div>
   );
 };

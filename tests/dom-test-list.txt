@@ -326,7 +326,7 @@ packages/ui/hooks/useAnnotationHighlighter.selectionEdges.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.releaseOutside.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.wobbleClick.test.tsx
-packages/ui/hooks/useAnnotationHighlighter.touchRest.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.touchSelection.test.tsx
 packages/ui/components/AnnotationToolbar.scrollOut.test.tsx
 packages/ui/hooks/useClickWord.test.tsx
 packages/ui/components/Viewer.clickAWord.test.tsx
@@ -541,6 +541,7 @@ packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
 packages/ui/components/AnnotationToolbar.side.test.tsx
 packages/ui/components/AnnotationToolbar.touchPlacement.test.tsx
 packages/ui/components/touchAnchorWiring.test.tsx
+packages/ui/components/TouchSelectionToolbar.test.tsx
 packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
 packages/ui/components/PermissionModeSetup.mobile.test.tsx
 packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx

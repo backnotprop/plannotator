@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { EyeOff, ExternalLink, LayoutGrid, MessageSquarePlus, Paperclip, RotateCcw } from 'lucide-react';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { TouchSelectionToolbar } from '@plannotator/ui/components/TouchSelectionToolbar';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
@@ -360,6 +361,9 @@ function AnnotatableMarkdownStage({
           }}
         />,
         document.body,
+      )}
+      {hook.touchSelectionOffer && (
+        <TouchSelectionToolbar offer={hook.touchSelectionOffer} />
       )}
     </OverlayScrollArea>
   );
