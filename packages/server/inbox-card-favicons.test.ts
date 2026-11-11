@@ -1,10 +1,4 @@
-/**
- * A person's web link's favicon, fetched by the Inbox (inbox-card-favicons.ts),
- * over a scripted fetch and DNS (never the network). What regresses: a
- * favicon over 64 KB, of another type (a page, an SVG), from another host by
- * redirect, from a private or loopback address, or past its deadline being
- * served; a miss asked again on every open; a slow host holding the window.
- */
+/** A link's favicon fetched by the Inbox over a scripted fetch and DNS, never the network. */
 import { describe, expect, test } from "bun:test";
 import { createCardFavicons, isPublicAddress, type CardFaviconOptions } from "./inbox-card-favicons";
 
@@ -45,7 +39,6 @@ describe("card favicons", () => {
     big.set([0, 0, 1, 0, 1, 0]);
     const streamed = scripted(() => new Response(new ReadableStream({ start(c) { c.enqueue(big.slice(0, 40_000)); c.enqueue(big.slice(40_000)); c.close(); } }), { headers: { "content-type": "image/x-icon" } }));
     expect(await streamed.favicons.get("big.example")).toEqual({ ok: false, miss: "too_big" });
-    // Exactly at the cap is fine.
     const atCap = new Uint8Array(64 * 1024);
     atCap.set([0, 0, 1, 0, 1, 0]);
     expect(await scripted(() => new Response(atCap, { headers: { "content-type": "image/x-icon" } })).favicons.get("ok.example")).toMatchObject({ ok: true });
@@ -84,7 +77,6 @@ describe("card favicons", () => {
     const started = Date.now();
     expect(await slow.favicons.get("slow.example")).toEqual({ ok: false, miss: "timeout" });
     expect(Date.now() - started).toBeLessThan(1000);
-    // A body that stalls after its headers is cut off by the same deadline.
     const stalled = scripted(() => new Response(new ReadableStream({ start(c) { c.enqueue(ICO.slice(0, 10)); } }), { headers: { "content-type": "image/x-icon" } }), { timeoutMs: 30 });
     expect(await stalled.favicons.get("stall.example")).toEqual({ ok: false, miss: "timeout" });
   });

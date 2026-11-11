@@ -1,15 +1,4 @@
-/**
- * Icon sets for agents' icons ("Sets" in the face picker): the `set:<set>/<icon>` face, the built-in sets embedded
- * from packages/inbox/assets/icon-sets, and a fetchable set downloaded on one click (inbox-icon-set-fetch.ts) from a
- * local fake server (tests/helpers/fake-icon-set.ts: generated pictures, 127.0.0.1 only). Temp data dirs only.
- *
- * What this catches: a `set:` face an older Plannotator cannot skip, or the faces file's version bumped; a built-in
- * icon outside its archive, of another type, or a set whose look (pixel size, one colour) the window would draw wrong;
- * game-icons.net's credit missing or changed; an icon served without the sandbox headers; the pointer read without
- * the picker asking (or at all when it is off); a download that does not finish in one click, does not resume after a
- * stop, needs the network once done, keeps a file that is not a picture or is too big, or follows a redirect to a
- * private address.
- */
+/** Icon sets: the `set:` face, built-in sets and a fetchable set downloaded from a local fake server (temp data dirs only). */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,13 +55,11 @@ describe("the set: face", () => {
     const again = createInboxAgentFacesFile(dir, () => {}).wire().faces;
     expect(again.ses_set).toEqual({ face: "set:tiny-creatures/zombie", sessions: [] });
     expect(again.ses_fetched).toEqual({ face: "set:blobs/25", sessions: [] });
-    // Not a set icon's id: refused like any unknown face (no path, no capitals, no empty parts).
     for (const bad of ["set:", "set:dcss", "set:dcss/", "set:/x", "set:../x/y", "set:dcss/../../x", "set:DCSS/orc", "set:dcss/orc/extra", `set:${"a".repeat(41)}/x`]) expect(isInboxAgentFace(bad)).toBe(false);
     expect(readInboxAgentFaces({ x: { face: "set:dcss/a b", sessions: [] } })).toEqual({});
 
-    // 0.28.60's reader, as released: a closed list, entries it does not know dropped one by one.
+    // A released older reader: a closed list, entries it does not know dropped one by one.
     const RELEASED = ["agent", "glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice", "transparent", "totman"];
-    // The upload build's reader (feat/inbox-own-agent-icon): the same list plus `own:<hash>`.
     const readers = [(face: string) => RELEASED.includes(face), (face: string) => RELEASED.includes(face) || INBOX_OWN_FACE.test(face)];
     for (const knows of readers) {
       if (typeof raw.v === "number" && raw.v > 1) throw new Error("an older reader would refuse the whole file");
@@ -86,7 +73,6 @@ describe("the set: face", () => {
     const faces = createInboxAgentFacesFile(dir, () => {});
     for (let i = 0; i < INBOX_AGENT_ICONS_KEPT + 5; i++) faces.change({ agent: `ses_${i}`, face: `set:dcss/icon-${i}` });
     expect(Object.keys(faces.wire().faces)).toHaveLength(INBOX_AGENT_ICONS_KEPT + 5);
-    // No uploads folder appears: a set icon is not a copy.
     expect(existsSync(join(dir, "agent-icons"))).toBe(false);
   });
 });
@@ -112,7 +98,6 @@ describe("the built-in sets", () => {
         const read = (await sets.read(set.id, icon.id))!;
         expect(sniffImageContentType(new Uint8Array(read.body))).toBe(read.type);
       }
-      // The window never gets the archive's offsets.
       expect(JSON.stringify(listing)).not.toContain('"at"');
     }
     expect(await sets.read("dcss", "no-such-icon")).toBeNull();
@@ -154,7 +139,6 @@ describe("the routes, through a running Inbox", () => {
   test("built-in icons are served sandboxed; the pointer is read only when the picker's Sets asks; one click gets a set", async () => {
     const served = await fake({ count: 12 });
     const w = await inboxWorld(served.pointer);
-    // Started, and the built-in sets listed: nothing asked of the network.
     expect((await w.list()).map((set) => set.id)).toEqual(["tiny-creatures", "game-icons", "dcss", "noto-3d"]);
     expect(served.total()).toBe(0);
 
@@ -175,14 +159,12 @@ describe("the routes, through a running Inbox", () => {
     expect(await credits.text()).toContain("Icons made by Delapouite");
     expect(served.total()).toBe(0);
 
-    // The picker's Sets: the pointer once, the set offered, nothing downloaded.
     const offered = (await w.list(true)).find((set) => set.id === "blobs");
     expect(offered).toMatchObject({ name: "Blobs", count: 12, kind: "fetchable", get: { state: "none", have: 0 } });
     expect(served.total()).toBe(1);
     await w.list(true);
     expect(served.total()).toBe(1);
 
-    // One click.
     const got = await fetch(`${w.base}/api/inbox/icon-sets`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ get: "blobs" }) });
     expect(got.status).toBe(200);
     for (let i = 0; i < 100; i++) {
@@ -198,12 +180,9 @@ describe("the routes, through a running Inbox", () => {
     const fetched = await fetch(`${w.base}/api/inbox/icon-sets/blobs/2`);
     expect(fetched.headers.get("content-type")).toBe("image/png");
     expect(fetched.headers.get("content-security-policy")).toContain("sandbox");
-    // Kept in this Inbox's data folder.
     expect(readdirSync(join(w.dataDir, "inbox", "icon-sets", "blobs")).filter((name) => name.endsWith(".png"))).toHaveLength(12);
-    // A face for it round-trips like any other.
     const saved = await fetch(`${w.base}/api/inbox/agent-faces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent: "ses_x", face: "set:blobs/2" }) });
     expect(((await saved.json()) as { faces: Record<string, { face: string }> }).faces.ses_x!.face).toBe("set:blobs/2");
-    // Another site cannot start a download.
     expect((await fetch(`${w.base}/api/inbox/icon-sets`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://evil.example" }, body: JSON.stringify({ get: "blobs" }) })).status).toBe(403);
   });
 
@@ -228,16 +207,13 @@ describe("a fetchable set", () => {
       return new Response("{}", { status: 404 });
     }) as unknown as typeof fetch;
     const dir = join(scratch("pn-icon-set-pointer-"), "icon-sets");
-    // The default pointer (which does not exist yet): listing, getting and resuming without the picker ask nothing.
     const quiet = fetcherAt(dir, INBOX_ICON_SETS_POINTER_DEFAULT, { fetch: counting, classify: async () => "public" });
     quiet.resume();
     expect(await quiet.list(false)).toEqual([]);
     expect(asked).toBe(0);
-    // The picker asks: one read, a missing pointer offers nothing, and is not asked again at once.
     expect(await quiet.list(true)).toEqual([]);
     expect(await quiet.list(true)).toEqual([]);
     expect(asked).toBe(1);
-    // Off: nothing, ever.
     const off = fetcherAt(dir, null, { fetch: counting });
     expect(await off.list(true)).toEqual([]);
     expect(await off.get("blobs")).toBeNull();
@@ -254,8 +230,6 @@ describe("a fetchable set", () => {
     expect((await first.list(false))[0]!.get).toEqual({ state: "failed", have: 10 });
     expect(first.listing("blobs")!.have).toEqual(Array.from({ length: 10 }, (_, i) => String(i + 1)));
 
-    // The Inbox starts again (a new fetcher on the same folder) and the server is back: the stopped set goes on alone,
-    // asking only for the icons it lacks.
     served.heal();
     const before = new Map(served.hits);
     const second = fetcherAt(dir, served.pointer);
@@ -266,7 +240,6 @@ describe("a fetchable set", () => {
     expect(served.hits.get("/blobs.json")).toBe(1);
     expect(existsSync(join(dir, "blobs", ".getting"))).toBe(false);
 
-    // Offline: the server gone, a new start. Listed (the pointer cannot be read), every icon served from the folder.
     await served.stop();
     fakes.splice(fakes.indexOf(served), 1);
     const offline = fetcherAt(dir, served.pointer);
@@ -307,11 +280,9 @@ describe("a fetchable set", () => {
     const started = Date.now();
     await gone.get("blobs");
     await gone.running("blobs");
-    // Stopped once one icon had waited through every try, not after waiting on each of the 20 left.
     expect(Date.now() - started).toBeLessThan(2_000);
     const state = (await gone.list(false))[0]!.get!;
     expect(state.state).toBe("failed");
-    // What it kept stays kept (Get again goes on from there).
     expect(state.have).toBeGreaterThan(0);
     expect(state.have).toBe(readdirSync(join(dir, "blobs")).filter((name) => name.endsWith(".png")).length);
     expect(readdirSync(join(dir, "blobs")).filter((name) => name.includes(".tmp"))).toEqual([]);
@@ -328,7 +299,6 @@ describe("a fetchable set", () => {
     const files = readdirSync(join(dir, "blobs"));
     expect(files.some((name) => name.startsWith("3.") || name.startsWith("5."))).toBe(false);
     expect(fetcher.read("blobs", "3")).toBeNull();
-    // A file planted in the folder that is not a picture is not served either.
     writeFileSync(join(dir, "blobs", "7.png"), "<html></html>");
     expect(fetcher.read("blobs", "7")).toBeNull();
   });
@@ -354,12 +324,10 @@ describe("a fetchable set", () => {
 });
 
 describe("trimming a fetched set's PNGs", () => {
-  /** A palette PNG (colour type 3, 8 bits, a tRNS clear index 0) of `size` px with a w × h block at (x, y). */
   function palettePng(size: number, x0: number, y0: number, w: number, h: number): Uint8Array {
     const rgba = new Uint8Array(size * size * 4);
     for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) rgba.set([200, 40, 40, 255], (y * size + x) * 4);
     const rgbaPng = encodePng(size, size, rgba);
-    // Rewrite as a palette PNG: index 1 for the block, 0 (clear) elsewhere.
     const raw = new Uint8Array(size * (size + 1));
     for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) raw[y * (size + 1) + 1 + x] = 1;
     const chunk = (name: string, body: Uint8Array) => {
@@ -387,18 +355,15 @@ describe("trimming a fetched set's PNGs", () => {
       const before = decodePng(bytes)!;
       const trimmed = trimPng(bytes);
       if (before.width === 16) {
-        // The generated creature nearly fills its 16 px: nothing worth trimming, kept as it came.
         expect(trimmed === null || decodePng(trimmed)!.width <= 16).toBe(true);
         continue;
       }
       const after = decodePng(trimmed!)!;
       expect([after.width, after.height]).toEqual([38, 38]);
-      // The block's pixels, all of them, in the middle; the corners clear.
       const opaque = [...Array(after.width * after.height).keys()].filter((i) => after.rgba[i * 4 + 3]! > 0).length;
       expect(opaque).toBe(24 * 36);
       expect(after.rgba[3]).toBe(0);
     }
-    // Not a PNG, or nothing to trim: kept as it came.
     expect(trimPng(new TextEncoder().encode("<html></html>"))).toBeNull();
     expect(trimPng(encodePng(8, 8, new Uint8Array(8 * 8 * 4).fill(255)))).toBeNull();
   });

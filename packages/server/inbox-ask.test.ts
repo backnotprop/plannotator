@@ -1,10 +1,4 @@
-/**
- * Ask AI's conversation file and routes through a running Inbox on a temp data
- * dir: the agent writes through the official MCP client, the person through
- * requests shaped as the window's. Guards that it is on with no switch, that
- * words are neither lost nor saved twice, that a conversation goes with its
- * thread, and that only the owner's own window can ask or read.
- */
+/** Ask AI's conversation file and routes through a running Inbox on a temp data dir. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,10 +46,6 @@ async function setup() {
   return { server, client: await connect(server), project, dataDir, root };
 }
 
-/**
- * The agent sends, and its connection says it can answer live, so a question
- * is saved. Nothing answers here: what happens next is inbox-ask-live.test.ts.
- */
 async function agentSends(client: Client, project: string, session: string | null, body: string, reply_to?: string): Promise<{ message_id: string; thread_id: string }> {
   const result = await client.callTool({
     name: "send_message",
@@ -75,7 +65,6 @@ async function agentSends(client: Client, project: string, session: string | nul
 
 const WINDOW_HEADERS = { "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" };
 
-/** A request shaped as the window's page makes it. */
 function fromWindow(server: InboxServer, path: string, body?: Record<string, unknown>): Promise<Response> {
   return fetch(`http://127.0.0.1:${server.port}${path}`, {
     method: body ? "POST" : "GET",
@@ -100,12 +89,10 @@ function askFile(dataDir: string, threadId: string): string {
   return join(inboxDir(dataDir), "ask", `${threadId}.json`);
 }
 
-/** Everything in the ask folder that belongs to one thread. */
 function filesOf(dataDir: string, threadId: string): string[] {
   return readdirSync(join(inboxDir(dataDir), "ask")).filter((name) => name.startsWith(`${threadId}.`));
 }
 
-/** A saved question, answered at `answered_at`: what step 2's agent will leave in the file. */
 function answeredTurn(id: string, answered_at: string, answer = "Because.") {
   return { id, at: "2026-10-31T09:00:00.000Z", session: "session-a", host: "claude-code", question: "Why?", answer, answered_at };
 }
@@ -114,7 +101,6 @@ async function code(response: Response): Promise<string> {
   return ((await response.json()) as { code: string }).code;
 }
 
-/** Collects a stream's named frames as they arrive. */
 function listen(response: Response) {
   const frames: string[] = [];
   const reader = response.body!.getReader();
@@ -140,7 +126,6 @@ describe("on for everyone", () => {
   test("with no switch and Code review off, every ask route answers and the settings say so", async () => {
     const previous = process.env.PLANNOTATOR_INBOX_ASK_AI;
     try {
-      // A leftover from when this was a switch: it no longer turns Ask off.
       process.env.PLANNOTATOR_INBOX_ASK_AI = "0";
       const { server, client, project } = await setup();
       const settings = (await (await fromWindow(server, "/api/inbox/settings")).json()) as { ask_ai?: boolean; code_review?: { on?: boolean } };
@@ -167,7 +152,6 @@ describe("the conversation file", () => {
     const source = '[Quoted from plan.md (/work/plan.md, attached to this thread; the version sent, unchanged), line 4, under "Region".]';
     const response = await ask(server, thread_id, "turn-0001", "Why this region?", { passage: "us-east-1", source });
     expect(response.status).toBe(200);
-    // A Side's source is kept with the turn, so Ask again sends it to the agent again.
     expect(((await response.json()) as { turn: unknown }).turn).toMatchObject({ id: "turn-0001", session: "session-a", host: "claude-code", question: "Why this region?", passage: "us-east-1", source });
 
     const file = askFile(dataDir, thread_id);
@@ -242,7 +226,6 @@ describe("the conversation file", () => {
     const retry = await ask(server, thread_id, "turn-0001", "Why?");
     expect(retry.status).toBe(200);
     expect(((await retry.json()) as { turn: { id: string } }).turn.id).toBe("turn-0001");
-    // A new question still waits for the thread to come back.
     const fresh = await ask(server, thread_id, "turn-0002", "And now?");
     expect(fresh.status).toBe(409);
     expect(await code(fresh)).toBe("thread_resolved");
@@ -303,11 +286,9 @@ describe("the conversation file", () => {
     const truncated = whole.slice(0, whole.length - 20);
     writeFileSync(file, truncated);
 
-    // The read says so and keeps the window's way in: the next question is what sets the file aside.
     const read = await fromWindow(server, askPath(thread_id));
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({ conversation: null, damaged: true, subject: "Ship it?" });
-    // Marking seen reports it. Neither moves anything.
     const seen = await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" });
     expect(seen.status).toBe(409);
     expect(await code(seen)).toBe("ask_damaged");
@@ -321,7 +302,6 @@ describe("the conversation file", () => {
     expect(aside[0]).toMatch(/\.json\.\d+\.bad$/);
     expect(readFileSync(join(file, "..", aside[0]!), "utf8")).toBe(truncated);
 
-    // The window kept the words and asks again: a new conversation, beside the old bytes.
     expect((await ask(server, thread_id, "turn-0003", "Three?")).status).toBe(200);
     expect((await conversation(server, thread_id))?.turns.map((turn) => turn.id)).toEqual(["turn-0003"]);
     expect(readFileSync(join(file, "..", aside[0]!), "utf8")).toBe(truncated);
@@ -335,7 +315,6 @@ describe("the conversation file", () => {
     planted.turns[0]!.answer = "x".repeat(INBOX_ASK_FILE_MAX - skeleton - 500);
     writeInboxAsk(inboxDir(dataDir), planted);
 
-    // A short question still fits under the limit, right to the edge.
     expect((await ask(server, thread_id, "turn-0002", "Why?")).status).toBe(200);
     const file = askFile(dataDir, thread_id);
     const saved = readFileSync(file);
@@ -437,7 +416,6 @@ describe("seen", () => {
     const turns = [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z")];
     writeInboxAsk(inboxDir(dataDir), { v: 1, thread_id, seen_at: null, turns });
 
-    // Parses, is far in the future, and is not ISO: stored as the newest answer's time.
     expect((await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "Nov 1 3000" })).status).toBe(200);
     const stored = await conversation(server, thread_id);
     expect(stored?.seen_at).toBe("2026-11-01T10:00:00.000Z");
@@ -502,7 +480,6 @@ describe("the gate", () => {
     const post = (path: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
       fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
 
-    // An agent's curl: no browser headers, the page's serverSession in hand.
     for (const response of [
       await fetch(`${base}${askPath(thread_id)}`),
       await post(askPath(thread_id), { turn_id: "turn-0002", question: "From curl" }),
@@ -514,7 +491,6 @@ describe("the gate", () => {
       expect(JSON.parse(body).code).toBe("window_only");
       expect(body).not.toContain("Private words");
     }
-    // Another site, and another localhost port (same-site).
     for (const site of ["cross-site", "same-site", "none"]) {
       const read = await fetch(`${base}${askPath(thread_id)}`, { headers: { "Sec-Fetch-Site": site } });
       expect(read.status).toBe(403);
@@ -549,7 +525,6 @@ describe("the gate", () => {
     const project = join(root, "api");
     mkdirSync(dataDir, { recursive: true });
     mkdirSync(project, { recursive: true });
-    // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
     const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
@@ -590,7 +565,6 @@ describe("the gate", () => {
         expect(JSON.parse(body).code).toBe("owner_only");
         expect(body).not.toContain("Private words");
       }
-      // The agent's client is this computer's: not the owner's either, over the tailnet.
       const agentRoute = await through(OWNER, `${inboxAskBridgeBase("session-a")}${SESSION_BRIDGE_POLL_PATH}`, {});
       expect(agentRoute.status).toBe(403);
       expect(((await agentRoute.json()) as { code: string }).code).toBe("local_only");

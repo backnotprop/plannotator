@@ -1,8 +1,4 @@
-/**
- * Codex's account line (inbox-codex-account.ts) against a fake `codex` app-server (tests/helpers/fake-codex-launch.ts),
- * never the real one: the plan and the limits used from Codex's own answers, an API key without limits, a signed-out
- * Codex as signed out, no email or id passed on, a limits read that fails leaving the plan, one run per 30 s.
- */
+/** Codex's account line against a fake `codex` app-server, never the real one. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,7 +49,6 @@ describe("Codex's account, read from Codex", () => {
     });
     expect(JSON.stringify(account)).not.toContain("example.com");
     expect(fake.rpc().map((call) => call.method)).toEqual(["initialize", "initialized", "account/read", "account/rateLimits/read"]);
-    // Never signs in or out.
     expect(fake.rpc().some((call) => call.method.startsWith("account/login") || call.method === "account/logout")).toBe(false);
   });
 
@@ -74,11 +69,9 @@ describe("Codex's account, read from Codex", () => {
   });
 
   test("Codex runs only where New message could start it: launch's check first", async () => {
-    // No Inbox MCP entry (or too old, or not found): no row, and Codex never ran.
     const off = setup({ login: "chatgpt" }, true, async () => ({ ok: false, code: "tool_off" }));
     expect(await off.reader.read()).toEqual({ state: "unknown" });
     expect(off.fake.starts()).toHaveLength(0);
-    // Launch's check says signed out: that is the answer, without running Codex.
     const out = setup({ login: "chatgpt" }, true, async () => ({ ok: false, code: "signed_out" }));
     expect(await out.reader.read()).toEqual({ state: "signed_out" });
     expect(out.fake.starts()).toHaveLength(0);
@@ -90,7 +83,6 @@ describe("Codex's account, read from Codex", () => {
     expect(codexPlanName("team")).toBe("ChatGPT Business");
     expect(codexPlanName("someday_new")).toBe("ChatGPT");
     expect(codexAccountOf({ account: null, requiresOpenaiAuth: false })).toEqual({ state: "signed_in", kind: "other", plan: null, limits: null });
-    // The `codex` limit first; a window with no finite percent is left out, never read as 0.
     expect(codexLimitsOf({ rateLimits: { primary: { usedPercent: 99 } }, rateLimitsByLimitId: { codex: { primary: { usedPercent: 12.4, windowDurationMins: 300 }, secondary: { usedPercent: "x" }, planType: "go" } } })).toEqual({
       limits: [{ used_percent: 12, window_mins: 300, resets_at: null }],
       plan: "go",

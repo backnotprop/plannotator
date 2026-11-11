@@ -1,8 +1,4 @@
-/**
- * Decision data's Ask (approval decision-data), through the server's real doors: a Send with `decision_ask` keeps the
- * person's words as typed, and only what the agent receives for that message carries the instructions, once. The
- * connections are plain HTTP calls with the registry's token and a real MCP client, never a real agent.
- */
+/** Decision data's Ask through the server's real doors: only what the agent receives carries the instructions, once. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,12 +73,10 @@ describe("Decision data's Ask", () => {
     const sent = await send(server, { body: QUESTION, idempotency_key: "k1", decision_ask: true });
     expect(sent.message.body).toBe(QUESTION);
 
-    // What the window reads never holds the instructions.
     const stored = (await (await fetch(`${base(server)}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: InboxThread };
     expect(stored.thread.messages[0]!.body).toBe(QUESTION);
     expect(JSON.stringify(stored)).not.toContain(INBOX_DECISION_ASK_OPEN);
 
-    // A connection that polls again before it reports the delivery is handed the same turn: once each time.
     for (let round = 0; round < 2; round++) {
       const [command] = await poll(server, "ses-a", project);
       expect(command!.body).toBe(`${QUESTION}\n\n${INBOX_DECISION_ASK_BLOCK}`);
@@ -95,7 +89,6 @@ describe("Decision data's Ask", () => {
     const text = await readThreadText(client, sent.thread_id);
     expect(count(text, INBOX_DECISION_ASK_BLOCK)).toBe(1);
 
-    // A retried Send answers the same thread.
     const replay = await send(server, { body: QUESTION, idempotency_key: "k1", decision_ask: true });
     expect(replay).toMatchObject({ replayed: true, thread_id: sent.thread_id });
     expect(count(await readThreadText(client, sent.thread_id), INBOX_DECISION_ASK_OPEN)).toBe(1);

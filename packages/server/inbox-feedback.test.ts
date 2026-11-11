@@ -1,12 +1,4 @@
-/**
- * The Feedback dialog's send through a running Inbox (temp data dir,
- * loopback) to a local fake feedback endpoint (never the real Worker): the
- * window's words go on with the version, the OS name and `surface: "inbox"`
- * and nothing else; the answer is `{ ok: true }`; a refusal is a 502 with
- * the Worker's reason; an unreachable, undeployed, failing or silent endpoint
- * is a 502 with one plain line, within 8 s; bad input never leaves the
- * computer; another site's page cannot send.
- */
+/** The Feedback dialog's send through a running Inbox to a local fake endpoint, never the real Worker. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +17,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A stand-in for the feedback Worker on 127.0.0.1: records each request and answers `status`. */
 function fakeEndpoint(status = 201) {
   const received: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   const fake = Bun.serve({
@@ -59,7 +50,6 @@ describe("POST /api/inbox/feedback", () => {
   test("forwards exactly the words, version, OS and surface; answers { ok: true }", async () => {
     const endpoint = fakeEndpoint();
     const { send } = await inbox(endpoint.url);
-    // The window's POSTs all carry `serverSession` (packages/inbox/api.ts); it is not forwarded.
     const res = await send({ message: "  The sidebar is lovely  ", category: "idea", contact: "me@example.com", serverSession: "srv_page" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
@@ -68,7 +58,6 @@ describe("POST /api/inbox/feedback", () => {
     expect(got!.method).toBe("POST");
     expect(got!.path).toBe("/feedback");
     expect(got!.headers["content-type"]).toBe("application/json");
-    // No cookie and no Origin: the Worker sees a server-side request.
     expect(got!.headers.cookie).toBeUndefined();
     expect(got!.headers.origin).toBeUndefined();
     const body = got!.body as Record<string, unknown>;
@@ -104,7 +93,6 @@ describe("POST /api/inbox/feedback", () => {
   });
 
   test("unreachable, not deployed (404), failing (5xx) or a page that is not the Worker: a 502 with one plain line", async () => {
-    // A port nothing listens on: a fake that is already stopped.
     const gone = fakeEndpoint();
     fakes.pop()!.stop(true);
     const odd = (status: number, body: string, type: string) => {
@@ -175,7 +163,6 @@ describe("POST /api/inbox/feedback", () => {
     roots.push(root);
     const dataDir = join(root, "data");
     mkdirSync(dataDir, { recursive: true });
-    // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
     const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
     process.env.PLANNOTATOR_DATA_DIR = dataDir;

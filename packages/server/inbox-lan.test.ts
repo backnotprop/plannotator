@@ -1,26 +1,4 @@
-/**
- * "Reach from this Wi-Fi" (mobile plan step P2; adr/implementation/inbox-mobile.md
- * section 3), proved against a real Inbox: `plannotator inbox --background`
- * as a process (the compiled binary when PLANNOTATOR_INBOX_TEST_BINARY names
- * one, as the inbox-e2e job runs it; the CLI from source otherwise) under a
- * temp HOME and data dir. Nothing is mocked: the certificate is made by the
- * real `openssl` at run time (never committed), the listener is a real TLS
- * socket on this machine's network address, and the "phone" is
- * tests/helpers/pinned-phone.ts, which pins the certificate by SHA-256 as the
- * app does and sends its requests byte for byte.
- *
- * Proved: the switch opens the listener and fills the QR's `lan` and `fp`;
- * a phone pairs over the LAN address (exchange 7.2) and reads with its token;
- * six digits are refused there (QR only over the Wi-Fi) while the window's
- * port still takes them;
- * a wrong fingerprint is refused by the phone before it sends anything; the
- * window, `/mcp`, the bridge, control, settings, restart and pairing are
- * absent there whatever Host, Origin or encoded path is sent; the Bonjour
- * record (read back with `dns-sd -L` on macOS) carries the port and `fp`,
- * and goes with the switch, a clean stop and a kill -9; the next start opens
- * the same port with the same certificate. In process: `openssl` missing
- * answers 409 lan_unavailable and the switch stays off.
- */
+/** "Reach from this Wi-Fi" against a real Inbox process under a temp HOME and data dir: real `openssl`, a real TLS listener, and a phone that pins the certificate by SHA-256. */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +10,6 @@ import { certificateFingerprint, INBOX_BONJOUR_TYPE } from "./inbox-lan";
 
 type Json = Record<string, any>;
 
-/** Read `dns-sd -L` for a few seconds: the record's port and TXT, or "" when nothing answers. */
 async function bonjourLookup(name: string, ms = 3000): Promise<string> {
   const child = Bun.spawn(["dns-sd", "-L", name, INBOX_BONJOUR_TYPE, "local"], { stdout: "pipe", stderr: "ignore" });
   await Bun.sleep(ms);
@@ -40,10 +17,7 @@ async function bonjourLookup(name: string, ms = 3000): Promise<string> {
   return await new Response(child.stdout).text();
 }
 
-/**
- * Read `dns-sd -B` for a few seconds: the instance names whose last event is
- * Add. A record just taken down can show as a cached Add followed by its Rmv.
- */
+/** Read `dns-sd -B` for a few seconds: the instance names whose last event is Add. A record just taken down can show as a cached Add followed by its Rmv. */
 async function bonjourBrowse(ms = 3000): Promise<string[]> {
   const child = Bun.spawn(["dns-sd", "-B", INBOX_BONJOUR_TYPE, "local"], { stdout: "pipe", stderr: "ignore" });
   await Bun.sleep(ms);
@@ -131,7 +105,6 @@ describe("Reach from this Wi-Fi, on the binary", () => {
       expect(statSync(join(tls, "cert.pem")).mode & 0o777).toBe(0o600);
       expect(statSync(join(tls, "key.pem")).mode & 0o777).toBe(0o600);
     }
-    // Self-signed P-256 with CN=Plannotator Inbox, as the contract writes it.
     const { X509Certificate } = await import("node:crypto");
     const x509 = new X509Certificate(cert);
     expect(x509.subject).toBe("CN=Plannotator Inbox");
@@ -166,7 +139,6 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const threads = await phone("/api/inbox/device/threads", { headers: { Authorization: `Bearer ${token}` } });
     expect(threads.status).toBe(200);
     expect(JSON.parse(threads.text)).toHaveProperty("sections");
-    // A command through the LAN keeps its idempotency key like any other path.
     const seen = await phone("/api/inbox/device/threads/msg_none/seen", { headers: { Authorization: `Bearer ${token}` }, body: { idempotency_key: "lan-1" } });
     const replay = await phone("/api/inbox/device/threads/msg_none/seen", { headers: { Authorization: `Bearer ${token}` }, body: { idempotency_key: "lan-1" } });
     expect(replay.status).toBe(seen.status);
@@ -177,10 +149,8 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const made = (await (await win("/api/inbox/pairing", { serverSession })).json()) as Json;
     const digits = await phone("/api/inbox/device/pair", { body: { code: made.offer.code, name: "Typed", platform: "ios" } });
     expect([digits.status, JSON.parse(digits.text)]).toEqual([400, { error: "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.", code: "code_not_accepted_here" }]);
-    // Refused before the offer is read: no wrong try counted, the right code still works where digits are allowed.
     const onWindow = await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "Typed on loopback", platform: "ios" }) });
     expect(onWindow.status).toBe(201);
-    // The secret pairs over the LAN.
     const next = (await (await win("/api/inbox/pairing", { serverSession })).json()) as Json;
     const secret = new URL(next.link.replace("plannotator://", "https://pair.invalid/")).searchParams.get("secret");
     const wrongDigits = await phone("/api/inbox/device/pair", { body: { code: next.offer.code === "000000" ? "000001" : "000000", name: "Typed", platform: "ios" } });
@@ -196,7 +166,6 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const attempt = await phone("/api/inbox/device/pair", { fingerprint: wrong, body: { secret, name: "Impostor", platform: "ios" } }).catch((error) => error);
     expect(attempt).toBeInstanceOf(PinMismatchError);
     expect((attempt as PinMismatchError).presented).toBe(lan.fingerprint);
-    // Nothing reached the Inbox: the offer is still open for the right phone.
     const right = await phone("/api/inbox/device/pair", { body: { secret, name: "iPhone 2", platform: "ios" } });
     expect(right.status).toBe(201);
   });
@@ -226,7 +195,6 @@ describe("Reach from this Wi-Fi, on the binary", () => {
       ["POST", "/api/inbox/cards/marks"],
       ["POST", "/api/inbox/voice/key"],
       ["GET", "/api/inbox/attachments/att_x"],
-      // Encoded and dotted paths that a lax router could resolve outside the door.
       ["GET", "/api/inbox/device/../threads"],
       ["GET", "/api/inbox/device/%2e%2e/threads"],
       ["GET", "/api/inbox/device/%2E%2E/%2E%2E/settings"],
@@ -238,30 +206,25 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const seen: string[] = [];
     for (const host of hosts) {
       for (const [method, path] of outside) {
-        // A forged Tailscale login too: it counts only on the tailnet listener, so here it opens nothing.
         for (const headers of [{ Host: host }, { Host: host, ...auth }, { Host: host, ...auth, "X-Forwarded-Host": "localhost" }, { Host: host, ...auth, "Tailscale-User-Login": "owner@example.com" }]) {
           const answer = await phone(path, { method, headers, body: method === "POST" ? {} : undefined });
           seen.push(`${host} ${method} ${path} ${answer.status} ${JSON.parse(answer.text).code}`);
           expect([host, path, answer.status, JSON.parse(answer.text).code]).toEqual([host, path, 404, "device_route_not_found"]);
         }
       }
-      // A door path that is not on the allowlist, with a valid token: the door's own 404.
       for (const path of ["/api/inbox/device/..%2fsettings", "/api/inbox/device/settings", "/api/inbox/device/restart", "/api/inbox/device/pairing", "/api/inbox/device/devices", "/api/inbox/device/bridge/poll", "/api/inbox/device/update", "/api/inbox/device/agents", "/api/inbox/device/voice/key"]) {
         const answer = await phone(path, { method: "POST", headers: { Host: host, ...auth, "Tailscale-User-Login": "owner@example.com" }, body: { idempotency_key: "spoof" } });
         expect([path, answer.status, JSON.parse(answer.text).code]).toEqual([path, 404, "device_route_not_found"]);
       }
-      // An encoded id on an allowed route reaches only that route's handler, which finds no such thread.
       const tricked = await phone("/api/inbox/device/threads/..%2f..%2fsettings", { headers: { Host: host, ...auth } });
       expect(tricked.status).toBe(404);
       expect(tricked.text).not.toContain("agent_tools");
-      // A spoofed Origin (the window's own) is refused on the door itself.
       for (const origin of [`http://localhost:${windowPort}`, `http://127.0.0.1:${windowPort}`, "null"]) {
         const answer = await phone("/api/inbox/device/health", { headers: { Host: host, Origin: origin, ...auth } });
         expect([origin, answer.status, JSON.parse(answer.text).code]).toEqual([origin, 403, "origin_not_allowed"]);
       }
     }
     w.proof(seen.join("\n"));
-    // Plain HTTP to the TLS port gets no answer from the door.
     const plain = await fetch(`http://${lan.address}/api/inbox/device/health`).then((r) => r.status, () => "refused");
     expect(plain).not.toBe(200);
   });
@@ -269,14 +232,12 @@ describe("Reach from this Wi-Fi, on the binary", () => {
   test("an absolute-form request line and a WebSocket upgrade reach nothing outside the door on the LAN listener", async () => {
     const windowPort = registry(w).port;
     const auth = { Authorization: `Bearer ${token}` };
-    // Absolute-form (as a proxy would send it), naming the window's own origin.
     for (const target of [`http://127.0.0.1:${windowPort}/api/inbox/threads`, `http://localhost:${windowPort}/mcp`, `https://${lan.address}/api/inbox/settings`, `http://localhost:${windowPort}/api/inbox/device/../threads`]) {
       for (const method of ["GET", "POST"]) {
         const answer = await phone(target, { method, headers: auth, body: method === "POST" ? {} : undefined });
         expect([method, target, answer.status, JSON.parse(answer.text).code]).toEqual([method, target, 404, "device_route_not_found"]);
       }
     }
-    // A WebSocket upgrade: the LAN listener never upgrades; outside the door, and on a door path off the allowlist, it is a 404.
     const upgrade = { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "AAAAAAAAAAAAAAAAAAAAAA==" };
     for (const path of ["/", "/mcp", "/api/inbox/threads", "/api/inbox/events", "/api/inbox/device/socket", "/api/inbox/device/bridge/poll"]) {
       const answer = await phone(path, { headers: { ...upgrade, ...auth } });
@@ -304,12 +265,10 @@ describe("Reach from this Wi-Fi, on the binary", () => {
       await Bun.sleep(500);
       expect(await bonjourBrowse()).not.toContain(computerName);
     }
-    // A start with the switch off opens nothing.
     await signalInbox(w, "SIGTERM");
     await Bun.sleep(500);
     await restart();
     expect(((await (await win("/api/inbox/lan")).json()) as Json).lan).toEqual({ on: false, address: null, fingerprint: null, bonjour: false, error: null });
-    // The certificate and the port stay: on again, the same address and fingerprint, so a paired phone's pin and a written-down address still hold.
     lan = await setLan(true);
     expect(lan.fingerprint).toBe(before.fingerprint);
     expect(lan.address).toBe(before.address);
@@ -375,7 +334,6 @@ describe("Reach from this Wi-Fi, in process", () => {
     const on = await fetch(`http://127.0.0.1:${first.port}/api/inbox/lan`, { method: "POST", body: JSON.stringify({ on: true }) });
     const port = Number((((await on.json()) as Json).lan.address ?? ":0").split(":")[1]);
     first.stop();
-    // The certificate is gone and openssl fails: the next start cannot open the listener.
     rmSync(join(dataDir, "inbox", "tls"), { recursive: true, force: true });
     const bin = join(root, "bin");
     mkdirSync(bin);

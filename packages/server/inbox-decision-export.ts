@@ -1,13 +1,4 @@
-/**
- * `GET /api/inbox/threads/<id>/decisions?format=md|html|json&tz=<IANA zone>`: the thread's decisions as a download
- * (design brief "export-decisions"), with `content-disposition: attachment`, as Decision data's CSV is. Read only;
- * nothing is kept. Bun-only, like the rest of the Inbox server. The phone door carries it (`threads/:id/decisions`).
- *
- * The shape and both documents are packages/shared/inbox/decision-export*.ts; this file reads the pictures the HTML
- * embeds (each through the message image route's own rules: an image the message's body names, sniffed and capped),
- * scaled to 800 px when wider, each at most `DECISION_EXPORT_PICTURE_MAX_BYTES` and all at most
- * `DECISION_EXPORT_PICTURES_MAX_BYTES`; past either the alt text shows.
- */
+/** `GET /api/inbox/threads/<id>/decisions`: the thread's decisions as a read-only download. Bun-only. */
 import { homedir } from "node:os";
 import { inboxThreadPullWire } from "@plannotator/core/inbox-types";
 import {
@@ -36,7 +27,6 @@ const FORMATS: Record<DecisionExportFormat, string> = {
   json: "application/json; charset=utf-8",
 };
 
-/** Read each picture the document names into `images`, within the caps. Pictures that can't be read show their alt text. */
 async function withPictures(doc: DecisionExportV1, pictures: readonly DecisionExportPictureSource[], store: InboxStore): Promise<void> {
   let total = 0;
   for (const source of pictures) {
@@ -60,7 +50,6 @@ async function withPictures(doc: DecisionExportV1, pictures: readonly DecisionEx
   }
 }
 
-/** A thread's export as the download and Post decisions build it, or null for no such thread. */
 export function threadDecisionExport(store: InboxStore, threadId: string, options: { tz: string; version: string; now?: () => Date }): ReturnType<typeof buildDecisionExport> | null {
   const input = store.decisionExportInput(threadId);
   if (!input) return null;
@@ -77,7 +66,6 @@ export function threadDecisionExport(store: InboxStore, threadId: string, option
   });
 }
 
-/** The download, or null when the path is not this route. */
 export async function inboxDecisionExportRoute(url: URL, store: InboxStore, options: { version: string; now?: () => Date }): Promise<Response | null> {
   const match = INBOX_DECISION_EXPORT_ROUTE.exec(url.pathname);
   if (!match) return null;

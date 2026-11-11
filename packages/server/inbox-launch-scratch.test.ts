@@ -1,14 +1,4 @@
-/**
- * Scratch folders (launch PR 3), on a real launch module over a temp data dir and a temp home. What each
- * test guards: Settings → Agents' "Scratch folders" saves only a full path (`~/` is the home; empty is the
- * default) outside any git repository, never from a tailnet guest; the trust-once row reads Claude Code's own
- * trust record, where a trusted folder above the root counts and the root's own untrusted entry does not, and
- * a rewrite of that record is read again; and `claude purge` runs only on a folder whose purge reaches nothing
- * else: never below a repository's root or in a linked worktree (Claude's purge maps both to a repository and
- * drops that repository's own entry, as run on 2.1.314), and only after a dry run whose plan names that folder
- * alone (tested through the host's `purge`, with a stub `claude`).
- * Making, naming and removing the folders runs end to end in tests/e2e/inbox-launch-scratch.spec.ts.
- */
+/** Scratch folders on a real launch module over a temp data dir and home; `claude purge` is tested through the host's `purge` with a stub `claude`. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,11 +48,9 @@ function setup() {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    // As inbox.ts's `isGuest`, with every tailnet caller here a guest (the owner over the tailnet: inbox-tailnet-owner.test.ts).
     isGuest: (_req, via) => via === "tailnet",
   });
   restore.push(() => launch.stop());
-  // A refusal the route throws (InboxError) is answered by the Inbox's error table; here its code is enough.
   const post = async (body: Record<string, unknown>, via = "local") => {
     const response = await launch.route(
       new Request("http://127.0.0.1:4000/api/inbox/launch/settings", { method: "POST", headers: { host: "127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify({ serverSession: "srv", ...body }) }),
@@ -96,7 +84,6 @@ describe("Settings → Agents: Scratch folders", () => {
     mkdirSync(join(home, "code", "app", ".git"), { recursive: true });
     for (const scratch_dir of ["~/code/app", "~/code/app/scratch/new"]) expect(await post({ scratch_dir })).toMatchObject({ status: 422, body: { code: "validation_error" } });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
-    // Through a link into the repository too: the real path decides.
     symlinkSync(join(home, "code", "app"), join(home, "app-link"));
     expect(await post({ scratch_dir: "~/app-link/scratch" })).toMatchObject({ status: 422, body: { code: "validation_error" } });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
@@ -104,7 +91,6 @@ describe("Settings → Agents: Scratch folders", () => {
   });
 });
 
-/** A stub `claude` that logs its argv and prints `plan` for `purge --dry-run`. */
 function stubClaude(plan: (folder: string) => string) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-purge-host-")));
   restore.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -135,7 +121,6 @@ function stubClaude(plan: (folder: string) => string) {
   return { dir, host, folder, calls };
 }
 
-/** A dry-run plan as 2.1.314 prints it, for these `projects[...]` keys. */
 const planOf = (folder: string, keys: string[]) =>
   [`Purge plan for ${folder}:`, ``, `  dir:    /h/.claude/projects/${folder.replace(/[^A-Za-z0-9]/g, "-")}`, `           project transcripts (.jsonl) and memory/`, ...keys.flatMap((k) => [`  config: projects["${k}"]`, `           project entry in ~/.claude.json (trust, history, MCP servers)`]), ``, `Dry run: ${keys.length + 1} item(s) would be deleted.`].join("\n");
 
@@ -210,7 +195,6 @@ describe("claudeTrustsFolder", () => {
     writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { "/work/scratch": { hasTrustDialogAccepted: false }, "/work": { hasTrustDialogAccepted: true } } }));
     expect(claudeTrustsFolder(env(home), "/work/scratch")).toBe(true);
     expect(claudeTrustsFolder(env(home), "/workshop")).toBe(false);
-    // Read once and kept while the file stays; a rewrite of the same size (Claude replaces the file) is read again.
     writeFileSync(join(home, "next.json"), JSON.stringify({ projects: { "/work/scratch": { hasTrustDialogAccepted: false }, "/wor": { hasTrustDialogAccepted: true } } }) + " ");
     renameSync(join(home, "next.json"), join(home, ".claude.json"));
     expect(claudeTrustsFolder(env(home), "/work/scratch")).toBe(false);

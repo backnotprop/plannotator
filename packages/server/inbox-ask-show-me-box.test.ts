@@ -1,11 +1,4 @@
-/**
- * A Show me from a dragged box, at the ask route: a stand-in Inbox store, a real Shape store in a temp folder, no
- * Inbox started. The window sends the box's picture as a data: URL and a request without the picture's line; the
- * route keeps the picture in the board's own folder and the request the agent reads names that file. What regresses
- * if these fail: the picture is dropped or kept outside the board, the agent is never told where it is, a box over
- * several parts goes out under one part's name, the picture is kept again on a retry of the same turn, or a picture
- * that cannot be saved fails the whole Show me.
- */
+/** A Show me from a dragged box at the ask route: a stand-in Inbox store and a real Shape store in a temp folder. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +9,6 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createShapeStore } from "@plannotator/shared/shape/store";
 import { createInboxAsk } from "./inbox-ask";
 
-// A thread's id is its first message's.
 const THREAD = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0A";
 const SESSION = "srv_test";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -36,7 +28,6 @@ function setup(keep?: (id: string, picture: string) => Promise<string | null>) {
   if (!made.ok) throw new Error(JSON.stringify(made));
   const board = made.id;
   const thread = { thread_id: THREAD, subject: "S", project: { name: "app", root: dir }, messages: [] } as unknown as InboxThread;
-  // An owner whose client never connects: the turn is saved, and the answer is "no_connection".
   const store = {
     dir,
     onDeletion: () => () => {},
@@ -62,13 +53,11 @@ function setup(keep?: (id: string, picture: string) => Promise<string | null>) {
   asks.push(ask);
   const post = async (part: NonNullable<InboxShowMeTarget["part"]>, turn = "ask_01J8ZK3TQ4VW7Y9A2B5C6D8E0F") => {
     const target: InboxShowMeTarget = { review: null, file: null, lines: null, round: 1, words: "how does it fail", part };
-    // As the window writes it: the picture is a data: URL, so the request has no picture line.
     const body = { serverSession: SESSION, turn_id: turn, question: inboxShowMeRequest({ target, title: "", threadId: THREAD }), kind: "show_me", show_me: target };
     const req = new Request(`http://127.0.0.1/api/inbox/threads/${THREAD}/ask`, { method: "POST", headers: { "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const res = (await ask.route(req, new URL(req.url), "local"))!;
     return { status: res.status, body: (await res.json()) as { turn: { question: string; show_me: InboxShowMeTarget }; reason?: string } };
   };
-  // The board's own folder (the store keeps each under its project's).
   const folder = join(shapes.dir, readdirSync(shapes.dir).find((project) => existsSync(join(shapes.dir, project, board)))!, board, "files");
   return { board, shapes, post, files: () => (existsSync(folder) ? readdirSync(folder) : []) };
 }

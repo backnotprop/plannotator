@@ -1,19 +1,4 @@
-/**
- * Plannotator Inbox: icon sets for agents' icons ("Sets" in the face picker; core `inbox-types.ts`, "Agent faces").
- * Bun only: the Inbox runs on the Bun server; the Pi server serves no Inbox route.
- *
- *   GET  /api/inbox/icon-sets[?remote=1]        { sets }: the built-in sets, then the fetchable ones (`remote=1`: the
- *                                                pointer is read too, the only time it is; the picker's Sets asks it)
- *   GET  /api/inbox/icon-sets/<set>             the set and its icons (InboxIconSetListing)
- *   GET  /api/inbox/icon-sets/<set>?credits=1   its credits file, as sandboxed plain text (game-icons.net's)
- *   GET  /api/inbox/icon-sets/<set>/<icon>      one icon, with the uploads' sandboxed image headers
- *   POST /api/inbox/icon-sets  `{ get: <set> }`  download a fetchable set into the data folder (resumes a stopped one)
- *
- * A face names an icon as `set:<set>/<icon>` in agent-faces.json; the window draws it from the icon's address, as an
- * `<img>` (pixel art, nearest-neighbour at whole multiples) or as a CSS mask in the text colour (one-colour sets), and
- * never as markup. Built-in sets are embedded in the binary (inbox-icon-sets-content.ts) and served to any window of
- * this Inbox; a fetched set, the pointer and a download are this computer's windows' and the owner's over the tailnet.
- */
+/** Icon sets for agents' icons, built-in (embedded in the binary) and fetchable. A face names an icon as `set:<set>/<icon>`; the window draws it only as an image or CSS mask, never as markup. Bun only. */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import type { InboxIconSet, InboxIconSetIcon, InboxIconSetListing } from "@plannotator/core/inbox-types";
@@ -47,7 +32,6 @@ export interface BuiltInIconSets {
   credits(id: string): Promise<string | null>;
 }
 
-/** The embedded sets (or, for tests, any files of the same shape). Each manifest is read once, when first asked. */
 export function createBuiltInIconSets(files: Readonly<Record<string, BuiltInIconSetFiles>> = BUILT_IN_ICON_SET_FILES): BuiltInIconSets {
   const manifests = new Map<string, Promise<{ manifest: BuiltInManifest; byId: Map<string, BuiltInManifest["icons"][number]> } | null>>();
   const load = (id: string) => {
@@ -126,7 +110,6 @@ export function createInboxIconSets(options: {
 }) {
   const { builtIn, fetcher, serverSession, json } = options;
   const notFound = () => json({ error: "No such icon.", code: "no_icon" }, 404);
-  /** `owner`: this computer's window, or the owner's over the tailnet (`ownerOrLocal`). */
   const route = async (req: Request, url: URL, owner: boolean): Promise<Response | null> => {
     const path = url.pathname;
     if (path !== INBOX_ICON_SETS_PATH && !path.startsWith(`${INBOX_ICON_SETS_PATH}/`)) return null;

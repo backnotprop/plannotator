@@ -1,16 +1,4 @@
-/**
- * "Float reply drafts" (Settings → Capabilities → Experimental; approval "inbox-reply-floaters", the owner 2026-11-08:
- * off by default), on a real Inbox with config.json deciding:
- *
- *  - unset: the settings read says off, and another switch's `event: capabilities` leaves it out (a window that never
- *    turned it on gets the frame it got before);
- *  - turned on, then off: config.json `inboxFloatDrafts` is written, the answer and the read follow, and every window
- *    hears each change, off included;
- *  - a bad value is refused and writes nothing.
- *
- * What regresses: drafts floating for someone who never turned it on, a window that keeps floating after another
- * window turned it off, or a switch that does not save.
- */
+/** The Float reply drafts switch on a real Inbox with config.json deciding. */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +39,6 @@ async function world(config: Record<string, unknown> | null) {
   return { base, read, post, save, saved };
 }
 
-/** A window's event stream: the `event: capabilities` frames, as they arrive. */
 async function windowCapabilities(base: string) {
   const controller = new AbortController();
   const response = await fetch(`${base}/api/inbox/events?window=float-drafts-test`, { signal: controller.signal, headers: { "Sec-Fetch-Site": "same-origin" } });

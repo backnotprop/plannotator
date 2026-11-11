@@ -1,9 +1,4 @@
-/**
- * The ask route's gates for a Show me from a board, on the route alone: a stand-in store, no Inbox started. Each
- * request is the window's exact request (`inboxShowMeRequest`), so the question check passes and the gate under test
- * is the only thing that can refuse it. What regresses if these fail: a Show me goes out on another thread's board,
- * or on a board while Shape and Code review are both off (PLANNOTATOR_INBOX_ASK_AI turns the route on by itself).
- */
+/** The ask route's gates for a Show me from a board, with a stand-in store and no Inbox started. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +26,6 @@ function route(switches: { codeReview: boolean; boards: boolean }) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-ask-part-"));
   dirs.push(dir);
   const thread = (id: string) => ({ thread_id: id, subject: "S", project: { name: "p", root: dir }, messages: [] }) as unknown as InboxThread;
-  // No owner: a request the gates let through ends at "No agent owns this thread", with nothing saved.
   const store = { dir, onDeletion: () => () => {}, thread: (id: string) => (id === THREAD || id === OTHER ? thread(id) : null), messageAnswerable: () => true, threadOwner: () => null } as unknown as InboxStore;
   const ask = createInboxAsk({
     codeReviewOn: () => switches.codeReview,

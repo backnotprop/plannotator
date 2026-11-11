@@ -1,8 +1,4 @@
-/**
- * The drive rows come from the mount table only (approval "inbox-launch-any-folder"): what guards it is which mounts
- * count as a person's drive (under /Volumes on macOS, /mnt, /media and /run/media on Linux; none hidden, none Finder
- * hides, never the boot disk) and which read as a network drive (it may be slow to answer).
- */
+/** Drive rows come from the mount table only: which mounts count as a drive and which read as a network drive. */
 import { expect, test } from "bun:test";
 import { parseDarwinMounts, parseLinuxMounts } from "./inbox-drives";
 

@@ -1,17 +1,4 @@
-/**
- * Attachments of any kind (images, PDFs, other files) through a real Inbox:
- * an agent attaches over the MCP SDK's HTTP client, the window reads with
- * real `fetch`, and a paired phone reads the same bytes through its door.
- * Every test has its own temp data dir; nothing touches the real home.
- *
- * Proves: each kind from the bytes; a file outside the project attached by
- * its absolute path; the headers of the image, download and text routes per
- * kind; the text routes refusing a binary kind; a cross-site request refused
- * before anything is read; comments on images (with a marked-up copy) and on
- * code lines kept, a PDF refusing them; the markup removed with its thread;
- * and the phone's door answering with the window's own headers and the same
- * dotenv refusal.
- */
+/** Attachments of any kind through a real Inbox; every test has its own temp data dir. */
 import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { INBOX_VIEW_MAX_BYTES } from "@plannotator/core/inbox-types";
@@ -35,7 +22,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A real 1x1 PNG. */
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><script>alert(1)</script><rect width="40" height="20"/></svg>';
 const PDF = "%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n";
@@ -52,7 +38,6 @@ function world() {
   writeFileSync(join(project, "payments-api.pdf"), PDF);
   writeFileSync(join(project, "fixtures.zip"), ZIP);
   writeFileSync(join(project, "retry.mjs"), "export const MAX_ATTEMPTS = 5;\nexport function retry() {\n  return MAX_ATTEMPTS;\n}\n");
-  // Outside the project, as a screenshot tool leaves it.
   const elsewhere = join(root, "tmp-shots");
   mkdirSync(elsewhere);
   writeFileSync(join(elsewhere, "Screen Shot 2026-10-10 at 4.12.png"), PNG);
@@ -119,7 +104,6 @@ test("served headers per kind: an image as its sniffed type for <img>, a PDF and
   expect(image.headers.get("content-disposition")).toStartWith("inline;");
   expect(image.headers.get("x-image-width")).toBe("1");
   expect(Buffer.from(await image.arrayBuffer()).equals(PNG)).toBe(true);
-  // Revalidation by the sent hash.
   const etag = image.headers.get("etag")!;
   expect((await fetch(`${base}/${png!.id}/image`, { headers: { "If-None-Match": etag } })).status).toBe(304);
 
@@ -141,16 +125,13 @@ test("served headers per kind: an image as its sniffed type for <img>, a PDF and
   expect(file.headers.get("content-type")).toBe("application/octet-stream");
   expect(file.headers.get("content-disposition")).toStartWith("attachment;");
   expect(new Uint8Array(await file.arrayBuffer())).toEqual(ZIP);
-  // Every kind downloads, code included.
   expect((await fetch(`${base}/${code!.id}/download`)).headers.get("content-disposition")).toStartWith("attachment;");
 
-  // The text routes never stream a binary kind as text; the image route takes images only.
   for (const id of [png!.id, pdf!.id, zip!.id]) {
     expect((await fetch(`${base}/${id}`)).status).toBe(415);
     expect((await fetch(`${base}/${id}/view`)).status).toBe(415);
   }
   expect((await fetch(`${base}/${pdf!.id}/image`)).status).toBe(415);
-  // Another site's request is refused before anything is read.
   expect((await fetch(`${base}/${png!.id}/image`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
   expect((await fetch(`${base}/${zip!.id}/download`, { headers: { "Sec-Fetch-Site": "same-site" } })).status).toBe(403);
 });
@@ -181,7 +162,6 @@ test("comments on an image (with a marked-up copy) and on code lines are kept; a
   const origin = `http://127.0.0.1:${server.port}`;
   const post = (path: string, body: unknown) => fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(body) });
 
-  // The marked-up image: kept once by its hash, shown back by name only.
   const markup = await fetch(`${origin}/api/inbox/markups?serverSession=${server.serverSession}`, { method: "POST", headers: { "Content-Type": "image/png", Origin: origin }, body: PNG });
   expect(markup.status).toBe(200);
   const kept = (await markup.json()) as Json;
@@ -189,7 +169,6 @@ test("comments on an image (with a marked-up copy) and on code lines are kept; a
   const shown = await fetch(`${origin}${kept.url}`);
   expect(shown.headers.get("content-type")).toBe("image/png");
   expect(shown.headers.get("x-content-type-options")).toBe("nosniff");
-  // A page on another site cannot post one; a body that is not an image is refused.
   expect((await fetch(`${origin}/api/inbox/markups`, { method: "POST", headers: { Origin: "https://evil.example" }, body: PNG })).status).toBe(403);
   expect((await fetch(`${origin}/api/inbox/markups`, { method: "POST", headers: { Origin: origin }, body: "<svg/>" })).status).toBe(422);
 
@@ -245,8 +224,7 @@ test("the phone's door: an image, a PDF and a file with the window's own headers
   }
   expect((await door(`attachments/${pdf.id}/image`)).status).toBe(415);
 
-  // A record naming a dotenv file (one an older Inbox, or a hand-edited store,
-  // could hold) is refused at serve time by the same check on both doors.
+  // A record naming a dotenv file is refused at serve time by the same check on both doors.
   writeFileSync(join(project, ".env"), "STRIPE_KEY=sk_live_secret\n");
   const projectRecord = server.store.listProjects().find((p) => p.root === project)!;
   const forged = server.store.sendMessage({
@@ -288,12 +266,10 @@ test("a text file that grew past the view limit answers 413 attachment_too_large
   const door = await fetch(`${origin}/api/inbox/device/attachments/${id}/view`, { headers: { Authorization: `Bearer ${paired.token}` } });
   expect(door.status).toBe(413);
   expect(((await door.json()) as Json).code).toBe("attachment_too_large");
-  // The sent version still reads, and the grown file still downloads.
   expect(((await (await fetch(`${origin}/api/inbox/attachments/${id}/view?version=sent`)).json()) as Json).text).toBe("started\n");
   const download = await fetch(`${origin}/api/inbox/attachments/${id}/download`);
   expect(download.status).toBe(200);
   expect((await download.arrayBuffer()).byteLength).toBe(INBOX_VIEW_MAX_BYTES + 8);
-  // The cross-site check guards the view and the listing too.
   expect((await fetch(`${origin}/api/inbox/attachments/${id}/view`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
   expect((await fetch(`${origin}/api/inbox/threads/${sent.thread_id}/attachments`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
 });
@@ -341,7 +317,6 @@ test("deleting a thread removes the markups its annotations named and leaves a m
   const upload = async (bytes: Uint8Array) =>
     (await (await fetch(`${origin}/api/inbox/markups`, { method: "POST", headers: { Origin: origin, "Content-Type": "image/png" }, body: bytes })).json()) as Json;
   const named = await upload(PNG);
-  // A second, different PNG: uploaded, its comment not saved yet.
   const pending = await upload(Buffer.concat([PNG, Buffer.from([0])]));
   expect(pending.name).not.toBe(named.name);
   const saved = await fetch(`${origin}/api/inbox/annotations`, {

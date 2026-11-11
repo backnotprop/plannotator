@@ -1,12 +1,4 @@
-/**
- * Compose ("send a new message to a connected agent"), through the server's
- * real doors: the live sessions in every project, a new thread the person
- * starts, its delivery to that session alone with the new-thread wake line,
- * the agent's answer in the same thread, Send to another session, drafts
- * (kept out of the event log and search) and uploads that become ordinary
- * attachments. Every test uses its own temp data dir; the connections are
- * plain HTTP calls with the registry's token, never a real agent.
- */
+/** Compose through the server's real doors; every test has its own temp data dir and the connections are plain HTTP calls, never a real agent. */
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as realFs from "node:fs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -29,7 +21,6 @@ import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { InboxGitRunner } from "./inbox-project-root";
 
-/** git with no user or system config, for the worktree tests' own repositories. */
 const GIT_ENV = {
   ...process.env,
   GIT_CONFIG_GLOBAL: "/dev/null",
@@ -44,7 +35,6 @@ function git(cwd: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
-/** The Inbox's git (rev-parse) for these tests: no user or system config, and no env mutation. */
 const quietGit = (): InboxGitRunner => async (args, cwd) => {
   const env: Record<string, string | undefined> = { ...GIT_ENV };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]) delete env[key];
@@ -89,7 +79,6 @@ function bridge(server: InboxServer, path: string, body: unknown): Promise<Respo
   });
 }
 
-/** One poll from a connection: the session is live for 30 s after it. */
 async function poll(server: InboxServer, session: string, host: string, project?: string) {
   const response = await bridge(server, INBOX_BRIDGE_POLL_PATH, { session, host, waitMs: 0, ...(project ? { project_path: project, started_at: Date.now(), busy: false } : {}) });
   expect(response.status).toBe(200);
@@ -128,7 +117,6 @@ describe("the live sessions in every project", () => {
     const { server, client, ledger, billing } = await setup();
     await poll(server, "ses-claude", "claude-code", ledger);
     await poll(server, "ses-pi", "pi", billing);
-    // An MCP-only writer whose connection polls without a folder: placed in the project it wrote in.
     await client.callTool({ name: "send_message", arguments: { body: "Relay done.", project_path: ledger, agent_session: "ses-oc", agent_host: "opencode" } });
     await poll(server, "ses-oc", "opencode");
     await poll(server, "ses-nowhere", "opencode");
@@ -137,7 +125,6 @@ describe("the live sessions in every project", () => {
     expect(model.session).toEqual({ session: "ses-claude", live: true });
     const byRoot = new Map(model.projects.map((group) => [group.project.root, group]));
     expect([...byRoot.keys()].sort()).toEqual([billing, ledger].sort());
-    // billing is new to the Inbox: no id yet, named by its folder.
     expect(byRoot.get(billing)!.project).toEqual({ id: null, name: "billing", root: billing });
     expect(byRoot.get(ledger)!.project.id).toMatch(/^prj_/);
     expect(byRoot.get(ledger)!.sessions.map((s) => s.session).sort()).toEqual(["ses-claude", "ses-oc"]);
@@ -169,7 +156,6 @@ describe("a thread the person starts", () => {
     const lines = inboxWakeText(commands[0]!).split("\n");
     expect(lines[0]).toBe(`Plannotator Inbox: Idea: retry the webhook on a 409 (${sent.message.id})`);
     expect(lines[1]).toBe(INBOX_NEW_THREAD_INSTRUCTION);
-    // An older connection that ignores new_thread still words it as a New message, which stays true.
     const { new_thread: _ignored, ...older } = commands[0]!;
     expect(inboxWakeText(older).split("\n")[1]).toBe(INBOX_MESSAGE_INSTRUCTION);
 
@@ -241,7 +227,6 @@ describe("a thread the person starts", () => {
     const follow = ((await more.json()) as { reply: InboxMessage }).reply;
     expect(follow.to).toMatchObject({ session: "ses-a" });
 
-    // An unrelated agent reads the thread.
     await client.callTool({ name: "read_thread", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x" } });
 
     expect((await poll(server, "ses-a", "claude-code", billing)).map((c) => c.id)).toEqual([sent.message.id, follow.id]);
@@ -254,7 +239,6 @@ describe("a thread the person starts", () => {
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.message.id });
     const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
-    // ses-a took the thread: its follow-up wakes it as a plain reply.
     const [own] = await poll(server, "ses-a", "claude-code", billing);
     expect(own).toMatchObject({ type: "reply", id: follow.id });
     expect(own!.continues_thread).toBeUndefined();
@@ -268,7 +252,6 @@ describe("a thread the person starts", () => {
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     expect(lines[2]).toBe(inboxContinuesLine(follow.id));
 
-    // An archived thread is not re-addressed.
     expect((await post(server, `/api/inbox/messages/${sent.message.id}/resolve`, { resolved: true })).status).toBe(200);
     const archived = await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "claude-code", session: "ses-a" } });
     expect(((await archived.json()) as { code: string }).code).toBe("thread_resolved");
@@ -284,7 +267,6 @@ describe("a thread the person starts", () => {
     expect(both.map((c) => c.id)).toEqual([sent.message.id, follow.id]);
     expect(both[1]!.continues_thread).toBeUndefined();
 
-    // Both moved to B before anyone took them: B gets the root first, so the follow-up needs no line either.
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     for (const id of [sent.message.id, follow.id]) {
@@ -354,7 +336,6 @@ describe("worktrees and a slow git (#1919)", () => {
     expect(body.error).toContain("try the same call again");
     expect(server.store.cursor()).toBe(before);
     expect(server.store.listProjects()).toEqual([]);
-    // The upload is still pending, so the same Send can go once git answers.
     expect(existsSync(join(dataDir, "inbox", "uploads", "pending", `${file.upload_id}.json`))).toBe(true);
     slow = false;
     const again = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Hello", idempotency_key: "c1", uploads: [file.upload_id] });
@@ -385,7 +366,6 @@ describe("uploads", () => {
     expect(made.path).not.toBe(source.path);
     expect(readFileSync(made.path).equals(Buffer.from(PNG))).toBe(true);
     expect(blobs()).toEqual(before);
-    // The agent's line is the one any upload gets, with no word of where it came from.
     const commands = await poll(server, "ses-pi", "pi", billing);
     expect(commands.find((command) => command.id === sent.message.id)!.body).toBe(`Again.\n\nAttached: ref02.png (${made.path})`);
   });
@@ -470,7 +450,6 @@ describe("uploads", () => {
     writeFileSync(attachments[0]!.path, "changed by the agent");
     expect(readFileSync(join(dataDir, "inbox", "blobs", attachments[0]!.sent_sha256), "utf8")).toBe("# Notes\n\nThe export.");
     writeFileSync(attachments[0]!.path, "# Notes\n\nThe export.");
-    // The pending records are gone; the blobs stay with the message.
     expect(existsSync(join(dataDir, "inbox", "uploads", "pending", `${notes.upload_id}.json`))).toBe(false);
 
     const view = (await (await fetch(`${base(server)}/api/inbox/attachments/${attachments[0]!.id}/view`)).json()) as { text: string };
@@ -499,9 +478,7 @@ describe("uploads", () => {
     expect(message.body).toBe("");
     expect(message.attachments!.map((a) => a.name)).toEqual(["pasted-text-2026-11-01-2256.txt"]);
     expect(readFileSync(message.attachments![0]!.path, "utf8")).toBe(log);
-    // A thread with no words is named by its file.
     expect(message.subject).toBe("pasted-text-2026-11-01-2256.txt");
-    // The agent's turn is the usual Attached line, and no words before it.
     const [command] = await poll(server, "ses-pi", "pi", billing);
     expect(command!.body).toBe(`Attached: pasted-text-2026-11-01-2256.txt (${message.attachments![0]!.path})`);
   });
@@ -530,7 +507,6 @@ describe("drafts", () => {
     const draft = ((await created.json()) as { draft: InboxDraft & { status: string } }).draft;
     expect(draft).toMatchObject({ id, body: "Rename Quiet to Done?", status: "none", files: [{ upload_id: notes.upload_id, name: "notes.md" }] });
 
-    // A second create, or a save from a stale read, is refused with the newer draft.
     const conflict = await post(server, `/api/inbox/drafts/${id}`, { body: "other tab", base: null });
     expect(conflict.status).toBe(409);
     expect(((await conflict.json()) as { code: string; draft: InboxDraft }).draft.body).toBe("Rename Quiet to Done?");
@@ -549,7 +525,6 @@ describe("drafts", () => {
     const list = ((await (await fetch(`${base(server)}/api/inbox/drafts`)).json()) as { drafts: (InboxDraft & { status: string })[] }).drafts;
     expect(new Map(list.map((d) => [d.id, d.status]))).toEqual(new Map([[id, "live"], [ended, "ended"]]));
 
-    // Drafts never enter the event log (agents, phones, search read it).
     expect(JSON.stringify(server.store.changesSince(0))).not.toContain("Rename Quiet");
 
     const sent = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: saved.body, idempotency_key: "c1", uploads: [notes.upload_id], draft_id: id });
@@ -562,7 +537,6 @@ describe("drafts", () => {
 
   test("a draft saved, deleted or sent tells every window's stream (event: drafts, compose); a refused save, a delete of nothing and the phone's stream hear nothing", async () => {
     const { server, billing } = await setup();
-    /** The `event: drafts` frames a stream has carried so far. */
     const listen = async (query: string) => {
       const response = await fetch(`${base(server)}/api/inbox/events${query}`);
       const reader = response.body!.getReader();
@@ -593,7 +567,6 @@ describe("drafts", () => {
     const created = (await (await post(server, `/api/inbox/drafts/${id}`, { body: "First words", to: null, base: null })).json()) as { draft: InboxDraft };
     await settle();
     expect(windowA.frames()).toEqual([compose]);
-    // A stale save is refused and changes nothing; neither does deleting a draft that is not there.
     expect((await post(server, `/api/inbox/drafts/${id}`, { body: "other tab", base: null })).status).toBe(409);
     expect(((await (await post(server, `/api/inbox/drafts/${inboxId("drf")}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(false);
     await settle();
@@ -603,7 +576,6 @@ describe("drafts", () => {
     await settle();
     expect(windowA.frames()).toEqual([compose, compose]);
 
-    // Sent from a draft: the draft is gone, and the windows hear it (the new thread's record says nothing of the draft).
     await poll(server, "ses-pi", "pi", billing);
     const again = inboxId("drf");
     await post(server, `/api/inbox/drafts/${again}`, { body: "Send me", to: { host: "pi", session: "ses-pi" }, base: null });
@@ -611,7 +583,6 @@ describe("drafts", () => {
     await settle();
     expect(windowA.frames()).toEqual([compose, compose, compose, compose]);
     expect(created.draft.id).toBe(id);
-    // The phone's door (no window id) never carries drafts.
     expect(phone.frames()).toEqual([]);
     windowA.close();
     phone.close();
@@ -648,7 +619,6 @@ describe("the Pi and OpenCode wake (agent-link)", () => {
       expect(entry).toMatchObject({ host: "pi", busy: false, last_thread: null });
       expect(Date.parse(entry!.started_at)).toBeGreaterThan(0);
 
-      // A turn starts: the next state check posts a `state` event.
       busy = true;
       for (let i = 0; i < 100 && entry?.busy !== true; i++) {
         await Bun.sleep(50);

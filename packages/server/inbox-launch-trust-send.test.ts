@@ -1,8 +1,4 @@
-/**
- * Trust and start through a real server: `POST /api/inbox/messages` with `to.launch.trust` saves the folder's trust and
- * starts the agent, so it belongs to the owner's window alone, and nothing is written unless all of it can go through.
- * The launch runs on the fake host (no `claude` is on the sandbox PATH). `offer.accepted` is the trust saved.
- */
+/** Trust and start through a real server on the fake launch host (no `claude` is on the sandbox PATH). */
 import "../../tests/setup/sandbox-data-dir";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -48,12 +44,10 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
   setEnv("PLANNOTATOR_TEST_SANDBOX", dataDir);
   setEnv("HOME", join(root, "home"));
   setEnv("PLANNOTATOR_INBOX_TAILSCALE", undefined);
-  // Pairing never reaches the real relay: a port nothing listens on.
   setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
 
   const fake = fakeLaunchHost();
   fake.faults.trusted = () => false;
-  /** What the folder holds now, and the steps in order: each says how many threads there were when it ran. */
   const offer = { reading: HOOKS, reads: 0, accepted: 0, acceptFails: null as string | null, steps: [] as string[], duringLockWait: null as null | (() => Promise<unknown>) };
   const server: InboxServer = await startInboxServer({
     dataDir,
@@ -97,7 +91,6 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
     return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
   })();
   const trust = (facts = HOOKS.facts) => ({ folder, facts });
-  /** A Send as the window makes it. `extra` is laid over the body. */
   const sendBody = (launch: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
     to: { launch: { agent: FAKE, ...launch } },
     body: "Tidy the readme.",
@@ -107,13 +100,11 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
   });
   const press = (extra: Record<string, unknown> = {}, headers: Record<string, string> = window, url = `${base}/api/inbox/messages`) =>
     fetch(url, { method: "POST", headers, body: JSON.stringify(sendBody({ project_id: project.id, trust: trust() }, extra)) });
-  /** Nothing moved: nothing trusted, no thread, nothing started. */
   const nothingHappened = () => {
     expect(offer.accepted).toBe(0);
     expect(threads()).toBe(0);
     expect(fake.calls).toEqual([]);
   };
-  /** Sends with the listener `tailscale serve` points at, as `login`. */
   const tailnet = (login: string) => ({
     url: `http://127.0.0.1:${server.tailscale.listenerPort()!}/api/inbox/messages`,
     headers: { Host: `${TAILNET_MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${TAILNET_MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
@@ -125,7 +116,6 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
 
 const codeOf = async (response: Response) => [response.status, ((await response.json()) as { code?: string }).code];
 
-/** A paired phone's token, through the real pairing routes. */
 async function pairPhone(world: Awaited<ReturnType<typeof setup>>) {
   const post = (path: string, body: unknown) => fetch(`${world.base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const made = (await (await post("/api/inbox/pairing", {})).json()) as { offer: { code: string } };
@@ -250,7 +240,6 @@ describe("the order, and what stops it", () => {
     world.offer.reading = { warning: "w", facts: ["Runs 3 hooks"], warns: true };
     expect(await codeOf(await world.press())).toEqual([409, "trust_warning_changed"]);
     world.nothingHappened();
-    // The window read it again; the press on the new reading goes through.
     expect((await world.press({ to: { launch: { agent: FAKE, project_id: world.project.id, trust: world.trust(["Runs 3 hooks"]) } } })).status).toBe(200);
     expect(world.offer.accepted).toBe(1);
   });
@@ -397,7 +386,6 @@ describe("a scratch folder", () => {
     expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
     const refused = answers.find((answer) => answer.status === 404)!;
     expect(((await refused.json()) as { code?: string }).code).toBe("upload_not_found");
-    // One thread, one folder, one project: the refused press left neither of its own behind.
     expect(world.threads()).toBe(1);
     expect(scratchDirs(world)).toHaveLength(1);
     expect(world.store.listProjects().length).toBe(projects + 1);
@@ -489,7 +477,6 @@ describe("what `GET /api/inbox/sessions` offers", () => {
 });
 
 describe("a launched session and a reply going elsewhere", () => {
-  /** A launch through the server, the sessions' clock in hand; `C` polls. */
   async function launched(start?: { ok: false; code: string; text: string }) {
     const clock = { now: Date.now() };
     const world = await setup({ inboxLaunch: { enabled: true } }, () => clock.now);
@@ -533,7 +520,6 @@ describe("a launched session and a reply going elsewhere", () => {
   test("stopped: a reply aimed elsewhere leaves it the thread, a reply waiting on it stays; once its launch is deleted, the reply takes the thread", async () => {
     const w = await launched();
     const asked = w.says("Done.", w.L, w.rootId, "a1");
-    // Addressed to it while it still polled; it stops after.
     await w.poll(w.L);
     const addressed = await w.reply(asked.id, "k0", w.to(w.L));
     await w.fake.host.stop("f1");
@@ -541,7 +527,6 @@ describe("a launched session and a reply going elsewhere", () => {
     await w.poll("ses_c");
     expect((await w.reply(asked.id, "k1", w.to("ses_c"))).took_over).toBeUndefined();
     expect(w.owner()).toBe(w.L);
-    // The stopped launched session is there: a reply addressed to it is not moved off it.
     expect(await w.move(addressed.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
 
     const saved = await w.reply(asked.id, "k3");

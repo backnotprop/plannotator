@@ -1,43 +1,4 @@
-/**
- * Launch, PR 2: Claude Code's permission prompts answered in the launch
- * thread (PLAN "Permission hook"): Claude Code's transport and terms. The
- * questions themselves are the shared ones (inbox-launch-permission.ts). A
- * launched session's settings file runs `plannotator inbox permission-hook`
- * on every PermissionRequest (apps/hook/server/inbox-permission-hook.ts). The
- * hook long-polls
- *
- *   POST /api/inbox/launch/<id>/permission  { key, request_id, event, message_id? }
- *
- * Connection-guarded like the bridge (this machine, no browser, the Inbox
- * token), and the launch's own key, checked against `launch/<id>/settings.json`.
- *
- * The first call writes the question into the launch thread. Each call is
- * held up to 25 s and answers `waiting` (call again with the message id),
- * `decided` (`choice`: once, session, deny, auto or full, and the reason; the
- * hook builds the decision from its own event, and honours full only when its
- * own launch allows it; the call records the delivery) or `withdrawn` (say
- * nothing; Claude Code's own dialog stays).
- *
- * A lease withdraws a question no hook holds any more: each call renews it
- * for 60 s, and a held call keeps it. When it runs out (the hook timed out,
- * crashed, or Claude Code ended it because the person answered in Terminal),
- * a one-line follow-up from the same identity supersedes the question,
- * "No longer waiting.". With no call held, a host read made since the
- * question that says the session went on (not waiting, not stopped)
- * withdraws it at once as "Answered in Terminal.". Stop and Delete withdraw
- * at once. An Inbox restart forgets the leases: each open question gets a
- * fresh one, and the hook, retrying every 2 s, renews it. A question the host
- * takes no allow for (Approve in Terminal) is never withdrawn as answered in
- * Terminal: its dialog shows only after the hook ends, and may block the call
- * by itself, so "No longer waiting." is all that is known.
- *
- * The card states the person's answer, never what Claude did with it: the run
- * line says that ("waiting on a permission prompt" once a host read made after
- * the answer settled still shows the session on its dialog). A read made
- * before then still shows the prompt just answered, and counts for nothing
- * (`settledAfter`). That holds from the person's answer on: the hook takes it
- * at its next look, and the question no longer says the session waits on them.
- */
+/** Claude Code's permission prompts answered in the launch thread: its transport and terms; the questions are the shared ones (inbox-launch-permission.ts). The hook long-polls `POST /api/inbox/launch/<id>/permission`, connection-guarded, with the launch's own key checked against `launch/<id>/settings.json`. */
 
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -66,20 +27,14 @@ const HOST_SETTLE_MS = 5_000;
 export const ANSWER_SETTLE_MS = 3_000;
 const CHECK_EVERY_MS = 200;
 
-/** Claude Code's name: To's row, a refusal, its questions' author. */
 export const CLAUDE_NAME = INBOX_HOST_NAMES["claude-code"] ?? "Claude Code";
 
 /** Claude Code's hook timeout for the permission hook: four days, as the plugin's ExitPlanMode hook. */
 const PERMISSION_HOOK_TIMEOUT_S = 345_600;
 
-/** One shell word: single-quoted. */
 const shellWord = (word: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
 
-/**
- * The per-launch PermissionRequest hook: every tool (ExitPlanMode passes straight through to plan review). On Windows
- * Claude runs a hook in Git Bash where it is installed, else PowerShell: the hook names PowerShell (`shell`) and is
- * quoted for it, so one command works with or without Git Bash.
- */
+/** On Windows Claude runs a hook in Git Bash where installed, else PowerShell: the hook names PowerShell and is quoted for it, so one command works with or without Git Bash. */
 export function launchPermissionHooks(self: readonly string[], platform: NodeJS.Platform = process.platform) {
   const argv = [...self, "inbox", "permission-hook"];
   const hook =
@@ -89,40 +44,16 @@ export function launchPermissionHooks(self: readonly string[], platform: NodeJS.
   return { PermissionRequest: [{ matcher: "*", hooks: [hook] }] };
 }
 
-/**
- * Claude Code 2.1.314 takes a PermissionRequest hook's allow only when the ask
- * lets hooks allow it. Its own safety checks (removing the working folder, for
- * one) do not: it awaits the hooks, ignores an allow, takes a deny, and only
- * then shows its own dialog, which blocks the call by itself after about 2
- * minutes. The hook's input does not mark such a check, but it carries the
- * session's `permission_mode`, and in bypass mode only such checks reach the
- * hook (one limit: a `permissions.ask` rule of the person's own, if Claude asks
- * it in bypass mode, gets the same card although a hook could allow it). So a
- * session in bypass mode is offered Deny, or Approve in Terminal: the hook says
- * nothing, Claude's own dialog comes up, and the person approves it there.
- *
- * In any other mode a prompt can be person-only too, and nothing in the hook's
- * input says so (it carries tool_name, tool_input, permission_suggestions,
- * mcp_server and the common fields): a `permissions.ask` rule ("Permission rule
- * … requires confirmation") ignores a hook's allow, and so, very likely, does a
- * safety check. So every card also offers Approve in Terminal, the honest way
- * when Claude wants a person; the run line says when an allow did not count.
- */
+/** Claude Code 2.1.314 ignores a PermissionRequest hook's allow for its own safety checks and shows its own dialog, which blocks the call after about 2 minutes. In bypass mode only such checks reach the hook, so those sessions are offered Deny or Approve in Terminal. In any other mode a `permissions.ask` rule can do the same, so every card also offers Approve in Terminal. */
 export const CLAUDE_TERMINAL_ONLY = "Claude Code only accepts this approval in Terminal.";
 /** After Approve in Terminal on a safety check: Claude's dialog waits about 2 minutes, then blocks the call. */
 export const CLAUDE_HANDOFF = "Approve it in Claude Code within 2 minutes.";
-/** After Approve in Terminal on any other prompt. */
 export const CLAUDE_HANDOFF_PLAIN = "Approve it in Claude Code, in Terminal.";
 
-/** Whether the session runs in bypass mode: its hook input's `permission_mode`; the launch record only when the input has none. */
 export function claudeInBypass(launch: Pick<InboxLaunchRecord, "full_permissions">, event: { permission_mode: string | null }): boolean {
   return event.permission_mode !== null ? event.permission_mode === "bypassPermissions" : launch.full_permissions === true;
 }
 
-/**
- * What a permission card may offer: Approve in Terminal always; in bypass mode no mode switch and no allow from here
- * (Deny, or Approve in Terminal).
- */
 export function claudePermissionTerms(
   launch: Pick<InboxLaunchRecord, "full_permissions">,
   event: { permission_mode: string | null },
@@ -134,9 +65,7 @@ export function claudePermissionTerms(
 
 interface Lease {
   launchId: string;
-  /** When no held call renews it any more, it runs out at this time. */
   expires: number;
-  /** Calls held open now: the lease does not run out while one is. */
   holding: number;
   askedAt: number;
 }
@@ -148,16 +77,13 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
   const holdMs = options.holdMs ?? PERMISSION_HOLD_MS;
   const leaseMs = options.leaseMs ?? PERMISSION_LEASE_MS;
   const leases = new Map<string, Lease>();
-  /** The latest answer handed to a hook, per launch. */
   const answeredAt = new Map<string, number>();
   const questions = createLaunchQuestions({ store, name: CLAUDE_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log, forget: (messageId) => leases.delete(messageId) });
-  /** When a launch's last answer settles: counted from the person's answer, and again from the hook's taking it. Null with no answer. */
   const settledAt = (root: InboxMessage): number | null => {
     const at = Math.max(lastPermissionAnswerAt(store, root.thread_id) ?? 0, answeredAt.get(root.launch!.id) ?? 0);
     return at === 0 ? null : at + ANSWER_SETTLE_MS;
   };
 
-  /** The key in the launch's settings file; null when there is no such file. */
   const keyOf = (launchId: string): string | null => {
     try {
       const settings = JSON.parse(readFileSync(join(options.launchDir(launchId), "settings.json"), "utf8")) as { env?: Record<string, unknown> };
@@ -175,22 +101,15 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
     return a.length === b.length && timingSafeEqual(a, b);
   };
 
-  /**
-   * How a launch's questions read paths, and whether Full permissions is a choice: only in a launch whose
-   * person recorded Claude Code's bypass consent (`bypass_available`, so it started with
-   * --allow-dangerously-skip-permissions). Claude ignores a switch to bypass without it; an older launch has no flag.
-   */
+  /** Whether Full permissions is a choice: only in a launch whose person recorded Claude Code's bypass consent (`bypass_available`); Claude ignores a switch to bypass without it. */
   const optionsFor = (root: InboxMessage, event: InboxPermissionEvent): InboxPermissionOptions => {
-    // The host's terms: in bypass mode (as its hook input says) no allow from here, and no mode switch.
     const terms = claudePermissionTerms(root.launch!, event);
     return { shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && !terms.full, ...terms };
   };
 
-  /** The question this prompt asks in a launch's thread. */
   const questionFor = (root: InboxMessage, event: InboxPermissionEvent, target: PermissionTarget = {}): InboxPermissionQuestion =>
     questions.questionFor(root, event, { ...optionsFor(root, event), ...target });
 
-  /** Where the question stands: decided (the delivery recorded), withdrawn, or still waiting (null). */
   const settled = (messageId: string, event: InboxPermissionEvent, expected: InboxPermissionQuestion, answerOptions: InboxPermissionOptions): PermissionAnswer | null => {
     const done = questions.settled(messageId, event, expected, answerOptions);
     if (done?.status === "decided") leases.delete(messageId);
@@ -200,7 +119,6 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
   const json = (body: unknown, status = 200) => Response.json(body, { status });
 
   return {
-    /** The hook's long poll (the connection guard already passed). */
     async handle(req: Request, launchId: string): Promise<Response> {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -214,7 +132,6 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);
-        // Only a question of this launch's thread, from a permission identity.
         if (!message || message.thread_id !== root.thread_id || message.author.kind !== "agent" || !isInboxPermissionSession(message.author.session)) {
           return json({ error: "No such permission question in this launch.", code: "message_not_found" }, 404);
         }
@@ -227,7 +144,6 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       }
       // The question as asked: a Write's file may have appeared since (or a link changed), and the card keeps the words it was asked with.
       const question = questionFor(root, event, questions.askedTarget(messageId, event));
-      /** A decision: a host read before it settles still shows this prompt. */
       const answered = (answer: PermissionAnswer) => {
         if (answer.status === "decided") answeredAt.set(launchId, now());
         return json(answer);
@@ -251,15 +167,8 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       return json({ status: "waiting", message_id: messageId } satisfies PermissionAnswer);
     },
 
-    /** Stop or Delete: every open question of this launch is withdrawn at once. */
     withdrawAll: questions.withdrawAll,
 
-    /**
-     * Every second: an open question no lease covers (an Inbox restart) gets a
-     * fresh one; a lease that ran out withdraws its question; a session the
-     * host says went on without the hook's answer withdraws it as answered in
-     * Terminal.
-     */
     sweep(): void {
       const t = now();
       for (const root of options.roots()) {
@@ -294,19 +203,16 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       }
     },
 
-    /** Whether a lease is held for a launch now (the host's view is worth reading). */
     holds(launchId: string): boolean {
       for (const lease of leases.values()) if (lease.launchId === launchId) return true;
       return false;
     },
 
-    /** A host read made before this still shows the launch's last answered prompt (it counts for nothing), or null. */
     settledAfter(launchId: string): number | null {
       const root = options.rootOf(launchId);
       return root ? settledAt(root) : null;
     },
 
-    /** Whether a launch's answer has settled since the last host read (one more read says where the session is). */
     readDue(readAt: number): boolean {
       const t = now();
       return options.roots().some((root) => {
@@ -315,7 +221,6 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       });
     },
 
-    /** A deleted launch: nothing kept for it. */
     forget(launchId: string): void {
       answeredAt.delete(launchId);
     },

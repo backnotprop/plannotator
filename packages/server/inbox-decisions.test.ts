@@ -1,11 +1,4 @@
-/**
- * Decision mode (experimental, approval "inbox-decision-mode") on a running
- * Inbox: the gate (config.json `experimental.decisionMode`, the
- * PLANNOTATOR_EXPERIMENTAL override, Settings' POST), `GET
- * /api/inbox/decisions` (its guards, its order, its liveness through the
- * existing picks and reply routes), and that the phone door leaves it out.
- * Every test runs under its own temp data dir.
- */
+/** Decision mode on a running Inbox: the gate, `GET /api/inbox/decisions`, and the phone door leaving it out. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +22,6 @@ afterEach(async () => {
   else process.env.PLANNOTATOR_EXPERIMENTAL = envBefore.experimental;
 });
 
-/** A fresh Inbox whose config.json is its own (the Inbox reads config through PLANNOTATOR_DATA_DIR). */
 async function setup(options: { on?: boolean; phones?: boolean; readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-decisions-")));
   roots.push(root);
@@ -89,7 +81,6 @@ describe("the gate", () => {
       const refused = await post(server, "/api/inbox/settings", { experimental: bad });
       expect(refused.status).toBe(422);
     }
-    // Another site's page cannot switch it.
     const cross = await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
     expect(cross.status).toBe(403);
     const stale = await fetch(`${base(server)}/api/inbox/settings`, {
@@ -120,13 +111,11 @@ describe("the gate", () => {
     const settings = (await (await fetch(`${base(server)}/api/inbox/settings`)).json()) as { experimental: unknown };
     expect(settings.experimental).toEqual({ decision_mode: { on: false, env: false } });
     process.env.PLANNOTATOR_EXPERIMENTAL = " Decision-Mode ";
-    // While the env var decides, the switch is locked: a save is refused (409, like Over your tailnet) and writes nothing.
     const before = readFileSync(join(dataDir, "config.json"), "utf8");
     const locked = await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } });
     expect(locked.status).toBe(409);
     expect(((await locked.json()) as { code: string }).code).toBe("experimental_env_decides");
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(before);
-    // Nothing else in the same request is saved either.
     expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: true }, text_size: 12 })).status).toBe(409);
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(before);
     expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
@@ -163,7 +152,6 @@ describe("GET /api/inbox/decisions", () => {
     const last = model.decisions.at(-1)!;
     expect(last.message).toMatchObject({ id: plain.message_id, excerpt: "Some context first." });
     expect(last.id).toBe(`${plain.message_id}/${last.question.key}`);
-    // The project filter keeps the order.
     const filtered = await decisions(server, `?project=${stopped.thread.project.id}`);
     expect(filtered.decisions.map((d) => d.id)).toEqual(model.decisions.map((d) => d.id));
   });
@@ -221,7 +209,6 @@ describe("GET /api/inbox/decisions", () => {
       ["First?", "picked", 1],
       ["Second?", "open", 0],
     ]);
-    // A stale revision is refused by the picks route as always.
     const stale = await post(server, `/api/inbox/messages/${asked.message_id}/picks`, {
       questions: [{ key: first!.question.key, revision: 0, answer: null }],
     });
@@ -242,7 +229,6 @@ describe("GET /api/inbox/decisions", () => {
     const answer = (selected: string) => ({ v: 1, key: d!.question.key, kind: "single", prompt: "Ship it?", selected: [selected] });
     expect((await post(server, `/api/inbox/messages/${asked.message_id}/picks`, { questions: [{ key: d!.question.key, revision: 0, answer: answer("Yes") }] })).status).toBe(200);
     expect((await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { idempotency_key: "k1", words: "", questions: [{ key: d!.question.key, revision: 1 }] })).status).toBe(200);
-    // The window read revision 1 before the Send: its pick lands after it.
     const raced = await post(server, `/api/inbox/messages/${asked.message_id}/picks`, { unsent_only: true, questions: [{ key: d!.question.key, revision: 1, answer: answer("No") }] });
     expect(raced.status).toBe(409);
     expect(((await raced.json()) as { code: string }).code).toBe("question_already_sent");

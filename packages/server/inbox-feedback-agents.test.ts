@@ -1,10 +1,4 @@
-/**
- * The agent names the Inbox's Feedback send adds: read from the hosts of the
- * agent messages in the store, by Plannotator's own names, the most recently
- * used first, deduplicated and capped. Never an agent's own display name, a
- * session, a subject or a count. The route is driven directly (no Inbox is
- * started) with a fake send, so nothing leaves the process.
- */
+/** The agent names the Feedback send adds, with the route driven directly and a fake send so nothing leaves the process. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +25,6 @@ describe("inboxFeedbackAgents", () => {
       inboxFeedbackAgents([
         agent("claude-code", "2026-11-01T10:00:00.000Z"),
         agent("codex", "2026-11-03T10:00:00.000Z"),
-        // `claude` is Claude Code too: one name.
         agent("claude", "2026-11-02T10:00:00.000Z"),
         person("2026-11-04T10:00:00.000Z"),
         agent("pi", "2026-10-01T10:00:00.000Z"),
@@ -62,7 +55,6 @@ describe("inboxFeedbackAgents", () => {
       inboxFeedbackAgents([
         agent("claude-code", "2026-11-01T10:00:00.000Z"),
         agent("codex", "2026-11-02T10:00:00.000Z"),
-        // Claude Code again, after Codex: it leads.
         agent("claude", "2026-11-03T10:00:00.000Z"),
       ]),
     ).toEqual(["Claude Code", "Codex"]);
@@ -87,14 +79,12 @@ describe("inboxStoreFeedbackAgents over a real store", () => {
     const author = (host: string): InboxAuthor => ({ kind: "agent", host, session: `ses_${host.replace(/[^a-z]/g, "")}000000000001`, name: null });
     const root = store.sendMessage({ project_id: project.id, author: author("claude-code"), subject: "First", body: "One", reply_to: null, thread: null }).message;
     store.sendMessage({ project_id: project.id, author: author("pi"), subject: "Second", body: "Two", reply_to: null, thread: null });
-    // A reply from another agent in the first thread counts too.
     store.sendMessage({ project_id: project.id, author: author("codex"), subject: null, body: "Three", reply_to: root.id, thread: null });
     expect(inboxStoreFeedbackAgents(store)).toEqual(["Codex", "Pi", "Claude Code"]);
   });
 });
 
 describe("the Feedback route adds the names", () => {
-  /** A store holding one agent message per name given; `null`: a store whose read fails. */
   const storeOf = (hosts: string[] | null): InboxFeedbackStore =>
     hosts === null
       ? {

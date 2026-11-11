@@ -1,20 +1,4 @@
-/**
- * The diff display settings the Inbox shows and changes (approval
- * "diff-controls-headers"): the guided review's and the review's "Diff
- * display" popover and Split / Unified button. They are code review's own
- * (config.json `diffOptions`), so a choice made in either holds in both; the
- * Inbox may run on another host than code review (127.0.0.1, the tailnet
- * name), where the two share no cookies, so config.json carries them.
- *
- * On the wire (GET and POST /api/inbox/settings `diff_options`) each field
- * has a snake_case name; config.json keeps code review's names. Whole file
- * (`expandUnchanged`) and Hide whitespace are not here: they need the local
- * repository, and the Inbox does not show them. Fonts are set in code
- * review's Settings only.
- *
- * `diff_style` stays as an alias of `diff_options.diff_style` (pages and
- * scripts from before).
- */
+/** The diff display settings are code review's own (config.json `diffOptions`); the Inbox may run on another host where cookies are not shared, so config.json carries them. Wire names are snake_case. */
 import type { DiffOptions } from "@plannotator/core/config-types";
 
 export interface InboxDiffOptions {
@@ -32,9 +16,7 @@ type WireKey = keyof InboxDiffOptions;
 
 interface Field {
   config: keyof DiffOptions;
-  /** The field's value when valid, else undefined. */
   read: (value: unknown) => unknown;
-  /** Says what a valid value is. */
   rule: string;
 }
 
@@ -54,7 +36,6 @@ export const INBOX_DIFF_OPTION_FIELDS: Record<WireKey, Field> = {
 
 const WIRE_KEYS = Object.keys(INBOX_DIFF_OPTION_FIELDS) as WireKey[];
 
-/** config.json's `diffOptions` as the wire names them; a field never chosen (or not valid there) is null. */
 export function inboxDiffOptionsOf(diffOptions: DiffOptions | undefined): InboxDiffOptions {
   const out = {} as Record<WireKey, unknown>;
   for (const key of WIRE_KEYS) {
@@ -68,10 +49,6 @@ export type InboxDiffOptionsParse =
   | { ok: true; diffOptions: Partial<DiffOptions> }
   | { ok: false; field: string; error: string };
 
-/**
- * A change to save: `diff_options` (any of its fields) and/or the `diff_style` alias, each field checked. Nothing
- * else is accepted, and the alias may not disagree with `diff_options.diff_style`. Answers config.json's fields.
- */
 export function parseInboxDiffOptionsChange(body: { diff_options?: unknown; diff_style?: unknown }): InboxDiffOptionsParse {
   const out: Partial<DiffOptions> = {};
   if (body.diff_options !== undefined) {
@@ -101,7 +78,6 @@ export function parseInboxDiffOptionsChange(body: { diff_options?: unknown; diff
   return { ok: true, diffOptions: out };
 }
 
-/** Every field of `change` reads back the same from `saved` (config.json after the write). */
 export function inboxDiffOptionsSaved(change: Partial<DiffOptions>, saved: DiffOptions | undefined): boolean {
   return Object.entries(change).every(([key, value]) => (saved as Record<string, unknown> | undefined)?.[key] === value);
 }

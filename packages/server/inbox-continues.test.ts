@@ -1,14 +1,4 @@
-/**
- * A reply after the conversation moved to a new session id, through the
- * server's real doors: the reply route, the connection's poll (`continues`)
- * and its `delivered` event, and the list row. The failures these guard: the
- * person's reply waiting for good on a session id that will never poll again
- * until the agent writes in the thread; the reply handed again after it was
- * delivered; a `delivered` from the continuing session refused; the row
- * saying "Session ended" while its conversation goes on; the wake's words
- * changing because another session id took it. Every test uses its own temp
- * data dir.
- */
+/** A reply after the conversation moved to a new session id, through the server's real doors. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +27,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** An Inbox on a clock the test moves, and a thread a waking session started. */
 async function world() {
   let now = 1_000_000;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-continues-")));
@@ -92,23 +81,19 @@ describe("a reply after the conversation moved to a new session id", () => {
     expect((await row()).session_ended).toBe(true);
     const reply = await personReplies("Use the ARM runner.");
 
-    // A session that does not say it continues the old one gets nothing.
     expect(await poll("ses-other")).toEqual([]);
     const commands = await poll("ses-new", ["ses-old"]);
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({ type: "reply", id: reply.id, thread_id: asked.thread_id, reply_to: asked.message_id });
-    // Not a reply moved to another session: the conversation is the same one.
     expect(commands[0]!.redirected_from).toBeUndefined();
     expect(commands[0]!.tagged).toBeUndefined();
     expect(inboxWakeText(commands[0]!)).toContain("Use the ARM runner.");
-    // The thread's conversation goes on: the row no longer says it ended.
     expect((await row()).session_ended).toBeUndefined();
 
     const delivered = await bridge(INBOX_BRIDGE_EVENT_PATH, { session: "ses-new", host: "claude-code", type: "delivered", id: reply.id });
     expect(delivered.status).toBe(200);
     expect((await thread()).messages.at(-1)?.delivery).toMatchObject({ state: "delivered", host: "claude-code" });
     expect(await poll("ses-new", ["ses-old"])).toEqual([]);
-    // A session that names nothing still may not acknowledge another session's reply.
     const next = await personReplies("And keep x86 for the release build.");
     const wrong = await bridge(INBOX_BRIDGE_EVENT_PATH, { session: "ses-other", host: "claude-code", type: "delivered", id: next.id });
     expect(wrong.status).toBe(422);
@@ -120,7 +105,6 @@ describe("a reply after the conversation moved to a new session id", () => {
     await poll("ses-old");
     const reply = await personReplies("Use the ARM runner.");
     expect(await poll("ses-new", ["ses-old"])).toEqual([]);
-    // The branch may not take it either.
     const early = await bridge(INBOX_BRIDGE_EVENT_PATH, { session: "ses-new", host: "claude-code", type: "delivered", id: reply.id });
     expect(early.status).toBe(422);
     expect((await poll("ses-old")).map((command) => command.id)).toEqual([reply.id]);

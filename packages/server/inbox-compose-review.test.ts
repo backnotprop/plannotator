@@ -1,6 +1,3 @@
-/**
- * Who may start a review from a Send: the factory alone, on a temp store, with no Inbox server around it.
- */
 import { expect, test } from "bun:test";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";

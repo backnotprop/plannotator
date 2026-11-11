@@ -1,47 +1,21 @@
-/**
- * The Inbox's optional debug log, the server's side (packages/shared/inbox/debug-log.ts says what may enter it).
- * Each API request writes a start before any work, and an end: a request that never finishes still shows it
- * arrived, once its start is on disk (within about `INBOX_DEBUG_FLUSH_MS`; a loop blocked by it keeps the start in
- * memory, written at the exit, so only a force-kill of a blocked process loses it). The window's buffered records
- * come in through `accept`. Nothing here may break the Inbox: a failed write is dropped. The file is capped and
- * rotated once, to `debug.log.1`.
- *
- * Lines are kept in memory and written in order, asynchronously, about every `INBOX_DEBUG_FLUSH_MS` (sooner past
- * `INBOX_DEBUG_FLUSH_BYTES`), so no request waits on the disk; whatever is still kept when the process exits is
- * written then, as the server's stop writes it (the write in flight too, again at its own place: never twice). Past
- * `INBOX_DEBUG_PENDING_MAX_BYTES` not yet on disk (a disk that stopped answering), new lines are dropped.
- */
+/** The Inbox's optional debug log, server side. Nothing here may break the Inbox: a failed write is dropped. */
 import { closeSync, constants, fstat, fstatSync, mkdirSync, open, openSync, renameSync, stat, statSync, write, writeSync } from "node:fs";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { cleanWindowRecord, debugMethod, debugRoute, INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH, isDebugRequestId } from "@plannotator/shared/inbox/debug-log";
 
-/** Each of the two files. */
 export const INBOX_DEBUG_MAX_BYTES = 5 * 1024 * 1024;
-/** How long a line waits in memory before it is written. */
 export const INBOX_DEBUG_FLUSH_MS = 250;
-/** Kept lines past this are written at once. */
 export const INBOX_DEBUG_FLUSH_BYTES = 64 * 1024;
-/** Lines waiting past this are dropped, as the window's own buffer drops them. */
 export const INBOX_DEBUG_PENDING_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface InboxDebugLog {
   path: string;
-  /**
-   * `handle`, logging each `/api/inbox/` request. `owner` answers whether this request may be told debug is on and
-   * may name its own id; a request from anyone else gets a server id and no mark.
-   */
   wrap<Via extends string>(handle: (req: Request, via: Via) => Promise<Response>, owner: (req: Request, via: Via) => boolean): (req: Request, via: Via) => Promise<Response>;
-  /** The window's records: a same-origin, owner-only POST, checked by the caller. */
   accept(req: Request): Promise<Response>;
-  /** One line the server writes about something it did on its own (`ev` names it), stamped now. */
   note(ev: string, fields: Record<string, unknown>): void;
-  /** Every line kept so far, written: resolves once they are on disk. */
   flush(): Promise<void>;
-  /**
-   * Write everything not yet on disk now, synchronously and in order (the server's stop), the write in flight
-   * included. Lines that come later still go in.
-   */
+  /** Write everything not yet on disk now, synchronously and in order (the server's stop). */
   close(): void;
 }
 
@@ -51,30 +25,23 @@ const openAsync = promisify(open);
 const writeAsync = (fd: number, buf: Buffer, offset: number, length: number, position: number) =>
   new Promise<{ bytesWritten: number }>((resolve, reject) => write(fd, buf, offset, length, position, (error, bytesWritten) => (error ? reject(error) : resolve({ bytesWritten }))));
 
-/**
- * One planned write: `rotate` first moves the full file aside. Once started it has its file and offset (`fd`, `at`),
- * so writing it twice (the write in flight, and a stop's) puts the same bytes in the same place.
- */
+/** Once started, a step has its file and offset, so writing it twice (the write in flight, and a stop's) puts the same bytes in the same place. */
 interface Step {
   rotate: boolean;
   rotated: boolean;
   buf: Buffer;
-  /** The pieces' bytes as kept (`outstanding` counts these). */
   bytes: number;
   fd: number | null;
   at: number;
   done: boolean;
 }
 
-/** Every log in this process with lines kept or being written, so an exit writes them, and tests can wait for the disk. */
 const busyLogs = new Map<InboxDebugLog, () => void>();
 let exitHooked = false;
-/** The process is exiting: what each log keeps goes in now, synchronously (a write in flight may not finish). */
 const onExit = (): void => {
   for (const drainNow of busyLogs.values()) drainNow();
 };
 
-/** Tests: every debug log's kept lines, on disk. */
 export async function flushInboxDebugLogs(): Promise<void> {
   await Promise.all([...busyLogs.keys()].map((log) => log.flush()));
 }
@@ -86,7 +53,6 @@ async function readCapped(req: Request, cap: number): Promise<string | null> {
   let bytes = 0;
   for await (const chunk of req.body) {
     bytes += chunk.byteLength;
-    // Leaving the loop cancels the rest of the stream.
     if (bytes > cap) return null;
     chunks.push(chunk);
   }
@@ -103,24 +69,16 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     // No file yet.
   }
 
-  /**
-   * Whole lines not yet planned, in order; each `append` stays one piece, so rotation never splits a window's batch
-   * across the two files.
-   */
+  /** Each `append` stays one piece, so rotation never splits a window's batch across the two files. */
   let pending: { text: string; bytes: number }[] = [];
   let pendingBytes = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  /** Planned writes not yet started, in order (`plan`). Data, so a stop or an exit can write them itself. */
   let queue: Step[] = [];
-  /** The one write started and not yet finished: its file and offset are fixed (`Step.fd`, `Step.at`). */
   let writing: Step | null = null;
-  /** Bytes kept and not yet on disk (pending, queued, being written): the cap counts them all. */
   let outstanding = 0;
-  /** The open file and where its next byte goes; reopened when the file was moved or removed. */
   let fd: number | null = null;
   let ino = -1;
   let end = 0;
-  /** Files given up while a write on them may still be running: closed once it ends. */
   const retired: number[] = [];
   const waiters: (() => void)[] = [];
 
@@ -138,7 +96,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     else closeQuietly(fd);
     fd = null;
   };
-  /** The file to write, opened (synchronously) if it is not, or not the one at `path` any more. */
   const openNow = (): number => {
     if (fd !== null) {
       let same = false;
@@ -157,7 +114,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     end = stat.size;
     return n;
   };
-  /** Rotation at the step's start: the full file becomes `debug.log.1`. Rare (once a file), so done at once. */
   const rotateNow = (step: Step): void => {
     if (!step.rotate || step.rotated) return;
     step.rotated = true;
@@ -168,7 +124,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
       // The log never gets in the Inbox's way.
     }
   };
-  /** The step's place in the file, fixed: whoever writes it (this write or a stop's) writes the same bytes there. */
   const place = (step: Step, n: number): void => {
     step.fd = n;
     step.at = end;
@@ -179,14 +134,12 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     step.done = true;
     outstanding -= step.bytes;
   };
-  /** Nothing kept or queued: off the busy list, and anyone waiting on the disk is told. */
   const settle = (): void => {
     if (queue.length > 0 || (writing && !writing.done)) return;
     for (const waiter of waiters.splice(0)) waiter();
     if (pending.length === 0) busyLogs.delete(log);
   };
 
-  /** The kept pieces as writes: each file's run of pieces in one write, a rotation between where the cap falls. */
   const plan = (pieces: { text: string; bytes: number }[]): Step[] => {
     const steps: Step[] = [];
     let run: string[] = [];
@@ -211,7 +164,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     return steps;
   };
 
-  /** What is kept, planned onto the queue. */
   const enqueue = (): void => {
     if (timer) {
       clearTimeout(timer);
@@ -224,7 +176,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     queue.push(...plan(pieces));
   };
 
-  /** One write off the loop: rotation and the file's place now, then the bytes; a stop may write them first. */
   const run = async (step: Step): Promise<void> => {
     rotateNow(step);
     if (step.buf.byteLength === 0) return finished(step);
@@ -252,7 +203,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     finished(step);
   };
 
-  /** The queue, one write at a time, in order. */
   const pump = (): void => {
     if (writing || queue.length === 0) return settle();
     const step = queue.shift()!;
@@ -297,11 +247,6 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     }
   };
 
-  /**
-   * Everything not yet on disk, written now and synchronously, in order (the process is exiting, or the server
-   * stopping): the write in flight again at its own place (the same bytes, so never twice), then the queue, then
-   * what is kept.
-   */
   const drainNow = (): void => {
     enqueue();
     const steps = writing && !writing.done ? [writing, ...queue] : queue;

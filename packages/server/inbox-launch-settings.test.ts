@@ -1,14 +1,4 @@
-/**
- * Settings → Agents' read of how a launch would start (GET /api/inbox/launch/settings),
- * on a real launch module over a temp data dir and a temp home. What each test guards:
- * another site's page and a tailnet guest are refused before the person's login shell is
- * started; concurrent reads share one shell read; the person's own bypass consent, read
- * from their Claude files, decides whether Full permissions can apply; and a person
- * whose Claude settings set a default mode is not shown (or started in) auto mode. And
- * Settings → Agents' "Start agents from New message" switch: absent in config.json is on,
- * an explicit false is off, and its POST writes config.json and turns launch on or off at
- * once (no restart), the read and the switch itself still answering while off.
- */
+/** Settings → Agents' read of how a launch would start (`GET /api/inbox/launch/settings`) and its launch switch, on a real launch module over a temp data dir and home. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +10,6 @@ import { createInboxLiveSessions } from "./inbox-sessions";
 import { claudeBypassSetup, createAgentEnvironmentFor } from "./inbox-agents";
 
 const restore: (() => void)[] = [];
-/** The machine's owner over the tailnet: every other allowed login is a guest. */
 const OWNER = "owner@example.com";
 afterEach(() => {
   for (const undo of restore.splice(0).reverse()) undo();
@@ -44,7 +33,6 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  // `enabled: null`: no `enabled` key at all (the 0.29 default).
   const enabled = options.enabled === null ? {} : { enabled: options.enabled ?? true };
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { ...enabled, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
   if (options.claude) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(options.claude));
@@ -71,7 +59,6 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    // As inbox.ts's `isGuest`: a tailnet login that is not the owner's.
     isGuest: (req, via) => via === "tailnet" && req.headers.get("tailscale-user-login") !== OWNER,
   });
   restore.push(() => launch.stop());
@@ -103,10 +90,8 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
     const off = setup({ enabled: false, fullPermissions: true });
     expect(off.launch.enabled()).toBe(false);
     expect(await off.launch.composeBlock()).toBeUndefined();
-    // Settings → Agents still reads the switch: off, and nothing about the hidden rows.
     expect(await off.get()).toEqual({ status: 200, body: { launch: { enabled: false, full_permissions: false } } });
     expect(off.reads.count).toBe(0);
-    // Every other launch route, and the hidden rows' own settings, stay off.
     expect(await off.call("/api/inbox/launch/folders?path=~")).toMatchObject({ status: 404, body: { code: "launch_off" } });
     expect(await off.post({ full_permissions: false })).toMatchObject({ status: 404, body: { code: "launch_off" } });
     expect(await off.post({ scratch_dir: null })).toMatchObject({ status: 404, body: { code: "launch_off" } });
@@ -134,7 +119,6 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
     const off = setup({ enabled: false });
     const id = `lch_${"0".repeat(26)}`;
     for (const action of ["stop", "delete", "retry", "trust", "open"]) {
-      // Past the switch: the route looks the launch up (none by this id here), never `launch_off`.
       const answered = await off.call(`/api/inbox/launch/${id}/${action}`, { body: {} }).then(
         (r) => r.body.code,
         (e: { code?: string }) => e.code,
@@ -174,7 +158,6 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
       );
     };
     expect(await send("k-here", null)).toEqual({ code: "launch_off", message: "Starting agents from the Inbox is off. Turn it on in Settings → Agents." });
-    // From a linked machine (remote launch): its window shows these words, about this computer's switch.
     expect(await send("k-there", { machine: true, window: true, from: { machine: "mch_a", name: "MacBook" } })).toEqual({
       code: "launch_off",
       message: "Starting agents is off on that computer. Turn it on in its Settings → Agents.",
@@ -196,7 +179,6 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
     expect(world.launch.enabled()).toBe(true);
     await expect(world.post({ enabled: "false" })).rejects.toMatchObject({ code: "validation_error" });
     expect(world.saved()).toEqual({});
-    // The owner over the tailnet (their phone), as the other launch settings.
     expect((await world.post({ enabled: false }, { "tailscale-user-login": OWNER }, "tailnet")).status).toBe(200);
     expect(world.launch.enabled()).toBe(false);
   });
@@ -209,10 +191,8 @@ describe("GET /api/inbox/launch/settings", () => {
     expect(await get({ "sec-fetch-site": "cross-site" })).toMatchObject({ status: 403, body: { code: "cross_origin" } });
     expect(await get({ "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
     expect(reads.count).toBe(0);
-    // The window's own page reads.
     expect((await get({ origin: "http://127.0.0.1:4000", "sec-fetch-site": "same-origin" })).status).toBe(200);
     expect(reads.count).toBe(1);
-    // The owner over the tailnet, as main's other settings.
     expect((await get({ "tailscale-user-login": OWNER }, "tailnet")).status).toBe(200);
   });
 
@@ -223,7 +203,6 @@ describe("GET /api/inbox/launch/settings", () => {
     expect(reads.count).toBe(1);
     await get();
     expect(reads.count).toBe(1);
-    // The composer's read ahead ("Start Claude Code" picked) reads again, fresh or not; concurrent ones still share it.
     await Promise.all([get({}, "local", "?ahead=1"), get({}, "local", "?ahead=1")]);
     expect(reads.count).toBe(2);
   });
@@ -237,7 +216,6 @@ describe("GET /api/inbox/launch/settings", () => {
   test("the shell's export wants full permissions; only the person's own consent makes it apply", async () => {
     const without = setup({ shellSkips: true });
     expect((await without.get()).body.launch).toMatchObject({ full_permissions: true, follows: "shell", needs_consent: true });
-    // Consent in the person's Claude settings, or accepted in ~/.claude.json.
     for (const consent of [{ claude: { skipDangerousModePermissionPrompt: true } }, { claudeJson: { bypassPermissionsModeAccepted: true } }]) {
       const withConsent = setup({ shellSkips: true, ...consent });
       expect((await withConsent.get()).body.launch).toMatchObject({ full_permissions: true, follows: "shell", needs_consent: false });
@@ -248,12 +226,10 @@ describe("GET /api/inbox/launch/settings", () => {
     // Consent only in ~/.claude/settings.local.json (Claude never reads it for a session elsewhere): not accepted.
     const localOnly = setup({ fullPermissions: true, claudeLocal: { skipDangerousModePermissionPrompt: true } });
     expect((await localOnly.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true, bypass_off: false });
-    // Turned off in the user's settings: said as such, never as a notice to accept (consent or not).
     const disabled = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true, permissions: { disableBypassPermissionsMode: "disable" } } });
     expect((await disabled.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: false, bypass_off: true });
     const disabledNoConsent = setup({ fullPermissions: true, claude: { permissions: { disableBypassPermissionsMode: "disable" } } });
     expect((await disabledNoConsent.get()).body.launch).toMatchObject({ needs_consent: false, bypass_off: true });
-    // What Claude ignores does not count: ~/.claude/settings.local.json, and any value but "disable".
     const ignoredLocal = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true }, claudeLocal: { permissions: { disableBypassPermissionsMode: "disable" } } });
     expect((await ignoredLocal.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: false, bypass_off: false });
     const ignoredTrue = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true, permissions: { disableBypassPermissionsMode: true } } });
@@ -271,12 +247,10 @@ describe("GET /api/inbox/launch/settings", () => {
     writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true, permissions: { defaultMode: "acceptEdits" } }));
     const e = createAgentEnvironmentFor({ platform: "darwin", homeDir: home, env: {} });
     expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
-    // A repo cannot grant bypass, nor consent to it.
     writeFileSync(join(folder, ".claude", "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true, permissions: { defaultMode: "bypassPermissions" } }));
     expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
     writeFileSync(join(folder, ".claude", "settings.local.json"), JSON.stringify({ permissions: { defaultMode: "plan", disableBypassPermissionsMode: "disable" } }));
     expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: true, defaultMode: "plan" });
-    // Settings → Agents (no folder): the person's own files only.
     expect(claudeBypassSetup(e)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
   });
 
@@ -286,7 +260,6 @@ describe("GET /api/inbox/launch/settings", () => {
     await off.launch.composeBlock();
     await tick();
     expect(off.reads.count).toBe(0);
-    // Created (the Inbox started): nothing read until New message opens.
     const on = setup();
     await tick();
     expect(on.reads.count).toBe(0);
@@ -296,7 +269,6 @@ describe("GET /api/inbox/launch/settings", () => {
     await on.launch.composeBlock();
     expect((await on.get()).status).toBe(200);
     expect(on.reads.count).toBe(1);
-    // Windows: no login shell to run, ever (an explicit true there included).
     const windows = setup({ platform: "win32" });
     await windows.launch.composeBlock();
     expect((await windows.get({}, "local", "?ahead=1")).status).toBe(200);

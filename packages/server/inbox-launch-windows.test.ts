@@ -1,11 +1,4 @@
-/**
- * Launch on native Windows: PATH by any spelling and `;`, the `//c/` Read rule, Claude's trust key forms, PowerShell
- * commands, typed Windows folders, Hidden/System folders, and a `.cmd` CLI through cmd.exe with a tree kill.
- *
- * The pure checks run everywhere, and also prove macOS and Linux get exactly what they got before. The checks marked
- * Windows run real PowerShell, cmd.exe and file attributes in the `pi-extension-ai-runtime-windows` job of
- * `windows.yml`; they start only stub programs (cmd scripts and node), in temp folders: never an agent CLI or an Inbox.
- */
+/** Launch on native Windows. The checks marked Windows run real PowerShell, cmd.exe and file attributes in the `pi-extension-ai-runtime-windows` job of `windows.yml`, starting only stub programs in temp folders, never an agent CLI or an Inbox. */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -90,7 +83,6 @@ describe("Claude Code's paths on Windows", () => {
     expect(claudeReadRule("C:\\Users\\me\\.plannotator\\inbox\\uploads", "win32")).toBe("Read(//c/Users/me/.plannotator/inbox/uploads/**)");
     expect(claudeReadRule("d:/data/uploads\\", "win32")).toBe("Read(//d/data/uploads/**)");
     expect(claudeRulePathOf("E:\\")).toBe("/e");
-    // macOS and Linux: as before.
     expect(claudeReadRule("/Users/me/.plannotator/inbox/uploads", "darwin")).toBe("Read(//Users/me/.plannotator/inbox/uploads/**)");
   });
 
@@ -106,7 +98,6 @@ describe("commands a person copies on Windows run in PowerShell", () => {
     expect(claudeAttachCommand("C:\\Users\\me\\it's here", "4f1c9a2e", "win32")).toBe("Set-Location -LiteralPath 'C:\\Users\\me\\it''s here'; if ($?) { claude attach 4f1c9a2e }");
     // PowerShell also ends a single-quoted string at ‘ ’ ‚ ‛: each is doubled.
     expect(claudeTrustCommand("C:\\Users\\me\\Bob’s", "win32")).toBe("Set-Location -LiteralPath 'C:\\Users\\me\\Bob’’s'; if ($?) { claude }");
-    // macOS and Linux: as before.
     expect(claudeAttachCommand("/Users/me/it's here", "4f1c9a2e", "darwin")).toBe("cd '/Users/me/it'\\''s here' && claude attach 4f1c9a2e");
     expect(claudeTrustCommand("/Users/me/x", "linux")).toBe("cd '/Users/me/x' && claude");
   });
@@ -150,7 +141,6 @@ describe("typed folders on Windows", () => {
     }
     for (const real of ["C:\\Users\\Me\\AppData\\Roaming", "D:\\vault\\notes", "D:\\work\\.git"]) expect(windowsFolderRefusal(real, env, attributes)).toBe("hidden");
     for (const real of ["D:\\", "D:\\footage", "C:\\Users\\Me\\code"]) expect(windowsFolderRefusal(real, env, attributes)).toBeNull();
-    // Attributes that can't be read (an access-denied junction) hide a folder; no way to read them hides nothing.
     expect(windowsFolderRefusal("D:\\locked", env, () => null)).toBe("hidden");
     expect(windowsFolderRefusal("D:\\footage", env, () => undefined)).toBeNull();
   });
@@ -220,7 +210,6 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
     const listed = listHomeFolders(home, "~");
     expect("folders" in listed ? listed.folders : null).toEqual(["code", "plain"]);
     expect(resolveHomeFolder(home, "~\\secret")).toEqual({ ok: false, refused: "hidden" });
-    // Typed with backslashes, another drive-letter case, another folder case: the same folder.
     const typed = `${home.slice(0, 1).toLowerCase()}${home.slice(1).toUpperCase()}\\code`;
     expect(resolveHomeFolder(home, typed)).toMatchObject({ ok: true, exists: true, shown: "~/code" });
     expect(resolveHomeFolder(home, "D:\\elsewhere")).toEqual({ ok: false, refused: "outside" });
@@ -229,7 +218,6 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
   test("a junction in home that leads to the Windows folder is never listed or opened", () => {
     const home = tempDir("junction");
     mkdirSync(join(home, "code"));
-    // A junction needs no admin rights; it lands outside home, where Windows' own folder rules judge it.
     const junction = join(home, "win");
     symlinkSync(process.env.SystemRoot ?? "C:\\Windows", junction, "junction");
     try {

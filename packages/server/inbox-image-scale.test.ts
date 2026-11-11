@@ -1,9 +1,4 @@
-/**
- * The smaller copy of a big picture (`?w=` on the Inbox's image routes, inbox-image-scale.ts): a tab with dozens of
- * 3840-wide screenshots died of decoding them at full size. A wide PNG asked for at a width comes back that wide as
- * WebP, with its own ETag and a 304 on it; anything the window does not ask for, a picture already that narrow, an
- * animated PNG and a width off the list stay the original, byte for byte.
- */
+/** The smaller copy of a big picture (`?w=`): anything not asked for, already narrow, animated or off the list stays the original, byte for byte. */
 import { describe, expect, test } from "bun:test";
 import { deflateSync } from "node:zlib";
 import { inboxImageWidth, isAnimatedPng, scaleInboxImage } from "./inbox-image-scale";
@@ -11,10 +6,7 @@ import { inboxImageResponse } from "./inbox-message-images";
 
 const hasImage = typeof (globalThis as { Bun?: { Image?: unknown } }).Bun?.Image === "function";
 
-/**
- * A real PNG `width` by `height` (8-bit RGB, a gradient), encoded here: zlib for the data, CRC-32 by hand. `gray`: one
- * flat 8-bit gray row repeated, cheap to build at tens of megapixels.
- */
+/** A real PNG encoded here; `gray` is one flat row repeated, cheap to build at tens of megapixels. */
 async function png(width: number, height: number, gray = false): Promise<Uint8Array> {
   const channels = gray ? 1 : 3;
   const raw = new Uint8Array((width * channels + 1) * height);
@@ -82,7 +74,6 @@ describe("the width a request asks for", () => {
     };
     expect(isAnimatedPng(file("acTL", "IDAT"))).toBe(true);
     expect(isAnimatedPng(file("IDAT", "IEND"))).toBe(false);
-    // An acTL after the image data is not an animation's.
     expect(isAnimatedPng(file("IDAT", "acTL"))).toBe(false);
   });
 });
@@ -99,12 +90,10 @@ describe.if(hasImage)("a message's picture asked for at a width", () => {
     expect(etag).toMatch(/^"[0-9a-f]{64}-w1600"$/);
     const body = new Uint8Array(await response.arrayBuffer());
     expect(body.byteLength).toBeLessThan(original.byteLength);
-    // The guards stay on the copy.
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
     const again = await inboxImageResponse(get({ "if-none-match": etag }), served(original, 2400, 1200), 1600);
     expect(again.status).toBe(304);
-    // The original's own tag does not stand for the copy.
     const plainTag = (await inboxImageResponse(get(), served(original, 2400, 1200))).headers.get("etag")!;
     expect((await inboxImageResponse(get({ "if-none-match": plainTag }), served(original, 2400, 1200), 1600)).status).toBe(200);
   });
@@ -127,8 +116,7 @@ describe.if(hasImage)("a message's picture asked for at a width", () => {
 });
 
 describe.if(hasImage)("the scaling work is bounded", () => {
-  // Two requests for the same copy (a body picture and its attachment share the file's hash) scale it once: a second
-  // scale wasted a full decode and, before, counted the copy twice in the cache, which then shrank to one entry.
+  // Two requests for the same copy scale it once.
   test("the same copy asked for twice at once is scaled once", async () => {
     const original = await png(2400, 1200);
     const [a, b] = await Promise.all([scaleInboxImage(original, "image/png", 800, "same-key"), scaleInboxImage(original, "image/png", 800, "same-key")]);
@@ -136,8 +124,7 @@ describe.if(hasImage)("the scaling work is bounded", () => {
     expect(b).toBe(a);
   });
 
-  // A phone's scroll capture (1170 by 25000) at 800 wide would be 17094 tall, past WebP's 16383: it is scaled to fit
-  // instead of failing (and failing again on every request).
+  // A tall capture would pass WebP's 16383 limit: it is scaled to fit instead of failing.
   test("a very tall picture is scaled to fit WebP's limit", async () => {
     const original = await png(1700, 25000, true);
     const scaled = await scaleInboxImage(original, "image/png", 1600, "tall-key");
@@ -146,8 +133,7 @@ describe.if(hasImage)("the scaling work is bounded", () => {
     expect(scaled!.width).toBeLessThan(1600);
   });
 
-  // A small file can declare a huge picture (16000 by 16000 in 775 KB took 1.1 GB to decode): past the pixel cap it is
-  // not decoded at all, the original is served as before, and the refusal is remembered.
+  // A small file can declare a huge picture: past the pixel cap it is not decoded and the original is served.
   test("a picture past the pixel cap is not decoded to be scaled", async () => {
     const original = await png(8000, 6400, true);
     const started = performance.now();

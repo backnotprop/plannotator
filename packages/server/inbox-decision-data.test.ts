@@ -1,7 +1,4 @@
-/**
- * Decision data's route on a real Inbox in a temp folder: what the window reads, the CSV, its guards, what it does with
- * a reader who left, and that a delete through the window's own route keeps the numbers.
- */
+/** Decision data's route on a real Inbox in a temp folder. */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +27,6 @@ function scratch() {
   return { root, project, data: join(root, "data") };
 }
 
-/** `count` answered questions, written through the store before the Inbox starts. */
 function seed(data: string, projectRoot: string, count: number) {
   mkdirSync(data, { recursive: true });
   let clock = Date.now() - 86_400_000;
@@ -105,10 +101,7 @@ test("the CSV downloads as a file, by range; only GET; another site's page canno
   }
 });
 
-/**
- * A store big enough to take many slices would take minutes to seed, so the clock runs fast instead: every look at it
- * is 5 ms on, so each offer to give way is taken, as it would be on a huge store or a slow machine.
- */
+/** The clock runs fast instead of seeding a huge store: every look is 5 ms on, so each offer to give way is taken. */
 async function withFastClock<T>(run: () => Promise<T>): Promise<T> {
   const saved = performance.now;
   let at = saved.call(performance);
@@ -147,7 +140,6 @@ for (const [what, query] of [
 test(`a reader who leaves stops the ${what}, and the server keeps answering`, async () => {
   const world = scratch();
   seed(world.data, world.project, 1);
-  // Kept lines are quick to write, and give either answer far more slices than a request takes to notice a reader left.
   const at = Date.now() - 86_400_000;
   const line = (id: number) => JSON.stringify({ v: 1, id: `q${id}`, thread_id: "t", project_id: "p", agent: "Claude Code", kind: "single", asked_at: at, answered_at: at, sent_at: at, fate: "answered", took: null, offered: false, stopped: false, holds_up: false, files: false, revisions: 1 });
   writeFileSync(join(world.data, "inbox", DECISION_LINES_FILE), `${Array.from({ length: 100_000 }, (_, id) => line(id)).join("\n")}\n`);
@@ -166,11 +158,9 @@ test(`a reader who leaves stops the ${what}, and the server keeps answering`, as
       slices = 0;
       const controller = new AbortController();
       const left = fetch(`${base(server)}/api/inbox/decision-data?${query}`, { signal: controller.signal }).catch(() => null);
-      // Only once the server is counting does leaving say anything.
       while (slices === 0) await new Promise((resolve) => setTimeout(resolve, 1));
       controller.abort();
       await left;
-      // Give it time to run to the end, were it still running.
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(slices).toBeLessThan(whole / 2);
     });

@@ -1,26 +1,4 @@
-/**
- * Plannotator Inbox: fetchable icon sets for agents' icons ("Sets" in the face picker). Bun only, like every Inbox
- * route. A fetchable set is described by a small remote manifest; the person's own Inbox downloads its icons into the
- * data folder on one click ("Get"), and from then on serves them like a built-in set, offline too.
- *
- * Which sets can be fetched comes from a pointer file (`PLANNOTATOR_ICON_SETS_URL`; empty or `off`: none). It is read
- * only when a window opens the picker's Sets (never at start, never in the background), and remembered for a while.
- *
- *   pointer      { v: 1, sets: [{ id, name, count, manifest: "<url>" }] }
- *   manifest     { v: 1, name, count, icon: "<url with {n} or {n3}>", mirrors?: ["<url pattern>"],
- *                  names?: "<url>" | string[], nameFixes?: { [slug]: name }, start?: 1,
- *                  pixelated?, size?, mono?, zoom?, trim?, licence?, credit? }
- *   names file   a JSON array of names (number order), or { results: [{ name }] }
- *
- *   inbox/icon-sets/<set>/set.json    the manifest as kept (names resolved), written first
- *   inbox/icon-sets/<set>/<n>.<ext>   each icon, sniffed from its bytes (PNG, JPEG, GIF, WebP or SVG), at most 512 KB
- *   inbox/icon-sets/<set>/.getting    there while a download is not finished (a stopped one resumes on the next Get)
- *
- * Safety: http and https only; no redirect or link to a private address (loopback, LAN, link-local, the tailnet's
- * 100.64/10, unique-local IPv6) unless the person's own pointer is on one; at most 3 redirects, each checked; size and
- * count caps on every file; a file that is not one of the five image types is refused and never kept. Icons are served
- * with the uploads' sandboxed headers (inbox-agent-icons.ts) and drawn only as images.
- */
+/** Fetchable icon sets: a small remote manifest, downloaded into the data folder on one click. http(s) only, no redirect or link to a private address unless the person's own pointer is on one, at most 3 redirects each checked, size and count caps, and only the five image types are kept. */
 
 import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -32,7 +10,6 @@ import { AGENT_ICON_MAX_BYTES } from "./inbox-agent-icons";
 import { trimPng } from "./inbox-icon-trim";
 
 export const INBOX_ICON_SETS_DIR = "icon-sets";
-/** Where the list of fetchable sets will live once one exists (nothing is there yet). */
 export const INBOX_ICON_SETS_POINTER_DEFAULT = "https://plannotator.ai/assets/icon-sets/v1/index.json";
 
 export const ICON_SET_CAPS = {
@@ -45,11 +22,9 @@ export const ICON_SET_CAPS = {
   redirects: 3,
   timeoutMs: 20_000,
   together: 10,
-  /** The waits before trying an unreachable icon again: the link back within about half a minute loses nothing. */
   retryWaitsMs: [2_000, 8_000, 20_000],
 } as const;
 
-/** How long a read pointer is believed (a missing one: a shorter while). */
 const POINTER_FRESH_MS = 60 * 60 * 1000;
 const POINTER_MISSING_MS = 10 * 60 * 1000;
 
@@ -57,8 +32,6 @@ const SET_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const EXT: Readonly<Record<string, string>> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
 const TYPE_OF_EXT = Object.fromEntries(Object.entries(EXT).map(([type, ext]) => [ext, type])) as Readonly<Record<string, string>>;
 const ICON_FILE = /^(\d{1,5})\.(png|jpg|gif|webp|svg)$/;
-
-/* ---------- addresses ---------- */
 
 function v4Private(ip: string): boolean {
   const [a = 0, b = 0] = ip.split(".").map(Number);
@@ -76,7 +49,6 @@ function v4Private(ip: string): boolean {
   );
 }
 
-/** Whether an IP address is not on the public internet (loopback, LAN, link-local, CGNAT/tailnet, multicast). */
 export function isPrivateAddress(ip: string): boolean {
   const kind = isIP(ip);
   if (kind === 4) return v4Private(ip);
@@ -89,7 +61,6 @@ export function isPrivateAddress(ip: string): boolean {
 }
 
 export type HostKind = "private" | "public";
-/** A host name's kind: private when any address it resolves to is (or it does not resolve). */
 export async function classifyHost(hostname: string): Promise<HostKind> {
   const host = hostname.replace(/^\[|\]$/g, "");
   if (isIP(host)) return isPrivateAddress(host) ? "private" : "public";
@@ -102,22 +73,15 @@ export async function classifyHost(hostname: string): Promise<HostKind> {
   }
 }
 
-/* ---------- one careful GET ---------- */
-
 export type Got = { ok: true; bytes: Uint8Array<ArrayBuffer> } | { ok: false; reason: "bad_url" | "private" | "redirects" | "status" | "too_big" | "network"; status?: number };
 
 export interface FetchPolicy {
   fetch: typeof fetch;
   classify: (hostname: string) => Promise<HostKind>;
-  /** Private addresses are allowed only when the person's own pointer is on one. */
   allowPrivate: boolean;
 }
 
-/**
- * GET a URL under the policy: http(s) only, each redirect checked again, the body cut off past `max` bytes. The whole
- * GET (connecting, redirects, the body) has one deadline that nothing outlives: on a link that stalls without closing
- * (hotel WiFi), a read that never ends is given up, never waited on.
- */
+/** GET under the policy: http(s) only, each redirect checked again, the body cut off past `max`. One deadline for the whole GET, so a link that stalls without closing is given up. */
 export async function carefulGet(raw: string, max: number, policy: FetchPolicy, timeoutMs: number = ICON_SET_CAPS.timeoutMs): Promise<Got> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -203,8 +167,6 @@ async function carefulGetBefore(raw: string, max: number, policy: FetchPolicy, s
   return { ok: false, reason: "redirects" };
 }
 
-/* ---------- the documents ---------- */
-
 interface PointerEntry {
   id: string;
   name: string;
@@ -212,7 +174,6 @@ interface PointerEntry {
   manifest: string;
 }
 
-/** A kept set (set.json): what the window lists, and where its icons come from. */
 interface KeptSet {
   v: 1;
   id: string;
@@ -225,11 +186,9 @@ interface KeptSet {
   size?: number;
   mono?: boolean;
   zoom?: number;
-  /** PNGs trimmed to their picture as they arrive (inbox-icon-trim.ts). */
   trim?: true;
   licence?: string;
   credit?: string;
-  /** The person's own pointer was on a private address when this set was kept: its icons may be too. */
   local?: true;
   icons: InboxIconSetIcon[];
 }
@@ -258,7 +217,6 @@ function readPointer(bytes: Uint8Array, builtIn: ReadonlySet<string>): PointerEn
   return out;
 }
 
-/** "mr-mime" → "Mr mime"; a name with its own capitals or spaces is kept as given. */
 function niceName(raw: string): string {
   const name = raw.trim().slice(0, 80);
   if (/[A-Z ]/.test(name)) return name;
@@ -271,23 +229,14 @@ function namesFrom(value: unknown): string[] {
   return list.map((item) => (typeof item === "string" ? item : typeof (item as { name?: unknown } | null)?.name === "string" ? (item as { name: string }).name : ""));
 }
 
-/** URL of icon n in a pattern (`{n}`: the number, `{n3}`: padded to three digits). */
 export const iconUrl = (pattern: string, n: number) => pattern.replaceAll("{n3}", String(n).padStart(3, "0")).replaceAll("{n}", String(n));
 
-/* ---------- the fetcher ---------- */
-
 export interface IconSetFetcher {
-  /** The kept sets, and with `remote` the pointer's too (read now, or remembered). */
   list(remote: boolean): Promise<InboxIconSet[]>;
-  /** A kept set's icons and which are here. */
   listing(id: string): InboxIconSetListing | null;
-  /** One kept icon's bytes and type. */
   read(id: string, icon: string): { type: string; body: Uint8Array<ArrayBuffer> } | null;
-  /** Start (or resume) a set's download; answers its state at once. Refused: not a set the pointer offers. */
   get(id: string): Promise<InboxIconSet | null>;
-  /** Resume the downloads a stop cut short (the server's start). */
   resume(): void;
-  /** Tests: the download under way, if any. */
   running(id: string): Promise<void> | null;
 }
 
@@ -298,7 +247,6 @@ export function createIconSetFetcher(options: {
   fetch?: typeof fetch;
   classify?: (hostname: string) => Promise<HostKind>;
   now?: () => number;
-  /** Tests: shorter waits before an unreachable icon is tried again. */
   retryWaitsMs?: readonly number[];
 }): IconSetFetcher {
   const { dir, pointer, builtIn } = options;
@@ -390,7 +338,6 @@ export function createIconSetFetcher(options: {
     renameSync(temp, file);
   };
 
-  /** The set's manifest, read and kept (names resolved) the first time; later runs use the kept copy. */
   const keepManifest = async (entry: PointerEntry): Promise<KeptSet | null> => {
     const already = keptOf(entry.id);
     if (already) return already;
@@ -449,7 +396,6 @@ export function createIconSetFetcher(options: {
     return kept;
   };
 
-  /** Every icon not yet here, a few at a time; each one sniffed, capped and written whole. */
   const fetchIcons = async (kept: KeptSet): Promise<boolean> => {
     const folder = setDir(kept.id);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
@@ -460,7 +406,6 @@ export function createIconSetFetcher(options: {
     let next = 0;
     let complete = true;
     let over = false;
-    /** One icon from its address, then each mirror's: "kept", "refused" (not one to keep), or "unreachable". */
     const attempt = async (icon: InboxIconSetIcon): Promise<"kept" | "refused" | "unreachable"> => {
       let unreachable = true;
       for (const pattern of [kept.icon, ...kept.mirrors]) {
@@ -484,7 +429,6 @@ export function createIconSetFetcher(options: {
       }
       return unreachable ? "unreachable" : "refused";
     };
-    /** The link stayed down through every wait: the run stops (the set shows how far it got, and Get again). */
     let down = false;
     const one = async (icon: InboxIconSetIcon) => {
       // A link that drops for a moment (hotel WiFi) waits and tries again, rather than running through every icon
@@ -540,7 +484,6 @@ export function createIconSetFetcher(options: {
         seen.add(entry.id);
         out.push(summary(entry.id, keptOf(entry.id), entry));
       }
-      // Sets kept before (the pointer since changed, or not read this time): still here, offline too.
       for (const id of keptIds()) if (!seen.has(id)) out.push(summary(id, keptOf(id)));
       return out;
     },
@@ -580,7 +523,6 @@ export function createIconSetFetcher(options: {
   };
 }
 
-/** The pointer's address: `PLANNOTATOR_ICON_SETS_URL` when set (empty or `off`: none), else the default. */
 export function iconSetsPointer(env: Record<string, string | undefined> = process.env): string | null {
   const given = env.PLANNOTATOR_ICON_SETS_URL;
   if (given === undefined) return INBOX_ICON_SETS_POINTER_DEFAULT;

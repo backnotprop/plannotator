@@ -1,16 +1,4 @@
-/**
- * Trust folder's Claude side (docs/agent-guides/inbox-launch.md, "Trusting a folder"). What each test guards: the
- * write changes one value and no other byte, keeps the mode and any link, and never replaces a file it can't read
- * or an empty one; Claude's lock is taken, waited for, and survives two writers at once in separate processes; the
- * file is the one Claude picks and the key the one it uses (physical, NFC, a worktree's main checkout), and
- * `claudeTrustsFolder` reads them; the warning counts what Claude's own prompt warns on and says what it could not
- * read; the owner's click goes through the real server, into a sandboxed config, and a guest gets neither the button
- * nor the route.
- *
- * Every config here is under a temp folder through `refuseRealClaudeConfig`; a real `~/.claude.json` is never read.
- * The sandbox import comes first so a run with no bunfig preload (any folder but the repository's root) is sandboxed
- * too, and the real-server test sets its own marker and HOME for a shell that already names a scratch data dir.
- */
+/** Trust folder's Claude side. Every config is under a temp folder through `refuseRealClaudeConfig`, so a real `~/.claude.json` is never read; the sandbox import comes first so a run with no bunfig preload is sandboxed too. */
 import "../../tests/setup/sandbox-data-dir";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -28,7 +16,6 @@ import type { LaunchHostContext } from "./inbox-launch-host";
 
 const claudeTrustWarning = (folders: readonly string[]) => claudeTrustReading(folders).warning;
 
-/** Only ever handed to the guard below, never opened. */
 const CLAUDE_DIR = ".claude";
 
 const restore: (() => void)[] = [];
@@ -53,7 +40,6 @@ function git(cwd: string, ...args: string[]) {
   const result = spawnSync("/usr/bin/git", args, { cwd, env: GIT_ENV, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
 }
-/** A repository with one commit, and a linked worktree of it. */
 function repoWithWorktree(root: string) {
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -74,7 +60,6 @@ describe("the write", () => {
     const after = readFileSync(config, "utf8");
     expect(JSON.parse(after).projects["/new"]).toEqual({ hasTrustDialogAccepted: true });
     expect(JSON.parse(after).oauthAccount).toEqual({ email: "a@b.c" });
-    // What a re-serialize would change is still as it was: 1.50, the compact objects, the four-space indent.
     expect(after).toContain('"tail": 1.50\n}\n');
     expect(after).toContain('"/other": {"allowedTools": ["Bash"], "hasTrustDialogAccepted": false}');
     expect(after.startsWith('{\n    "numStartups": 12,\n    "oauthAccount": {"email": "a@b.c"},\n    "projects": {\n')).toBe(true);
@@ -221,7 +206,6 @@ describe("Claude's lock", () => {
     const writing = acceptClaudeTrust(config, "/a");
     await Bun.sleep(150);
     expect(readFileSync(config, "utf8")).toBe('{"numStartups":1}');
-    // Claude saves, then lets go.
     writeFileSync(config, '{"numStartups":2}');
     rmdirSync(`${config}.lock`);
     await writing;
@@ -329,7 +313,6 @@ describe("the key, as Claude Code uses it", () => {
     const decomposed = join(root, "café");
     mkdirSync(decomposed);
     expect(claudeTrustKey(decomposed)).toBe(join(root, "café"));
-    // A repository's root goes the same way.
     mkdirSync(join(root, "cafe\u0301-repo", ".git"), { recursive: true });
     mkdirSync(join(root, "cafe\u0301-repo", "sub"));
     expect(claudeTrustKey(join(root, "cafe\u0301-repo", "sub"))).toBe(join(root, "caf\u00E9-repo"));
@@ -359,7 +342,6 @@ describe("the key, as Claude Code uses it", () => {
     symlinkSync(plain, join(root, "plain-link"));
     await acceptClaudeTrust(config, claudeTrustKey(join(root, "plain-link")));
     expect(claudeTrustsFolder(files, join(root, "plain-link", "child"))).toBe(true);
-    // A key as written through the link is not one Claude would ever match.
     const unphysical = join(root, "other-link");
     const other = join(root, "other");
     mkdirSync(other);
@@ -486,7 +468,6 @@ describe("the Claude host's offer", () => {
     const read = offerFor().read();
     expect(read.facts).toEqual(["Runs 2 hooks, 2 MCP servers, 1 helper command, env settings", "Uses tools without asking, reaches outside folders", "1 file couldn't be read"]);
     expect(read.warns).toBe(true);
-    // The warning comes from the same read: the run line and compose can never disagree on what was counted.
     expect(read.warning).toContain("2 hooks, 2 MCP servers, 1 helper command and env settings");
   });
 
@@ -621,7 +602,6 @@ describe("through a real server", () => {
     expect((await read(OWNER)).trust).toEqual({ warning: null });
     const clicked = await click(OWNER);
     expect(clicked.status).toBe(200);
-    // Inside the sandbox's own home, and only there.
     expect(JSON.parse(readFileSync(sandboxConfig, "utf8"))).toEqual({ projects: { [folder]: { hasTrustDialogAccepted: true } } });
     expect(store.message(thread.id)!.launch!.error?.code).not.toBe("untrusted");
   }, 30_000);

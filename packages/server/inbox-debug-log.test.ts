@@ -1,7 +1,4 @@
-/**
- * The Inbox's optional debug log against a real Inbox server on loopback. Temp data dir only; the tailnet is a
- * scripted `tailscale` CLI through the runner seam, so the real one never runs.
- */
+/** The Inbox's optional debug log against a real Inbox; the tailnet is a scripted `tailscale` CLI. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -308,12 +305,10 @@ describe("written off the request path", () => {
     }
     await log.flush();
     const ids = [...lines(`${log.path}.1`), ...lines(log.path)].filter((line) => line.ev === "req_end").map((line) => Number(String(line.id).slice(1)));
-    // Rotated once: the oldest lines went with the first file; the rest are every request since, in order.
     expect(ids.at(-1)).toBe(300);
     expect(ids).toEqual(Array.from({ length: ids.length }, (_, i) => 301 - ids.length + i));
     expect(existsSync(`${log.path}.2`)).toBe(false);
 
-    // Kept, not yet written: the stop writes it before it returns.
     log.note("store_load", { ms: 1 });
     log.close();
     expect(lines(log.path).at(-1)).toMatchObject({ ev: "store_load" });
@@ -324,7 +319,6 @@ describe("a stop or an exit while a write is in flight", () => {
   const seqs = (path: string) => (existsSync(path) ? lines(path).map((line) => line.n) : []);
 
   test("every line lands once, in order, whatever stage the write in flight is at", async () => {
-    // Each round stops at a different point of the write in flight (before its file is open, before or after the bytes).
     for (let turns = 0; turns < 12; turns += 1) {
       const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
       roots.push(dir);
@@ -340,13 +334,10 @@ describe("a stop or an exit while a write is in flight", () => {
       for (let i = 0; i < turns; i += 1) await new Promise((resolve) => (i % 2 ? setTimeout(resolve, 0) : setImmediate(resolve)));
       some(5);
       log.close();
-      // On disk when the stop returns: nothing waits for the write in flight.
       expect({ turns, seqs: seqs(log.path) }).toEqual({ turns, seqs: Array.from({ length: n }, (_, i) => i) });
-      // And the write in flight, ending after, adds nothing: no line twice.
       await inFlight;
       await flushInboxDebugLogs();
       expect({ turns, seqs: seqs(log.path) }).toEqual({ turns, seqs: Array.from({ length: n }, (_, i) => i) });
-      // Lines after the stop still go in.
       some(1);
       await log.flush();
       expect(seqs(log.path).at(-1)).toBe(n - 1);
@@ -385,7 +376,6 @@ process.exit(143);
     roots.push(dir);
     const log = createInboxDebugLog(dir, 64 * 1024 * 1024);
     const pad = "x".repeat(1000);
-    // 12 MB of lines with no turn of the loop: every write planned (64 KB at a time) waits.
     const total = Math.ceil((12 * 1024 * 1024) / 1050);
     for (let n = 0; n < total; n += 1) log.note("loop_stall", { n, pad });
     await log.flush();
@@ -394,7 +384,6 @@ process.exit(143);
     expect(kept.length).toBeLessThan(total);
     expect(kept).toEqual(Array.from({ length: kept.length }, (_, i) => i));
     expect(readFileSync(log.path).byteLength).toBeLessThanOrEqual(INBOX_DEBUG_PENDING_MAX_BYTES);
-    // Once written, there is room again.
     log.note("store_load", { ms: 1 });
     await log.flush();
     expect(lines(log.path).at(-1)).toMatchObject({ ev: "store_load" });
@@ -441,7 +430,6 @@ describe("over the tailnet", () => {
     expect(owner.headers.get(INBOX_DEBUG_ON_HEADER)).toBe("1");
     expect((await through(INBOX_DEBUG_PATH, OWNER, records)).status).toBe(200);
 
-    // A guest on inboxTailscaleAllow: past the listener, so these reach the Inbox's own owner check.
     const guestId = `${PAGE}-2`;
     const guest = await through("/api/inbox/threads", GUEST, { headers: { [INBOX_DEBUG_ID_HEADER]: guestId } });
     expect(guest.status).toBe(200);
@@ -450,7 +438,6 @@ describe("over the tailnet", () => {
     expect(refused.status).toBe(403);
     expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
 
-    // Someone not on the list stops at the listener.
     const stranger = await through(INBOX_DEBUG_PATH, "someone@example.com", records);
     expect(stranger.status).toBe(403);
 

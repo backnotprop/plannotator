@@ -1,10 +1,4 @@
-/**
- * "Another folder on <machine>…": a Send's `to.launch.folder`, on a real launch module over a temp data dir and a temp
- * home. What each test guards: a typed folder that would put an agent somewhere the folder listing never offers is
- * refused before anything is checked or written (`prepare` throws, so no thread, project or start): a hidden folder
- * reached by a backslash, a NUL, or a link in home that lands in one; and home itself, where an agent would reach
- * every folder under it, hidden ones too. The listing's own rules are in inbox-home-folders.test.ts.
- */
+/** A Send's `to.launch.folder` on a real launch module over a temp data dir and home: a folder the listing never offers is refused before anything is checked or written. The listing's own rules are in inbox-home-folders.test.ts. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,7 +54,6 @@ function setup() {
   });
   restore.push(() => launch.stop());
   let resolved = 0;
-  /** A Send's `to.launch.folder` through `target` and `prepare`, as compose runs them: the refusal's code and words. */
   const send = async (folder: string) => {
     try {
       const target = launch.target({ launch: { agent: "claude-code", folder } })!;
@@ -102,7 +95,6 @@ describe("to.launch.folder: never somewhere the listing doesn't offer", () => {
     expect(await send("~/code/sshlink/nope")).toEqual({ code: "validation_error", message: "Hidden folders can't be picked. Nothing was sent." });
     // The temp folder is a system folder (macOS's /private, Linux's /tmp): a link there is one too.
     expect(await send("~/outlink/nope")).toEqual({ code: "validation_error", message: "System folders can't be picked. Nothing was sent." });
-    // Under a plain folder: just missing.
     expect((await send("~/code/nope")).code).toBe("folder_missing");
     expect(resolvedCount()).toBe(0);
   });
@@ -116,11 +108,6 @@ describe("to.launch.folder: never somewhere the listing doesn't offer", () => {
   });
 });
 
-/**
- * Create a folder (approval "launch-create-clone", decision 1a): `to.launch: { folder, create: true }` makes only the
- * last folder, after every check, and only in a folder that is there and can be written. A thread that is never
- * written takes the folder away again while it is empty; a folder that is there by now is started in as it is.
- */
 describe("to.launch.folder with create", () => {
   const asRoot = typeof process.getuid === "function" && process.getuid() === 0;
   function world() {
@@ -183,7 +170,6 @@ describe("to.launch.folder with create", () => {
 
   test("q-d2512542: Create + Send starts straight away: the empty folder it made is trusted as by hand, with no Trust folder step; one with anything in it by then is not", async () => {
     const { home, launch, prepare, store, fake } = world();
-    // Claude Code trusts nothing here yet, and refuses an untrusted folder until the trust is saved (by the host's offer).
     const accepted: string[] = [];
     fake.faults.trusted = () => false;
     fake.faults.untrusted = true;
@@ -208,7 +194,6 @@ describe("to.launch.folder with create", () => {
     expect(store.message(fresh.id)!.launch!.session_ref).toBeTruthy();
     expect(accepted).toEqual([join(home, "code", "pricing-page")]);
 
-    // Something was put in it before the start: the person reads and trusts it, as any other folder (E8, Trust folder).
     fake.faults.untrusted = true;
     const filled = await send("~/code/pricing-notes", "filled", () => writeFileSync(join(home, "code", "pricing-notes", "notes.md"), "x"));
     for (let i = 0; i < 200 && !store.message(filled.id)!.launch!.error && !store.message(filled.id)!.launch!.session_ref; i++) await Bun.sleep(10);
@@ -257,12 +242,7 @@ describe("to.launch.folder with create", () => {
   });
 });
 
-/**
- * A folder on another drive (approval "inbox-launch-any-folder"): a Send may start in any folder but a system or hidden
- * one, a drive's own root too; never in the folder drives are mounted in. A drive that doesn't answer is given up after
- * the read's timeout and said by name, and never holds the Inbox: the next read of it answers at once. The temp folder
- * is a system folder here, so the test names its own disk (`folderPlaces`).
- */
+/** A drive that doesn't answer is given up after the read's timeout and never holds the Inbox. The temp folder is a system folder here, so the test names its own disk (`folderPlaces`). */
 describe("to.launch.folder on another drive", () => {
   function drives() {
     const disk = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-drive-")));
@@ -273,7 +253,6 @@ describe("to.launch.folder on another drive", () => {
     for (const dir of [join(home, "code"), join(volumes, "Studio SSD", "footage"), join(volumes, "Backup", "jobs"), dataDir]) mkdirSync(dir, { recursive: true });
     setEnv("PLANNOTATOR_DATA_DIR", dataDir);
     setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-    // Backup stands in for a network drive that stopped answering: its reads never finish.
     setEnv("PLANNOTATOR_TEST_DRIVES", JSON.stringify({ slow: [join(volumes, "Backup")] }));
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
     const store = InboxStore.open(dataDir);
@@ -329,7 +308,6 @@ describe("to.launch.folder on another drive", () => {
     const answer = (await list(join(volumes, "Backup", "jobs")))!;
     expect(Date.now() - again).toBeLessThan(300);
     expect([answer.status, await answer.json()]).toEqual([504, { error: "Backup isn't responding.", code: "folder_slow", drive: "Backup" }]);
-    // Another drive still reads.
     expect(await (await list(`${join(volumes, "Studio SSD")}/`))!.json()).toMatchObject({ exists: true, folders: ["footage"] });
   });
 

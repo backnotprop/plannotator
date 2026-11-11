@@ -1,12 +1,4 @@
-/**
- * Pi through the real launch engine (inbox-launch.ts with its own hosts, no test host), against the fake `pi`
- * (tests/helpers/fake-pi/), never the real one. What each test guards: To offers "Pi" once `pi` and Plannotator's
- * Pi extension are there, and only then; a Send starts one `pi --mode rpc` in the chosen project's folder, with the
- * thread's name as one argument whatever it holds, and the thread addressed to that Pi session; the session's
- * extension polls the bridge as that session and takes the root; the spawn env keeps the login's own names but no
- * Plannotator name other than the two it sets, and no outer Pi session's markers. A small bridge stands in for the
- * Inbox's: no Inbox is started.
- */
+/** Pi through the real launch engine against the fake `pi` (tests/helpers/fake-pi/), never the real one; a small bridge stands in for the Inbox's. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +24,6 @@ async function until<T>(what: string, check: () => T | null | undefined | false 
   }
 }
 
-/** The bridge the fake's extension calls: each session's polls, the root and the waiting replies handed once to the session they are for, their delivery. */
 function stubBridge(dataDir: string, store: InboxStore) {
   const polls = new Map<string, { count: number; last: number }>();
   const busy = new Map<string, boolean>();
@@ -42,7 +33,6 @@ function stubBridge(dataDir: string, store: InboxStore) {
     hostname: "127.0.0.1",
     async fetch(req) {
       const pathname = new URL(req.url).pathname;
-      // The extension's "delivered" event, recorded as the Inbox's bridge records it.
       if (pathname === "/api/inbox/bridge/event") {
         const event = (await req.json()) as { session: string; host: string; type: string; id?: string; busy?: boolean };
         if (event.type === "delivered" && event.id) store.recordDelivery(event.id, { host: event.host, session: event.session });
@@ -87,7 +77,6 @@ function setup(options: { folderName?: string } = {}) {
   const folder = join(root, options.folderName ?? "project");
   for (const dir of [home, bin, dataDir, folder]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
-  // The engine reads launch's switch from this data dir's config.json.
   const before = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   cleanup.push(() => {
@@ -101,9 +90,7 @@ function setup(options: { folderName?: string } = {}) {
   const bridge = stubBridge(dataDir, store);
   cleanup.push(() => bridge.stop());
   const path = `${bin}:/usr/bin:/bin`;
-  /** How far the engine's clock is ahead of the wall clock (past the start's grace). */
   const clock = { ahead: 0 };
-  /** A launch engine over this data dir: the Inbox, or the Inbox after a restart. */
   const makeLaunch = () => {
   const made = createInboxLaunch({
     store,
@@ -112,7 +99,6 @@ function setup(options: { folderName?: string } = {}) {
     serverSession: "srv",
     homeDir: home,
     platform: process.platform,
-    // The login shell carries a name of its own, an outer Pi session's markers and Plannotator's own names.
     loginEnv: async () => ({ HOME: home, PATH: path, LOGIN_ONLY: "from-login", PI_SESSION_ID: "outer-session", PI_MODEL: "outer/model", PLANNOTATOR_PORT: "1", PLANNOTATOR_TEST_SANDBOX: "1" }),
     ownEnv: () => ({ HOME: home, PATH: path }),
     installDirs: [],
@@ -148,7 +134,6 @@ describe("Pi through the launch engine, against the fake pi", () => {
 
   test("Send starts Pi in the project's folder, the thread's name one argument, the thread addressed to that session, which takes the root", async () => {
     const { store, project, folder, dataDir, fake, bridge, launch } = setup({ folderName: `pro'ject $(touch x) "y"` });
-    // Pi keeps working on the root, so the line shows the session's own live state.
     fake.configure({ hold: true });
     const name = `--mode json; $(touch pwned) 'q' "dq"`;
     const target = launch.target({ launch: { agent: "pi", project_id: project.id } })!;
@@ -169,7 +154,6 @@ describe("Pi through the launch engine, against the fake pi", () => {
     expect(start!.env).not.toContain("PI_SESSION_ID");
     expect(start!.env).not.toContain("PI_MODEL");
 
-    // The session connects back: its extension polls as that session and takes the root as its first turn.
     await until("the root delivered", () => fake.delivered().includes(root.id));
     expect(bridge.polls.has(session)).toBe(true);
     await until("the root marked delivered to that session", () => store.message(root.id)!.delivery);
@@ -177,7 +161,6 @@ describe("Pi through the launch engine, against the fake pi", () => {
     await until("the line follows that session: working", async () => (await launch.runOf(root.id))?.state === "working");
   });
 
-  /** Send to a new Pi session whose extension does not connect: started, with its session id. */
   async function sendUnconnected(t: ReturnType<typeof setup>) {
     t.fake.configure({ noConnect: true });
     const target = t.launch.target({ launch: { agent: "pi", project_id: t.project.id } })!;
@@ -188,7 +171,6 @@ describe("Pi through the launch engine, against the fake pi", () => {
     return { root, session };
   }
 
-  /** The reply starts Pi again on the same session, and the new one takes the root and the reply. */
   async function replyContinues(t: ReturnType<typeof setup>, launch: ReturnType<typeof setup>["launch"], root: InboxMessage, session: string) {
     t.fake.configure({ noConnect: false });
     const { reply } = t.store.sendReply(root.id, { words: "Please go on.", idempotency_key: "reply-1" });
@@ -213,7 +195,6 @@ describe("Pi through the launch engine, against the fake pi", () => {
   test("the Inbox restarted before Pi connected: the line says a reply continues it, and a reply does", async () => {
     const t = setup();
     const { root, session } = await sendUnconnected(t);
-    // The Inbox stops (its Pi with it) and starts again.
     await t.launch.stop();
     await until("the first Pi ended", () => !t.fake.alive(t.fake.starts()[0]!.pid));
     const after = t.makeLaunch();

@@ -1,25 +1,4 @@
-/**
- * The Board's switch (approval "inbox-board", 2026-10-26: "board should be
- * something that is enabled ... careful with the state machine"), on a real
- * Inbox with config.json deciding (no override). Each transition of the
- * state table in docs/agent-guides/inbox-notifications-and-agents.md:
- *
- *  - off (the default): no `card` in tools/list; a `card` call answers
- *    `board_off` and writes nothing; the first-visit dialog is not claimed;
- *  - off → on (Settings' switch, config.json `inboxBoard`): the next
- *    tools/list has `card`; a call works;
- *  - on → off with an agent mid-session (its tool list, taken while on, still
- *    names the action, as the Claude Code mod's cached list does): its call
- *    answers `board_off`, nothing is written, every card is kept;
- *  - a card op in flight while it turns off: each call either wrote its card
- *    or answered `board_off` with nothing written, never half;
- *  - off → on again: the cards are as they were;
- *  - throughout: the person's list, sections and routing are untouched.
- *
- * What regresses: an Inbox that offers cards to agents the person never
- * turned the Board on for, a call that writes while it is off, a switch that
- * deletes cards, or a switch that moves anything in the Inbox itself.
- */
+/** The Board's switch on a real Inbox with config.json deciding: the `card` tool is offered, refused and written only as the switch says. */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +53,6 @@ async function world() {
     fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board: { on } }) });
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as { board: { on: boolean } };
   const cards = async () => ((await (await fetch(`${base}/api/inbox/cards`)).json()) as { cards: { id: string; title: string; column: string; said: string | null }[] }).cards;
-  // A project, the way it always gets one: a message.
   await call("send_message", { ...agent, body: "seed" });
   return { dataDir, server, base, rpc, toolNames, call, card, setBoard, settings, cards, agent };
 }
@@ -91,10 +69,7 @@ test("off by default: no card tool, a card call answers board_off and writes not
   expect(w.server.store.listCards()).toHaveLength(0);
   const intro = await fetch(`${w.base}/api/inbox/board/intro`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   expect(await intro.json()).toEqual({ show: false });
-  // The Claude Code mod's bundled list (from a default Inbox) has no card action either.
   expect(INBOX_DEFAULT_TOOLS.map((tool) => tool.name)).not.toContain("card");
-  // Off, the agent tool says once that the Board exists and where to read about it (the owner, 2026-10-27):
-  // built from the live list (Pi, OpenCode) and from the mod's bundled one.
   for (const tool of [inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!, modAgentTool(INBOX_DEFAULT_TOOLS)!]) {
     expect(tool.description.split(INBOX_TOOL_BOARD_OFF_NOTE)).toHaveLength(2);
     // Claude Code cuts a description at 2,048 characters: the last line (the help pointer) must survive.
@@ -106,7 +81,6 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   const w = await world();
   const rowsBefore = JSON.stringify(w.server.store.listRows());
 
-  // off → on: saved to config.json; the next tools/list carries card, and the tool works.
   expect((await (await w.setBoard(true)).json()) as { board: { on: boolean } }).toMatchObject({ board: { on: true } });
   expect(JSON.parse(readFileSync(join(w.dataDir, "config.json"), "utf8")).inboxBoard).toBe(true);
   const listed = parseInboxToolList((await w.rpc("tools/list", {})).result);
@@ -115,17 +89,12 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   expect(made.isError).toBeFalsy();
   const cardId = made.structuredContent!.card.id as string;
 
-  // An agent mid-session: its connection built the tool from the list it read while the Board was on
-  // (the Claude Code mod reads it once per process; Pi and OpenCode at session start).
   const cached = inboxAgentTool(listed)!;
   expect((cached.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum).toContain("card");
-  // On, the card action's own line says it: no Board-off line.
   expect(cached.description).not.toContain(INBOX_TOOL_BOARD_OFF_NOTE);
-  // With the card action's line, still every rule (the work-stream one too) inside Claude Code's 2,048 characters.
   expect(cached.description).toContain(INBOX_AGENT_RULES);
   expect(cached.description.length).toBeLessThan(2048);
 
-  // on → off: every card kept, the tool gone from the next list, the cached call refused, nothing written.
   expect((await (await w.setBoard(false)).json()) as { board: { on: boolean } }).toMatchObject({ board: { on: false } });
   expect(await w.toolNames()).not.toContain("card");
   const cursor = w.server.store.cursor();
@@ -137,16 +106,13 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   const kept = await w.cards();
   expect(kept.map((c) => [c.id, c.column, c.said])).toEqual([[cardId, "in_progress", "lane started"]]);
 
-  // The rest of the Inbox goes on as before while it is off.
   const sent = await w.call("send_message", { ...w.agent, body: "an update while the Board is off" });
   expect(sent.isError).toBeFalsy();
 
-  // off → on again: the card is as it was, and its agent can keep it current.
   await w.setBoard(true);
   expect((await w.cards()).find((c) => c.id === cardId)).toMatchObject({ column: "in_progress", said: "lane started" });
   expect((await w.card({ op: "say", card_id: cardId, say: "back on" })).isError).toBeFalsy();
 
-  // The switch never touched the person's list: the rows are the seed's, plus the update the agent sent.
   const rowsAfter = w.server.store.listRows();
   expect(rowsAfter.length).toBeGreaterThanOrEqual(JSON.parse(rowsBefore).length);
   expect(rowsAfter.some((row) => row.thread_id === (sent.structuredContent!.thread_id as string))).toBe(true);
@@ -163,7 +129,6 @@ test("a card op in flight while the Board turns off: each call wrote its card or
   const refused = results.filter((r) => r.isError);
   for (const r of refused) expect(r.content[0]!.text).toStartWith("board_off: ");
   expect(written.length + refused.length).toBe(12);
-  // Exactly the cards the successful calls name exist: a refused call wrote nothing.
   expect(w.server.store.listCards().map((c) => c.id).sort()).toEqual([...written].sort());
 });
 
@@ -180,7 +145,6 @@ test("the switch is a boolean, and only from this computer's page", async () => 
   expect((await w.settings()).board).toEqual({ on: false });
 });
 
-/** An event stream's `event: capabilities` frames, as they arrive, and whether it said hello. */
 function capabilityFrames(response: Response) {
   const frames: Record<string, unknown>[] = [];
   const state = { hello: false };
@@ -213,8 +177,6 @@ async function until(ready: () => boolean): Promise<void> {
   }
 }
 
-// Review of #2598, finding 4 (the owner: settings sync everywhere): a Board turned on in one window (Settings, or a
-// reveal's "Turn it on") shows its row in every other one (the phone, another tab) without a reload.
 test("the switch tells every window at once (`event: capabilities` carries the Board), only on a change, never an agent's stream", async () => {
   const w = await world();
   const phone = capabilityFrames(await fetch(`${w.base}/api/inbox/events?window=board-phone`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
@@ -223,7 +185,6 @@ test("the switch tells every window at once (`event: capabilities` carries the B
   expect((await w.setBoard(true)).status).toBe(200);
   await until(() => phone.frames.length >= 1);
   expect(phone.frames[0]!.board).toEqual({ on: true });
-  // The same state again says nothing; a change does, so the stream has caught up past the repeat.
   expect((await w.setBoard(true)).status).toBe(200);
   expect((await w.setBoard(false)).status).toBe(200);
   await until(() => phone.frames.length >= 2);
@@ -232,14 +193,11 @@ test("the switch tells every window at once (`event: capabilities` carries the B
   await Promise.all([phone.stop(), agent.stop()]);
 });
 
-// Review of #2522, finding 7: the window states the tool's size with the Board on (INBOX_TOOL_COST_WITH_BOARD);
-// what regresses is card text that grows the entry every request carries while that number goes stale.
 test("the agent tool's entry with the Board on stays within 5% of the size the window states", async () => {
   const w = await world();
   await w.setBoard(true);
   const tool = inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!;
   expect(tool.description).toContain("Board card");
-  // Pi's request shape: name, description, parameters.
   const bytes = Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.inputSchema }));
   expect(Math.abs(bytes - INBOX_TOOL_COST_WITH_BOARD.bytes) / INBOX_TOOL_COST_WITH_BOARD.bytes).toBeLessThanOrEqual(0.05);
 });

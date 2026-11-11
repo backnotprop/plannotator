@@ -1,9 +1,4 @@
-/**
- * A chapter's diagram (approval "guide-chapter-diagrams": diagrams live in chapters, the overview takes none): what
- * an agent can send and read. A chapter's diagram makes a version-5 snapshot and rides the Code review switch, as
- * the overview's did; an older session's overview diagram is still taken. No Inbox is started: the check is called
- * directly and the MCP server is built, never served.
- */
+/** A chapter's diagram: what an agent can send and read, with no Inbox started. */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -145,7 +140,6 @@ describe("get_guide_brief offers a chapter's diagram, not the overview's", () =>
     expect(rules).toContain(inboxReviewChapterDiagramDoc(false));
     const all = JSON.stringify({ schema, rules });
     for (const word of ["html", "plannotator shape", "Shape", "\"css\"", "\"tall\""]) expect([word, all.includes(word)]).toEqual([word, false]);
-    // Shape's switch absent from the context: off.
     const server = createInboxMcpServer({ codeReviewOn: () => true } as unknown as InboxMcpContext);
     const tools = (server as unknown as { _registeredTools: Registered })._registeredTools;
     const absent = ((await tools.get_guide_brief!.handler!({}, {})) as { structuredContent: { rules: string[] } }).structuredContent;
