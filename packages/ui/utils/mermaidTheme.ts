@@ -1,72 +1,6 @@
 /**
- * Theme-aware Mermaid configuration.
- *
- * Mermaid diagrams used to render from one static config (`MERMAID_CONFIG` in
- * `./mermaid`: the `dark` base theme plus a slate palette) in every one of
- * Plannotator's palettes and both modes. This module derives the diagram
- * theme from the live CSS tokens instead, the same tokens `ThemeProvider`
- * applies through `theme.css`, so a diagram follows the palette the way a
- * code fence already does (see `syntaxTheme.ts` / `useFenceTheme`).
- *
- * Three layers, each pure below the top one:
- *
- * 1. `readThemeTokens(el)` reads the handful of custom properties the mapping
- *    needs off the document (`getComputedStyle`), returning a plain record of
- *    raw CSS values, or `undefined` when the tokens are not there at all (a
- *    host that never mounted `ThemeProvider` and ships no `theme.css`).
- * 2. `buildMermaidThemeVariables(tokens, mode)` turns that record into the
- *    Mermaid base theme (`dark` when the resolved mode is dark, `default`
- *    when light) plus a complete `themeVariables` override: general, flowchart,
- *    sequence, state, class, ER, requirement, gitGraph, gantt, pie, mindmap /
- *    timeline (`cScale*`), journey (`fillType*`), quadrant, xyChart, packet,
- *    radar, wardley, venn, architecture and C4 all derive from the same
- *    tokens. Every colour handed to Mermaid is an opaque hex string, because
- *    Mermaid's colour library does not parse `oklch()`.
- * 3. `applyMermaidTheme(mermaid, key)` is the runtime step `MermaidBlock`
- *    calls before every render: `mermaid.initialize` is global state, so it
- *    runs only when the `(palette, mode, shadow amount)` key changed since the
- *    last apply.
- *
- * Node shadow: Mermaid 12's neo look paints a drop shadow on every node,
- * cluster and actor, from its own fixed `rgba(185,185,185,1)` grey at
- * `1px 2px 2px`. The mapping keeps the look and replaces that one filter:
- * `themeVariables.dropShadow` is built from the palette's own ground at
- * `DEFAULT_MERMAID_SHADOW_AMOUNT` (0.7 of Mermaid's geometry), in the polarity
- * the page reads in — see `buildMermaidShadow`. A host that wants Mermaid's
- * grey back sets its own `themeVariables.dropShadow` after ours; a host that
- * wants none passes `{ shadowAmount: 0 }`, which publishes `dropShadow: false`
- * and the neo rules render `filter: none`.
- *
- * Fallback contract (hosts): when no tokens resolve, the runtime keeps the
- * static `MERMAID_CONFIG` it was initialized with, and nothing is
- * re-initialized, so a host that does not use Plannotator's theme tokens
- * renders exactly as before this module existed.
- *
- * Contrast rule (the "guard"): every text-on-fill pair the mapping produces
- * must reach WCAG 4.5:1 and every line-on-canvas pair 3:1 (plus a 0.1
- * headroom, `GUARD_HEADROOM`). Page-level text and lines are guarded against
- * EVERY surface they can cross, not one: the diagram canvas (the block's
- * `bg-muted/30` tint over the document card, and over the bare page for a
- * host that mounts the block there), node fills (`card`), cluster and
- * composite-state fills (`muted`), popovers and ER rows. A pair that falls
- * short is repaired by moving the text (or line) colour toward the mode's
- * `foreground` token, the smallest step that satisfies the ratio so hue is
- * kept where possible; when `foreground` itself cannot reach the ratio on that
- * fill (a light fill in dark mode), the `background` token is used as the ink
- * instead, and when neither token reaches it pure black or white is the last
- * resort (a mid-luminance fill such as the line colour under a sequence
- * number). Ratios are measured on the 8-bit colour Mermaid receives, never on
- * the unrounded mix. Categorical fills (pie slices, branch lines, mindmap
- * sections, journey tasks) are normalized to one lightness per page polarity
- * (0.74 on a dark page, 0.50 on a light one, chroma clamped to 0.06..0.15) so
- * a single ink, the `background` token, reads on all of them; each fill is
- * additionally pushed in lightness until that ink reaches 4.5:1. Polarity is
- * the measured luminance of the `background` token, not the mode label, so a
- * dark-only palette rendered under a light label still gets fills its ink can
- * carry; the mode label only picks the Mermaid base theme. Structural strokes (node, cluster, actor
- * borders) are guaranteed 1.5:1 against the canvas, nudged toward
- * `muted-foreground`, so a palette with a near-invisible `border` still draws
- * node outlines.
+ * Contrast rule (the "guard"): every text-on-fill pair the mapping produces must reach WCAG
+ * 4.5:1 and every line-on-canvas pair 3:1 (plus a 0.1 headroom, `GUARD_HEADROOM`).
  */
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { MERMAID_CONFIG } from './mermaid';
@@ -118,29 +52,17 @@ export type MermaidThemeTokens = Partial<Record<MermaidThemeTokenName, string>>;
 export interface MermaidThemeSpec {
   theme: 'dark' | 'default';
   themeVariables: Record<string, unknown>;
-  /** The node shadow amount baked into `themeVariables.dropShadow` (0..1). */
   shadowAmount: number;
 }
 
 /** Options `buildMermaidThemeVariables` accepts beyond the tokens and mode. */
 export interface MermaidThemeOptions {
-  /**
-   * How much node drop shadow to paint, 0..1, where 1 reproduces Mermaid's
-   * own default geometry (`1px 2px 2px`) and 0 means no shadow at all.
-   * Default: `DEFAULT_MERMAID_SHADOW_AMOUNT`.
-   */
   readonly shadowAmount?: number;
 }
 
-/**
- * The shipped shadow amount: Mermaid 12's neo look at 70% of its own shadow.
- * The full-strength default reads as a grey halo around every node on a
- * Plannotator page; 70 keeps the lift and drops the halo.
- */
 export const DEFAULT_MERMAID_SHADOW_AMOUNT = 0.7;
 
-/** Mermaid 12's own node shadow, the colour included. Amount 1 reproduces
- *  this geometry; the colour is ours unless the palette yields nothing. */
+/** Mermaid 12's own node shadow, the colour included. */
 export const MERMAID_DEFAULT_SHADOW_COLOR = 'rgba(185, 185, 185, 1)';
 
 /** Clamp an amount to 0..1 and round it, so it is stable in a cache key. */
@@ -153,45 +75,24 @@ export function clampShadowAmount(amount: number | undefined): number {
 export const MERMAID_TEXT_CONTRAST_MIN = 4.5;
 export const MERMAID_LINE_CONTRAST_MIN = 3;
 export const MERMAID_BORDER_CONTRAST_MIN = 1.5;
-/**
- * Headroom the mapping adds over the text and line minimums. This arithmetic
- * composites in float and rounds once; a browser composites the container's
- * `bg-muted/30` tint in its own space, so a pair repaired to exactly 4.5 or
- * 3.0 here can measure a hair under in the rendered SVG.
- */
 const GUARD_HEADROOM = 0.1;
 
-/** Target OKLCH lightness of categorical fills per mode (see module doc). */
 const CATEGORICAL_LIGHTNESS: Record<MermaidThemeMode, number> = { dark: 0.74, light: 0.5 };
 const CATEGORICAL_MAX_CHROMA = 0.15;
 const CATEGORICAL_MIN_CHROMA = 0.06;
 const CATEGORICAL_COUNT = 12;
-/** Hues closer than this (degrees) are treated as the same family. */
 const HUE_SEPARATION = 18;
-/** Opacity of the diagram container's `bg-muted/30` tint over the page. */
 const CANVAS_MUTED_ALPHA = 0.3;
 
-// ---------------------------------------------------------------------------
-// Token reading (browser)
-// ---------------------------------------------------------------------------
-
 /**
- * Read the theme tokens off `el` (default: the document element, where
- * `ThemeProvider` puts the `theme-*` / `light` classes). A value the parser
- * does not understand (`color-mix()`, a `var()` chain) is resolved through a
- * throwaway probe element so the engine does the substitution. Returns
- * `undefined` when neither `--background` nor `--foreground` resolves, which
- * is the signal to keep the static config.
+ * Read the theme tokens off `el` (default: the document element, where `ThemeProvider` puts the
+ * `theme-*` / `light` classes).
  */
 export function readThemeTokens(el?: Element | null): MermaidThemeTokens | undefined {
   const tokens: MermaidThemeTokens | undefined = readThemeTokenValues(MERMAID_THEME_TOKEN_NAMES, el, ['font-sans']);
   if (!tokens?.background || !tokens.foreground) return undefined;
   return tokens;
 }
-
-// ---------------------------------------------------------------------------
-// Mapping (pure)
-// ---------------------------------------------------------------------------
 
 interface Palette {
   canvas: RgbColor;
@@ -214,11 +115,6 @@ interface Palette {
   fontFamily: string | undefined;
 }
 
-/**
- * Parse the tokens into opaque colours, filling gaps from the two required
- * ones so the mapping below is total. Alpha (e.g. a `#ffffff99`
- * muted-foreground) is composited over the page background.
- */
 function resolvePalette(tokens: MermaidThemeTokens): Palette | null {
   const background = parseCssColor(tokens.background);
   if (!background) return null;
@@ -232,8 +128,6 @@ function resolvePalette(tokens: MermaidThemeTokens): Palette | null {
   const card = over(tokens.card, opaqueBackground);
   const muted = over(tokens.muted, towardFg(0.08));
   const primary = over(tokens.primary, foreground);
-  // The block's `bg-muted/30` container sits on the document card in
-  // Plannotator (`bg-card` article); a host may place it straight on the page.
   const canvas = compositeOver({ ...muted, a: CANVAS_MUTED_ALPHA }, card);
   const canvasOnBackground = compositeOver({ ...muted, a: CANVAS_MUTED_ALPHA }, opaqueBackground);
   const font = tokens['font-sans']?.trim();
@@ -260,19 +154,13 @@ function resolvePalette(tokens: MermaidThemeTokens): Palette | null {
   };
 }
 
-/**
- * Repair `color` against `against` until the pair reaches `min`, by the
- * smallest OKLab step toward the first ink that can reach it (see the module
- * doc for the rule). Returns `color` unchanged when it already passes.
- */
+/** Returns `color` unchanged when it already passes. */
 export function ensureContrast(color: RgbColor, against: RgbColor, min: number, inks: readonly RgbColor[]): RgbColor {
   const start = quantize(color);
   const fill = quantize(against);
   if (contrastRatio(start, fill) >= min) return start;
   let best: RgbColor = start;
   let bestRatio = contrastRatio(start, fill);
-  // The tokens first; pure black and white are the last resort for a
-  // mid-luminance fill that neither token can carry text on.
   for (const ink of [...inks, BLACK, WHITE]) {
     const inkRatio = contrastRatio(ink, fill);
     if (inkRatio < min) {
@@ -282,8 +170,6 @@ export function ensureContrast(color: RgbColor, against: RgbColor, min: number, 
       }
       continue;
     }
-    // Binary search the smallest mix toward this ink that passes, measured
-    // on the 8-bit colour Mermaid will receive.
     let lo = 0;
     let hi = 1;
     for (let i = 0; i < 12; i++) {
@@ -300,46 +186,21 @@ const BLACK: RgbColor = { r: 0, g: 0, b: 0, a: 1 };
 const WHITE: RgbColor = { r: 1, g: 1, b: 1, a: 1 };
 
 /**
- * Whether the page reads as dark: the luminance at which black and white
- * text contrast equally (about 0.179). Decided from the background token's
- * measured luminance rather than the mode label, so a dark-only palette that
- * a host renders under a light label still gets fills its ink can carry.
+ * Whether the page reads as dark: the luminance at which black and white text contrast equally
+ * (about 0.179).
  */
 export function isDarkBackground(background: RgbColor): boolean {
   return relativeLuminance(background) < 0.179;
 }
 
-/** `rgba()` from an RgbColor plus an explicit alpha. */
 function rgba(c: RgbColor, alpha: number): string {
   const ch = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
   return `rgba(${ch(c.r)}, ${ch(c.g)}, ${ch(c.b)}, ${Math.round(alpha * 1000) / 1000})`;
 }
 
 /**
- * The node drop shadow, as the `drop-shadow(x y blur colour)` string Mermaid's
- * `dropShadow` theme variable takes, or `false` — its falsy value, which every
- * `[data-look="neo"] … { filter: … }` rule turns into `filter: none`.
- *
- * Geometry scales with the amount over a small floor, so a toned-down shadow
- * still reads as a lift rather than vanishing: at 1 it is exactly Mermaid's own
- * `1px 2px 2px`, at 0 there is no shadow at all.
- *
- * The COLOUR comes from the palette rather than Mermaid's fixed
- * `rgba(185,185,185,1)` grey — that grey is the halo that reads as wrong on a
- * themed page — and its POLARITY follows the page, exactly as Mermaid's own
- * `insertLookDefs` does (`floodColor = theme.includes('dark') ? '#FFFFFF' :
- * '#000000'`): on a dark page a shadow's job is to LIFT the node off the
- * ground, and a black shadow on a near-black ground paints nothing the eye can
- * see. What is kept from the palette is the tint and the strength, not the
- * direction:
- *   - dark page: the ground lifted 82% toward white, alpha 0.18 -> 0.90;
- *   - light page: the ground darkened 40% toward black, alpha 0.25 -> 0.55.
- * Each is then asserted to differ from the ground in the READABLE direction,
- * falling back to plain white or black, so no palette can produce an invisible
- * shadow; a ground that is not a usable colour at all falls back to Mermaid's
- * own grey.
- *
- * Pure. `ground` is the page's opaque background.
+ * The node drop shadow, as the `drop-shadow(x y blur colour)` string Mermaid's `dropShadow`
+ * theme variable takes, or `false` — its falsy value.
  */
 export function buildMermaidShadow(ground: RgbColor | undefined, amount: number): string | false {
   const a = clampShadowAmount(amount);
@@ -351,13 +212,9 @@ export function buildMermaidShadow(ground: RgbColor | undefined, amount: number)
     Number.isFinite(ground.r) &&
     Number.isFinite(ground.g) &&
     Number.isFinite(ground.b);
-  // Nothing usable from the palette: Mermaid's own colour at our geometry.
   if (!usable) return `drop-shadow(${geometry} ${MERMAID_DEFAULT_SHADOW_COLOR})`;
   const dark = isDarkBackground(ground);
   let colour = dark ? mixOklab(ground, WHITE, 0.82) : mixOklab(ground, BLACK, 0.4);
-  // The dark-page top end is calibrated so amount 1 reads as strongly as
-  // Mermaid's own `rgba(185,185,185,1)` over the same ground — 1 is defined as
-  // "Mermaid's default", so it has to actually look like it.
   const alpha = dark ? 0.18 + 0.72 * a : 0.25 + 0.3 * a;
   const groundL = relativeLuminance(ground);
   if (dark && relativeLuminance(colour) <= groundL) colour = WHITE;
@@ -365,10 +222,6 @@ export function buildMermaidShadow(ground: RgbColor | undefined, amount: number)
   return `drop-shadow(${geometry} ${rgba(colour, alpha)})`;
 }
 
-/**
- * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
- * Used for the categorical scale, whose single ink is fixed per mode.
- */
 function fitFillForInk(fill: RgbColor, ink: RgbColor, polarity: MermaidThemeMode): RgbColor {
   let current = quantize(fill);
   const step = polarity === 'dark' ? 0.02 : -0.02;
@@ -381,11 +234,8 @@ function fitFillForInk(fill: RgbColor, ink: RgbColor, polarity: MermaidThemeMode
 }
 
 /**
- * Twelve categorical fills for pie / git / mindmap / journey / timeline,
- * seeded from the palette's own accent tokens (in order: primary, accent,
- * success, warning, destructive, secondary; greys skipped) and filled out with
- * hue rotations of the first seed, all normalized to one lightness and a
- * chroma band so they read as one family and share one ink.
+ * Twelve categorical fills for pie / git / mindmap / journey / timeline, seeded from the
+ * palette's own accent tokens (in order: primary, accent, success, warning.
  */
 export function buildCategoricalScale(p: Palette, polarity: MermaidThemeMode): RgbColor[] {
   const targetL = CATEGORICAL_LIGHTNESS[polarity];
@@ -407,23 +257,16 @@ export function buildCategoricalScale(p: Palette, polarity: MermaidThemeMode): R
     if (rgbToOklch(seed).C >= 0.05) push(seed);
     if (out.length >= CATEGORICAL_COUNT) break;
   }
-  // A grey palette (no chromatic seed) still gets a scale: start from a
-  // mid-chroma blue-violet so slices stay tellable apart.
   const base: RgbColor = out.length ? out[0] : { ...withOklchLightness(parseCssColor('#7c7cff') as RgbColor, targetL), a: 1 };
   if (!out.length) push(base);
   for (let k = 1; out.length < CATEGORICAL_COUNT && k < 40; k++) {
-    // Golden-angle-ish stepping spreads the rotations before wrapping.
     push(rotateHue(base, (k * 137.5) % 360));
   }
   // Every fill must carry the mode ink at 4.5:1.
   return out.slice(0, CATEGORICAL_COUNT).map((c) => fitFillForInk(c, p.background, polarity));
 }
 
-/**
- * Derive the Mermaid base theme and a total `themeVariables` override from
- * the tokens. Returns `null` when the required tokens are missing or
- * unparsable, which callers treat as "use the static config".
- */
+/** Derive the Mermaid base theme and a total `themeVariables` override from the tokens. */
 export function buildMermaidThemeVariables(
   tokens: MermaidThemeTokens | undefined,
   mode: MermaidThemeMode,
@@ -434,16 +277,10 @@ export function buildMermaidThemeVariables(
   if (!p) return null;
   const shadowAmount = clampShadowAmount(options?.shadowAmount);
 
-  // Base theme follows the mode; fill lightness and ink follow the measured page.
   const polarity: MermaidThemeMode = isDarkBackground(p.background) ? 'dark' : 'light';
   const inks = [p.foreground, p.background] as const;
   const rowEven = mixOklab(p.card, p.muted, 0.6);
-  // Every surface page-level text and lines can land on: the canvas (over the
-  // card, and over the bare page for hosts), node fills, cluster fills, ER
-  // rows, popovers. A colour guarded against all of them reads everywhere.
   const surfaces = [p.canvas, p.canvasOnBackground, p.card, p.muted, p.popover, rowEven] as const;
-  // A little headroom over the published minimums absorbs the compositing
-  // and rounding differences between this arithmetic and a browser's.
   const textMin = MERMAID_TEXT_CONTRAST_MIN + GUARD_HEADROOM;
   const lineMin = MERMAID_LINE_CONTRAST_MIN + GUARD_HEADROOM;
   const text = (color: RgbColor, fill: RgbColor): RgbColor => ensureContrast(color, fill, textMin, inks);
@@ -465,13 +302,10 @@ export function buildMermaidThemeVariables(
   const primaryLine = line(p.primary);
   const destructiveLine = line(p.destructive);
   const warningLine = line(p.warning);
-  // A note is a card tinted toward the warning token, so it stays a surface
-  // its own text reads on rather than a fixed yellow.
   const noteBg = mixOklab(p.card, p.warning, 0.18);
   const noteText = text(p.cardForeground, noteBg);
   const errorBg = mixOklab(p.card, p.destructive, 0.25);
   const errorText = text(p.foreground, errorBg);
-  // Ink on a line-coloured shape (sequence numbers sit on `lineColor` discs).
   const onLine = text(p.background, lineColor);
 
   const scale = buildCategoricalScale(p, polarity);
@@ -481,14 +315,11 @@ export function buildMermaidThemeVariables(
   const scaleLabel = scale.map((c) => toHex(text(scaleInk, c)));
 
   const h = toHex;
-  // The shadow nodes, clusters and actors are painted with. Derived from the
-  // page's own ground, never Mermaid's fixed grey (see buildMermaidShadow).
   const shadow = buildMermaidShadow(p.background, shadowAmount);
   const vars: Record<string, unknown> = {
     darkMode: mode === 'dark',
     ...(p.fontFamily ? { fontFamily: p.fontFamily } : {}),
 
-    // General
     background: h(canvas),
     primaryColor: h(p.card),
     primaryTextColor: h(cardText),
@@ -517,13 +348,8 @@ export function buildMermaidThemeVariables(
     useGradient: false,
     // Paint-time only: a filter on the shape, never a fill or a label colour.
     dropShadow: shadow,
-    // `nodeShadow` gates ONE thing in Mermaid 12: the inline
-    // `filter:url(#…-drop-shadow-small)` a state diagram's small start / end
-    // dots carry, which no theme variable string reaches. Off at amount 0 so
-    // "no shadow" is true of every element.
     ...(shadow === false ? { nodeShadow: false } : {}),
 
-    // Flowchart
     nodeBkg: h(p.card),
     nodeBorder: h(nodeBorder),
     nodeTextColor: h(cardText),
@@ -531,7 +357,6 @@ export function buildMermaidThemeVariables(
     clusterBorder: h(clusterBorder),
     edgeLabelBackground: h(canvas),
 
-    // Sequence
     actorBkg: h(p.card),
     actorBorder: h(nodeBorder),
     actorTextColor: h(cardText),
@@ -550,7 +375,6 @@ export function buildMermaidThemeVariables(
     activationBorderColor: h(nodeBorder),
     sequenceNumberColor: h(onLine),
 
-    // State
     stateBkg: h(p.card),
     stateLabelColor: h(cardText),
     transitionColor: h(lineColor),
@@ -563,16 +387,13 @@ export function buildMermaidThemeVariables(
     innerEndBackground: h(lineColor),
     specialStateColor: h(lineColor),
 
-    // Class
     classText: h(cardText),
 
-    // ER
     attributeBackgroundColorOdd: h(p.card),
     attributeBackgroundColorEven: h(rowEven),
     rowOdd: h(p.card),
     rowEven: h(rowEven),
 
-    // Requirement
     requirementBackground: h(p.card),
     requirementBorderColor: h(nodeBorder),
     requirementTextColor: h(cardText),
@@ -580,14 +401,12 @@ export function buildMermaidThemeVariables(
     relationLabelBackground: h(canvas),
     relationLabelColor: h(fg),
 
-    // Git
     commitLabelColor: h(fg),
     commitLabelBackground: h(canvas),
     tagLabelColor: h(cardText),
     tagLabelBackground: h(p.card),
     tagLabelBorder: h(nodeBorder),
 
-    // Gantt
     sectionBkgColor: h(p.muted),
     altSectionBkgColor: h(canvas),
     sectionBkgColor2: h(p.card),
@@ -609,7 +428,6 @@ export function buildMermaidThemeVariables(
     todayLineColor: h(destructiveLine),
     vertLineColor: h(primaryLine),
 
-    // Pie
     pieTitleTextColor: h(fg),
     pieSectionTextColor: h(text(scaleInk, scale[0])),
     pieLegendTextColor: h(fg),
@@ -617,7 +435,6 @@ export function buildMermaidThemeVariables(
     pieOuterStrokeColor: h(nodeBorder),
     pieOpacity: '1',
 
-    // Quadrant
     quadrant1Fill: h(p.card),
     quadrant2Fill: h(p.muted),
     quadrant3Fill: h(p.muted),
@@ -634,18 +451,15 @@ export function buildMermaidThemeVariables(
     quadrantExternalBorderStrokeFill: h(nodeBorder),
     quadrantTitleFill: h(fg),
 
-    // Architecture / C4
     archEdgeColor: h(lineColor),
     archEdgeArrowColor: h(lineColor),
     archGroupBorderColor: h(nodeBorder),
     personBkg: h(p.card),
     personBorder: h(nodeBorder),
 
-    // Venn
     vennTitleTextColor: h(fg),
     vennSetTextColor: h(fg),
 
-    // Event modeling
     emUiFill: h(p.card),
     emUiStroke: h(nodeBorder),
     emProcessorFill: scaleHex[3] ?? scaleHex[0],
@@ -661,7 +475,6 @@ export function buildMermaidThemeVariables(
     emArrowhead: h(lineColor),
     emRelationStroke: h(lineColor),
 
-    // Scale-driven families
     scaleLabelColor: scaleLabel[0],
     xyChart: {
       backgroundColor: h(canvas),
@@ -735,22 +548,14 @@ export function buildMermaidThemeVariables(
   return { theme: mode === 'dark' ? 'dark' : 'default', themeVariables: vars, shadowAmount };
 }
 
-/** The full Mermaid config for a spec: `MERMAID_CONFIG` with the theme swapped. */
 export function buildMermaidConfig(spec: MermaidThemeSpec | null): MermaidConfig {
   if (!spec) return MERMAID_CONFIG;
   return { ...MERMAID_CONFIG, theme: spec.theme, themeVariables: spec.themeVariables };
 }
 
-// ---------------------------------------------------------------------------
-// Runtime application (cached by key)
-// ---------------------------------------------------------------------------
-
 /**
- * `mode:palette`, the cache key `applyMermaidTheme` compares — plus a
- * `#s<amount>` suffix when the shadow amount is not the shipped default, so a
- * changed amount re-initializes the runtime. The default amount keeps the key
- * byte-identical to the `(palette, mode)` pair it always was, which is also
- * what keeps a host that never names an amount on the same key it had.
+ * `mode:palette`, the cache key `applyMermaidTheme` compares — plus a `#s<amount>` suffix when
+ * the shadow amount is not the shipped default.
  */
 export function mermaidThemeKey(
   colorTheme: string,
@@ -766,7 +571,6 @@ function modeFromKey(key: string): MermaidThemeMode {
   return key.startsWith('light:') ? 'light' : 'dark';
 }
 
-/** The amount a key carries, the default when it carries none. */
 export function shadowAmountFromKey(key: string): number {
   const match = /#s(\d*\.?\d+)$/u.exec(key);
   return match ? clampShadowAmount(Number(match[1])) : DEFAULT_MERMAID_SHADOW_AMOUNT;
@@ -778,13 +582,7 @@ let appliedRuntime: Pick<Mermaid, 'initialize'> | null = null;
 let appliedKey: string | null = null;
 let appliedKind: 'dynamic' | 'static' | null = null;
 
-/**
- * Initialize `mermaid` for the `(palette, mode)` named by `key`, once per key
- * change. Reads the tokens from `root` (default: the document element). With
- * no tokens the runtime is left on the static config it was initialized with
- * (no `initialize` call at all unless a dynamic theme was applied earlier),
- * which is the fallback contract for hosts.
- */
+/** Initialize `mermaid` for the `(palette, mode)` named by `key`, once per key change. */
 export function applyMermaidTheme(
   mermaid: Pick<Mermaid, 'initialize'>,
   key: string,

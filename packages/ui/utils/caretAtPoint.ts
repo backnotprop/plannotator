@@ -1,4 +1,3 @@
-/** A position in the document's text. */
 export interface CaretPosition {
   node: Node;
   offset: number;

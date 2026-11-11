@@ -30,14 +30,7 @@ export function canUseAnnotateWideMode(options: {
 /** What the focus-mode keyboard shortcut should do on this press. */
 export type FocusShortcutAction = 'enter-focus' | 'exit' | 'none';
 
-/**
- * Decide the next step for the focus-mode keyboard shortcut.
- *
- * The shortcut is a single "hide the chrome / give it back" toggle, so ANY
- * active panel-hiding view mode restores the remembered layout — including
- * `wide`, which the toolbar control would instead swap for `focus`. A press
- * that could only re-hide already-hidden panels would look like a dead key.
- */
+/** Decide the next step for the focus-mode keyboard shortcut. */
 export function resolveFocusShortcutAction(state: {
   canUseWideMode: boolean;
   wideModeType: WideModeType | null;

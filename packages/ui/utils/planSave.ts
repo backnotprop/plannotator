@@ -1,11 +1,6 @@
 /**
- * Plan Save Settings Utility
- *
- * Manages settings for automatic plan saving after approval/denial.
- * Users can configure custom save path or disable saving entirely.
- *
- * Uses cookies (not localStorage) because each hook invocation runs on a
- * random port, and localStorage is scoped by origin including port.
+ * Uses cookies (not localStorage) because each hook invocation runs on a random port, and
+ * localStorage is scoped by origin including port.
  */
 
 import { storage } from './storage';
@@ -23,9 +18,6 @@ const DEFAULT_SETTINGS: PlanSaveSettings = {
   customPath: null, // null means use default ~/.plannotator/plans/
 };
 
-/**
- * Get current plan save settings from storage
- */
 export function getPlanSaveSettings(): PlanSaveSettings {
   const enabled = storage.getItem(STORAGE_KEY_ENABLED);
   const customPath = storage.getItem(STORAGE_KEY_PATH);
@@ -36,9 +28,6 @@ export function getPlanSaveSettings(): PlanSaveSettings {
   };
 }
 
-/**
- * Save plan save settings to storage
- */
 export function savePlanSaveSettings(settings: PlanSaveSettings): void {
   storage.setItem(STORAGE_KEY_ENABLED, String(settings.enabled));
   if (settings.customPath) {

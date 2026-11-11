@@ -1,14 +1,12 @@
 /**
- * A v4 UUID that also works in an insecure context. `crypto.randomUUID` exists only in a secure
- * context (https or localhost), so the Inbox opened over plain http on another address would throw.
- * `crypto.getRandomValues` has no such limit.
+ * `crypto.randomUUID` exists only in a secure context (https or localhost), so the Inbox opened
+ * over plain http on another address would throw.
  */
 export function newUuid(): string {
   if (typeof crypto.randomUUID === 'function') {
     try {
       return crypto.randomUUID();
     } catch {
-      // Fall through to getRandomValues.
     }
   }
   const b = crypto.getRandomValues(new Uint8Array(16));

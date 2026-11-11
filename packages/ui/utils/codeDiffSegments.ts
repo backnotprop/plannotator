@@ -1,13 +1,6 @@
 /**
- * The markup for one chunk of a config file's version diff (`renderAs: "code"`):
- * Shiki's colours with the diff's own marks laid over them.
- *
- * Both inputs partition the same strings, so merging them is one walk: the
- * highlighter's runs (`highlightToRuns`) cut the text by colour, and the diff
- * cuts it into unchanged / added / removed. Unchanged and added text take the
- * NEW side's colours, removed text the OLD side's, so a removed `50` is still a
- * number. A struck stretch (a removed line, a removed word) never strikes a
- * line's leading whitespace: an indented YAML key must not start with a dash.
+ * Unchanged and added text take the NEW side's colours, removed text the OLD side's, so a
+ * removed `50` is still a number.
  */
 import type { HighlightRun } from "./codeHighlight";
 import type { InlineDiffToken } from "./planDiffEngine";
@@ -77,11 +70,7 @@ export function chunkSegments(text: string, runs: readonly HighlightRun[] | null
   }));
 }
 
-/**
- * A modified block's word diff over both sides' colours. `oldText`/`newText`
- * are the texts `tokens` were computed from (see `computeCodeInlineDiff`).
- * Should a token not match its side's text, that token falls back to plain.
- */
+/** A modified block's word diff over both sides' colours. */
 export function wordDiffSegments(
   oldText: string,
   newText: string,
@@ -116,10 +105,8 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Struck text keeps the diff view's old strike: `line-through decoration-destructive/30`. */
 const STRUCK_CLASS = "line-through decoration-destructive/30";
 
-/** The segments as `<code>` inner HTML. Styles come from the Shiki theme, text is escaped. */
 export function codeSegmentsToHtml(segments: readonly CodeSegment[]): string {
   let html = "";
   for (const segment of segments) {

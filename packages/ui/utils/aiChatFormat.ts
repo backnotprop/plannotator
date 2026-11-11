@@ -3,9 +3,8 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 /**
- * What DOMPurify keeps of an Ask AI answer. Every tag and attribute marked
- * writes for the markdown an answer uses must be listed here, or DOMPurify
- * drops the element and keeps only its text (#2069: tables ran together).
+ * Every tag and attribute marked writes for the markdown an answer uses must be listed here, or
+ * DOMPurify drops the element and keeps only its text.
  */
 export const CHAT_SANITIZE_CONFIG = {
   ALLOWED_TAGS: [
@@ -13,10 +12,8 @@ export const CHAT_SANITIZE_CONFIG = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'a', 'blockquote',
     'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
-  // `align` is what marked writes on th/td for aligned GFM columns. No `class`
-  // (an answer's raw HTML could style itself with the app's utility classes;
-  // nothing in `.ai-markdown` reads one) and no `rel` (marked never writes it
-  // and `target` is not allowed).
+  // No `class` (an answer's raw HTML could style itself with the app's utility classes; nothing in
+  // `.ai-markdown` reads one) and no `rel` (marked never writes it and `target` is not allowed).
   ALLOWED_ATTR: ['href', 'align'],
   // DOMPurify keeps data-* and aria-* unless told not to.
   ALLOW_DATA_ATTR: false,
@@ -29,10 +26,8 @@ export function chatMarkdownToHtml(text: string): string {
 }
 
 /**
- * Never throws: deeply nested input can overflow the stack in marked, and a
- * throw inside a render would unmount the whole page. On any failure the
- * answer is shown as plain text, line breaks kept, as a React text child
- * (React escapes it).
+ * Never throws: deeply nested input can overflow the stack in marked, and a throw inside a
+ * render would unmount the whole page.
  */
 export function renderChatMarkdown(text: string): ReactNode {
   try {

@@ -1,15 +1,6 @@
 /**
- * The overlay projection: the canvas scales a wrapper around the rendered
- * svg with a CSS transform; the overlay is a sibling of that wrapper,
- * unscaled, so rings and badges keep constant pixel size at every zoom.
- * Each target's box is read in svg user units (`getBBox`) and pushed
- * through `getScreenCTM`, which carries the svg viewBox scaling and every
- * ancestor transform, the wrapper's CSS zoom included. Minus the canvas
- * host's own rect, that is the ring's rectangle in overlay pixels.
- *
- * Pure over two browser APIs; happy-dom has neither, so the tests install
- * both on the captured fixture's elements with the numbers a real Chromium
- * measured (test-setup/fixtures/diagrams/*.geometry.json).
+ * The overlay projection: the canvas scales a wrapper around the rendered svg with a CSS
+ * transform; the overlay is a sibling of that wrapper, unscaled.
  */
 
 export interface ScreenRect {
@@ -33,7 +24,6 @@ export function projectElement(el: Element, host: HostRect): ScreenRect | null {
   try {
     box = graphic.getBBox();
   } catch {
-    // A detached or display:none element throws in some engines.
     return null;
   }
   const m = graphic.getScreenCTM();

@@ -1,10 +1,6 @@
 /**
- * Composer-yield state machine for shift-click multi-select.
- *
- * While Shift is held during a multi-target draft, the comment composer gets
- * out of the pointer's way: it fades as the pointer approaches and becomes
- * click-through when the pointer is over it. Restoration uses hysteresis so
- * the composer does not flicker at its boundary.
+ * Composer-yield state machine for shift-click multi-select. Restoration uses hysteresis so the
+ * composer does not flicker at its boundary.
  */
 
 export type ComposerYieldState = 'none' | 'near' | 'over';

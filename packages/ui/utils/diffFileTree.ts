@@ -1,23 +1,9 @@
 /**
- * Pure tree builder for a list of changed files (a diff), shared by
- * Plannotator's code-review file tree (`packages/review-editor`) and the
- * embeddable `DiffFileTree` component. Browser-safe, no React.
- *
- * Shape rules (the review's, unchanged when this moved here):
- * - folders before files at every level, each group sorted by name
- *   (`localeCompare`);
- * - a folder whose only child is a folder is merged into it
- *   (`packages/app/src`), recursively;
- * - when the whole tree is one root folder holding only files, that folder is
- *   unwrapped and the files sit at the root;
- * - a folder's +/- counts are the sums of everything under it.
+ * Change status a tree row can show. 'binary' is a host-facing extra; the review's own parser
+ * never produces it.
  */
-
-/** Change status a tree row can show. 'binary' is a host-facing extra; the
- * review's own parser never produces it. */
 export type DiffFileTreeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'binary';
 
-/** The minimum a file needs to sit in the tree. */
 export interface DiffFileTreeFile {
   path: string;
   oldPath?: string;
@@ -28,12 +14,9 @@ export interface DiffFileTreeFile {
 
 export interface DiffFileTreeNode<F extends DiffFileTreeFile = DiffFileTreeFile> {
   type: 'file' | 'folder';
-  /** Display name: the file name, or the (possibly merged) folder segment(s). */
   name: string;
-  /** File: the file's own path. Folder: the full folder path from the root. */
   path: string;
   depth: number;
-  /** Index of the file in the input array (file nodes only). */
   fileIndex?: number;
   file?: F;
   children?: DiffFileTreeNode<F>[];
@@ -153,7 +136,6 @@ export function buildDiffFileTree<F extends DiffFileTreeFile>(files: readonly F[
   let tree = trieToNodes(trie, '', 0);
   tree = collapseSingleChild(tree);
 
-  // Flat fallback: if the tree is a single root folder with only file children, unwrap it
   if (
     tree.length === 1 &&
     tree[0].type === 'folder' &&
@@ -165,8 +147,7 @@ export function buildDiffFileTree<F extends DiffFileTreeFile>(files: readonly F[
   return tree;
 }
 
-/** Every proper ancestor folder path of a file path (`a/b/c.ts` → `a`, `a/b`).
- * A merged folder's path is one of these, so expanding them all reveals the file. */
+/** Every proper ancestor folder path of a file path (`a/b/c.ts` → `a`, `a/b`). */
 export function getAncestorPaths(filePath: string): string[] {
   const segments = filePath.split('/').filter(Boolean);
   const paths: string[] = [];

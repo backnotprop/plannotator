@@ -1,10 +1,3 @@
-/**
- * File Browser Settings
- *
- * Manages settings for the markdown file browser sidebar tab.
- * Users add directories to browse; settings persist via cookies.
- */
-
 import { storage } from './storage';
 
 const STORAGE_KEY_ENABLED = 'plannotator-filebrowser-enabled';

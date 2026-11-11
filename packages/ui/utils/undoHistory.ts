@@ -1,4 +1,3 @@
-/** Direction in which a recorded history action is replayed. */
 export type HistoryDirection = 'undo' | 'redo';
 
 /** Immutable state for one bounded undo/redo context. */
@@ -13,7 +12,6 @@ export interface UndoHistoryStep<TAction> {
   readonly action: TAction | null;
 }
 
-/** Create an empty undo/redo state. */
 export function createUndoHistoryState<TAction>(): UndoHistoryState<TAction> {
   return { past: [], future: [] };
 }
@@ -31,7 +29,6 @@ export function recordUndoAction<TAction>(
   };
 }
 
-/** Take the newest undo action, if one exists. */
 export function takeUndoAction<TAction>(state: UndoHistoryState<TAction>): UndoHistoryStep<TAction> {
   const action = state.past.at(-1) ?? null;
   if (action === null) return { state, action: null };
@@ -44,7 +41,6 @@ export function takeUndoAction<TAction>(state: UndoHistoryState<TAction>): UndoH
   };
 }
 
-/** Take the newest redo action, if one exists. */
 export function takeRedoAction<TAction>(
   state: UndoHistoryState<TAction>,
   capacity: number,
@@ -61,7 +57,6 @@ export function takeRedoAction<TAction>(
   };
 }
 
-/** One reversible mutation to an ID-addressed collection. */
 export type CollectionMutation<TItem> =
   | { readonly kind: 'add'; readonly item: TItem; readonly index: number }
   | { readonly kind: 'edit'; readonly before: TItem; readonly after: TItem }
@@ -125,10 +120,7 @@ const ACTIVE_HISTORY_OVERLAY_SELECTOR = [
   '.cm-editor.cm-focused',
 ].join(',');
 
-/**
- * Return whether the event belongs to native text history or another active
- * tool. `composedPath()` is required for editors mounted inside shadow DOM.
- */
+/** Return whether the event belongs to native text history or another active tool. */
 export function isNativeHistoryOwner(event: KeyboardEvent): boolean {
   const first = event.composedPath()[0];
   if (!(first instanceof Element)) return false;
@@ -152,10 +144,7 @@ export interface HistoryHighlightTarget<TItem extends { readonly id: string }> {
   applySharedAnnotations: (items: TItem[]) => void;
 }
 
-/**
- * Synchronize one replayed annotation without tombstoning retained highlights.
- * Removal is reserved for actions whose result no longer contains the item.
- */
+/** Synchronize one replayed annotation without tombstoning retained highlights. */
 export function syncHistoryHighlight<TItem extends { readonly id: string }>(
   target: HistoryHighlightTarget<TItem> | null,
   item: TItem,

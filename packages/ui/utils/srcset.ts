@@ -1,5 +1,7 @@
-/** One `srcset` candidate: its URL and its descriptors (`2x`, `640w`), the
- *  descriptors joined by one space and empty when there are none. */
+/**
+ * One `srcset` candidate: its URL and its descriptors (`2x`, `640w`), the descriptors joined by
+ * one space and empty when there are none.
+ */
 export interface SrcsetCandidate {
   url: string;
   descriptors: string;
@@ -8,11 +10,8 @@ export interface SrcsetCandidate {
 const isSpace = (char: string) => char === ' ' || char === '\t' || char === '\n' || char === '\f' || char === '\r';
 
 /**
- * Split a `srcset` the way the HTML spec does ("parse a srcset attribute"):
- * a candidate's URL runs to the next whitespace, so a comma inside it (a
- * `data:image/png;base64,…` URL, a query string) stays part of the URL. Only
- * commas at the URL's end are separators. Its descriptors run to the next
- * comma outside parentheses.
+ * Split a `srcset` the way the HTML spec does ("parse a srcset attribute"): a candidate's URL
+ * runs to the next whitespace, so a comma inside it (a `data:image/png;base64.
  */
 export function parseSrcset(srcset: string): SrcsetCandidate[] {
   const candidates: SrcsetCandidate[] = [];
@@ -43,7 +42,6 @@ export function parseSrcset(srcset: string): SrcsetCandidate[] {
   return candidates;
 }
 
-/** Write candidates back as a `srcset` value. */
 export function serializeSrcset(candidates: readonly SrcsetCandidate[]): string {
   return candidates
     .map(({ url, descriptors }) => (descriptors ? `${url} ${descriptors}` : url))

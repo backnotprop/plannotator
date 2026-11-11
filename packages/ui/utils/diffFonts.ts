@@ -1,10 +1,3 @@
-/**
- * Dynamic font loading for code review diff viewer.
- *
- * Injects Google Fonts / CDN stylesheet links on demand when the user
- * selects a custom diff font. Each font is loaded at most once.
- */
-
 const FONT_URLS: Record<string, string> = {
   'Red Hat Mono': 'https://fonts.googleapis.com/css2?family=Red+Hat+Mono:wght@300..700&display=swap',
   'Fira Code': 'https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap',

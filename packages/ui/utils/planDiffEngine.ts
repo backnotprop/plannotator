@@ -1,15 +1,3 @@
-/**
- * Plan Diff Engine
- *
- * Computes line-level diffs between two plan versions, then (for modified
- * blocks that qualify) computes a second-pass word-level diff so the UI
- * can render inline insertions/deletions in context instead of showing
- * the whole old block struck-through above the whole new block.
- *
- * Two-pass hierarchical diff: `diffLines` outer + `diffWordsWithSpace`
- * inner, same shape as `git diff --word-diff`.
- */
-
 import { diffLines, diffWordsWithSpace, type Change } from "diff";
 import { parseMarkdownToBlocks } from "./parser";
 import type { Block } from "../types";
@@ -21,9 +9,7 @@ export interface InlineDiffToken {
 
 export interface InlineDiffWrap {
   type: "heading" | "paragraph" | "list-item";
-  /** For headings */
   level?: number;
-  /** For list items */
   ordered?: boolean;
   listLevel?: number;
   checked?: boolean;
@@ -31,27 +17,14 @@ export interface InlineDiffWrap {
 }
 
 export interface PlanDiffBlock {
-  /** What kind of change this block represents */
   type: "added" | "removed" | "modified" | "unchanged";
-  /** The content for this block (new content for added/modified, old content for removed, full content for unchanged) */
   content: string;
-  /** For 'modified' blocks: the old content that was replaced */
   oldContent?: string;
-  /** Number of lines in this block */
   lines: number;
-  /** Present only on 'modified' blocks that pass the qualification gate for word-level inline diff. */
   inlineTokens?: InlineDiffToken[];
-  /** Structural wrap metadata paired with inlineTokens. */
   inlineWrap?: InlineDiffWrap;
-  /**
-   * Source line range of this block in the OLD text: 1-based, inclusive,
-   * trimmed of leading and trailing blank lines. Absent when the block has
-   * no non-blank old line (added blocks, or an all-blank chunk). Filled by
-   * `computePlanDiff`; plan review ignores it.
-   */
   oldStart?: number;
   oldEnd?: number;
-  /** Same as `oldStart`/`oldEnd`, in the NEW text (absent on removed blocks). */
   newStart?: number;
   newEnd?: number;
 }
@@ -62,23 +35,14 @@ export interface PlanDiffStats {
   modifications: number;
 }
 
-/**
- * Count lines in a string (handles trailing newline correctly).
- */
 function countLines(text: string): number {
   const lines = text.split("\n");
-  // diffLines often includes a trailing empty string from the final newline
   if (lines.length > 0 && lines[lines.length - 1] === "") {
     return lines.length - 1;
   }
   return lines.length;
 }
 
-/**
- * The trimmed line range a chunk occupies when its first line is `start`
- * (1-based): leading and trailing blank lines are not counted. Empty when the
- * chunk has no non-blank line.
- */
 function trimmedLineRange(
   value: string,
   start: number
@@ -122,26 +86,14 @@ function structuralFieldsMatch(a: Block, b: Block): boolean {
   return true; // paragraph
 }
 
-// Sentinel used to replace inline-code spans before word-diffing. Must be
-// made entirely of word characters ([A-Za-z0-9_]) so diffWordsWithSpace
-// treats it as a single atomic token — word-boundary splits (\b) happen at
-// transitions between word and non-word chars, so any non-word character
-// inside the sentinel would cause the tokenizer to fragment it mid-diff
-// and defeat the round-trip. Collision with real plan text is implausible.
 const SENTINEL_PREFIX = "__PLDIFFCODE";
 const SENTINEL_SUFFIX = "PLDIFFCODE__";
 const SENTINEL_PATTERN = /__PLDIFFCODE\d+PLDIFFCODE__/g;
 const CODE_SPAN_PATTERN = /`[^`]+`/g;
 
 /**
- * Replace every inline-code span in `text` with a numeric sentinel so that
- * diffWordsWithSpace treats the span as an atomic token. Identical spans on
- * both sides share the same sentinel, so they pair as unchanged. Different
- * spans get different sentinels and diff as whole-span add/remove tokens.
- *
- * The sentinel sits in place of the backticks, so diff markers injected
- * later by the unified-string builder never land *between* backticks — which
- * is the hazard the old backtick gate was protecting against.
+ * Replace every inline-code span in `text` with a numeric sentinel so that diffWordsWithSpace
+ * treats the span as an atomic token.
  */
 function sentinelFor(id: number): string {
   return `${SENTINEL_PREFIX}${id}${SENTINEL_SUFFIX}`;
@@ -171,16 +123,6 @@ function restoreCodeSpans(
   return value.replace(SENTINEL_PATTERN, (m) => codeMap.get(m) ?? m);
 }
 
-// Link sentinel. Same trick as inline-code spans but applied to markdown
-// links [text](url) so diffWordsWithSpace treats each whole link atomically.
-// Without this pass, a URL-only change like [docs](old) → [docs](new) would
-// tokenize on "old"/"new" and inject <ins>/<del> markers into the raw
-// Markdown, producing `[docs](https://<del>old</del><ins>new</ins>.example)`.
-// InlineMarkdown's link regex would then swallow those tags into the href,
-// rendering an unchanged-looking link with a broken URL. Atomizing the link
-// means URL-only changes render as old-link-struck + new-link-green, each
-// rendered as a real, clickable anchor. Tradeoff: word-level highlighting
-// inside link anchor text goes away — the whole link is the diff unit.
 const LINK_SENTINEL_PREFIX = "__PLDIFFLINK";
 const LINK_SENTINEL_SUFFIX = "PLDIFFLINK__";
 const LINK_SENTINEL_PATTERN = /__PLDIFFLINK\d+PLDIFFLINK__/g;
@@ -214,20 +156,6 @@ function restoreLinks(
   return value.replace(LINK_SENTINEL_PATTERN, (m) => linkMap.get(m) ?? m);
 }
 
-// Fenced-block sentinel. Same idea as the inline-code sentinel above, but
-// applied at block granularity BEFORE diffLines runs. Without this pass,
-// diffLines finds common lines like the closing ```, a shared `}`, or a
-// blank line between two otherwise-rewritten code blocks, and fragments
-// the block into 4-6 separate diff chunks. Each chunk then renders
-// independently (half a fence here, a stray `}` paragraph there, an
-// empty <pre> where the lone closing ``` landed) — the visually "messy"
-// cascade after case ⑩. By collapsing each whole fenced block to a
-// single-line sentinel, diffLines treats the block atomically: it
-// becomes one modified pair, rendered as a clean before/after.
-// Capture the opening fence's backtick count and back-reference it on the
-// closer so nested fences (e.g., 4-backtick outer wrapping a 3-backtick
-// example) are matched atomically — the inner closer has fewer backticks
-// than \1 and is correctly skipped by the lazy content scanner.
 const FENCE_SENTINEL_PREFIX = "__PLDIFFFENCE";
 const FENCE_SENTINEL_SUFFIX = "PLDIFFFENCE__";
 const FENCE_SENTINEL_PATTERN = /__PLDIFFFENCE\d+PLDIFFFENCE__/g;
@@ -253,14 +181,8 @@ function substituteFencedBlocks(
   });
 }
 
-// A quote (a run of `>` lines) that holds a code fence is one block in the
-// rendered plan, and each diff chunk renders as its own quote. Diffed line
-// by line, an edit inside the quoted fence split it into chunks holding half
-// a fence each, so one chunk opened a fence it never closed and rendered the
-// prose after it as code. The whole run is therefore one atomic unit, like
-// an unquoted fence. Quotes without a fence keep line-level diffing. Runs
-// after substituteFencedBlocks, so a `>` line inside an unquoted fence is
-// already behind its sentinel and never starts a run.
+// Diffed line by line, an edit inside the quoted fence split it into chunks holding half a fence
+// each, so one chunk opened a fence it never closed and rendered the prose after it as code.
 const QUOTE_RUN_PATTERN = /^[ \t]*>[^\n]*(?:\n[ \t]*>[^\n]*)*/gm;
 const QUOTED_FENCE_LINE = /^[ \t]*(?:>[ \t]?)+[ \t]*`{3,}/m;
 
@@ -289,44 +211,16 @@ function restoreFencedBlocks(
   return value.replace(FENCE_SENTINEL_PATTERN, (m) => fenceMap.get(m) ?? m);
 }
 
-// Inline-emphasis sentinels. Each balanced markdown emphasis pair
-// (`**...**`, `__...__`, `~~...~~`, `*...*`, `_..._`) gets a unique
-// word-char sentinel before `diffWordsWithSpace` runs so that:
-//
-//   - The whole phrase diffs as a single atomic token (sentinels contain
-//     no whitespace, and `diffWordsWithSpace` splits on whitespace).
-//   - Identical phrases on both sides pair as unchanged via sentinel
-//     identity; different phrases pair as a single remove + add.
-//
-// This is the "pair" form of atomization discussed in the bold-phrase
-// design doc: it reliably handles both single-word (`**important**`) and
-// multi-word (`**preliminary analysis**`) emphasis without fragmenting
-// the closing delimiter into unchanged-tail tokens, which the earlier
-// single-delimiter substitution couldn't achieve.
-//
-// Pair matching uses CommonMark-ish flanking rules: opening delimiter
-// must not be preceded by a word char and must be followed by a non-space
-// char; closing delimiter must be preceded by a non-space char and not
-// followed by a word char. Content is matched lazily. Stray unbalanced
-// delimiters (e.g., `2**3` arithmetic) don't match and are left verbatim,
-// preserving existing behaviour.
-//
-// Longest-first ordering (`**`/`__`/`~~` before `*`/`_`) prevents single
-// delimiters from eating the inside of a double-delim pair.
 const PAIR_SENTINEL_PREFIX = "PLDIFFEMPH";
 const PAIR_SENTINEL_PATTERN = /PLDIFFEMPH\d+ZZ/g;
 
 const PAIR_PATTERNS: Array<{ delim: string; regex: RegExp }> = [
-  // Triples first so `***foo***` (bold+italic) atomizes as one token
-  // instead of being split into `**` pair plus a leftover `*`.
   { delim: "***", regex: /(?<!\w)\*\*\*(\S(?:[\s\S]*?\S)?)\*\*\*(?!\w)/g },
   {
     delim: "___",
     regex: /(?<![A-Za-z0-9])___(\S(?:[\s\S]*?\S)?)___(?![A-Za-z0-9])/g,
   },
   { delim: "**", regex: /(?<!\w)\*\*(\S(?:[\s\S]*?\S)?)\*\*(?!\w)/g },
-  // `__` with word-boundary guard to protect intraword underscores
-  // (e.g., `my__var__name`). Same for `_` below.
   {
     delim: "__",
     regex: /(?<![A-Za-z0-9])__(\S(?:[\s\S]*?\S)?)__(?![A-Za-z0-9])/g,
@@ -370,21 +264,6 @@ function restoreEmphasisPairs(
   return value.replace(PAIR_SENTINEL_PATTERN, (m) => pairMap.get(m) ?? m);
 }
 
-// Hyphen sentinel. Hyphens between word chars (e.g. `ninety-five`,
-// `64-byte`, `state-of-the-art`) are semantic compound words, not two
-// tokens. `diffWordsWithSpace` splits on word boundaries, so without
-// this pass `ninety-five` → `ninety-nine` fragments into an unchanged
-// `ninety-` prefix and a swapped `five`/`nine` suffix, producing
-// visually noisy partial-word diffs that confuse readers.
-//
-// Replace each infix hyphen with a word-char marker before diffing and
-// restore afterwards. The sentinel is a fixed string (no per-instance
-// id) because all hyphens restore to the same character — uniqueness
-// isn't needed, only opacity to the word-boundary tokenizer.
-//
-// Runs AFTER the code/link/emphasis sentinel passes so hyphens inside
-// those constructs (e.g. `**state-of-the-art**`, `[link-text](url)`)
-// are already hidden and not re-processed here.
 const HYPHEN_SENTINEL = "PLDIFFHYZZ";
 const HYPHEN_SENTINEL_PATTERN = /PLDIFFHYZZ/g;
 const HYPHEN_INFIX_PATTERN = /(?<=\w)-(?=\w)/g;
@@ -397,22 +276,6 @@ function restoreHyphens(value: string): string {
   return value.replace(HYPHEN_SENTINEL_PATTERN, "-");
 }
 
-// Coalescing pass (Commit 2). After `diffWordsWithSpace` and sentinel
-// restoration, adjacent word-level changes separated by only "thin"
-// unchanged tokens (whitespace + closed punctuation) get merged into a
-// single phrase-level swap. This turns alternating red/green word-noise
-// into a readable before/after, and rescues the A3 regression where
-// mashed sentinel-plus-word tokens would otherwise render as fragmented
-// literal delimiters inside colored tags.
-//
-// Definitions (from the design doc):
-//   - change site: contiguous non-unchanged run
-//   - thin unchanged: value consists only of whitespace + { , . ; : — – " ' }
-//     (parens/brackets EXCLUDED so inline links stay as hard boundaries)
-//   - dirty run: maximal sequence of change sites joined by thin-unchanged
-// Coalesce when a dirty run has ≥2 change sites (asymmetric counts allowed).
-// Single-site dirty runs pass through so isolated swaps keep word-level
-// highlighting.
 const THIN_UNCHANGED_RE =
   /^[\s,.;:—–"'‘’“”]+$/;
 
@@ -433,7 +296,6 @@ function coalesceChangeTokens(tokens: InlineDiffToken[]): InlineDiffToken[] {
       i++;
       continue;
     }
-    // Scan first change site.
     let lastChangeEnd = i;
     while (
       lastChangeEnd + 1 < tokens.length &&
@@ -498,12 +360,7 @@ function wrapFromBlock(block: Block): InlineDiffWrap {
   return { type: "paragraph" };
 }
 
-/**
- * Second-pass word diff on the inline content of a modified block.
- * Returns null (falls back to block-level rendering) if the block doesn't
- * pass the qualification gate. Gate is whitelist-based on block type:
- * only single-block prose-like modifications get the inline treatment.
- */
+/** Second-pass word diff on the inline content of a modified block. */
 export function computeInlineDiff(
   oldContent: string,
   newContent: string
@@ -519,26 +376,6 @@ export function computeInlineDiff(
   if (!INLINE_DIFFABLE_TYPES.has(a.type)) return null;
   if (!structuralFieldsMatch(a, b)) return null;
 
-  // Atomic passes before word-diffing (longest-lived sentinels first):
-  //   1. Inline code spans — protect backtick-wrapped content so diff markers
-  //      never land between backticks (see SENTINEL_PREFIX comment).
-  //   2. Markdown links [text](url) — protect the whole link so diff markers
-  //      never land inside the link's bracketed text or parenthesized href.
-  //   3. Balanced emphasis pairs (**…**, __…__, ~~…~~, *…*, _…_) — replace
-  //      each whole pair with a unique word-char sentinel so the phrase
-  //      diffs atomically, avoiding the fragmented/unbalanced-delimiter
-  //      output that whitespace-splitting `diffWordsWithSpace` produces
-  //      for multi-word emphasis changes.
-  //   4. Infix hyphens — replace `-` between word chars with a word-char
-  //      marker so hyphenated compounds (`ninety-five`, `64-byte`,
-  //      `state-of-the-art`) diff as single atomic tokens instead of
-  //      fragmenting into an unchanged prefix + swapped suffix.
-  //
-  // Code spans are substituted first so that a backticked literal like
-  // `[fake](link)` is treated as code and not accidentally captured by the
-  // link regex; similarly, code and link sentinels are opaque to the
-  // emphasis-pair regex. Hyphens run last so that hyphens inside those
-  // constructs are already hidden. Restorations run in reverse order.
   const codeMap = new Map<string, string>();
   const codeToId = new Map<string, number>();
   const linkMap = new Map<string, string>();
@@ -567,33 +404,23 @@ export function computeInlineDiff(
     ),
   }));
 
-  // Coalesce adjacent change sites separated by thin unchanged context into
-  // single phrase-level swaps. Turns alternating red/green word-noise into
-  // a readable before/after, and rescues the Case-2 regression where
-  // wrapping a previously-plain phrase in emphasis would otherwise surface
-  // as fragmented literal delimiters inside colored tags.
   const tokens = coalesceChangeTokens(rawTokens);
 
-  // Build the render wrapper from the NEW block so ordered-list items that
-  // renumbered (e.g., 3. → 4. because a step was inserted above) display the
-  // current plan's numeral rather than the previous version's.
+  // Build the render wrapper from the NEW block so ordered-list items that renumbered (e.g., 3. →
+  // 4. because a step was inserted above) display the current plan's numeral rather than the
+  // previous version's.
   return { tokens, wrap: wrapFromBlock(b) };
 }
 
 /**
- * Longest pair of chunks a code document's modified block word-diffs inline.
- * Past it the diff view stacks old over new, so a rewritten block of a large
- * config file never runs one big word diff on the main thread.
+ * Past it the diff view stacks old over new, so a rewritten block of a large config file never
+ * runs one big word diff on the main thread.
  */
 export const CODE_INLINE_DIFF_LIMIT = 8 * 1024;
 
 /**
- * Word-level tokens for a modified block of a config or data file
- * (`renderAs: "code"`), or null when the pair is too long to diff inline.
- *
- * `computeInlineDiff` gates on the markdown parse (a `#` comment line is a
- * heading there, and its tokens drop the `#`), so a code document diffs the
- * raw text instead: every character of both sides survives in the tokens.
+ * Word-level tokens for a modified block of a config or data file (`renderAs: "code"`), or null
+ * when the pair is too long to diff inline.
  */
 export function computeCodeInlineDiff(oldText: string, newText: string): InlineDiffToken[] | null {
   if (oldText.length + newText.length > CODE_INLINE_DIFF_LIMIT) return null;
@@ -606,22 +433,10 @@ export function computeCodeInlineDiff(oldText: string, newText: string): InlineD
   }));
 }
 
-/**
- * Compute the diff between two plan versions.
- *
- * Groups consecutive remove+add changes into "modified" blocks for
- * better rendering (showing what was replaced rather than separate
- * remove and add blocks). For each modified block, attempts a word-level
- * sub-diff; blocks that pass the qualification gate get `inlineTokens`
- * populated for inline rendering.
- */
 export function computePlanDiff(
   oldText: string,
   newText: string
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
-  // Pre-pass: collapse every fenced code block to a single-line sentinel
-  // so diffLines treats each whole fence atomically. See the comment on
-  // FENCE_BLOCK_PATTERN for the failure this prevents.
   const fenceMap = new Map<string, string>();
   const fenceToId = new Map<string, number>();
   const substOld = substituteQuotedFenceRuns(
@@ -636,9 +451,6 @@ export function computePlanDiff(
   );
 
   const rawChanges: Change[] = diffLines(substOld, substNew);
-  // Restore the fenced-block content on each change value before the
-  // block-building loop consumes it, so downstream rendering and the
-  // inline-diff pass see the original fence text.
   const changes: Change[] = rawChanges.map((c) => ({
     ...c,
     value: restoreFencedBlocks(c.value, fenceMap),
@@ -646,8 +458,6 @@ export function computePlanDiff(
 
   const blocks: PlanDiffBlock[] = [];
   const stats: PlanDiffStats = { additions: 0, deletions: 0, modifications: 0 };
-  // First line (1-based) of the next chunk on each side; the restored chunk
-  // values hold the real source lines, so counting them keeps both in step.
   let oldLine = 1;
   let newLine = 1;
 
@@ -656,7 +466,6 @@ export function computePlanDiff(
     const next = changes[i + 1];
 
     if (change.removed && next?.added) {
-      // Adjacent remove + add = modification
       const inline = computeInlineDiff(change.value, next.value);
       blocks.push({
         type: "modified",
@@ -707,18 +516,12 @@ export function computePlanDiff(
   return { blocks, stats };
 }
 
-// --- Folding unchanged runs (code review's rendered Markdown diff) ---------
-
 /** A run of unchanged sections hidden behind one row. */
 export interface PlanDiffFold {
   kind: "fold";
-  /** Stable for the same diff: `fold-<block index>-<first hidden piece>`. */
   key: string;
-  /** The hidden sections, each an 'unchanged' block with its own ranges. */
   pieces: PlanDiffBlock[];
-  /** How many sections are hidden (`pieces.length`). */
   sectionCount: number;
-  /** Plain text of the hidden headings, at most three. */
   headings: string[];
   oldStart?: number;
   oldEnd?: number;
@@ -732,7 +535,6 @@ export type PlanDiffSegment =
 
 const MAX_FOLD_HEADINGS = 3;
 
-/** Heading text without inline markdown markers. */
 function plainHeadingText(text: string): string {
   return text
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -746,13 +548,6 @@ interface UnchangedPiece {
   heading?: string;
 }
 
-/**
- * Split an unchanged chunk into one piece per markdown block: each piece is
- * the exact source text from its block's first line up to the next block's
- * (blank lines stay with the piece before them; anything before the first
- * block, such as frontmatter, stays with the first piece). Concatenating the
- * pieces gives the chunk back byte for byte.
- */
 function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
   const content = block.content;
   const parsed = parseMarkdownToBlocks(content);
@@ -761,7 +556,6 @@ function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
     return [only?.type === "heading" ? { piece: block, heading: plainHeadingText(only.content) } : { piece: block }];
   }
 
-  // Character offset of the start of each 1-based line.
   const lineOffsets: number[] = [0];
   for (let i = 0; i < content.length; i++) {
     if (content[i] === "\n") lineOffsets.push(i + 1);
@@ -773,7 +567,6 @@ function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
   if (starts.length === 0) return [{ piece: block }];
   starts[0] = 1;
 
-  // The chunk's untrimmed first line on each side (its ranges are trimmed).
   const contentLines = content.split("\n");
   let leadingBlank = 0;
   while (leadingBlank < contentLines.length && contentLines[leadingBlank].trim() === "") leadingBlank++;
@@ -799,14 +592,11 @@ function splitUnchangedChunk(block: PlanDiffBlock): UnchangedPiece[] {
       ...(oldBase !== undefined ? oldRange(pieceContent, oldBase + startLine - 1) : {}),
       ...(newBase !== undefined ? newRange(pieceContent, newBase + startLine - 1) : {}),
     };
-    // A heading piece begins at the heading itself (i > 0), or the first
-    // piece's parsed block is the heading.
     const heading = headingByStart.get(i === 0 ? parsed[0].startLine : startLine);
     return heading !== undefined ? { piece, heading } : { piece };
   });
 }
 
-/** The span of several pieces' ranges on each side. */
 function spanOf(pieces: PlanDiffBlock[]): Pick<PlanDiffBlock, "oldStart" | "oldEnd" | "newStart" | "newEnd"> {
   const withOld = pieces.filter((p) => p.oldStart !== undefined);
   const withNew = pieces.filter((p) => p.newStart !== undefined);
@@ -820,22 +610,13 @@ function spanOf(pieces: PlanDiffBlock[]): Pick<PlanDiffBlock, "oldStart" | "oldE
   };
 }
 
-/** Consecutive pieces as one unchanged block (kept together so list numbering stays continuous). */
 function joinPieces(pieces: PlanDiffBlock[]): PlanDiffBlock {
   if (pieces.length === 1) return pieces[0];
   const content = pieces.map((p) => p.content).join("");
   return { type: "unchanged", content, lines: countLines(content), ...spanOf(pieces) };
 }
 
-/**
- * Fold long runs of unchanged sections behind one row, the way a code diff
- * folds unmodified lines. Changed blocks pass through. Each unchanged block
- * keeps `context` sections next to each neighbouring change visible (none
- * toward the start or end of the document) and folds the rest when at least
- * `minHidden` would be hidden; otherwise it is shown whole, untouched.
- *
- * Pure: the same blocks always give the same segments and fold keys.
- */
+/** Fold long runs of unchanged sections behind one row, the way a code diff folds unmodified lines. */
 export function foldUnchangedPlanDiff(
   blocks: PlanDiffBlock[],
   options: { context?: number; minHidden?: number } = {}

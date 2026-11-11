@@ -1,9 +1,6 @@
 /**
- * AI Provider Settings Utility
- *
- * Manages the user's default AI provider and per-provider model preferences.
- * Uses cookies (not localStorage) because each hook invocation runs on a
- * random port, and localStorage is scoped by origin including port.
+ * Uses cookies (not localStorage) because each hook invocation runs on a random port, and
+ * localStorage is scoped by origin including port.
  */
 
 import { storage } from './storage';
@@ -21,13 +18,9 @@ export interface AIProviderOption {
   id: string;
   name: string;
   models?: AIProviderModel[];
-  /** Where `models` came from, when the server says (`/api/ai/capabilities`). */
   modelsSource?: 'fallback' | 'discovered';
-  /** The installed CLI's version, when the server reports it. */
   toolVersion?: string;
-  /** Display label overriding the name lookup (e.g. "Ask this session · Pi"). */
   label?: string;
-  /** Present only on the "Ask this session" provider: the host session's live status. */
   sessionBridge?: SessionBridgeInfo;
 }
 
@@ -38,7 +31,6 @@ export interface SessionBridgeInfo {
   host: string;
   status: 'ready' | 'busy' | 'blocked' | 'gone';
   modes: { turn: boolean; transient: boolean };
-  /** `false` when the host never interrupts the session (Stop only stops listening). Absent = it can. */
   interruptible?: boolean;
 }
 
@@ -47,12 +39,10 @@ export function hasNonInterruptibleSession(providers: readonly { sessionBridge?:
   return providers.some((provider) => provider.sessionBridge?.interruptible === false);
 }
 
-/** Error codes "Ask this session" answers with that the panel turns into actions. */
 export const SESSION_ASK_ERROR_CODES = {
   agentBusy: 'agent_busy',
   blocked: 'session_blocked',
   gone: 'session_gone',
-  /** The person typed into the session while it answered: a note under the partial answer, not an error. */
   takenOver: 'session_taken_over',
 } as const;
 
@@ -60,21 +50,13 @@ export function isSessionBridgeProvider(provider: Pick<AIProviderOption, 'name' 
   return !!provider && (provider.name === SESSION_BRIDGE_PROVIDER_NAME || !!provider.sessionBridge);
 }
 
-/**
- * The "Ask this session" provider, whatever its status. A server that has one
- * offers nothing else (the session that opened Plannotator is the only thing
- * Ask AI talks to), so when it is present it is the selection.
- */
 export function findSessionBridge(providers: AIProviderOption[]): AIProviderOption | null {
   return providers.find(isSessionBridgeProvider) ?? null;
 }
 
 export interface AIProviderSettings {
-  /** The provider instance ID to use, or null for server default. */
   providerId: string | null;
-  /** Preferred model per provider. Key = provider instance ID, value = model ID. */
   preferredModels: Record<string, string>;
-  /** Preferred provider per detected agent origin. Key = Origin, value = provider instance ID. */
   providerByOrigin: Partial<Record<Origin, string>>;
 }
 
@@ -87,9 +69,6 @@ export function originHasDedicatedAIProvider(origin: Origin | null | undefined):
   return getAgentAIProviderTypes(origin).length > 0;
 }
 
-/**
- * Get current AI provider settings from storage
- */
 export function getAIProviderSettings(): AIProviderSettings {
   const providerId = storage.getItem(PROVIDER_KEY) || null;
   let preferredModels: Record<string, string> = {};
@@ -98,7 +77,6 @@ export function getAIProviderSettings(): AIProviderSettings {
     const raw = storage.getItem(MODELS_KEY);
     if (raw) preferredModels = JSON.parse(raw);
   } catch {
-    // Invalid JSON — start fresh
   }
   try {
     const raw = storage.getItem(PROVIDER_BY_ORIGIN_KEY);
@@ -113,14 +91,10 @@ export function getAIProviderSettings(): AIProviderSettings {
       }
     }
   } catch {
-    // Invalid JSON — start fresh
   }
   return { providerId, preferredModels, providerByOrigin };
 }
 
-/**
- * Save AI provider settings to storage
- */
 export function saveAIProviderSettings(settings: AIProviderSettings): void {
   if (settings.providerId) {
     storage.setItem(PROVIDER_KEY, settings.providerId);
@@ -136,27 +110,19 @@ export function saveAIProviderSettings(settings: AIProviderSettings): void {
   }
 }
 
-/**
- * Get the preferred model for a specific provider
- */
 export function getPreferredModel(providerId: string): string | null {
   const { preferredModels } = getAIProviderSettings();
   return preferredModels[providerId] ?? null;
 }
 
-/**
- * Save the preferred model for a specific provider (without changing other preferences)
- */
+/** Save the preferred model for a specific provider (without changing other preferences) */
 export function savePreferredModel(providerId: string, modelId: string): void {
   const settings = getAIProviderSettings();
   settings.preferredModels[providerId] = modelId;
   saveAIProviderSettings(settings);
 }
 
-/**
- * Find the first available provider that naturally matches the current origin.
- * Instance IDs can be custom, so we match both the registry ID and provider type.
- */
+/** Find the first available provider that naturally matches the current origin. */
 export function findOriginAIProvider(
   providers: AIProviderOption[],
   origin: Origin | null | undefined,
@@ -195,10 +161,9 @@ export function resolveAIProviderSelection(options: {
   const byId = (id: string | null | undefined) =>
     id ? providers.find(provider => provider.id === id) ?? null : null;
 
-  // "Ask this session" is the only choice when the server offers it, even when
-  // the session is busy, blocked or gone: a saved pick never routes a question
-  // anywhere else (and is not rewritten, so it still applies to sessions with
-  // no bridge). Without a bridge this is the previous order.
+  // "Ask this session" is the only choice when the server offers it, even when the session is
+  // busy, blocked or gone: a saved pick never routes a question anywhere else (and is not
+  // rewritten, so it still applies to sessions with no bridge).
   const sessionBridge = findSessionBridge(providers);
   const provider =
     sessionBridge ??

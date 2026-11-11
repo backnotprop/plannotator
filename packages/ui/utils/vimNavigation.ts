@@ -5,10 +5,6 @@ import { getAnnotatableTextNodes } from './domSelection';
 export interface VimTextPosition {
   readonly blockId: string;
   readonly textOffset: number;
-  /**
-   * Resolve an offset shared by adjacent text nodes toward the next or previous
-   * node. Omitted positions preserve the historical backward affinity.
-   */
   readonly affinity?: 'forward' | 'backward';
 }
 
@@ -74,12 +70,6 @@ export interface VimActionState {
   readonly returnTo: VimRestorableState;
 }
 
-/**
- * Complete Vim navigation state.
- *
- * The discriminated union prevents semantic focus, text cursors, and visual
- * anchors from existing in contradictory combinations.
- */
 export type VimSelectionState =
   | { readonly phase: 'inactive' }
   | VimRestorableState
@@ -201,9 +191,6 @@ function normalizeDomPoint(
   }
   if (!(node instanceof Element)) return null;
 
-  // A DOM point whose offset equals `childNodes.length` sits after the final
-  // child. Treating it as the start of that child moves a line/document-end
-  // cursor backward when Selection.modify() returns an element endpoint.
   const childAtOffset = offset < node.childNodes.length
     ? node.childNodes[Math.max(0, offset)]
     : undefined;
@@ -284,11 +271,6 @@ export function createRangeBetweenTextPositions(
   return range;
 }
 
-/**
- * Return durable text bounds for a semantic target element.
- *
- * Bounds may span multiple Markdown blocks for group targets.
- */
 export function getTextElementBounds(
   container: HTMLElement,
   element: HTMLElement,

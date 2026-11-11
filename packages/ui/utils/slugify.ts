@@ -1,8 +1,4 @@
-/**
- * Convert heading text into a URL-safe anchor id.
- * Strips common inline markdown so `**Install** \`bun\`` → `install-bun`.
- * Preserves unicode letters (e.g. "Café" → "café").
- */
+/** Convert heading text into a URL-safe anchor id. */
 export function slugifyHeading(text: string): string {
   return text
     .toLowerCase()
@@ -13,12 +9,7 @@ export function slugifyHeading(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/**
- * Build a blockId → anchor-id map for all headings in the doc, applying
- * GitHub's dedup convention: repeated slugs become `slug-1`, `slug-2`, etc.
- * First occurrence keeps the bare slug so stable links don't shift when a
- * later duplicate is added.
- */
+/** First occurrence keeps the bare slug so stable links don't shift when a later duplicate is added. */
 export function buildHeadingSlugMap(
   blocks: Array<{ id: string; type: string; content: string }>,
 ): Map<string, string> {

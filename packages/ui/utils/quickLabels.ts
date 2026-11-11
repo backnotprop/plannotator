@@ -1,10 +1,3 @@
-/**
- * Quick Labels — preset annotation labels for one-click feedback
- *
- * Labels are stored in cookies (same pattern as other settings)
- * so they persist across different port-based sessions.
- */
-
 import { storage } from './storage';
 
 const STORAGE_KEY = 'plannotator-quick-labels';
@@ -32,10 +25,8 @@ export const LABEL_COLOR_MAP: Record<string, { bg: string; text: string; darkTex
 };
 
 /**
- * The hardcoded one-click positive label behind the 👍 "Looks good" buttons
- * (the selection toolbar's and the HTML pinpoint composer's). Deliberately NOT part of the
- * configurable set: it is the ONLY label comment-only surfaces (HTML /
- * live-app) may emit — their restricted handlers filter on this id.
+ * The hardcoded one-click positive label behind the 👍 "Looks good" buttons (the selection
+ * toolbar's and the HTML pinpoint composer's).
  */
 export const THUMBS_UP_LABEL: QuickLabel = {
   id: 'thumbs-up',
@@ -77,10 +68,8 @@ export function resetQuickLabels(): void {
 }
 
 /**
- * The Alt/⌥ digit that applies the label at list position `index`: "1".."9"
- * for the first nine, "0" for the tenth, null past it. Position is the whole
- * contract — the pickers, the toolbar and the Settings key hints all read it
- * from here, so reordering the list (Settings → Labels) is what remaps keys.
+ * The Alt/⌥ digit that applies the label at list position `index`: "1".."9" for the first nine,
+ * "0" for the tenth, null past it.
  */
 export function quickLabelShortcutDigit(index: number): string | null {
   if (!Number.isInteger(index) || index < 0 || index > 9) return null;
@@ -92,11 +81,6 @@ export function quickLabelIndexForDigit(digit: number): number {
   return digit === 0 ? 9 : digit - 1;
 }
 
-/**
- * Return a copy of `labels` with the entry at `from` moved to `to`. The moved
- * label keeps every field (emoji, text, colour, tip). Out-of-range indices
- * return an unchanged copy.
- */
 export function moveQuickLabel<T>(labels: readonly T[], from: number, to: number): T[] {
   const next = labels.slice();
   if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
@@ -105,7 +89,6 @@ export function moveQuickLabel<T>(labels: readonly T[], from: number, to: number
   return next;
 }
 
-/** Longest single emoji we accept (ZWJ family sequences run ~11 code points). */
 const MAX_EMOJI_LENGTH = 32;
 const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 const FLAG = /^\p{Regional_Indicator}{2}$/u;
@@ -117,16 +100,12 @@ function splitGraphemes(value: string): string[] {
   if (Segmenter) {
     return Array.from(new Segmenter(undefined, { granularity: 'grapheme' }).segment(value), (s) => s.segment);
   }
-  // No grapheme segmentation: treat the whole string as one candidate and let
-  // the emoji check decide. Every browser Plannotator supports has it.
   return value ? [value] : [];
 }
 
 /**
- * Validate a quick-label emoji: exactly one emoji grapheme (pictographic
- * symbol, ZWJ sequence, skin-tone variant, flag or keycap), surrounding
- * whitespace ignored. Returns the emoji, or null when the input is empty,
- * more than one character, or not an emoji.
+ * Validate a quick-label emoji: exactly one emoji grapheme (pictographic symbol, ZWJ sequence,
+ * skin-tone variant, flag or keycap), surrounding whitespace ignored.
  */
 export function parseQuickLabelEmoji(input: string): string | null {
   const value = input.trim();
@@ -139,13 +118,7 @@ export function parseQuickLabelEmoji(input: string): string | null {
   return null;
 }
 
-/**
- * The emoji a person meant by editing an emoji field that held `current`.
- * Accepts a field holding just the new emoji, and also the field after a new
- * emoji was typed or picked BESIDE the old one (the caret was not on a
- * selection): the old one is set aside once. Null when the field does not
- * name exactly one emoji.
- */
+/** The emoji a person meant by editing an emoji field that held `current`. */
 export function emojiFromFieldInput(value: string, current: string): string | null {
   const graphemes = splitGraphemes(value.trim()).filter((g) => !/^\s+$/u.test(g));
   if (graphemes.length === 1) return parseQuickLabelEmoji(graphemes[0]);
@@ -161,7 +134,6 @@ export function findLabelByText(annotationText: string): QuickLabel | undefined 
   return getQuickLabels().find(l => `${l.emoji} ${l.text}` === annotationText);
 }
 
-/** Get color styles for a label, respecting dark mode */
 export function getLabelColors(color: string): { bg: string; text: string } {
   const colors = LABEL_COLOR_MAP[color];
   if (!colors) return { bg: 'rgba(128,128,128,0.15)', text: '#666' };

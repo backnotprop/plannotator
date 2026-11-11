@@ -1,18 +1,3 @@
-/**
- * Client half of the stale-tab guard (packages/core/server-session.ts).
- *
- * The tab keeps the `serverSession` nonce the server advertised on its first
- * payload (`/api/plan`, `/api/diff`) and echoes it on every decision it posts.
- * A server that does not recognize it (a NEW Plannotator session that took
- * over the same port) answers `409 { code: "session_mismatch" }`; the tab then
- * shows the reload prompt (`ServerSessionReplacedBanner`) instead of treating
- * the refusal as an ordinary failure.
- *
- * Module state on purpose: one tab talks to one server, and every decision
- * path (plan approve/deny, annotate feedback/approve/exit, review
- * feedback/exit) reads the same value without threading it through props.
- */
-
 import { useSyncExternalStore } from 'react';
 import { SERVER_SESSION_FIELD, SERVER_SESSION_MISMATCH_CODE } from '@plannotator/core/server-session';
 
@@ -41,7 +26,6 @@ export function withServerSessionQuery(url: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}${SERVER_SESSION_FIELD}=${encodeURIComponent(nonce)}`;
 }
 
-/** Whether a decision response is the server's session-mismatch refusal. Records it when it is. */
 export async function noteServerSessionMismatch(res: Response): Promise<boolean> {
   if (res.status !== 409) return false;
   let code: unknown;
@@ -77,7 +61,6 @@ export function useServerSessionReplaced(): boolean {
   return useSyncExternalStore(subscribe, isServerSessionReplaced, isServerSessionReplaced);
 }
 
-/** Tests only: forget the nonce and the replaced flag. */
 export function __resetServerSessionForTests(): void {
   nonce = null;
   replaced = false;

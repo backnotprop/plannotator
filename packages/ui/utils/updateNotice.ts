@@ -1,13 +1,6 @@
 /**
- * Update notices in plan review, annotate and code review (design:
- * .product/approved/plannotator-updates/ §4.5, owner's answers 1 and 3).
- *
- * The server says whether a newer release exists (`updateAvailable` on
- * /api/plan and /api/diff, from the machine's own check): the browser
- * never asks GitHub. This module parses that advert, decides whether the toast
- * may show now (once per version, and at most once a day across versions,
- * remembered in a cookie that every localhost port shares), and
- * words the toast for the host that launched the session.
+ * The server says whether a newer release exists (`updateAvailable` on /api/plan and /api/diff,
+ * from the machine's own check): the browser never asks GitHub.
  */
 
 import { getItem, setItem } from './storage';
@@ -20,16 +13,13 @@ export interface UpdateAdvert {
   current: string;
   releaseUrl: string;
   action: UpdateAction;
-  /** What a person runs by hand, with the remembered install flags (`pi update --extensions` for Pi). */
   command: string;
   publishedAt?: string;
 }
 
 /**
- * Checking for updates has failed for hours on this machine
- * (`updateCheckFailing` on /api/plan and /api/diff, never beside
- * `updateAvailable`): the Options menu says so quietly, with the command that
- * updates without the check. No toast, no dot.
+ * Checking for updates has failed for hours on this machine (`updateCheckFailing` on /api/plan
+ * and /api/diff, never beside `updateAvailable`).
  */
 export interface UpdateCheckFailingAdvert {
   since: string;
@@ -47,7 +37,7 @@ export function parseUpdateCheckFailing(value: unknown): UpdateCheckFailingAdver
   return { since: v.since, error: v.error, command: v.command };
 }
 
-/** The toast shows at most this often, across versions (owner's choice: once a day). */
+/** The toast shows at most this often, across versions. */
 export const UPDATE_TOAST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const TOAST_KEY = 'plannotator-update-toast';
@@ -86,7 +76,6 @@ function readToastRecord(): { version: string; at: number } | null {
 export function updateToastDue(version: string, now: number, record = readToastRecord()): boolean {
   if (!record) return true;
   if (record.version === version) return false;
-  // A clock that moved backwards does not hold the toast back for good.
   if (record.at > now) return true;
   return now - record.at >= UPDATE_TOAST_INTERVAL_MS;
 }

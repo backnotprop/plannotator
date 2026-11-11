@@ -1,24 +1,14 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * Ctrl+C / Cmd+C while a highlight stands in for the person's selection.
- *
- * The annotation surfaces take the browser's selection away once they mark it:
- * web-highlighter clears it on mouseup, a composer's textarea takes focus, the
- * plan diff turns a drag into a block composer, code review turns it into a
- * line range. The native copy then has nothing to copy. These put the
- * highlighted text into the copy event instead, as plain text (rich text is
- * the toolbar's Copy button only, the owner's call on #2191), unless the
- * person has a selection of their own: text selected in a field or anywhere
- * in the page always copies natively. A field that is not the highlight's
- * composer (a reply box, a search field) keeps the browser's own copy too.
+ * The annotation surfaces take the browser's selection away once they mark it: web-highlighter
+ * clears it on mouseup, a composer's textarea takes focus, the plan diff turns a drag into a
+ * block composer, code review turns it into a line range.
  */
 
 /**
- * Marks a highlight's composer for `writeHighlightCopy`: a field inside it
- * with nothing selected (the empty comment box, or a caret after typed words)
- * copies the highlight. `CommentPopover` is recognised by its own
- * `data-comment-popover`; another composer carries this attribute.
+ * Marks a highlight's composer for `writeHighlightCopy`: a field inside it with nothing selected
+ * (the empty comment box, or a caret after typed words) copies the highlight.
  */
 export const HIGHLIGHT_COMPOSER_ATTR = 'data-highlight-composer';
 
@@ -39,7 +29,6 @@ export function copyHasOwnSelection(event: ClipboardEvent): boolean {
     try {
       if (target.selectionStart !== null && target.selectionStart !== target.selectionEnd) return true;
     } catch {
-      // An input type without a text selection (checkbox, number).
     }
   }
   const owner = target instanceof Node ? target.ownerDocument : null;
@@ -53,11 +42,7 @@ export function copyFromOtherField(event: ClipboardEvent): boolean {
   return isEditable(target) && !target.closest(COMPOSER_SELECTOR);
 }
 
-/**
- * Writes `text` into `event` when it should; returns whether it did. Leaves an
- * event another handler already took, an empty highlight, the person's own
- * selection and a copy from another field alone.
- */
+/** Writes `text` into `event` when it should; returns whether it did. */
 export function writeHighlightCopy(event: ClipboardEvent, text: string): boolean {
   if (event.defaultPrevented || !text || !event.clipboardData) return false;
   if (copyHasOwnSelection(event) || copyFromOtherField(event)) return false;
@@ -66,7 +51,6 @@ export function writeHighlightCopy(event: ClipboardEvent, text: string): boolean
   return true;
 }
 
-/** While `text` is non-empty, Ctrl+C / Cmd+C copies it (see writeHighlightCopy). */
 export function useHighlightCopy(text: string | null | undefined): void {
   const textRef = useRef(text);
   textRef.current = text;

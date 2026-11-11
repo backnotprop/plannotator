@@ -1,19 +1,12 @@
 /**
- * Reading the live theme tokens off the document, for code that derives
- * colours from the palette on screen (Mermaid's theme, the review sidebar's
- * +/- counts). Browser-only, and free of any diagram code, so a bundle that
- * only needs the tokens never pulls a diagram runtime in.
+ * Browser-only, and free of any diagram code, so a bundle that only needs the tokens never pulls
+ * a diagram runtime in.
  */
 import { parseCssColor } from './cssColor';
 
 /**
- * Read the custom properties `names` off `el` (default: the document element,
- * where `ThemeProvider` puts the `theme-*` / `light` classes). Colours the
- * parser does not understand as written (`color-mix()`, a `var()` chain) are
- * resolved through a throwaway probe element so the engine does the
- * substitution; names in `raw` are returned as written (a font stack).
- * Returns `undefined` outside a browser; a token that does not resolve is
- * left out.
+ * Read the custom properties `names` off `el` (default: the document element, where
+ * `ThemeProvider` puts the `theme-*` / `light` classes).
  */
 export function readThemeTokenValues<N extends string>(
   names: readonly N[],
@@ -48,7 +41,6 @@ export function readThemeTokenValues<N extends string>(
         tokens[name] = value;
         continue;
       }
-      // Unparsable as written: let the engine resolve it to a colour.
       try {
         if (!probe) {
           probe = document.createElement('span');
@@ -64,7 +56,6 @@ export function readThemeTokenValues<N extends string>(
         const resolved = getComputedStyle(probe).color.trim();
         if (resolved && parseCssColor(resolved)) tokens[name] = resolved;
       } catch {
-        // leave the token absent
       }
     }
   } finally {

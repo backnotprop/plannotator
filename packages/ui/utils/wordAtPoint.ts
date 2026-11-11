@@ -1,15 +1,6 @@
 /**
- * The word under a screen point, for click-a-word and word-snapped drags.
- *
- * `Intl.Segmenter` with `granularity: 'word'` finds words in any script
- * (Chinese, Japanese and Thai have no spaces). Where it is missing, a run of
- * letters, marks and numbers is a word, with an apostrophe or a hyphen
- * between letters kept inside it ("don't", "re-run").
- *
- * A word is looked for in the run of adjacent sibling text nodes around the
- * position, so a word split into two text nodes (a removed highlight leaves
- * that) is still one word. It never crosses an element: a word half in bold
- * is two words here.
+ * Where it is missing, a run of letters, marks and numbers is a word, with an apostrophe or a
+ * hyphen between letters kept inside it ("don't", "re-run").
  */
 
 import { caretAtPoint } from './caretAtPoint';
@@ -49,14 +40,13 @@ function getSegmenter(): SegmenterLike | null {
 const WORD_CHAR = /[\p{L}\p{M}\p{N}_]/u;
 const JOINER = /['’-]/;
 
-/** A hyphen or apostrophe with a letter or digit on both sides: "re-run", "don't". Never a dash with a space beside it. */
+/** A hyphen or apostrophe with a letter or digit on both sides: "re-run", "don't". */
 const joinsWords = (text: string, i: number): boolean =>
   JOINER.test(text[i] ?? '') && WORD_CHAR.test(text[i - 1] ?? '') && WORD_CHAR.test(text[i + 1] ?? '');
 
 /**
- * [start, end) of the word holding the character at `index`, or null when that character is not in a word.
- * Words joined by single hyphens or apostrophes are one word ("Dead-lettered", "well-known", "user's"), and
- * the joiner itself counts as part of it; a slash, a dot or a spaced dash ends a word.
+ * [start, end) of the word holding the character at `index`, or null when that character is not
+ * in a word.
  */
 export function wordSpanAt(text: string, index: number, useSegmenter = true): [number, number] | null {
   if (index < 0 || index >= text.length) return null;
@@ -71,7 +61,6 @@ export function wordSpanAt(text: string, index: number, useSegmenter = true): [n
     let [start, end] = first;
     for (let next = joinsWords(text, end) ? at(end + 1) : null; next; next = joinsWords(text, end) ? at(end + 1) : null) end = next[1];
     for (let prev = joinsWords(text, start - 1) ? at(start - 2) : null; prev; prev = joinsWords(text, start - 1) ? at(start - 2) : null) start = prev[0];
-    // The segmenter keeps "retry.cap" and "a.b:c" whole; a dot or colon ends a word here, except inside a number ("0.28").
     const splits = (i: number) => /[.:]/.test(text[i] ?? '') && !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
     if (splits(index)) return null;
     for (let i = index - 1; i >= start; i -= 1) if (splits(i)) { start = i + 1; break; }
@@ -108,8 +97,8 @@ function positionIn(run: Text[], index: number, preferEnd: boolean): TextPositio
 }
 
 /**
- * The word holding the character after the caret (`side` 1) or before it
- * (`side` -1, for a caret at the end of a word).
+ * The word holding the character after the caret (`side` 1) or before it (`side` -1, for a caret
+ * at the end of a word).
  */
 export function wordAround(node: Node, offset: number, side: 1 | -1 = 1): WordBounds | null {
   if (node.nodeType !== Node.TEXT_NODE) return null;

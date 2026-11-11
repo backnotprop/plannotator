@@ -1,16 +1,3 @@
-/**
- * Why a decision POST (send feedback, approve, deny) did not land (#1392).
- *
- * The review pages used to swallow these failures: a POST to a server that
- * had stopped rejected with a network error, the catch only re-enabled the
- * button, and the reviewer could not tell that nothing reached the agent.
- * The handlers now tag the failure so the page can say which one happened
- * (`SendFailureToast`).
- */
-
-/** The `code` every plan, annotate and review server (Bun and Pi) puts on its
- *  409 for a decision that arrives after the review was decided or closed
- *  (also `packages/shared/host-control.ts`). */
 export const ALREADY_DECIDED_CODE = 'already_decided';
 
 /** The `code` of plan review's 409 for a decision on an older revision. */
@@ -51,8 +38,10 @@ export async function refusalCode(res: Response): Promise<string | undefined> {
   }
 }
 
-/** Throws the failure for a response that is not ok: `decided` for the
- *  servers' already-decided refusal, `rejected` with the status otherwise. */
+/**
+ * Throws the failure for a response that is not ok: `decided` for the servers' already-decided
+ * refusal, `rejected` with the status otherwise.
+ */
 export async function assertSendOk(res: Response): Promise<void> {
   if (res.ok) return;
   if (res.status === 409 && (await refusalCode(res)) === ALREADY_DECIDED_CODE) {

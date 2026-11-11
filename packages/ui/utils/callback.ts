@@ -1,10 +1,3 @@
-/**
- * Bot callback integration for Plannotator share URLs.
- *
- * When the bot posts a plan URL with ?cb=<encoded_url>&ct=<token>,
- * these utilities parse the config and POST the user's decision back.
- */
-
 /** Actions the user can trigger via the in-Plannotator callback buttons. */
 export enum CallbackAction {
   Approve  = "approve",
@@ -22,15 +15,8 @@ export interface ToastError   { readonly type: 'error';   readonly message: stri
 export type ToastPayload = ToastSuccess | ToastError | null;
 
 /**
- * Parse callback configuration from URL search params.
- * Checks both the standard query string (before #) and query-style params
- * embedded in the hash (e.g. `#<hash>?cb=...&ct=...`).
- *
  * The decoded `cb` value must use http: or https: — other schemes (file://, javascript://, etc.)
  * are rejected to prevent protocol-based attacks.
- *
- * @param loc - Location object to parse (defaults to window.location; injectable for tests)
- * @returns CallbackConfig if both cb and ct are present and valid, null otherwise
  */
 export function getCallbackConfig(
   loc: { readonly search: string; readonly hash: string } = window.location,
@@ -60,16 +46,6 @@ export function getCallbackConfig(
   return { callbackUrl: cb, token: ct };
 }
 
-/**
- * Execute a bot callback POST request.
- *
- * Pure function (no React deps) — testable without a DOM.
- *
- * @param action - The action to send
- * @param config - Callback URL and single-use token from `getCallbackConfig()`
- * @param annotatedUrl - Current share URL (with annotations encoded); sent to the bot
- * @returns Toast payload to display
- */
 export async function executeCallback(
   action: CallbackAction,
   config: CallbackConfig,

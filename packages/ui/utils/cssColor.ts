@@ -1,19 +1,3 @@
-/**
- * Small, dependency-free CSS colour toolkit for theme-derived rendering.
- *
- * Plannotator's palettes write their tokens as hex, `rgb()` and `oklch()`
- * (see `packages/ui/themes/*.css`), and a browser's computed value for a
- * colour can also come back as `oklab()`, `lab()`, `lch()`, `hsl()` or
- * `color(srgb ...)`. Mermaid's own colour library (khroma) understands only
- * the legacy syntaxes, so anything handed to it as a theme variable must first
- * be reduced to an opaque hex string. That reduction, plus the perceptual
- * mixing and the WCAG contrast arithmetic the diagram theme is built on, live
- * here so `mermaidTheme.ts` reads as a mapping rather than as colour math.
- *
- * Browser-free on purpose: every function is pure and runs under plain `bun
- * test`, which is what lets the contrast guard be unit-tested per palette.
- */
-
 /** sRGB colour, channels 0..1, straight (non-premultiplied) alpha. */
 export interface RgbColor {
   r: number;
@@ -45,16 +29,6 @@ const NAMED_COLORS: Record<string, string> = {
   transparent: '#00000000',
 };
 
-/**
- * Parse one CSS colour value into sRGB. Returns `undefined` for anything it
- * does not understand (a `var()` reference, `color-mix()`, an empty string),
- * which callers treat as "token absent".
- *
- * Supported: `#rgb[a]`, `#rrggbb[aa]`, `rgb()`/`rgba()` (comma or space
- * syntax, percentages, `/ alpha`), `hsl()`/`hsla()`, `oklch()`, `oklab()`,
- * `lab()`, `lch()`, `color(srgb|srgb-linear|display-p3 ...)`, and a handful of
- * named colours. Wide-gamut input is clipped to sRGB per channel.
- */
 export function parseCssColor(input: string | null | undefined): RgbColor | undefined {
   if (typeof input !== 'string') return undefined;
   const value = input.trim().toLowerCase();
@@ -113,7 +87,6 @@ function parseHex(value: string): RgbColor | undefined {
   return { r: r / 255, g: g / 255, b: b / 255, a: a / 255 };
 }
 
-/** Split a function body into channel tokens and an optional `/ alpha`. */
 function splitChannels(body: string): { parts: string[]; alpha: string | undefined } | undefined {
   let main = body;
   let alpha: string | undefined;
@@ -127,7 +100,6 @@ function splitChannels(body: string): { parts: string[]; alpha: string | undefin
     .map((p) => p.trim())
     .filter(Boolean);
   if (alpha === undefined && parts.length === 4) {
-    // legacy `rgba(r, g, b, a)` / `hsla(h, s, l, a)`
     alpha = parts.pop();
   }
   if (parts.length !== 3) return undefined;
@@ -257,7 +229,6 @@ function parseColorFunction(body: string): RgbColor | undefined {
       return { r: clamp01(linearToSrgb(x)), g: clamp01(linearToSrgb(y)), b: clamp01(linearToSrgb(z)), a };
     case 'display-p3': {
       const lin = [srgbToLinear(x), srgbToLinear(y), srgbToLinear(z)];
-      // display-p3 (linear) -> XYZ D65
       const X = 0.4865709 * lin[0] + 0.2656677 * lin[1] + 0.1982173 * lin[2];
       const Y = 0.2289746 * lin[0] + 0.6917385 * lin[1] + 0.0792869 * lin[2];
       const Z = 0.0 * lin[0] + 0.0451134 * lin[1] + 1.0439444 * lin[2];
@@ -267,10 +238,6 @@ function parseColorFunction(body: string): RgbColor | undefined {
       return undefined;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Colour spaces
-// ---------------------------------------------------------------------------
 
 export function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -293,7 +260,6 @@ function xyzToRgb({ X, Y, Z }: Xyz): { r: number; g: number; b: number } {
   return { r: clamp01(linearToSrgb(rl)), g: clamp01(linearToSrgb(gl)), b: clamp01(linearToSrgb(bl)) };
 }
 
-/** CIE Lab (D50 white as CSS specifies) -> XYZ D65 via Bradford. */
 function labToXyz(L: number, a: number, b: number): Xyz {
   const fy = (L + 16) / 116;
   const fx = fy + a / 500;
@@ -303,11 +269,9 @@ function labToXyz(L: number, a: number, b: number): Xyz {
   const xr = Math.pow(fx, 3) > e ? Math.pow(fx, 3) : (116 * fx - 16) / k;
   const yr = L > k * e ? Math.pow((L + 16) / 116, 3) : L / k;
   const zr = Math.pow(fz, 3) > e ? Math.pow(fz, 3) : (116 * fz - 16) / k;
-  // D50 reference white
   const X50 = xr * 0.3457 / 0.3585;
   const Y50 = yr;
   const Z50 = zr * (1 - 0.3457 - 0.3585) / 0.3585;
-  // Bradford D50 -> D65
   return {
     X: 0.9554734 * X50 - 0.0230985 * Y50 + 0.0632593 * Z50,
     Y: -0.0283697 * X50 + 1.0099954 * Y50 + 0.0210413 * Z50,
@@ -375,10 +339,6 @@ export function rgbToOklch(c: { r: number; g: number; b: number }): Oklch {
   return oklabToOklch(rgbToOklab(c));
 }
 
-// ---------------------------------------------------------------------------
-// Compositing, mixing, contrast
-// ---------------------------------------------------------------------------
-
 /** Alpha-composite `top` over an opaque `under` (source-over). */
 export function compositeOver(top: RgbColor, under: RgbColor): RgbColor {
   const a = clamp01(top.a);
@@ -391,7 +351,7 @@ export function compositeOver(top: RgbColor, under: RgbColor): RgbColor {
   };
 }
 
-/** Perceptual mix in OKLab: `t = 0` is `from`, `t = 1` is `to`. Alpha ignored. */
+/** Perceptual mix in OKLab: `t = 0` is `from`, `t = 1` is `to`. */
 export function mixOklab(from: RgbColor, to: RgbColor, t: number): RgbColor {
   const k = clamp01(t);
   const a = rgbToOklab(from);
@@ -414,8 +374,10 @@ export function contrastRatio(a: { r: number; g: number; b: number }, b: { r: nu
   return (light + 0.05) / (dark + 0.05);
 }
 
-/** Round to the 8-bit sRGB grid a hex string carries, so a contrast measured
- *  here equals the contrast of the colour Mermaid actually receives. */
+/**
+ * Round to the 8-bit sRGB grid a hex string carries, so a contrast measured here equals the
+ * contrast of the colour Mermaid actually receives.
+ */
 export function quantize(color: RgbColor): RgbColor {
   const q = (v: number) => Math.round(clamp01(v) * 255) / 255;
   return { r: q(color.r), g: q(color.g), b: q(color.b), a: 1 };
@@ -450,7 +412,6 @@ export function withMaxChroma(color: RgbColor, maxC: number): RgbColor {
   return { ...oklchToRgb({ ...lch, C: maxC }), a: 1 };
 }
 
-/** Rotate hue by `deg` in OKLCH. */
 export function rotateHue(color: RgbColor, deg: number): RgbColor {
   const lch = rgbToOklch(color);
   return { ...oklchToRgb({ ...lch, H: (((lch.H + deg) % 360) + 360) % 360 }), a: 1 };
