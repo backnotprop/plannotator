@@ -1745,7 +1745,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
   // A paired cloud agent is named by the name its wakes carry (packages/inbox/cloud/), not "Cloud agent".
-  const cloudName = thread.messages.findLast((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
+  const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (host === 'cloud' && cloudName ? cloudName : hostName(host));
   const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
   // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
