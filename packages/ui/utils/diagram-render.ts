@@ -481,10 +481,13 @@ async function loadWithRetry<T>(load: () => Promise<T>, delayMs: number): Promis
 
 /**
  * What a browser says when a lazily imported chunk does not arrive: Chromium,
- * WebKit (Safari, every iPad browser), Firefox, and Vite's CSS preload.
+ * WebKit (Safari, every iPad browser), Firefox, and Vite's CSS preload. The
+ * last is WebKit's words when the chunk's request was redirected to another
+ * origin: a sign-in proxy in front of the Inbox (Cloudflare Access) whose
+ * session lapsed answers every request with a redirect to its login page.
  */
 const CHUNK_LOAD_FAILURE =
-  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i;
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS|Cross-origin script load denied/i;
 
 function isChunkLoadFailure(error: unknown): boolean {
   return CHUNK_LOAD_FAILURE.test(error instanceof Error ? error.message : String(error));

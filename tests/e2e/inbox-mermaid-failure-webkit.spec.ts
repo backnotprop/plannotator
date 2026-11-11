@@ -107,6 +107,29 @@ test('a diagram that does not parse shows its source in the message, and nothing
   }
 });
 
+/**
+ * A flaky link (plane WiFi) breaks one download off. With a modulepreload link
+ * in front of the import, WebKit kept that failure for the tab: the re-attempt,
+ * Retry and even a reload of the tab failed with no request, and only a new tab
+ * drew the diagram. What regresses: the Inbox build preloads its lazy chunks
+ * again (`modulePreload` in apps/inbox/vite.config.ts).
+ */
+test('a diagram chunk whose download breaks off once draws on the automatic re-attempt, with no reload', async ({ browser }) => {
+  const sent = await claude.send({ project_path: project, subject: 'Flaky', thread: 'flaky', body: SEQUENCE_ONLY });
+  const { context, page } = await openOnIpad(browser);
+  try {
+    let tries = 0;
+    await page.route(/\/assets\/sequenceDiagram-[^/]+\.js$/, (route) => (++tries === 1 ? route.abort('connectionreset') : route.continue()));
+    await page.goto(`${url}#thread=${sent.thread_id}`);
+    const block = page.locator(`[data-message-id="${sent.message_id}"] [data-diagram-block="mermaid"]`);
+    await expect(block.locator('[data-diagram-svg] svg')).toBeVisible();
+    expect(tries).toBe(2);
+    expect(await outside(page)).toEqual({ stray: [], overflows: false });
+  } finally {
+    await context.close();
+  }
+});
+
 test('a diagram type whose chunk does not arrive shows the source under Reload, and nothing lands outside the message', async ({ browser }) => {
   const sent = await claude.send({ project_path: project, subject: 'Queue', thread: 'queue', body: SEQUENCE_ONLY });
   const { context, page } = await openOnIpad(browser);
