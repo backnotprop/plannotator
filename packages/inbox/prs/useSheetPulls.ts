@@ -7,15 +7,9 @@ export interface SheetPullsState {
   model: InboxPullsAnswer | null;
   error: string | null;
   loading: boolean;
-  /** Ask the forges again now (after a merge, or the person's refresh). */
   refresh: () => void;
 }
 
-/**
- * The Pull requests page's list (`GET /api/inbox/pulls?everywhere=1`): read only while the page (or a PR opened from
- * it) is on screen, on the same clock as the Reviews page (on open, on focus after `PULLS_FOCUS_MS`, every
- * `PULLS_TICK_MS` while visible). The server answers from its cache in between: no extra polling of the forges.
- */
 export function useSheetPulls(enabled: boolean): SheetPullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +34,6 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
           if (controller.signal.aborted) return;
           setModel(answer);
           setError(null);
-          // Others (the projects' other PRs) is read in the background: its answer is on the server's next one.
           if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {

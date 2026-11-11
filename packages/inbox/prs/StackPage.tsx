@@ -1,11 +1,3 @@
-/**
- * A stack on its own page (approval "inbox-pr-dashboard", rounds 6 and 7): the layers top of the stack first and the
- * base branch at the bottom, the way `gt log` reads (q-81634343). Merged layers stay in place, greyed (the default
- * while the owner's answer on q-922175ff is pending). A row opens that layer in the Inbox's PR view.
- *
- * Left for later (not in this first version): the docked inspector, a range of layers as one diff, "changed since you
- * looked", and the merged fold.
- */
 import { useId } from 'react';
 import { inboxPullIsOpen, inboxPullLabel, inboxPullLandsNext, type InboxPull, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
@@ -17,7 +9,6 @@ import { facesOnce, person, wordsText, type Words } from '../pulls/words';
 
 export interface StackPageProps {
   stack: InboxPullStack | null;
-  /** The list is still being read: nothing to say yet. */
   loading: boolean;
   repoLabel: string | null;
   phone: boolean;
