@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
+import { markedCommentText, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
 
 // GitLab-specific MRRef shape (used internally)
@@ -922,4 +923,78 @@ export async function submitGlMRReview(
   }
 
   return { status: "complete" };
+}
+
+// --- Marked text: a note or a description section found again by its marker (pr-marked.ts) ---
+
+/**
+ * GitLab's limit on a note's body and on an MR's description: 1,000,000 characters on gitlab.com (the Notes API's
+ * docs; an instance may set its own `description_and_note_max_size`, checked in bytes for a description).
+ */
+export const GL_NOTE_MAX = 1_000_000;
+export const GL_DESCRIPTION_MAX = 1_000_000;
+
+interface GlNote {
+  id: number;
+  body?: string | null;
+  system?: boolean;
+  author?: { username?: string } | null;
+}
+
+const glMrUrl = (ref: GlMRRef) => `https://${ref.host}/${ref.projectPath}/-/merge_requests/${ref.iid}`;
+
+const glFailure = (result: CommandResult) => result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+
+/**
+ * The person's own note on the MR that starts with `input.marker`, edited in place (PUT); else a new note. Found on
+ * the forge every time: the newest non-system note of the signed-in account that starts with the marker. One gone by
+ * the time it is edited (404) is posted again as new.
+ */
+export async function upsertGlMarkedNote(runtime: PRRuntime, ref: GlMRRef, input: PRMarkedCommentInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot post a note");
+  const run = runtime.runCommandWithInput.bind(runtime);
+  const text = markedCommentText(input, GL_NOTE_MAX);
+  const notes = `projects/${encodeProject(ref.projectPath)}/merge_requests/${ref.iid}/notes`;
+  const json = ["-H", "Content-Type:application/json"];
+  const listed = await runtime.runCommand("glab", apiArgs(ref.host, `${notes}?per_page=100&sort=asc`, ["--paginate"]));
+  if (listed.exitCode !== 0) throw new Error(`Couldn't read the merge request's notes: ${glFailure(listed)}`);
+  const marked = parsePaginatedArray<GlNote>(listed.stdout).filter((note) => !note.system && startsWithMarker(note.body, input.marker));
+  const me = marked.length > 0 ? await getGlUser(runtime, ref.host) : null;
+  const existing = marked.filter((note) => me !== null && note.author?.username?.toLowerCase() === me.toLowerCase()).at(-1);
+  if (existing) {
+    const edited = await run("glab", apiArgs(ref.host, `${notes}/${existing.id}`, ["--method", "PUT", "--input", "-", ...json]), JSON.stringify({ body: text }));
+    if (edited.exitCode === 0) return { action: "updated", url: `${glMrUrl(ref)}#note_${existing.id}` };
+    if (!isNotFoundCommandFailure(edited.stderr)) throw new Error(`Couldn't update the note: ${glFailure(edited)}`);
+  }
+  const posted = await run("glab", apiArgs(ref.host, notes, ["--method", "POST", "--input", "-", ...json]), JSON.stringify({ body: text }));
+  if (posted.exitCode !== 0) throw new Error(`Couldn't post the note: ${glFailure(posted)}`);
+  let id: unknown;
+  try {
+    id = JSON.parse(posted.stdout)?.id;
+  } catch {
+    // The note went; its link is the MR's.
+  }
+  return { action: "created", url: typeof id === "number" ? `${glMrUrl(ref)}#note_${id}` : glMrUrl(ref) };
+}
+
+/**
+ * The MR description's section between the markers, put in place (or at the end), the rest kept byte for byte. GitLab
+ * takes no precondition on this write either: read, splice, read again just before the write, refuse
+ * (PRMarkedRaceError) when another edit landed in between.
+ */
+export async function upsertGlDescriptionSection(runtime: PRRuntime, ref: GlMRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot edit a description");
+  const path = `projects/${encodeProject(ref.projectPath)}/merge_requests/${ref.iid}`;
+  const read = async (): Promise<{ body: string; url: string }> => {
+    const result = await runtime.runCommand("glab", apiArgs(ref.host, path));
+    if (result.exitCode !== 0) throw new Error(`Couldn't read the merge request: ${glFailure(result)}`);
+    const parsed = JSON.parse(result.stdout) as { description?: string | null; web_url?: string };
+    return { body: parsed.description ?? "", url: parsed.web_url ?? glMrUrl(ref) };
+  };
+  const first = await read();
+  const planned = spliceMarkedSection(first.body, input, GL_DESCRIPTION_MAX);
+  if ((await read()).body !== first.body) throw new PRMarkedRaceError();
+  const written = await runtime.runCommandWithInput("glab", apiArgs(ref.host, path, ["--method", "PUT", "--input", "-", "-H", "Content-Type:application/json"]), JSON.stringify({ description: planned.text }));
+  if (written.exitCode !== 0) throw new Error(`Couldn't edit the description: ${glFailure(written)}`);
+  return { action: planned.replaced ? "updated" : "created", url: first.url };
 }
