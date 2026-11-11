@@ -47,7 +47,7 @@ export const LINEAR_REF_QUERY = `query($id: String!) {
     identifier number title url description priorityLabel priority estimate createdAt updatedAt completedAt canceledAt
     state { name type color } team { key name } project { name }
     creator { ${LN_PERSON} } assignee { ${LN_PERSON} } labels(first: 8) { nodes { name color } }
-    comments(last: 1) { nodes { body createdAt user { ${LN_PERSON} } } }
+    comments(first: 1) { nodes { body createdAt user { ${LN_PERSON} } } }
     allComments: comments(first: 100) { nodes { id } }
     attachments(first: 10) { nodes { url title sourceType metadata } }
   }
@@ -104,7 +104,8 @@ export function parseLinearRefAnswer(body: unknown): LinearCardData | "not_found
   const stateType = str(state.type);
   const team = obj(item.team);
   const description = cut(str(item.description), FORGE_REF_BODY_MAX);
-  const last = nodes(item.comments).at(-1);
+  // Linear lists a connection newest first with `first` (oldest first with `last`): `comments(first: 1)` is the latest.
+  const last = nodes(item.comments).at(0);
   const assignee = personOf(item.assignee);
   const linked: ForgeRefLinked[] = nodes(item.attachments).flatMap((a) => {
     const meta = obj(a.metadata);

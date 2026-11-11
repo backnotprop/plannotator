@@ -115,3 +115,54 @@ test("teams for bare identifiers, and the route with its guard", async () => {
   expect(await off!.json()).toEqual({ serverSession: "sess", workspace: null, teams: [] });
   expect(await linearRefsRoute(new Request("http://127.0.0.1:1/x"), "/x", linear, "sess", json)).toBeNull();
 });
+
+test("the key goes only to api.linear.app's authorization header: never in an avatar fetch, an answer, a route body or a log line", async () => {
+  const KEY = "lin_api_key_must_not_leak_7f3a";
+  const seen: { url: string; init?: RequestInit }[] = [];
+  let mode: "ok" | "auth" | "throw" = "ok";
+  const avatarIssue = structuredClone(ISSUE);
+  avatarIssue.data.issue.creator.avatarUrl = "https://public.linear.app/avatars/ada.png";
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    seen.push({ url, init });
+    if (url !== LINEAR_API_URL) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
+    if (mode === "throw") throw new Error("network down");
+    if (mode === "auth") return Response.json({ errors: [{ message: "Authentication required", extensions: { code: "AUTHENTICATION_ERROR" } }] }, { status: 401 });
+    const body = JSON.parse(String(init!.body)) as { query: string };
+    return Response.json(body.query.includes("organization") ? { data: { organization: { urlKey: "acme" }, teams: { nodes: [{ key: "ENG" }] } } } : avatarIssue);
+  }) as unknown as typeof fetch;
+  const logged: string[] = [];
+  const consoleMethods = ["log", "info", "warn", "error", "debug"] as const;
+  const originals = consoleMethods.map((m) => console[m]);
+  for (const m of consoleMethods) console[m] = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+  const answers: unknown[] = [];
+  try {
+    let t = 0;
+    const cards = createLinearCards({ apiKey: () => KEY, fetch: fetchImpl, now: () => (t += 100_000) });
+    answers.push(await cards.get(LINK));
+    mode = "auth";
+    answers.push(await cards.get("https://linear.app/acme/issue/ENG-2"));
+    mode = "throw";
+    answers.push(await cards.get("https://linear.app/acme/issue/ENG-3"));
+    mode = "ok";
+    const json = (body: unknown, status = 200) => Response.json(body, { status });
+    const route = await linearRefsRoute(new Request("http://127.0.0.1:1/api/inbox/linear-refs", { headers: { host: "127.0.0.1:1" } }), "/api/inbox/linear-refs", cards, "sess", json);
+    answers.push(await route!.json());
+  } finally {
+    consoleMethods.forEach((m, i) => (console[m] = originals[i]!));
+  }
+  expect((answers[0] as { ok: boolean }).ok).toBe(true);
+  // The avatar was fetched (from Linear's own host), so the no-key fetch path ran.
+  const avatarFetches = seen.filter((s) => s.url !== LINEAR_API_URL);
+  expect(avatarFetches.map((s) => s.url)).toEqual(["https://public.linear.app/avatars/ada.png"]);
+  for (const s of seen) {
+    const sent = JSON.stringify({ url: s.url, headers: s.init?.headers ?? null, body: s.init?.body ?? null });
+    if (s.url === LINEAR_API_URL) {
+      expect((s.init!.headers as Record<string, string>).authorization).toBe(KEY);
+      expect(String(s.init!.body)).not.toContain(KEY);
+    } else {
+      expect(sent).not.toContain(KEY);
+    }
+  }
+  expect(JSON.stringify(answers)).not.toContain(KEY);
+  expect(logged.join("\n")).not.toContain(KEY);
+});
