@@ -1,18 +1,3 @@
-/**
- * A floating draft's window (approval "inbox-reply-floaters"): the thread's own reply draft (`useReplyDraft`) in
- * T6's box (approval "inbox-reply-box"): the words, then T6's row (ReplyRow.tsx) with Send, the paperclip, Skills,
- * the mic and the bin. It keeps no words of its own.
- *
- * - A computer: Ask's own window (`ChatFrame`), so it moves by its header, resizes by its corner grip and goes full
- *   screen exactly as Ask does. No "Draft · Saved · Discard" line: the box saves quietly and the bin discards; only
- *   "Not saved …" shows, over the row, as in the thread.
- * - A phone: the whole screen, T6's phone row (no bin) and T6's Draft line above the box, which keeps Discard.
- * - ⌘↵ sends (the thread box's own key). No Escape: Ask's window takes none (AskChat.tsx), and this is Ask's window.
- *
- * Send here is the plain case: words and files, to the message the words answer, in a thread with one agent. A
- * thread holding picks or comments, a chosen recipient, several agents or a hand-off, or whose agent has ended,
- * hands over to the thread ("Open to send"), whose Send knows how to carry them.
- */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxDraftFile, InboxMessageWire, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
@@ -37,18 +22,12 @@ import { useVoiceSession } from '../voice';
 import { floaterName, onFloaterEvent, peekText } from './model';
 
 const NO_UPLOADS: readonly InboxDraftFile[] = [];
-/** How long the press waits to learn whether the agent ended (as the thread's Send does). */
 const ENDED_READ_MS = 5_000;
 
-/** Picks, comments and action items waiting in the thread: only the thread's Send carries them. */
 export function carriedCount(row: InboxReplyDraftRow): number {
   return (row.unsent?.picks ?? 0) + (row.unsent?.comments ?? 0) + (row.unsent?.done ?? 0) + (row.unsent?.cant ?? 0);
 }
 
-/**
- * Whether this window's Send can carry the reply, or the thread must (its recipient pill, route choice and
- * hand-offs live there): one agent, no hand-off, no recipient chosen, nothing but words and files.
- */
 export function sendsHere(thread: InboxThread | null, row: InboxReplyDraftRow, recipients: readonly string[] | undefined): boolean {
   if (carriedCount(row) > 0 || (recipients?.length ?? 0) > 0) return false;
   if (!thread) return true;
@@ -58,18 +37,13 @@ export function sendsHere(thread: InboxThread | null, row: InboxReplyDraftRow, r
 export interface FloaterBoxProps {
   row: InboxReplyDraftRow;
   phone: boolean;
-  /** A computer: the draft window's store (Ask's ChatWindowStore class), so a size the person dragged holds. */
   frame: ChatWindowStore;
-  /** Take focus when it opens (a person's press). */
   takeFocus: boolean;
   onMinimize: () => void;
-  /** × : it stops floating and stays in Drafts. */
   onPutAway: () => void;
   onOpenThread: () => void;
   onSent: (agent: string) => void;
-  /** Discarded; the words and files, for Undo. */
   onDiscarded: (words: string, files: readonly ReplyDraftFileRef[]) => void;
-  /** Sent or discarded in another window. */
   onGone: () => void;
 }
 
@@ -78,7 +52,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const [text, setText] = useState('');
   const textRef = useRef('');
   textRef.current = text;
-  /** The bin was pressed: nothing this window still holds is saved again (no upload lands, no tile saves). */
   const discarded = useRef(false);
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const [said, setSaid] = useState('');
@@ -97,14 +70,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       set: (next) => change(next),
     },
     onUnmountUploads: (uploads) => {
-      // Discarded: what still uploads joins no draft (the bin threw the reply away).
       if (discarded.current) return;
       for (const upload of uploads) void landInReplyDraft(threadId, upload);
     },
   });
   const filesSaved = useRef('');
   const voice = useVoiceSession();
-  // The window shows only while its store is not minimized: this box opening is the window opening.
   useLayoutEffect(() => {
     if (!phone) frame.setMinimized(false);
   }, [frame, phone]);
@@ -120,7 +91,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     draft.save(next, list);
   }
 
-  // The draft's words and tiles come in once, when its read lands. Until then the field takes no typing.
   const loaded = useRef(false);
   const ready = draft.loadedFor === threadId;
   useLayoutEffect(() => {
@@ -145,11 +115,9 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
         field?.setSelectionRange(body.length, body.length);
       });
     }
-    // Read once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.loadedFor]);
 
-  // A tile finished or was removed: the draft keeps it.
   const signature = pastedSignature(files.draftFiles());
   useEffect(() => {
     if (!loaded.current || discarded.current || signature === filesSaved.current) return;
@@ -176,7 +144,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     draft.boxTook(id, files.draftFiles().map((file) => file.upload_id));
   };
 
-  // The thread as it is now: who the words go to, and what the agent last said.
   const [thread, setThread] = useState<InboxThread | null>(null);
   const firstLatest = useRef<string | null>(null);
   const [fresh, setFresh] = useState(false);
@@ -198,7 +165,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     }
   }, [latest?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Another window, a phone, or an agent.
   useEffect(
     () =>
       onFloaterEvent((kind, changed) => {
@@ -218,7 +184,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
           setSaid('This reply changed in another window.');
         });
       }),
-    // `draft`'s functions are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [threadId, readThread, onGone],
   );
@@ -229,7 +194,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const skillFilter = useMemo(() => inboxSkillFilter(false), []);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The key of a Send that failed, kept for its retry only while the words and files are the same ones. */
   const sendKey = useRef<{ key: string; content: string } | null>(null);
   const hasSomething = text.trim() !== '' || files.draftFiles().length > 0;
   const send = async () => {
@@ -254,7 +218,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       const model = await inboxApi.thread(threadId);
       setThread(model.thread);
       const target = wordsMessage(model.thread);
-      // What the thread's Send would ask about first (its pill, the route choice, an ended agent) is the thread's.
       if (!sendsHere(model.thread, row, draft.draft?.recipients)) {
         onOpenThread();
         return;
@@ -304,7 +267,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     const kept: ReplyDraftFileRef[] = files.draftFiles(words).map((file) => (file.pasted ? { upload_id: file.upload_id, pasted: file.pasted } : { upload_id: file.upload_id }));
     discarded.current = true;
     draft.discard();
-    // Uploads still in flight stop here; none is handed to the draft as the window goes.
     files.reset();
     onDiscarded(words, kept);
   };
@@ -317,7 +279,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const conflictId = `ib-rf-conflict-${threadId}`;
   const peekId = `ib-rf-peek-${threadId}`;
 
-  // ⌘↵ sends, as in the thread's box. No Escape: this is Ask's window, and Ask's window takes none.
   const onKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -326,7 +287,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     }
   };
 
-  // The header tells this window from Ask's at a glance: the reply arrow and "Reply to <thread title>".
   const title = (
     <span className="ib-rf-replyhead" data-rf-replyhead="">
       <Icon name="reply" size={phone ? 18 : 15} />
@@ -344,7 +304,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       </button>
     </Tip>
   );
-  // T6's Skills (the cube): a real `/` at the caret, so the field's own picker opens.
   const [noSkills, setNoSkills] = useState(false);
   const openSkills = () => {
     const field = fieldRef.current;
@@ -365,7 +324,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const [fold, setFold] = useState(false);
   const sendAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   const sendButton = (
-    // No ⌘↵ on Send: the key is named to assistive technology only (approval "inbox-send-no-shortcut-hint").
+    // No ⌘↵ on Send: the key is named to assistive technology only.
     <Tip content={here ? '' : 'Open the thread to send'}>
       <button type="button" className="ib-btn ib-pri ib-rsend" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={here ? sendAria : undefined} data-rf-send="">
         {sending && <span className="ib-spin" aria-hidden="true" />}
@@ -413,13 +372,11 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
           />
         </div>
       )}
-      {/* A phone: T6 keeps Discard in the Draft line above the box (no bin in the row). */}
       {phone && (
         <div className="ib-rf-draftline" data-rf-draftline="">
           <DraftStamp savedAt={draft.draft?.updated_at ?? null} failed={draft.failed} onDiscard={discard} />
         </div>
       )}
-      {/* T6's box: the words (and files) in one scroll region, then T6's row. */}
       <div
         className="ib-rbox ib-rf-t6"
         onPaste={(event) => files.paste(event)}
@@ -459,7 +416,6 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
             {error}
           </p>
         )}
-        {/* A computer saves without a word (T6): only "Not saved …" shows, on its own line over the row. */}
         {!phone && draft.failed && (
           <div className="ib-rnote" data-reply-note="">
             <DraftStamp savedAt={draft.draft?.updated_at ?? null} failed onDiscard={discard} />

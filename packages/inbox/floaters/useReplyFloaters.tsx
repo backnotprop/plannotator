@@ -1,22 +1,3 @@
-/**
- * Floating reply drafts and Ask AI in the Inbox's bottom right corner (approval "inbox-reply-floaters",
- * 2026-11-07, take "A. One corner" with separate windows).
- *
- * - One corner button, level with Send at the thread foot's right end (the foot makes room for it, as Ask's
- *   round button would), or 16 px from the window's corner with no thread open. Hovering spreads a list: one row
- *   per floating draft (pencil) and this thread's Ask chat (sparkle) while its window is minimized. A row opens
- *   its window. On a phone a press opens the list as a sheet (one item opens at once).
- * - Separate windows: a draft window (FloaterBox.tsx) shows only that draft, Ask's window only the chat. A draft
- *   window opens beside Ask's window when that is open. On a phone each fills the screen, one at a time.
- * - A draft floats when its box closes with words the person typed on this visit (T6's down arrow, Escape, or
- *   leaving the thread), with 8 characters or a file; it shows once they are in another thread. Sent or discarded
- *   anywhere, a day old, or × ("Stop floating"), it stops. It stays a draft.
- * - The corner shows in a thread with no Ask chat while drafts float, and hides in full screen and while a phone's
- *   keyboard is up.
- * - Drafts float only while the person turned it on (Settings → Capabilities → Experimental, "Float reply drafts";
- *   the owner, 2026-11-08: off by default). Off, no draft floats, no draft row or window shows, and the threads that
- *   floated are forgotten (each stays a draft in Drafts); Ask's row and window in the corner work as with it on.
- */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
@@ -33,16 +14,10 @@ import { floatingDrafts, floatsAfterVisit, floatThread, floaterName, onFloaterEv
 
 export interface ReplyFloatersOptions {
   rows: readonly InboxReplyDraftRow[];
-  /** The drafts were read at least once: before that, no row is not "sent". */
   rowsRead: boolean;
   threadId: string | null;
   phone: boolean;
-  /** The tour, a guest. */
   off: boolean;
-  /**
-   * Settings → Capabilities → Experimental → "Float reply drafts" (config.json `inboxFloatDrafts`), off by default.
-   * null: the settings are not read yet (nothing floats, and the threads that floated are kept until it is known).
-   */
   floatDrafts: boolean | null;
   ask: AskCorner;
   openThread: (threadId: string) => void;
@@ -53,10 +28,8 @@ export interface ReplyFloatersOptions {
 }
 
 const TILE = 44;
-/** How long a closed box's or a left thread's draft is looked at again while its save lands. */
 const SETTLE_WINDOW_MS = 5_000;
 
-/** One row of the corner's list: this thread's Ask chat, or a floating draft. */
 interface CornerItem {
   key: string;
   kind: 'ask' | 'draft';
@@ -78,7 +51,6 @@ function draftMark(row: InboxReplyDraftRow) {
 
 export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactNode } {
   const { rows, rowsRead, threadId, phone, off, floatDrafts, ask, openThread, openDrafts, refreshDrafts, toast, dismissToast } = options;
-  /** Drafts float: not the tour or a guest, and the person turned it on. Off, only Ask's row is in the corner. */
   const floats = !off && floatDrafts === true;
   const entries = useFloatEntries();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -88,7 +60,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   useSyncExternalStore(ask.store.subscribe, ask.store.getVersion);
   const askMinimized = ask.store.minimized;
   const askOpen = ask.threadId !== null && !askMinimized;
-  /** The draft window's store: Ask's ChatWindowStore class, one for the page, so a size the person dragged holds. */
   const frame = useMemo(() => new ChatWindowStore(), []);
   const layerRef = useRef<HTMLDivElement | null>(null);
   const refresh = useRef(refreshDrafts);
@@ -96,8 +67,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   const rowsNow = useRef({ rows, read: rowsRead });
   rowsNow.current = { rows, read: rowsRead };
 
-  // A draft floats once its box closed or its thread was left, when the person typed on this visit. Its save may
-  // land after the close: the draft is read again when it does (its `drafts` event), for a few seconds.
   const visit = useRef<{ id: string; updated: string | null | undefined } | null>(null);
   const settling = useRef(new Map<string, { updated: string | null | undefined; until: number }>());
   const settleTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -127,7 +96,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     },
     [look],
   );
-  // Off (the tour, a guest, the setting) or gone: no look still waiting floats a draft.
   useEffect(() => {
     if (!floats) return;
     const timers = settleTimers.current;
@@ -151,16 +119,13 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     const left = visit.current;
     visit.current = null;
     if (threadId && !machineOf(threadId)) {
-      // Its draft as the drafts list knows it (`reply_at` is the draft's `updated_at`): no read of its own.
       const known = rowsNow.current.read ? (rowsNow.current.rows.find((row) => row.thread_id === threadId)?.unsent?.reply_at ?? null) : undefined;
       visit.current = { id: threadId, updated: known };
       settling.current.delete(threadId);
-      // Never two boxes for one draft: in its thread, the thread's box has it.
       setOpenId((id) => (id === threadId ? null : id));
     }
     if (left && left.id !== threadId) settle(left.id, left.updated, 350);
   }, [threadId, floats, settle]);
-  // T6's down arrow, or Escape in the thread's box (Thread.tsx says so): it floats now, and shows once they go.
   useEffect(() => {
     if (!floats) return;
     return onReplyBoxSetAside((id) => {
@@ -169,15 +134,12 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     });
   }, [floats, settle]);
 
-  // The setting read as off (the default; an upgrade from 0.28.54 with drafts floating): they stop floating and stay
-  // in Drafts, and an open draft window closes (its words are the thread's draft, saved as typed).
   useEffect(() => {
     if (off || floatDrafts !== false) return;
     setOpenId(null);
     for (const entry of entries) unfloatThread(entry.id);
   }, [off, floatDrafts, entries]);
 
-  // Sent, discarded or a day old: it stops floating, wherever that happened.
   useEffect(() => {
     if (!floats || !rowsRead) return;
     for (const id of staleFloats(entries, rows, openId ? [openId] : [], Date.now())) unfloatThread(id);
@@ -185,7 +147,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   const drafts = useMemo(() => (floats ? floatingDrafts(entries, rows, threadId) : []), [floats, entries, rows, threadId]);
 
-  /** Back to the corner's button; when the last item went with it, to the open thread's title (never to the page). */
   const focusLauncher = useCallback(() => {
     requestAnimationFrame(() => {
       const target = layerRef.current?.querySelector<HTMLElement>('[data-rf-launcher]') ?? document.querySelector<HTMLElement>('section.ib-pane .ib-subject');
@@ -193,7 +154,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     });
   }, []);
 
-  /** Beside Ask's window when it is open (they never cover each other), else in the corner. */
   const placeWindow = useCallback(() => {
     if (ask.threadId !== null && !ask.store.minimized && !ask.store.fullscreen) {
       const at = ask.store.geometry();
@@ -205,14 +165,12 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     (id: string) => {
       setMenu(false);
       setWantsFocus(id);
-      // A phone: one window at a time, each the whole screen.
       if (phone) ask.minimize();
       else placeWindow();
       setOpenId(id);
     },
     [phone, placeWindow, ask],
   );
-  // Ask opening: a phone shows one window at a time; a computer moves the draft's window out from under Ask's.
   const wasAskOpen = useRef(askOpen);
   useEffect(() => {
     const opened = askOpen && !wasAskOpen.current;
@@ -294,7 +252,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
         lead: 'Reply discarded',
         onUndo: () => {
           dismissToast();
-          // The words and the files come back together (their uploads are kept until the sweep).
           const add = [...files];
           const place = add.flatMap((file) => (file.pasted ? [{ upload_id: file.upload_id, pasted: file.pasted }] : []));
           void inboxApi
@@ -316,19 +273,15 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     void refresh.current();
   }, []);
 
-  // The open window keeps the row it opened with while the list loses it (the person emptied the words to rewrite
-  // them, so the draft went for now). It closes only on Send, Discard, ×, minimize, or a send or discard elsewhere.
   const openedRow = useRef<InboxReplyDraftRow | null>(null);
   const listed = openId !== null ? (rows.find((each) => each.thread_id === openId) ?? null) : null;
   if (listed) openedRow.current = listed;
   else if (openedRow.current?.thread_id !== openId) openedRow.current = null;
   const openRow = floats && openId !== null && openId !== threadId ? (listed ?? openedRow.current) : null;
-  // A window with nothing to show is closed, so its float entry is not kept for good.
   const orphan = openId !== null && openId !== threadId && openRow === null;
   useEffect(() => {
     if (orphan) setOpenId(null);
   }, [orphan]);
-  // Ask has no row in the corner (the owner, 2026-11-09: "I don't want that button at all right now"): Side opens a chat.
   const items: CornerItem[] = [
     ...drafts.map(
       (row): CornerItem => ({
@@ -343,7 +296,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     ),
   ];
 
-  // The foot keeps room for the corner while it has a draft, so the row never jumps.
   const something = drafts.length > 0;
   const footRoom = !off && room.foot && !room.hidden && something && !(phone && room.boxOpen);
   const reserve = footRoom ? TILE + 12 : 0;
@@ -369,7 +321,6 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   if (off) return { layer: null };
 
-  // Where the button sits: level with Send at the foot's right end; beside Ask's window while that is open.
   const askGeom = !phone && askOpen && !ask.store.fullscreen ? ask.store.geometry() : null;
   const place: CSSProperties = askGeom ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom } : { right: room.right, bottom: room.bottom };
   const showCorner = items.length > 0 && !room.hidden && !(phone && (room.boxOpen || askOpen || openRow !== null)) && !(!phone && openRow !== null) && !(askOpen && ask.store.fullscreen);
@@ -411,7 +362,6 @@ interface StackProps {
   onAll: () => void;
 }
 
-/** The corner's pile: a round button that spreads into named rows when you reach for it. */
 function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
@@ -425,7 +375,6 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
     },
     [],
   );
-  // A new draft arriving bumps the pile once.
   const count = items.length;
   const last = useRef(count);
   const [arrive, setArrive] = useState(0);
@@ -485,7 +434,6 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
               {...(front ? { 'data-rf-launcher': '', 'aria-expanded': items.length > 1 ? menu : undefined } : {})}
               tabIndex={front || menu ? 0 : -1}
               onClick={() => {
-                // A finger or a key spreads first; a mouse has spread already. One row has nothing to spread.
                 if (!menu && items.length > 1) setMenu(true);
                 else item.onOpen();
               }}
@@ -515,7 +463,6 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
   );
 }
 
-/** A phone: no hover. The round button sits in the foot's row; a press opens one sheet with the list. */
 function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
   const front = items[0]!;
   const drafts = items.filter((item) => item.kind === 'draft');
@@ -574,27 +521,18 @@ function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
 }
 
 interface CornerRoom {
-  /** The open thread's foot is on screen. */
   foot: boolean;
-  /** From the viewport's right to the corner's right edge, and from its bottom to the corner's bottom edge. */
   right: number;
   bottom: number;
-  /** The thread's own T6 box is open. */
   boxOpen: boolean;
-  /** Full screen, or a phone's keyboard is up. */
   hidden: boolean;
 }
 
-/** Inside a `<pre>`: a code fence's own text and highlight spans. */
 function inCodeFence(node: Node): boolean {
   const element = node.nodeType === 1 ? (node as Element) : node.parentElement;
   return element?.closest('pre') != null;
 }
 
-/**
- * Level with Send at the foot's right end: the closed row's middle, or T6's row inside an open box. Watched, not
- * polled: the page's changes (a thread opening, the box, full screen), the foot's size and the window's.
- */
 function useCornerRoom(on: boolean, phone: boolean): CornerRoom {
   const [room, setRoom] = useState<CornerRoom>({ foot: false, right: 16, bottom: 16, boxOpen: false, hidden: false });
   useLayoutEffect(() => {
