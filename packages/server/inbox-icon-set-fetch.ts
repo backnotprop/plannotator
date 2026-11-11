@@ -9,7 +9,7 @@
  *   pointer      { v: 1, sets: [{ id, name, count, manifest: "<url>" }] }
  *   manifest     { v: 1, name, count, icon: "<url with {n} or {n3}>", mirrors?: ["<url pattern>"],
  *                  names?: "<url>" | string[], nameFixes?: { [slug]: name }, start?: 1,
- *                  pixelated?, size?, mono?, zoom?, licence?, credit? }
+ *                  pixelated?, size?, mono?, zoom?, trim?, licence?, credit? }
  *   names file   a JSON array of names (number order), or { results: [{ name }] }
  *
  *   inbox/icon-sets/<set>/set.json    the manifest as kept (names resolved), written first
@@ -29,6 +29,7 @@ import { join } from "node:path";
 import type { InboxIconSet, InboxIconSetIcon, InboxIconSetListing } from "@plannotator/core/inbox-types";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { AGENT_ICON_MAX_BYTES } from "./inbox-agent-icons";
+import { trimPng } from "./inbox-icon-trim";
 
 export const INBOX_ICON_SETS_DIR = "icon-sets";
 /** Where the list of fetchable sets will live once one exists (nothing is there yet). */
@@ -198,6 +199,8 @@ interface KeptSet {
   size?: number;
   mono?: boolean;
   zoom?: number;
+  /** PNGs trimmed to their picture as they arrive (inbox-icon-trim.ts). */
+  trim?: true;
   licence?: string;
   credit?: string;
   /** The person's own pointer was on a private address when this set was kept: its icons may be too. */
@@ -404,6 +407,7 @@ export function createIconSetFetcher(options: {
       ...(raw.pixelated === true ? { pixelated: true } : {}),
       ...(typeof raw.size === "number" && Number.isSafeInteger(raw.size) && raw.size > 0 && raw.size <= 512 ? { size: raw.size } : {}),
       ...(raw.mono === true ? { mono: true } : {}),
+      ...(raw.trim === true ? { trim: true as const } : {}),
       ...(typeof raw.zoom === "number" && raw.zoom > 1 && raw.zoom <= 3 ? { zoom: Math.round(raw.zoom * 100) / 100 } : {}),
       ...(text(raw.licence, 200) ? { licence: text(raw.licence, 200) } : {}),
       ...(text(raw.credit, 400) ? { credit: text(raw.credit, 400) } : {}),
@@ -437,12 +441,13 @@ export function createIconSetFetcher(options: {
         }
         const type = sniffImageContentType(got.bytes);
         if (!type || !EXT[type]) break;
-        if (bytesKept + got.bytes.byteLength > ICON_SET_CAPS.setBytes) {
+        const bytes = kept.trim && type === "image/png" ? (trimPng(got.bytes) ?? got.bytes) : got.bytes;
+        if (bytesKept + bytes.byteLength > ICON_SET_CAPS.setBytes || bytes.byteLength > ICON_SET_CAPS.iconBytes) {
           over = true;
           break;
         }
-        bytesKept += got.bytes.byteLength;
-        writeAtomic(join(folder, `${icon.n}.${EXT[type]}`), got.bytes);
+        bytesKept += bytes.byteLength;
+        writeAtomic(join(folder, `${icon.n}.${EXT[type]}`), bytes);
         return;
       }
       complete = false;

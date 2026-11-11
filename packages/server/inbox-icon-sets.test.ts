@@ -18,7 +18,9 @@ import { INBOX_AGENT_ICONS_KEPT, INBOX_OWN_FACE, isInboxAgentFace, readInboxAgen
 import { createInboxAgentFacesFile, INBOX_AGENT_FACES_FILE } from "@plannotator/shared/inbox/agent-faces";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
-import { serveFakeIconSet, type FakeIconSet } from "../../tests/helpers/fake-icon-set";
+import { creature, serveFakeIconSet, type FakeIconSet } from "../../tests/helpers/fake-icon-set";
+import { deflateSync } from "node:zlib";
+import { decodePng, encodePng, trimPng } from "./inbox-icon-trim";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createBuiltInIconSets } from "./inbox-icon-sets";
 import { carefulGet, createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_POINTER_DEFAULT, isPrivateAddress } from "./inbox-icon-set-fetch";
@@ -306,5 +308,56 @@ describe("a fetchable set", () => {
     for (const bad of ["file:///etc/passwd", "data:image/png;base64,AAAA", "ftp://example.com/x.png", "http://user:pw@127.0.0.1/x"]) expect(await carefulGet(bad, 1024, policy)).toEqual({ ok: false, reason: "bad_url" });
     for (const ip of ["127.0.0.1", "10.1.2.3", "192.168.1.1", "172.20.0.1", "169.254.169.254", "100.100.1.1", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "0.0.0.0"]) expect(isPrivateAddress(ip)).toBe(true);
     for (const ip of ["93.184.216.34", "1.1.1.1", "2606:4700::1111"]) expect(isPrivateAddress(ip)).toBe(false);
+  });
+});
+
+describe("trimming a fetched set's PNGs", () => {
+  /** A palette PNG (colour type 3, 8 bits, a tRNS clear index 0) of `size` px with a w × h block at (x, y). */
+  function palettePng(size: number, x0: number, y0: number, w: number, h: number): Uint8Array {
+    const rgba = new Uint8Array(size * size * 4);
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) rgba.set([200, 40, 40, 255], (y * size + x) * 4);
+    const rgbaPng = encodePng(size, size, rgba);
+    // Rewrite as a palette PNG: index 1 for the block, 0 (clear) elsewhere.
+    const raw = new Uint8Array(size * (size + 1));
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) raw[y * (size + 1) + 1 + x] = 1;
+    const chunk = (name: string, body: Uint8Array) => {
+      const out = new Uint8Array(12 + body.length);
+      const view = new DataView(out.buffer);
+      view.setUint32(0, body.length);
+      out.set(new TextEncoder().encode(name), 4);
+      out.set(body, 8);
+      let c = 0xffffffff;
+      for (const b of out.subarray(4, 8 + body.length)) {
+        c ^= b;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      view.setUint32(8 + body.length, (c ^ 0xffffffff) >>> 0);
+      return out;
+    };
+    const head = rgbaPng.slice(16, 29);
+    head[9] = 3;
+    const parts = [rgbaPng.slice(0, 8), chunk("IHDR", head), chunk("PLTE", new Uint8Array([0, 0, 0, 200, 40, 40])), chunk("tRNS", new Uint8Array([0])), chunk("IDAT", new Uint8Array(deflateSync(raw))), chunk("IEND", new Uint8Array())];
+    return new Uint8Array(Buffer.concat(parts));
+  }
+
+  test("a sprite small in a large clear square comes out trimmed to its picture, centred in a square", () => {
+    for (const bytes of [palettePng(96, 30, 40, 24, 36), creature(5)]) {
+      const before = decodePng(bytes)!;
+      const trimmed = trimPng(bytes);
+      if (before.width === 16) {
+        // The generated creature nearly fills its 16 px: nothing worth trimming, kept as it came.
+        expect(trimmed === null || decodePng(trimmed)!.width <= 16).toBe(true);
+        continue;
+      }
+      const after = decodePng(trimmed!)!;
+      expect([after.width, after.height]).toEqual([38, 38]);
+      // The block's pixels, all of them, in the middle; the corners clear.
+      const opaque = [...Array(after.width * after.height).keys()].filter((i) => after.rgba[i * 4 + 3]! > 0).length;
+      expect(opaque).toBe(24 * 36);
+      expect(after.rgba[3]).toBe(0);
+    }
+    // Not a PNG, or nothing to trim: kept as it came.
+    expect(trimPng(new TextEncoder().encode("<html></html>"))).toBeNull();
+    expect(trimPng(encodePng(8, 8, new Uint8Array(8 * 8 * 4).fill(255)))).toBeNull();
   });
 });
