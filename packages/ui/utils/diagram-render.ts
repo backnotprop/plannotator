@@ -526,9 +526,32 @@ function mermaidFailure(error: unknown, chunkFailed: boolean): DiagramRenderResu
   };
 }
 
+/**
+ * Mermaid renders into a temporary `<div id="d{id}">` (an `<iframe
+ * id="i{id}">` when sandboxed) that it appends to `document.body`. When the
+ * source does not parse, or a diagram-type chunk does not load (Mermaid
+ * reports both as a parse failure), it draws its own "Syntax error in text"
+ * graphic there and throws WITHOUT removing it; a draw error does the same.
+ * Each render has its own id, so nothing ever removed it: every failed render
+ * left that graphic at the bottom of the page, under the app, one more per
+ * re-render (a theme change). The block shows the failure itself, so the
+ * temporary nodes go after every failed render.
+ */
+function removeMermaidLeftovers(renderId: string): void {
+  if (typeof document === 'undefined') return;
+  document.getElementById(`d${renderId}`)?.remove();
+  document.getElementById(`i${renderId}`)?.remove();
+}
+
 /** One render; a throw (a parse error, a chunk that did not load) is the caller's. */
 async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
-  const { svg } = await runtime.render(renderId, source);
+  let svg: string;
+  try {
+    ({ svg } = await runtime.render(renderId, source));
+  } catch (error) {
+    removeMermaidLeftovers(renderId);
+    throw error;
+  }
   const svgNode = sanitizeDiagramSvg(svg);
   if (svgNode === null) {
     return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };

@@ -297,6 +297,43 @@ describe('Mermaid diagram-type chunk', () => {
 });
 
 /**
+ * Mermaid renders into a temporary `#d{id}` node on `document.body` and, on a
+ * parse failure (a diagram-type chunk that did not load is reported the same
+ * way) or a draw error, throws without removing it, with its "Syntax error in
+ * text" graphic inside. What regresses: that graphic piles up at the bottom of
+ * the page, under the app, one per failed render (the Inbox on an iPad).
+ * The stand-in leaves the node exactly where Mermaid 12.2 leaves it.
+ */
+describe('Mermaid failure leaves nothing outside the block', () => {
+  test.skipIf(!hasDom)('failed renders of several diagrams leave no node on document.body', async () => {
+    const leaky = {
+      initialize() {},
+      render: async (id: string) => {
+        const div = document.createElement('div');
+        div.id = `d${id}`;
+        div.textContent = 'Syntax error in text';
+        document.body.appendChild(div);
+        throw new Error('Parse error on line 2');
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(leaky), { retryDelayMs: RETRY_DELAY_MS });
+    const before = Array.from(document.body.children);
+    const el = await mount(
+      <>
+        <MermaidBlock block={mermaidBlock} />
+        <MermaidBlock block={{ ...mermaidBlock, id: 'm2' }} />
+      </>,
+    );
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.textContent).toContain('Parse error on line 2');
+    const added = Array.from(document.body.children).filter((node) => !before.includes(node) && node !== el);
+    expect(added.map((node) => node.id)).toEqual([]);
+    expect(document.body.textContent).not.toContain('Syntax error in text');
+  });
+});
+
+/**
  * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not
  * render shows its plain fence, never the red panel; a renderer that could
  * not load still shows the panel and its Retry, which recovers the diagram.
