@@ -27,6 +27,7 @@ import { parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/for
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { loadRefCard } from '@plannotator/ui/utils/refCard';
 import { inboxApi } from '../api';
+import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
 import { CountBadge, countBadgeText } from '../components/CountBadge';
 import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus } from './model';
@@ -47,30 +48,55 @@ export function PullsMarkIcon({ summary, size }: { summary: InboxThreadPullsSumm
   );
 }
 
-/** A thread's PRs, read when `active` and again whenever a `thread_pull` line names the thread. */
-export function useThreadPulls(threadId: string, active: boolean, read: (threadId: string) => Promise<InboxThreadPullsAnswer> = inboxApi.threadPulls) {
-  const [state, setState] = useState<{ thread: string; answer: InboxThreadPullsAnswer | null }>({ thread: threadId, answer: null });
+/**
+ * A thread's PRs, read when `active` and again whenever a `thread_pull` line (or `event: thread-pulls`) names the
+ * thread. A read is aborted when a newer one starts or `active` ends (the hover left, the thread closed), so an
+ * unanswered read never holds one of the browser's few connections to the Inbox. `failed`: the last read got no
+ * answer and nothing is known yet; the card says so instead of loading for ever.
+ */
+export function useThreadPulls(threadId: string, active: boolean, read: (threadId: string, signal?: AbortSignal) => Promise<InboxThreadPullsAnswer> = inboxApi.threadPulls) {
+  const [state, setState] = useState<{ thread: string; answer: InboxThreadPullsAnswer | null; failed: boolean }>({ thread: threadId, answer: null, failed: false });
   const seq = useRef(0);
+  const inFlight = useRef<AbortController | null>(null);
   const load = useCallback(() => {
     const mine = ++seq.current;
-    read(threadId)
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    // A new read: "Loading…" again until it answers.
+    setState((now) => (now.failed ? { ...now, failed: false } : now));
+    read(threadId, controller.signal)
       .then((answer) => {
         // Only the newest read lands.
-        if (mine === seq.current) setState({ thread: threadId, answer });
+        if (mine === seq.current) setState({ thread: threadId, answer, failed: false });
       })
       .catch(() => {
-        // A failed read keeps what shows; the next event reads again.
+        // A read this hook aborted says nothing. A failed one keeps what shows; with nothing shown yet, the card says
+        // so (hovering again, or the next event, reads again).
+        if (mine !== seq.current || controller.signal.aborted) return;
+        setState((now) => (now.thread === threadId && now.answer ? now : { thread: threadId, answer: null, failed: true }));
+      })
+      .finally(() => {
+        if (inFlight.current === controller) inFlight.current = null;
       });
   }, [threadId, read]);
   useEffect(() => {
     if (!active) return;
     load();
-    return threadPullsBus.subscribe((change) => {
+    const unsubscribe = threadPullsBus.subscribe((change) => {
       if (change === '*' || change === threadId) load();
     });
+    return () => {
+      unsubscribe();
+      // The card closed (or the thread changed): its read is no longer wanted.
+      seq.current++;
+      inFlight.current?.abort();
+      inFlight.current = null;
+    };
   }, [active, threadId, load]);
   const answer = state.thread === threadId ? state.answer : null;
-  return { answer, setAnswer: (next: InboxThreadPullsAnswer) => setState({ thread: threadId, answer: next }), reload: load };
+  const failed = state.thread === threadId && !answer && state.failed;
+  return { answer, failed, setAnswer: (next: InboxThreadPullsAnswer) => setState({ thread: threadId, answer: next, failed: false }), reload: load };
 }
 
 /** The card's open state and its pointer rules: a hover rests REF_CARD_DELAY_MS, leaving closes after REF_CARD_CLOSE_MS. */
@@ -300,7 +326,7 @@ function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRem
  * The card's body: the PRs (one: the hover card; several: the list), then the person's edit, an Add field and,
  * after a removal, its Undo.
  */
-export function PullsCard({ threadId, answer, onAnswer, sheet, onClose, adding = false }: { threadId: string; answer: InboxThreadPullsAnswer | null; onAnswer: (answer: InboxThreadPullsAnswer) => void; sheet: boolean; onClose: () => void; adding?: boolean }) {
+export function PullsCard({ threadId, answer, failed = false, onAnswer, sheet, onClose, adding = false }: { threadId: string; answer: InboxThreadPullsAnswer | null; failed?: boolean; onAnswer: (answer: InboxThreadPullsAnswer) => void; sheet: boolean; onClose: () => void; adding?: boolean }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -346,6 +372,11 @@ export function PullsCard({ threadId, answer, onAnswer, sheet, onClose, adding =
         </div>
       ) : answer ? (
         <div className="ib-prpop-empty">No pull requests on this thread.</div>
+      ) : failed ? (
+        // The read got no answer: said plainly, never "Loading…" for ever. Hovering again reads again.
+        <div className="ib-prpop-empty" role="status" data-pr-failed="">
+          {INBOX_UNREACHABLE}
+        </div>
       ) : (
         <div className="ib-prpop-empty" aria-busy="true">
           Loading…
@@ -423,7 +454,7 @@ export function PullsCard({ threadId, answer, onAnswer, sheet, onClose, adding =
  */
 export function RowPullsMark({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary | undefined }) {
   const { open, setOpen, hover, cardHover, close } = usePopover();
-  const { answer, setAnswer } = useThreadPulls(threadId, !!open);
+  const { answer, failed, setAnswer } = useThreadPulls(threadId, !!open);
   if (!summary) return null;
   // Once read, the card's answer is the newest (the row's summary follows on the next list read).
   const shown = (answer && pullsSummaryOf(answer)) ?? summary;
@@ -450,7 +481,7 @@ export function RowPullsMark({ threadId, summary }: { threadId: string; summary:
       </span>
       {open && (
         <PullsPopover anchor={open.anchor} sheet={open.sheet} label={words} onClose={close} cardHover={cardHover}>
-          <PullsCard threadId={threadId} answer={answer} onAnswer={setAnswer} sheet={open.sheet} onClose={close} />
+          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={close} />
         </PullsPopover>
       )}
     </>
@@ -466,7 +497,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const button = useRef<HTMLButtonElement>(null);
   // The thread is open: its PRs are read now (states older than 30 s again), and on every change.
-  const { answer, setAnswer } = useThreadPulls(threadId, true);
+  const { answer, failed, setAnswer } = useThreadPulls(threadId, true);
   const shown = answer ? pullsSummaryOf(answer) : summary;
   useEffect(() => {
     if (adding && button.current) setOpen({ anchor: button.current, sheet: coarse(), pinned: true });
@@ -502,7 +533,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
       </button>
       {open && (
         <PullsPopover anchor={open.anchor} sheet={open.sheet} label={words} onClose={closeAll} cardHover={cardHover}>
-          <PullsCard threadId={threadId} answer={answer} onAnswer={setAnswer} sheet={open.sheet} onClose={() => closeAll(true)} adding={adding} />
+          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={() => closeAll(true)} adding={adding} />
         </PullsPopover>
       )}
     </>
