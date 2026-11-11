@@ -3,6 +3,7 @@ import { keepAgentFace, keepOwnPicture, removeOwnPicture, type AgentFaceRef } fr
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
 import { AnimateIt } from './AnimateIt';
+import { fitPicture } from './fitPicture';
 import { ownIconSrc, useOwnIcons } from './ownIcons';
 
 /**
@@ -22,7 +23,9 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
     if (!file || busy) return;
     setBusy(true);
     setRefused(null);
-    const refusal = await keepOwnPicture(agent, file);
+    // A still photo over the limit (a phone's) is shrunk here first (fitPicture.ts); the upload checks what comes out.
+    const fitted = await fitPicture(file);
+    const refusal = 'refused' in fitted ? fitted.refused : await keepOwnPicture(agent, fitted.file);
     setBusy(false);
     if (refusal) setRefused(refusal);
     else onDone();
