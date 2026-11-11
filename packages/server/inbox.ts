@@ -235,6 +235,8 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
+import { createBuiltInIconSets, createInboxIconSets } from "./inbox-icon-sets";
+import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./inbox-icon-set-fetch";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
@@ -4349,6 +4351,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
   });
   const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
+  // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
+  const builtInIconSets = createBuiltInIconSets();
+  const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
+  // A download a stop cut short goes on (only one the person started; nothing is asked otherwise).
+  iconSetFetcher.resume();
+  const iconSets = createInboxIconSets({ builtIn: builtInIconSets, fetcher: iconSetFetcher, serverSession, localOnly: () => localOnly(), readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -5747,6 +5755,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
       const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
       if (iconed) return iconed;
+      // Icon sets for agents' icons ("Sets"): built-in ones to any window, fetched ones and downloads to the owner's.
+      const setIconed = await iconSets.route(req, url, ownerOrLocal(req, via));
+      if (setIconed) return setIconed;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
