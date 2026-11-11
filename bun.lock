@@ -25,11 +25,11 @@
     },
     "apps/cline-plugin": {
       "name": "@plannotator/cline",
-      "version": "0.28.61",
+      "version": "0.28.60",
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.28.61",
+      "version": "0.28.60",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -132,7 +132,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.28.61",
+      "version": "0.28.60",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -151,7 +151,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.28.61",
+      "version": "0.28.60",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.6.4",
@@ -388,7 +388,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.28.61",
+      "version": "0.28.60",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.6.4",
