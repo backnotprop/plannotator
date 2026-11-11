@@ -17,6 +17,7 @@
  * written: the window's CSP (`img-src 'self' data: blob:`) does not load them.
  */
 import { inboxUrl, machineOf } from './inboxUrl';
+import { commentPictureUrl } from './commentPictureFiles';
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
 import { tourAssetUrl, tourMarkupUrl } from './tour/assets';
 
@@ -86,6 +87,9 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   // Inbox's data dir, shown back by its file name only.
   const markup = inboxMarkupUrl(path);
   if (markup) return markup;
+  // A picture added to a comment, before its Send: the person's own upload, by its id (commentPictures.tsx).
+  const picture = commentPictureUrl(path);
+  if (picture) return picture;
   // A drawing the person made in the tour (kept in memory only): never for a real message's body, and only while the tour holds it.
   if (path.startsWith(TOUR_MARKUP_BASE) && !base?.startsWith(MESSAGE_BASE_PREFIX)) {
     const kept = tourMarkupUrl(path);

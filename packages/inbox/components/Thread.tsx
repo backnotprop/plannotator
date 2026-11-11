@@ -36,6 +36,8 @@ import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { withPictures } from '../commentPictureFiles';
+import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
@@ -599,6 +601,7 @@ export function MessageBody({
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.
   const ownReply = message.author.kind === 'person';
+  const pictures = useCommentPictures();
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
@@ -1150,7 +1153,7 @@ export function MessageBody({
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
-        allowImages={false}
+        allowImages={pictures}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
         // A click on a word of a message makes nothing (the owner, 2026-11-10): a thread is read and clicked
@@ -4810,6 +4813,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
+        const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
           words: last ? words : '',
@@ -4820,8 +4824,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
-          // The pasted files ride the reply that carries the words, as attachments.
-          ...(last && uploads.length > 0 ? { uploads } : {}),
+          // The pasted files ride the reply that carries the words, and each comment's pictures the reply carrying it, as attachments.
+          ...(files.length > 0 ? { uploads: files } : {}),
           ...(tags.length > 0 ? { tags } : {}),
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
@@ -6212,6 +6216,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
   return (
+    <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>
     <>
     <section
@@ -7659,6 +7664,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     )}
     </>
     </ReuseContext.Provider>
+    </CommentPictures>
   );
 }
 

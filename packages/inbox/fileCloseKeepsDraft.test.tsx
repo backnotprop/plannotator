@@ -25,6 +25,7 @@ import { clearFileDrafts, fileDraftKey, peekFileDrafts } from './fileCommentDraf
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { CommentPictures } = (hasDom ? await import('./commentPictures') : {}) as typeof import('./commentPictures');
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const bridge = hasDom ? await import('@plannotator/ui/components/html-viewer/bridge-script') : null;
@@ -927,4 +928,29 @@ test.skipIf(!hasDom)('an image comment saved as its file closes is a comment, ne
   await act(async () => showPane(true));
   await waitFor(() => expect(row()).not.toBeNull());
   expect(row()!.value).toBe('');
+});
+
+// What would regress: a picture button where nothing takes the picture (the tour and the phone app's surface have no
+// CommentPictures above them: no uploads), or none on a thread's file, where the picture rides the reply.
+const pictureButton = () => document.querySelector('[data-comment-popover] button[aria-label="Attachments"]');
+test.skipIf(!hasDom)('a file\'s comment box offers no picture button where nothing can upload it (the tour)', async () => {
+  serve();
+  await render(<Pane start={scope} steps={[]} />);
+  await commentOnPhrase('Partial refunds stay out of v1.');
+  expect(pictureButton()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a file\'s comment box in a thread offers the picture button, with no typed path or URL', async () => {
+  serve();
+  await render(
+    <CommentPictures thread="thr_01K7AAAAAAAAAAAAAAAAAAAAAA" records={[]}>
+      <Pane start={scope} steps={[]} />
+    </CommentPictures>,
+  );
+  await commentOnPhrase('Partial refunds stay out of v1.');
+  expect(pictureButton()).not.toBeNull();
+  await act(async () => (pictureButton() as HTMLButtonElement).click());
+  // The picture is uploaded to the Inbox or not at all: a path typed here would name a file the agent's reply cannot carry.
+  expect(document.querySelector('input[placeholder="Paste path or URL..."]')).toBeNull();
+  expect(document.body.textContent).toContain('Drop image or click to browse');
 });

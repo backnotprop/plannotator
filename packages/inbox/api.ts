@@ -60,6 +60,7 @@ import type {
   InboxVoiceSettings,
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
+import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
@@ -929,6 +930,11 @@ export function idsIn(value: unknown, out: Set<string> = new Set(), depth = 0, o
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (typeof item === 'string') {
       if (ROUTED_ID_KEYS.has(key) && /^[A-Za-z0-9_-]{16,80}$/.test(item) && !item.startsWith('ibx_')) out.add(item);
+      // A comment's picture (`<upl id>/<file>`): its upload is on the machine the comment is.
+      else if (key === 'path') {
+        const picture = inboxCommentPicture(item);
+        if (picture) out.add(picture.upload_id);
+      }
     } else idsIn(item, out, depth + 1, onlyLocal);
   }
   return out;
