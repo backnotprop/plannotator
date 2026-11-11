@@ -620,6 +620,17 @@ button.ib-mut { border-radius: 6px; }
 .ib-pinrow:hover .ib-pin, .ib-pinrow:has(:focus-visible) .ib-pin, .ib-pinrow[data-menu] .ib-pin { padding-right: 32px; }
 .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: hidden; position: absolute; }
 .ib-pinrow[data-menu] .ib-pmore { color: var(--foreground); }
+/* A screen that cannot hover (an iPad with no trackpad): ⋯ and "+" are always shown, muted, after the count or the
+   state, which stay (as on a phone, whose rules below take over at its size). A tap's hover then shows nothing new,
+   so iPadOS never takes the row's first tap as a hover. A long name gives way: it ends in "…" before them. */
+@media (hover: none) {
+  .pn-inbox :is(.ib-projrow, .ib-pinrow) .ib-pmore, .pn-inbox .ib-projrow .ib-pplus { opacity: 1; }
+  .ib-projrow > .ib-proj, .ib-projrow:hover > .ib-proj, .ib-projrow:has(:focus-visible) > .ib-proj, .ib-projrow[data-menu] > .ib-proj { padding-right: 32px; }
+  .ib-projrow[data-plus] > .ib-proj, .ib-projrow[data-plus]:hover > .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) > .ib-proj, .ib-projrow[data-plus][data-menu] > .ib-proj { padding-right: 58px; }
+  .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
+  .ib-pinrow > .ib-pin, .ib-pinrow:hover > .ib-pin, .ib-pinrow:has(:focus-visible) > .ib-pin, .ib-pinrow[data-menu] > .ib-pin { padding-right: 32px; }
+  .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: visible; position: static; }
+}
 /* A pinned thread's row in the list: a small pin always on the right, beside the counts (the owner, 2026-10-31).
    On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
    preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).

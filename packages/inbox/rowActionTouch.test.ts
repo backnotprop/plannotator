@@ -8,6 +8,11 @@
  * from the list took two taps: the first showed "Mark read", the second opened
  * the thread. Chromium does not do this, so the browser tests cannot see it:
  * this file reads the sheet instead. Keyboard focus still shows the action.
+ *
+ * The sidebar's Projects and Starred rows take the other way out (the owner,
+ * 2026-11-11): on a screen that cannot hover (`@media (hover: none)`) their ⋯
+ * and + are always shown and the count or state stays, so a tap's hover shows
+ * nothing new; with a mouse they still appear on hover.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -108,5 +113,45 @@ describe("a list row's hover action on a touch screen", () => {
     );
     expect(shows.length).toBe(1);
     expect(shows[0]!.selectors).toContain('.ib-rw[data-action-focus] .ib-ract');
+  });
+});
+
+/** An at-rule that holds only where the pointer cannot hover. */
+const noHover = (prelude: string) => /^@media\b/.test(prelude) && /\(\s*hover\s*:\s*none\s*\)/.test(prelude) && !prelude.includes(',');
+
+/** What a sidebar row must show where the pointer cannot hover: a selector, and a declaration a rule for it sets. */
+const SIDEBAR_ON_TOUCH: Array<{ selector: string; sets: RegExp; why: string }> = [
+  { selector: '.pn-inbox :is(.ib-projrow, .ib-pinrow) .ib-pmore', sets: /opacity:\s*1\b/, why: 'a project or starred row\'s ⋯' },
+  { selector: '.pn-inbox .ib-projrow .ib-pplus', sets: /opacity:\s*1\b/, why: "a project row's +" },
+  { selector: '.ib-projrow:hover .ib-proj .ib-n', sets: /clip-path:\s*none/, why: "a project's count, under a tap's hover" },
+  { selector: '.ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch)', sets: /visibility:\s*visible/, why: "a starred row's state, under a tap's hover" },
+];
+
+/** The entries of SIDEBAR_ON_TOUCH no `(hover: none)` rule in the sheet sets. */
+export function sidebarHiddenOnTouch(css: string): string[] {
+  const touch = styleRules(css).filter((rule) => rule.within.some(noHover));
+  return SIDEBAR_ON_TOUCH.filter(({ selector, sets }) => !touch.some((rule) => rule.selectors.includes(selector) && sets.test(rule.body))).map((e) => e.why);
+}
+
+describe("the sidebar's ⋯ and + on a touch screen", () => {
+  test('the check catches a sheet that hides them until hover, and passes one that shows them', () => {
+    const before = '.pn-inbox .ib-pmore { opacity: 0; } .ib-projrow:hover .ib-pmore { opacity: 1; }';
+    expect(sidebarHiddenOnTouch(before)).toHaveLength(SIDEBAR_ON_TOUCH.length);
+    const phoneOnly = `@media (max-width: 767px), (hover: none) { ${SIDEBAR_ON_TOUCH.map((e) => `${e.selector} { x: 1; }`).join(' ')} }`;
+    expect(sidebarHiddenOnTouch(phoneOnly)).toHaveLength(SIDEBAR_ON_TOUCH.length);
+  });
+
+  test("the Inbox's sheet always shows them, with the count and state, where the pointer cannot hover", () => {
+    expect(sidebarHiddenOnTouch(sheet)).toEqual([]);
+  });
+
+  test('with a mouse they still show on hover, and stay hidden until then', () => {
+    const plain = styleRules(sheet).filter((rule) => rule.within.length === 0);
+    const sets = (selector: string, decl: RegExp) => plain.some((rule) => rule.selectors.includes(selector) && decl.test(rule.body));
+    expect(sets('.pn-inbox .ib-pmore', /opacity:\s*0\b/)).toBe(true);
+    expect(sets('.pn-inbox .ib-pplus', /opacity:\s*0\b/)).toBe(true);
+    expect(sets('.ib-projrow:hover .ib-pmore', /opacity:\s*1\b/)).toBe(true);
+    expect(sets('.ib-pinrow:hover .ib-pmore', /opacity:\s*1\b/)).toBe(true);
+    expect(sets('.ib-projrow:hover .ib-pplus', /opacity:\s*1\b/)).toBe(true);
   });
 });
