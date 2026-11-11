@@ -1,5 +1,5 @@
 /**
- * "Your own…": a picture the person uploads for an agent's icon (agents/ownIcons.ts, OwnIconPanel.tsx, icons.tsx
+ * "Your own…": a picture the person uploads for an agent's icon (agents/ownIcons.ts, OwnIconsBody.tsx, AgentIconDialog.tsx, icons.tsx
  * `HostMark`, motion.ts), through the Inbox's real routes (packages/server/inbox-agent-icons.ts and
  * inbox-agent-faces.ts) on a temp folder, called through a fetch stand-in: no Inbox is started.
  *
@@ -167,7 +167,7 @@ async function openOwn(host: Element) {
   expect(place?.getAttribute('aria-label')).toBe('Your own…');
   act(() => place!.click());
   await settle();
-  const panel = document.querySelector<HTMLElement>('.am-own[data-open]');
+  const panel = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]');
   expect(panel).not.toBeNull();
   return panel!;
 }
@@ -194,7 +194,7 @@ test.if(hasDom)('a pasted picture is kept and shows on the agent everywhere at o
   for (const s of OUTSIDE) expect({ s, src: shown(at(host, s)) }).toEqual({ s, src: `/api/inbox/agent-icons/${id}?still=1` });
   expect(shown(at(host, 'other'))).toBe('own mark');
   // The panel closed and every window heard it (the wire names the picture).
-  expect(document.querySelector('.am-own[data-open]')).toBeNull();
+  expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).toBeNull();
   expect(events.at(-1)!.icons!.map((icon) => icon.id)).toEqual([id]);
   expect(events.at(-1)!.faces.ses_a!.face).toBe(`own:${id}`);
 });

@@ -100,13 +100,13 @@ async function openFan(page: Page, agentId: string) {
 async function openSets(page: Page, agentId: string): Promise<Locator> {
   await openFan(page, agentId);
   await page.locator('.am-fan[data-open] [data-face-choice="sets"]').click();
-  const panel = page.locator('.am-sets[data-open]');
+  const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
   await expect(panel).toBeVisible();
   return panel;
 }
 async function closeSets(page: Page) {
   await page.keyboard.press('Escape');
-  await expect(page.locator('.am-sets[data-open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
   await page.mouse.move(1000, 850);
 }
 
@@ -221,7 +221,7 @@ test('Sets: the pointer is read only when Sets opens; the largest set opens fast
   await page.emulateMedia({ colorScheme: 'light' });
   expect(fake.total()).toBe(0);
   await page.keyboard.press('Enter');
-  await expect(page.locator('.am-sets[data-open]')).toBeVisible();
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toBeVisible();
   await expect.poll(() => fake.hits.get('/index.json') ?? 0).toBe(1);
   // Only the pointer: nothing of the set itself until "Get".
   expect(fake.total()).toBe(1);
@@ -246,7 +246,7 @@ test('Sets: the pointer is read only when Sets opens; the largest set opens fast
         const t0 = performance.now();
         document.querySelector<HTMLButtonElement>('.am-fan[data-open] [data-face-choice="sets"]')!.click();
         const until = t0 + 20_000;
-        while (document.querySelectorAll('.am-sets[data-open] .am-sets-i').length < 419 && performance.now() < until) await frame();
+        while (document.querySelectorAll('dialog[data-dialog="agent-icon"][open] .am-sets-i').length < 419 && performance.now() < until) await frame();
         const grid = performance.now() - t0;
         const scroller = document.querySelector('.am-sets-scroll')!.getBoundingClientRect();
         while (performance.now() < until) {
@@ -301,7 +301,7 @@ test('a chosen icon shows everywhere; no row changes size; pixel art at whole mu
     await page.locator(`.am-sets-tab[data-set="${set}"]`).click();
     await page.locator('.am-sets-q').fill(query);
     await page.locator('.am-sets-i').first().click();
-    await expect(page.locator('.am-sets[data-open]')).toHaveCount(0);
+    await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
     await expect(sidebarMark(page, ids[key]!).locator('[data-agent-mark]')).toHaveAttribute('data-face', AGENTS.find((a) => a.key === key)!.face);
   }
   await page.mouse.move(1000, 850);
@@ -348,7 +348,7 @@ test('the credits line under game-icons.net', async () => {
   await expect(page.locator('.am-sets-credit')).toHaveText('Icons by game-icons.net authors · CC BY 3.0 · Credits');
   const credits = await page.request.get(new URL((await page.locator('.am-sets-credit a').getAttribute('href'))!, world.url).toString());
   expect(await credits.text()).toContain('Icons made by Delapouite');
-  await both(page, 'credits', page.locator('.am-sets[data-open]'));
+  await both(page, 'credits', page.locator('dialog[data-dialog="agent-icon"][open]'));
   await closeSets(page);
 });
 
@@ -358,20 +358,93 @@ test('a fetchable set: "Get", the grid filling in, then a set like the others', 
   await openSets(page, ids.blobs!);
   await page.locator('.am-sets-tab[data-set="blobs"]').click();
   await expect(page.locator('.am-sets-get')).toContainText('64 icons');
-  await both(page, 'fetch-1-get', page.locator('.am-sets[data-open]'));
+  await both(page, 'fetch-1-get', page.locator('dialog[data-dialog="agent-icon"][open]'));
   await page.locator('[data-get="blobs"]').click();
   await expect.poll(async () => page.locator('.am-sets-i:not(:disabled)').count(), { timeout: 20_000 }).toBeGreaterThan(8);
-  await shot(page, 'fetch-2-filling-light', page.locator('.am-sets[data-open]'));
+  await shot(page, 'fetch-2-filling-light', page.locator('dialog[data-dialog="agent-icon"][open]'));
   await expect(page.locator('.am-sets-get')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.locator('.am-sets-i:not(:disabled)')).toHaveCount(64);
   await page.waitForTimeout(400);
-  await both(page, 'fetch-3-done', page.locator('.am-sets[data-open]'));
+  await both(page, 'fetch-3-done', page.locator('dialog[data-dialog="agent-icon"][open]'));
   await page.locator('.am-sets-i').nth(1).click();
   await expect(sidebarMark(page, ids.blobs!).locator('[data-agent-mark]')).toHaveAttribute('data-face', 'set:blobs/2');
   await expect(page.locator(`[data-thread-id="${world.threads.blobs}"] .ib-set img[src="/api/inbox/icon-sets/blobs/2"]`).first()).toBeVisible();
   // Every icon asked of the fake server once; the window itself never reached it.
   for (let n = 1; n <= 64; n++) expect(fake.hits.get(`/icons/${n}.png`)).toBe(1);
   expect(world.outside).toEqual([]);
+});
+
+test('the dialog: in the middle of the window, picking applies and closes, Escape closes, focus returns to the face', async () => {
+  const { page } = world;
+  const ids = await agentIds(page);
+  const before = await rowBoxes(page);
+  // "Your own…" from the fan: the Inbox's dialog, centred, naming the agent with its icon now.
+  await openFan(page, ids.noto!);
+  await page.locator('.am-fan[data-open] [data-face-choice="own"]').click();
+  const dialog = page.locator('dialog[data-dialog="agent-icon"][open]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('h2')).toHaveText('noto');
+  await expect(dialog.locator('.ib-agi-mark .ib-set img')).toHaveAttribute('src', '/api/inbox/icon-sets/noto-3d/fox');
+  const box = (await dialog.boundingBox())!;
+  const view = page.viewportSize()!;
+  expect(Math.abs(box.x + box.width / 2 - view.width / 2)).toBeLessThan(2);
+  expect(Math.abs(box.y + box.height / 2 - view.height / 2)).toBeLessThan(2);
+  expect(box.width).toBeGreaterThan(600);
+  await both(page, 'dialog-your-own');
+  // Escape: closed, focus back on the agent's face, nothing changed.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(sidebarMark(page, ids.noto!)).toBeFocused();
+  // "Sets": wider grid; picking applies at once and closes; focus back on the face.
+  await openFan(page, ids.noto!);
+  await page.locator('.am-fan[data-open] [data-face-choice="sets"]').click();
+  await expect(dialog.locator('.am-sets-q')).toBeFocused();
+  await dialog.locator('.am-sets-tab[data-set="tiny-creatures"]').click();
+  await page.waitForTimeout(300);
+  await both(page, 'dialog-sets');
+  const columns = await dialog.locator('.am-sets-g').evaluate((g) => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+  expect(columns).toBeGreaterThanOrEqual(10);
+  await dialog.locator('.am-sets-i').nth(5).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(sidebarMark(page, ids.noto!).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^set:tiny-creatures\//);
+  await expect(sidebarMark(page, ids.noto!)).toBeFocused();
+  // A click outside closes it too.
+  await openFan(page, ids.noto!);
+  await page.locator('.am-fan[data-open] [data-face-choice="sets"]').click();
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(view.width - 10, view.height - 10);
+  await expect(dialog).toHaveCount(0);
+  expect(await rowBoxes(page)).toEqual(before);
+  // Back to the fox for the shots that follow.
+  await openSets(page, ids.noto!);
+  await dialog.locator('.am-sets-tab[data-set="noto-3d"]').click();
+  await dialog.locator('.am-sets-q').fill('fox');
+  await dialog.locator('.am-sets-i').first().click();
+  await page.mouse.move(1000, 850);
+});
+
+test('phone: the dialog is a full-height sheet', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  await page.goto(world.url);
+  await expect(page.locator(`[data-thread-id="${world.threads.dcss}"]`).first()).toBeVisible();
+  await page.getByRole('button', { name: /Toggle Sidebar/ }).first().click();
+  const ids = await agentIds(page);
+  await sidebarMark(page, ids.tiny!).focus();
+  await page.keyboard.press('Enter');
+  await page.locator('.am-fan[data-open] [data-face-choice="sets"]').click();
+  const dialog = page.locator('dialog[data-dialog="agent-icon"][open]');
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(400);
+  const box = (await dialog.boundingBox())!;
+  expect(box.width).toBe(390);
+  expect(Math.round(box.y + box.height)).toBe(844);
+  expect(box.height).toBeGreaterThan(780);
+  await both(page, 'dialog-phone-sets');
+  await dialog.locator('[data-agi-place="own"]').click();
+  await page.waitForTimeout(200);
+  await both(page, 'dialog-phone-your-own');
+  await context.close();
 });
 
 test('phone and other screens: the icons at phone size, pixel art at whole multiples on 1x and 3x', async ({ browser }) => {

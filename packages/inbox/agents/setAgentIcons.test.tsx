@@ -1,5 +1,5 @@
 /**
- * "Sets": an icon from a set as an agent's icon (agents/iconSets.ts, SetsPanel.tsx, icons.tsx `HostMark`, motion.ts),
+ * "Sets": an icon from a set as an agent's icon (agents/iconSets.ts, SetsBody.tsx, AgentIconDialog.tsx, icons.tsx `HostMark`, motion.ts),
  * through the Inbox's real routes (packages/server/inbox-icon-sets.ts, inbox-agent-faces.ts) on a temp folder, called
  * through a fetch stand-in: no Inbox is started. The fetchable set comes from a local fake server
  * (tests/helpers/fake-icon-set.ts, generated pictures on 127.0.0.1).
@@ -41,7 +41,7 @@ const { ReplyRecipient } = (hasDom ? await import('../components/ReplyRecipient'
 const { TagStack } = (hasDom ? await import('../components/TagPicker') : {}) as typeof import('../components/TagPicker');
 const faces = (hasDom ? await import('./agentFaces') : {}) as typeof import('./agentFaces');
 const sets = (hasDom ? await import('./iconSets') : {}) as typeof import('./iconSets');
-const panel = (hasDom ? await import('./SetsPanel') : {}) as typeof import('./SetsPanel');
+const panel = (hasDom ? await import('./SetsBody') : {}) as typeof import('./SetsBody');
 const art = (hasDom ? await import('./faceArtLoad') : {}) as typeof import('./faceArtLoad');
 const motion = (hasDom ? await import('./motion') : {}) as typeof import('./motion');
 const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
@@ -158,7 +158,7 @@ async function openSets(host: Element) {
   expect(place?.getAttribute('aria-label')).toBe('Sets');
   act(() => place!.click());
   await settle();
-  const opened = document.querySelector<HTMLElement>('.am-sets[data-open]');
+  const opened = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]');
   expect(opened).not.toBeNull();
   return opened!;
 }
@@ -190,7 +190,7 @@ test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent 
   act(() => cells()[0]!.click());
   await settle();
   expect(faces.agentFaceOf('ses_a')).toBe('set:tiny-creatures/zombie');
-  expect(document.querySelector('.am-sets[data-open]')).toBeNull();
+  expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).toBeNull();
   // Every window heard it.
   expect(events.at(-1)!.faces.ses_a!.face).toBe('set:tiny-creatures/zombie');
   for (const s of ['sidebar', ...OUTSIDE]) expect({ s, drawn: drawn(at(host, s)) }).toEqual({ s, drawn: '/api/inbox/icon-sets/tiny-creatures/zombie px 16px' });
@@ -307,4 +307,35 @@ test.if(hasDom)('a fetchable set: "Get" downloads it in one click and its grid f
   await settle();
   expect(faces.agentFaceOf('ses_a')).toBe('set:blobs/2');
   for (const s of OUTSIDE) expect(drawn(at(host, s))).toBe('/api/inbox/icon-sets/blobs/2 px 16px');
+});
+
+test.if(hasDom)('the dialog: a modal naming the agent with its icon now; Escape and a click outside close it; focus goes back to the face', async () => {
+  inbox();
+  const host = mount(<Surfaces />);
+  act(() => faces.keepAgentFace('ses_a', 'set:dcss/orc'));
+  await settle();
+  const face = host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_a"]')!;
+  for (const close of ['Escape', 'outside', 'Close'] as const) {
+    const dialog = await openSets(host);
+    // The Inbox's own dialog, modal; its head names the agent and shows the icon it has now.
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.querySelector('h2')!.textContent).toBe('Invoice retries');
+    expect(dialog.querySelector('.ib-agi-mark .ib-set img')!.getAttribute('src')).toBe('/api/inbox/icon-sets/dcss/orc');
+    expect(dialog.querySelector('[data-agi-place="sets"]')!.getAttribute('aria-selected')).toBe('true');
+    if (close === 'Escape') act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    else if (close === 'outside') act(() => dialog.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    else act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
+    await settle();
+    expect({ close, open: document.querySelector('dialog[data-dialog="agent-icon"]') }).toEqual({ close, open: null });
+    expect({ close, focus: document.activeElement === face }).toEqual({ close, focus: true });
+    // Nothing chosen: the face is as it was.
+    expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+  }
+  // The switch in its head moves to "Your own…", with its drop area.
+  const dialog = await openSets(host);
+  act(() => dialog.querySelector<HTMLButtonElement>('[data-agi-place="own"]')!.click());
+  await settle();
+  expect(dialog.querySelector('.ib-agi-drop')!.textContent).toBe('Drop or paste an imageUpload…');
+  expect(dialog.querySelector('.am-sets-g')).toBeNull();
 });

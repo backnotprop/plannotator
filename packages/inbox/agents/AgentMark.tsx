@@ -6,8 +6,7 @@ import { keepAgentFace, useAgentFace } from './agentFaces';
 import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
-import { OwnIconPanel } from './OwnIconPanel';
-import { SetsPanel } from './SetsPanel';
+import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
@@ -89,19 +88,13 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     clearTimeout(dwell.current);
     setFan((was) => (was ? { ...was, open: false } : was));
   };
-  // "Your own…": the uploaded pictures, opened from the fan's last inner place (OwnIconPanel.tsx).
-  const [own, setOwn] = useState<{ open: boolean; touch: boolean } | null>(null);
-  const openOwn = () => {
-    const touch = fan?.by === 'touch';
+  // "Your own…" and "Sets": the fan's last two inner places open the agent icon dialog in the middle of the window
+  // (AgentIconDialog.tsx). The face takes focus first, so the dialog gives it back when it closes.
+  const [dialog, setDialog] = useState<AgentIconPlace | null>(null);
+  const openDialog = (place: AgentIconPlace) => {
     closeFan();
-    setOwn({ open: true, touch });
-  };
-  // "Sets": the icon sets, opened from the fan's place after "Your own…" (SetsPanel.tsx).
-  const [setsPanel, setSetsPanel] = useState<{ open: boolean; touch: boolean } | null>(null);
-  const openSets = () => {
-    const touch = fan?.by === 'touch';
-    closeFan();
-    setSetsPanel({ open: true, touch });
+    button.current?.focus({ preventScroll: true });
+    setDialog(place);
   };
   const choose = (next: AgentFace) => {
     clicked.current = true;
@@ -130,7 +123,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     dwell.current = setTimeout(() => openFan('hover'), FAN_DWELL_MS);
   };
   const onPointerEnter = (event: PointerEvent) => {
-    if (event.pointerType === 'touch' || fan?.open || own?.open || setsPanel?.open || quiet.current) return;
+    if (event.pointerType === 'touch' || fan?.open || dialog || quiet.current) return;
     rest();
   };
   const onPointerLeave = () => {
@@ -153,7 +146,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     };
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !own?.open && !setsPanel?.open) {
+    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !dialog) {
       quiet.current = false;
       rest();
     }
@@ -197,34 +190,18 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
-      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={openOwn} onSets={openSets} onClose={closeFan} />}
-      {own && button.current && (
-        <OwnIconPanel
-          anchor={button.current}
-          open={own.open}
+      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={() => openDialog('own')} onSets={() => openDialog('sets')} onClose={closeFan} />}
+      {dialog && (
+        <AgentIconDialog
+          place={dialog}
           agent={agent ?? id}
+          host={host}
           name={name}
           face={face}
-          touch={own.touch}
           onClose={() => {
             clicked.current = true;
             quiet.current = true;
-            setOwn((was) => (was ? { ...was, open: false } : was));
-          }}
-        />
-      )}
-      {setsPanel && button.current && (
-        <SetsPanel
-          anchor={button.current}
-          open={setsPanel.open}
-          agent={agent ?? id}
-          name={name}
-          face={face}
-          touch={setsPanel.touch}
-          onClose={() => {
-            clicked.current = true;
-            quiet.current = true;
-            setSetsPanel((was) => (was ? { ...was, open: false } : was));
+            setDialog(null);
           }}
         />
       )}

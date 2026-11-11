@@ -35,9 +35,9 @@ export type FanOpenedBy = 'hover' | 'keyboard' | 'touch';
 /** A finger's fan: 40 px targets, 44 px apart (a pointer's are 28 and 32). */
 export const FAN_TOUCH: Partial<FanOptions> = { pitch: 44, item: 40, inner: 64, between: 52 };
 
-/** "Your own…": the inner arc's last place, which opens the uploaded pictures (OwnIconPanel.tsx). */
+/** "Your own…": the inner arc's last place, which opens the uploaded pictures (OwnIconsBody.tsx, AgentIconDialog.tsx). */
 export const OWN_CHOICE = 'own';
-/** "Sets": the inner arc's place after it, which opens the icon sets (SetsPanel.tsx). */
+/** "Sets": the inner arc's place after it, which opens the icon sets (SetsBody.tsx, AgentIconDialog.tsx). */
 export const SETS_CHOICE = 'sets';
 /** A place in the fan: a face, "Your own…" or "Sets". */
 export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
