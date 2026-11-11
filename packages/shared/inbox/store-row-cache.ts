@@ -66,6 +66,9 @@ export class InboxRowCache {
   private order: InboxListRow[] | null = null;
   private readonly inOrder = new Map<string, InboxListRow>();
   private readonly moved = new Set<string>();
+  /** The threads whose rows were dropped since the last `drain()` (the list feed's changed set), or all of them. */
+  private readonly touched = new Set<string>();
+  private touchedAll = true;
 
   constructor(host: InboxRowCacheHost) {
     this.host = host;
@@ -105,9 +108,24 @@ export class InboxRowCache {
     return this.host.isThread(threadId) ? this.built(threadId) : this.host.build(threadId, null);
   }
 
-  /** Every row, in the store's order. A copy: a caller may sort or trim it. */
-  rows(): InboxListRow[] {
-    this.prepare();
+  /**
+   * The threads whose rows may read differently since the last drain (`all`: any of them), every change before
+   * this call taken; `recheck` asks every live-session call again first (as a list read does). The list feed reads
+   * it to know which rows to compare. A thread named here may have no row now (gone).
+   */
+  drain(recheck: boolean): { all: boolean; threads: Set<string> } {
+    if (recheck) this.prepare();
+    else this.settle();
+    const out = { all: this.touchedAll, threads: new Set(this.touched) };
+    this.touchedAll = false;
+    this.touched.clear();
+    return out;
+  }
+
+  /** Every row, in the store's order. A copy: a caller may sort or trim it. `recheck: false`: no live-session call asked again. */
+  rows(recheck = true): InboxListRow[] {
+    if (recheck) this.prepare();
+    else this.settle();
     const order = this.order;
     if (order === null || this.moved.size > order.length / 4) return this.rebuildOrder().slice();
     for (const id of this.moved) {
@@ -135,6 +153,8 @@ export class InboxRowCache {
     }
     if (this.all) {
       this.all = false;
+      this.touchedAll = true;
+      this.touched.clear();
       this.dirty.clear();
       this.cached.clear();
       this.calls.clear();
@@ -170,6 +190,7 @@ export class InboxRowCache {
 
   private drop(threadId: string): void {
     this.cached.delete(threadId);
+    if (!this.touchedAll) this.touched.add(threadId);
     for (const key of this.callsOf.get(threadId) ?? []) {
       const call = this.calls.get(key);
       if (!call) continue;

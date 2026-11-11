@@ -157,7 +157,10 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_UPGRADING_LINE, storeMoveNote } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
 import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
-import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
+import { inboxArchivedRows, inboxRowArchived } from "@plannotator/shared/inbox/list";
+
+/** Today's order inside a section (`inboxListSections`): newest `last_at` first, ties on the thread id A→Z. */
+const newestFirstRows = (left: InboxListRow, right: InboxListRow) => right.last_at.localeCompare(left.last_at) || left.thread_id.localeCompare(right.thread_id);
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
   INBOX_ASK_BRIDGE_PREFIX,
@@ -205,7 +208,8 @@ import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites 
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, INBOX_SECTIONS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { createInboxListFeed, type InboxListFeed, type InboxListView } from "./inbox-list-feed";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -677,6 +681,8 @@ export interface InboxServer {
   t3Wake: InboxT3Wake;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
+  /** The list feed (inbox-list-feed.ts): tests compare its rows with every row decorated again. */
+  listFeed: Pick<InboxListFeed, "reference" | "debug">;
   stop: () => void;
 }
 
@@ -1515,8 +1521,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const projectFolders = (rows?: readonly InboxListRow[]) => {
     const byThread = snoozesById();
     const counted = rows ?? store.listRows().map((row) => withSnooze(row, byThread));
+    // One pass over the rows (each project's, in their order), not one per project.
+    const byProject = new Map<string, InboxListRow[]>();
+    for (const row of counted) {
+      const list = byProject.get(row.project.id);
+      if (list) list.push(row);
+      else byProject.set(row.project.id, [row]);
+    }
     return store.listProjects().map((project) => {
-      const mine = counted.filter((row) => row.project.id === project.id);
+      const mine = byProject.get(project.id) ?? [];
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
       // The projects combined into this one: a link to one opens this project. Additive, and only when there are any.
       const combined = store.combinedInto(project.id).map(({ id, name, root }) => ({ id, name, root }));
@@ -1585,56 +1598,52 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
   const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
-    // One pass over the store feeds both the folders' counts and the sections.
-    // `pinned_at` and `snoozed` (additive) on the window's and the phone's rows only: never on anything an agent reads.
-    const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
-    // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
-    // Resolved once per list: off, it is the identity and no row costs anything. Only this Inbox's own rows: a linked
-    // machine's launches are that machine's to decorate.
-    const decorate = launch.rowDecorator();
-    // Snoozes, by this reader's clock now (core inbox-snooze.ts): a row past its time stands as a return, in every mode.
-    // Applied after the launch decoration, so a launched row keeps its run word and section under a snooze.
-    const now = new Date();
-    const byThread = snoozesById();
-    // `steps_waiting` (additive, approval "inbox-checklist-spinners-2026-11-07"): while the Checklist switch is on, a
-    // thread whose checklist has a step waiting on the person; the row's still amber pause (and the Board lane card's,
-    // which reads this flag). Only while the thread still waits: the person has written nothing there since that list
-    // was last written, and its session has not ended (an ended session never updates the list). Off: never.
-    const stepsWaiting = stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null;
-    const withStepsWaiting = (row: InboxListRow): InboxListRow => (stepsWaiting?.has(row.thread_id) ? { ...row, steps_waiting: true } : row);
-    // `pulls` (additive, approval "inbox-pr-binding"): the thread's PRs, from their stored state, so a row paints its
-    // mark without a read. The threads not archived have their PRs still in play read now, off the request path:
-    // a changed state lands as a `thread_pull` line and the window reads the list again.
-    const pullsByThread = new Map<string, InboxThreadPull[]>();
-    for (const pull of store.allThreadPulls()) {
-      const list = pullsByThread.get(pull.thread_id);
-      if (list) list.push(pull);
-      else pullsByThread.set(pull.thread_id, [pull]);
+    // The rows come from the list feed (inbox-list-feed.ts), brought up to date for this read: every row as the
+    // window's list reads it (`pinned_at`, the launch's run word, `steps_waiting`, `snoozed` by the clock now, `pulls`;
+    // the window's and the phone's rows only, never anything an agent reads), already in place order, so no row is
+    // decorated again and no section is sorted again. The answer is the one this route always gave.
+    const feedRead = listFeed.read(merged ? "merged" : "own");
+    const now = feedRead.now;
+    const own = feedRead.own;
+    // `pulls` (additive, approval "inbox-pr-binding"): the threads not archived have their PRs still in play read now,
+    // off the request path: a changed state lands as a `thread_pull` line and the window reads the list again.
+    const onView = own.filter((row) => row.pulls && !inboxRowArchived(row));
+    if (onView.length > 0) {
+      const ids = new Set(onView.map((row) => row.thread_id));
+      void threadPullStates.refresh(store.allThreadPulls().filter((pull) => ids.has(pull.thread_id)));
     }
-    const withPulls = (row: InboxListRow): InboxListRow => {
-      const pulls = pullsByThread.get(row.thread_id);
-      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id))) : undefined;
-      return summary ? { ...row, pulls: summary } : row;
-    };
-    const own = store
-      .listRows()
-      .map((row) => withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)));
-    if (pullsByThread.size > 0) {
-      const onView = own.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
-      if (onView.length > 0) void threadPullStates.refresh(onView);
-    }
-    // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
-    // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
-    // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
-    const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
-      : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
-    const scoped = shownProject ? rows.filter((row) => row.project.id === shownProject) : rows;
-    const byId = new Map(rows.map((row) => [row.thread_id, row]));
-    const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
-    const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
+    // `?archived=exclude` (the window): archived threads leave every section. `?snoozed=exclude` (the window): threads
+    // snoozed now leave every section for `snoozed`, soonest back first; otherwise they stay in their sections.
+    const sectionOf = new Map<string, InboxListRow[]>(INBOX_SECTIONS.map(({ id }) => [id, []]));
+    const band: InboxListRow[] = [];
+    const late: InboxListRow[] = [];
+    for (const entry of feedRead.ordered) {
+      const row = entry.row;
+      if (shownProject && row.project.id !== shownProject) continue;
+      if (archived === "exclude" && entry.place.archived) continue;
+      if (snoozedMode === "exclude" && inboxRowSnoozed(row, now)) band.push(row);
+      // A row the feed placed in the Snoozed band but this read keeps in its section: put in its place there below.
+      else if (entry.place.group === "snoozed") late.push(row);
+      else sectionOf.get(row.section)!.push(row);
+    }
+    for (const row of late) {
+      const list = sectionOf.get(row.section)!;
+      let lo = 0;
+      let hi = list.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (newestFirstRows(list[mid]!, row) < 0) lo = mid + 1;
+        else hi = mid;
+      }
+      list.splice(lo, 0, row);
+    }
+    // The band soonest back first (core's rule): an archived row still snoozed keeps its section's place in the feed.
+    band.sort((a, b) => Date.parse(a.snoozed?.until ?? "") - Date.parse(b.snoozed?.until ?? "") || a.thread_id.localeCompare(b.thread_id));
+    const sections = INBOX_SECTIONS.map(({ id, label }) => ({ id, label, threads: sectionOf.get(id)! }));
+    const listed = snoozedMode === "exclude" ? { snoozed: band } : null;
+    const byId = feedRead.byId;
     // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
     const ownAgents = agentsOf(own, now);
     return {
@@ -1651,14 +1660,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Additive. */
       update_check_failing: updates.checkFailing(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
-      projects: merged ? [...projectFolders(own).map((project) => ({ ...project, machine: machines.selfId })), ...machines.projects().filter((project) => typeof project.id !== "string" || !store.project(project.id))] : projectFolders(own),
+      projects: listFolders(merged ? "merged" : "own", own),
       project: projectFilter,
       // `?archived=exclude` (the window): archived threads leave every section,
       // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
       // Without it they stay in Quiet, as an older window and the phone expect.
       // `?snoozed=exclude` (the window): snoozed threads leave every section for `snoozed`, soonest back first.
       // Without it they stay in their sections, each with its `snoozed` field, as an older window and the phone expect.
-      sections: inboxListSections(listed ? listed.rows : unarchived),
+      sections,
       ...(listed ? { snoozed: listed.snoozed } : {}),
       /** This Inbox keeps snoozes: a linked machine offers Snooze on this machine's rows only when its list says so. Additive. */
       snoozes: true,
@@ -1669,7 +1678,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        */
       pins: store
         .pins()
-        .map((pin) => byId.get(pin.thread_id))
+        .map((pin) => byId.get(pin.thread_id)?.row)
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
@@ -1681,8 +1690,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
   };
 
+  /** The sidebar's folders of a list view (the list model's `projects`), from this Inbox's own rows. */
+  const listFolders = (view: InboxListView, own: readonly InboxListRow[]) =>
+    view === "merged"
+      ? [...projectFolders(own).map((project) => ({ ...project, machine: machines.selfId })), ...machines.projects().filter((project) => typeof project.id !== "string" || !store.project(project.id))]
+      : projectFolders(own);
+
+  /**
+   * The rest of the list model, as a list page or catch-up carries it beside its rows (`head`, inbox-list-feed.ts):
+   * the same fields the whole list read gives, for the same reader (`session_labels` for the owner only).
+   */
+  const listHead = (view: InboxListView, owner: boolean): Record<string, unknown> => ({
+    version,
+    update: updates.current(),
+    updated: updates.updated(),
+    restart_claude_code: live.restartCount(),
+    restart_agents: live.restartAgents(),
+    update_check_failing: updates.checkFailing(),
+    notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
+    project: null,
+    snoozes: true,
+    ...(view === "merged" ? { self: machines.selfId, machines: machines.machinesView() } : {}),
+    ...(owner ? { session_labels: live.labels() } : {}),
+  });
+
   /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
-  const agentsOf = (own: InboxListRow[], now: Date): InboxAgentsGroup => {
+  const agentsOf = (own: readonly InboxListRow[], now: Date): InboxAgentsGroup => {
     const projectById = (id: string) => {
       const project = store.project(store.canonicalProjectId(id));
       return project ? { id: project.id, name: project.name } : null;
@@ -3601,6 +3634,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A `machines` snapshot opens every stream: a resync, never a notification.
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
+        // `list=1` (the list feed, inbox-list-feed.ts): `event: list` frames with the rows that changed, right after the
+        // record frames that caused them. Any door may ask (a window, the phone's door, a linked machine, the owner or a
+        // guest over the tailnet: the same rows; a guest's Agents without labels). The live sessions are watched while
+        // it listens (a session ending moves rows with no store line). A reader that does not ask gets none of this.
+        const listView: InboxListView | null = url.searchParams.get("list") === "1" ? (url.searchParams.get("machines") === "1" ? "merged" : "own") : null;
+        const onListDeliveries = () => listFeed.changedLater({ recheck: true, launched: true });
+        if (listView) deliveryListeners.add(onListDeliveries);
+        const stopList = listView ? listFeed.listen(listView, { owner: ownerOrLocal(req, via), send: (frame) => send(`event: list\ndata: ${JSON.stringify(frame)}\n\n`) }) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
         // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
         // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
@@ -3629,6 +3670,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           stopShapes?.();
           stopShapes = null;
           deliveryListeners.delete(sendDeliveries);
+          deliveryListeners.delete(onListDeliveries);
+          stopList();
           stopMachines();
           leave();
         };
@@ -4280,6 +4323,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     isGuest,
   });
   launchReady = true;
+
+  // The list feed (inbox-list-feed.ts): every list row as the window's list reads it, kept per thread and versioned;
+  // `list` frames to readers that ask, `page=1` and `since` reads, and the rows today's whole list read is made of.
+  const listFeed = createInboxListFeed({
+    store,
+    stepsWaiting: (now) => (stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null),
+    launchDecorator: () => launch.rowDecorator(),
+    machines: () => (machines ? { selfId: machines.selfId, rows: () => machines.rows() } : null),
+    agents: (view, own, now) => {
+      const ownAgents = agentsOf(own, now);
+      return view === "merged" ? inboxMergedAgents(machines.selfId, ownAgents, machines.agents()) : [ownAgents];
+    },
+    agentsWithoutLabels: (agents) => inboxAgentsWithoutLabels(agents),
+    folders: (view, own) => listFolders(view, own),
+    head: (view, owner) => listHead(view, owner),
+    serverSession,
+    cursor: () => store.cursor(),
+  });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4807,6 +4868,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
       if (path === "/api/inbox/threads" && req.method === "GET") {
+        // `page=1` (the list feed, inbox-list-feed.ts): a page of rows with their places, or with `since` what changed
+        // after a version (a first page when that version is out of reach). Any door may ask: the window, the phone's
+        // door, a linked machine (its own rows: the door refuses it `machines=1`), the owner or a guest over the tailnet.
+        if (url.searchParams.get("page") === "1") {
+          const view: InboxListView = url.searchParams.get("machines") === "1" ? "merged" : "own";
+          const owner = ownerOrLocal(req, via);
+          const since = url.searchParams.get("since");
+          if (since !== null) return json(listFeed.catchUp(view, owner, since));
+          const limit = url.searchParams.get("limit");
+          if (limit !== null && !/^\d{1,4}$/.test(limit)) throw new InboxError("validation_error", "limit: a whole number.", { field: "limit" });
+          const through = url.searchParams.get("through");
+          if (through !== null && !isInboxId("msg", through)) throw new InboxError("validation_error", "through: a thread id (msg_).", { field: "through" });
+          return json(listFeed.page(view, owner, { after: url.searchParams.get("after"), through, ...(limit !== null ? { limit: Number(limit) } : {}) }));
+        }
         const projectFilter = projectFilterOf(url);
         const archivedMode = archivedModeOf(url);
         const merged = url.searchParams.get("machines") === "1";
@@ -4820,7 +4895,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null, listFeed.hashOf));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -6715,6 +6790,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });
+    // A linked machine's list read again, or its records: the merged view's rows may have moved.
+    machines.subscribe(() => listFeed.changedLater());
     if (phonesOn) {
       // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
       // carriage: store lines down as the event stream writes them, commands up through the door in-process.
@@ -6805,6 +6882,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     imageCapture.stop();
     clearInterval(uploadSweep);
     stopPinEvents();
+    listFeed.stop();
     stopArtifactPinEvents();
     snoozes.stop();
     clearInterval(restartWatch);
@@ -6836,7 +6914,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), listFeed: { reference: listFeed.reference, debug: listFeed.debug }, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

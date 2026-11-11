@@ -19,6 +19,7 @@
 
 import { randomBytes } from "node:crypto";
 import { inboxListDeltaShape, inboxListRowsById, type InboxListDelta, type InboxListDeltaModel } from "@plannotator/core/inbox-list-delta";
+import type { InboxListRow } from "@plannotator/core/inbox-types";
 
 /** Kinds of list read remembered at once (the window asks one; the rest is a bound). */
 const MAX_KINDS = 8;
@@ -72,7 +73,13 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
    * `model`: the model, or only what changed since `since`. Every answer
    * carries `list_version`, the version to name next time.
    */
-  const answer = <M extends InboxListDeltaModel>(key: string, model: M, since: string | null): InboxListAnswer<M> => {
+  const answer = <M extends InboxListDeltaModel>(
+    key: string,
+    model: M,
+    since: string | null,
+    /** A row's hash already worked out (the list feed's, the same hash of the same JSON), so its JSON is not made again. */
+    known?: (row: InboxListRow) => number | bigint | undefined,
+  ): InboxListAnswer<M> => {
     const kind = kindOf(key);
     const now = ++version;
     const listVersion = `${run}.${kind.id}.${now}`;
@@ -94,7 +101,7 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
     const changed: InboxListDelta["rows"] = [];
     const base = versionOf(since, kind);
     for (const [id, row] of rows) {
-      const h = hash(textOf(row));
+      const h = known?.(row) ?? hash(textOf(row));
       const held = kind.rows.get(id);
       const fresh = !held || held.hash !== h;
       if (fresh) kind.rows.set(id, { hash: h, at: now });

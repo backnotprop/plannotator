@@ -2158,6 +2158,15 @@ export class InboxStore {
     return this.rowCache.row(threadId);
   }
 
+  /**
+   * The threads whose list rows may read differently since this was last asked (`all`: any thread), for the server's
+   * list feed (packages/server/inbox-list-feed.ts). `recheck`: the live sessions' answers are asked again first, as a
+   * list read does. One reader: each call takes what the last left.
+   */
+  drainListRowChanges(recheck: boolean): { all: boolean; threads: Set<string> } {
+    return this.rowCache.drain(recheck);
+  }
+
   /** Which rows a store line may change: its thread's; a project line, every row (the labels, a combine). */
   private rowChangedForLine(line: InboxLine): void {
     switch (line.kind) {
@@ -2614,6 +2623,14 @@ export class InboxStore {
     if (filter.projectId || filter.session) return this.buildRows(filter);
     // Every thread: the rows kept per thread, only the changed ones built again (`rowCache`). A copy of the list.
     return this.rowCache.rows();
+  }
+
+  /**
+   * Every row in the list's order as the row cache keeps it, without asking the live sessions again: for a reader that
+   * has just taken every change (the list feed, right after `drainListRowChanges`). Anyone else reads `listRows()`.
+   */
+  listRowsAsKept(): InboxListRow[] {
+    return this.rowCache.rows(false);
   }
 
   /** `listRows` for a project or a session: the matching threads' rows (from the row cache), sorted. */

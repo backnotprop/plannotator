@@ -142,8 +142,11 @@ export interface InboxRowChange {
   seq: number | null;
 }
 
-/** SSE `event: list`. Only to a window that asked (`/events?…&list=1`); never to the phone door or a linked machine. */
-export interface InboxListFrame {
+/**
+ * SSE `event: list`. Only to a reader that asked (`/events?…&list=1`): a window, the phone's door or a linked machine
+ * (the same person on every door, the same rows; `machines=1` for the merged view where the door allows it).
+ */
+export interface InboxListFrame<P = unknown> {
   v: 1;
   version: InboxFeedVersion;
   /** The version it follows. A window holding an older one has a gap: it reads `since`. */
@@ -159,6 +162,8 @@ export interface InboxListFrame {
   pins?: string[];
   /** The sidebar's Agents: only when they moved. */
   agents?: InboxAgentsGroup[];
+  /** The sidebar's folders as a page carries them (`projects`): only when a folder came, went, or its name or picture changed. */
+  projects?: P[];
 }
 
 /**
@@ -236,15 +241,18 @@ export function inboxBeyondEdge(entry: InboxPlacedRow, edge: string | null): boo
  * - a next page (`after`): the `limit` Quiet rows after that cursor;
  * - `through` (a thread id): as far as that row too, whatever the limit, when it is in Quiet.
  * `next` is the cursor of the last Quiet row sent, null when no Quiet row is left after it.
+ * `sorted`: the rows come in list order already (`inboxPlaceCompare`), so none is sorted again.
  */
 export function inboxPageRows(
   all: Iterable<InboxPlacedRow>,
-  options: { after?: string | null; through?: string | null; limit?: number; pins?: readonly string[] } = {},
+  options: { after?: string | null; through?: string | null; limit?: number; pins?: readonly string[]; sorted?: boolean } = {},
 ): { rows: InboxPlacedRow[]; next: string | null } {
   const limit = Math.max(1, Math.min(options.limit ?? INBOX_LIST_PAGE_LIMIT, INBOX_LIST_PAGE_MAX));
   const pinned = new Set(options.pins ?? []);
   // An archived thread stays pinned (approval "inbox-pinned-threads"): a first page sends it for the sidebar only.
-  const listed = [...all].filter((entry) => !entry.place.archived || (!options.after && pinned.has(entry.row.thread_id))).sort(inboxPlaceCompare);
+  const kept = [...all].filter((entry) => !entry.place.archived || (!options.after && pinned.has(entry.row.thread_id)));
+  // `sorted`: `all` is already in list order (the server keeps it so), and is not sorted again.
+  const listed = options.sorted ? kept : kept.sort(inboxPlaceCompare);
   const after = options.after ? cursorPlace(options.after) : null;
   const quiet = listed.filter((entry) => entry.place.group === "quiet" && !entry.place.archived && (!after || inboxPlaceCompare(entry, after) > 0));
   let take = Math.min(limit, quiet.length);
@@ -318,7 +326,7 @@ function takeChanges(rows: Record<string, InboxHeldRow>, changes: readonly Inbox
  * A frame over the held list. "gap": the frame follows a version newer than the one held (a frame was missed): read
  * `since` the held version. A frame the window already has (its version not after the held one) changes nothing.
  */
-export function applyInboxListFrame<H, P>(held: InboxListHeld<H, P>, frame: InboxListFrame): InboxListHeld<H, P> | "gap" {
+export function applyInboxListFrame<H, P>(held: InboxListHeld<H, P>, frame: InboxListFrame<P>): InboxListHeld<H, P> | "gap" {
   const newer = inboxFeedVersionOrder(frame.version, held.version);
   const follows = inboxFeedVersionOrder(frame.after, held.version);
   if (newer === null || follows === null) return "gap";
@@ -332,6 +340,7 @@ export function applyInboxListFrame<H, P>(held: InboxListHeld<H, P>, frame: Inbo
     counts: frame.counts,
     pins,
     ...(frame.agents ? { agents: frame.agents } : {}),
+    ...(frame.projects ? { projects: frame.projects } : {}),
     rows: takeChanges(held.rows, frame.changes, frame.version, held.next, pins),
   };
 }
