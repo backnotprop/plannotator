@@ -332,6 +332,8 @@ export interface ListModel {
    * an older Inbox and for a tailnet guest, which then read every session as before.
    */
   session_labels?: Record<string, string>;
+  /** A name for a session with none, list rows only (sessionTitles.ts, option A). Absent as `session_labels` is. */
+  session_titles?: Record<string, string>;
   /**
    * Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked
    * machine's on the merged view. Absent from an older Inbox.

@@ -248,6 +248,7 @@ import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
 import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
+import { setSessionTitles } from './sessionTitles';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
@@ -1576,6 +1577,7 @@ function Inbox() {
       setLatest(next);
       // The sessions' labels (issue #2450): every row's agents and the open thread's authors read them.
       setSessionLabels(next.session_labels);
+      setSessionTitles(next.session_titles);
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
