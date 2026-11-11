@@ -57,8 +57,20 @@ export const REF_FRESH_MS = 60_000;
 export const REF_FAILURE_MS = 30_000;
 export const REF_STALE_MAX_MS = 15 * 60_000;
 export const REF_RATE_LIMIT_MS = 60_000;
+/** A CLI's hard deadline: then it and everything it started are ended, and the runner answers at once. */
 export const REF_TIMEOUT_MS = 8_000;
+/** After TERM at the deadline, KILL to whatever is still there (a CLI that catches TERM, as glab does). */
+export const REF_KILL_GRACE_MS = 1_000;
+/** A CLI that exited while something it started still holds its output: how long that leftover may hold it. */
+export const REF_DRAIN_MS = 500;
 export const REF_MAX_CONCURRENT = 2;
+/**
+ * A slot is given back after this whatever its job does, so one stuck job can never hold it forever (a job may run
+ * several CLIs in turn, each under REF_TIMEOUT_MS).
+ */
+export const REF_SLOT_HOLD_MS = 30_000;
+/** With lookups waiting and no slot given back for this long, the waiting ones are answered (unavailable) and dropped. */
+export const REF_QUEUE_STALL_MS = 20_000;
 export const REF_AUTH_HOSTS_MS = 5 * 60_000;
 /** Refs kept in the cache (an answer, or a failure being held). */
 export const REF_CACHE_MAX = 500;
@@ -100,8 +112,96 @@ export interface RefCommandResult {
   stderr: string;
   exitCode: number;
 }
-/** Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. */
+/**
+ * Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. Always settles by
+ * REF_TIMEOUT_MS (exit 1, stderr `<cli>: timed out`), whatever the CLI and its children do.
+ */
 export type RefRunner = (cli: RefCli, args: string[], env?: Record<string, string>) => Promise<RefCommandResult>;
+
+/**
+ * End a CLI at its deadline, both runtimes: TERM, then KILL after REF_KILL_GRACE_MS to what is left. `signal` sends
+ * one signal (to the CLI's process group on POSIX); a first TERM that finds nothing (ESRCH) sends nothing more, so a
+ * reused pid is never signalled.
+ */
+export function refRunnerKill(signal: (signal: "SIGTERM" | "SIGKILL") => void, graceMs: number = REF_KILL_GRACE_MS): void {
+  try {
+    signal("SIGTERM");
+  } catch {
+    return;
+  }
+  const timer = setTimeout(() => {
+    try {
+      signal("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }, graceMs);
+  (timer as { unref?: () => void }).unref?.();
+}
+
+/** Thrown by a slot that cannot be had: too many waiting, or the queue stalled. Callers answer `unavailable`. */
+export const REF_SLOT_BUSY: unique symbol = Symbol("ref slot busy");
+
+/**
+ * At most `max` jobs at once, the others waiting in turn. Never stuck: a job's slot is given back after `holdMs`
+ * whatever the job does, and when nothing has been given back for `stallMs` the waiting jobs are refused
+ * (REF_SLOT_BUSY), as is one past `maxWaiting`.
+ */
+export function createRefSlots(
+  max: number,
+  options: { maxWaiting?: number; holdMs?: number; stallMs?: number } = {},
+): { run<T>(job: () => Promise<T>): Promise<T>; waiting(): number; running(): number } {
+  const maxWaiting = options.maxWaiting ?? REF_MAX_WAITING;
+  const holdMs = options.holdMs ?? REF_SLOT_HOLD_MS;
+  const stallMs = options.stallMs ?? REF_QUEUE_STALL_MS;
+  let running = 0;
+  const waiting: { go: () => void; refuse: () => void }[] = [];
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const watch = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    if (waiting.length === 0) return;
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      for (const entry of waiting.splice(0)) entry.refuse();
+    }, stallMs);
+    (watchdog as { unref?: () => void }).unref?.();
+  };
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next.go();
+    else running--;
+    // A slot was given back: the queue moves, so the stall clock starts again.
+    watch();
+  };
+  return {
+    async run(job) {
+      if (running >= max) {
+        if (waiting.length >= maxWaiting) throw REF_SLOT_BUSY;
+        await new Promise<void>((resolve, reject) => {
+          waiting.push({ go: resolve, refuse: () => reject(REF_SLOT_BUSY) });
+          if (!watchdog) watch();
+        });
+      } else running++;
+      let held = true;
+      const giveBack = () => {
+        if (!held) return;
+        held = false;
+        clearTimeout(hold);
+        release();
+      };
+      const hold = setTimeout(giveBack, holdMs);
+      (hold as { unref?: () => void }).unref?.();
+      try {
+        return await job();
+      } finally {
+        giveBack();
+      }
+    },
+    waiting: () => waiting.length,
+    running: () => running,
+  };
+}
 
 // --- the queries ---
 
@@ -431,8 +531,6 @@ export interface RefCardsSizes {
   waiting: number;
 }
 
-/** Thrown by a full queue: answered `unavailable`, never cached. */
-const QUEUE_FULL = Symbol("ref-cards queue full");
 
 export function createRefCards(options: {
   /** How `gh` / `glab` run (Bun: `refCliRunner` in packages/server; Node: `nodeRefCliRunner`). */
@@ -454,22 +552,9 @@ export function createRefCards(options: {
   const rateLimitedUntil = new Map<string, number>();
   /** A stale answer whose refresh failed: not asked again before this. */
   const retryAt = new Map<string, number>();
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= REF_MAX_CONCURRENT) {
-      if (waiting.length >= REF_MAX_WAITING) throw QUEUE_FULL;
-      await new Promise<void>((r) => waiting.push(r));
-    } else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most REF_MAX_CONCURRENT CLIs; never stuck (createRefSlots): a full or stalled queue answers at once.
+  const slots = createRefSlots(REF_MAX_CONCURRENT, { maxWaiting: REF_MAX_WAITING });
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const dropAvatar = (_url: string, entry: { bytes: number }) => {
     avatarBytes -= entry.bytes;
@@ -601,12 +686,12 @@ export function createRefCards(options: {
     const inFlight = pending.get(key);
     if (inFlight) return inFlight;
     const job = slot(() => fetchOnce(ref))
-      .catch((error): ForgeRefCardResult | typeof QUEUE_FULL => (error === QUEUE_FULL ? QUEUE_FULL : fail("unavailable")))
+      .catch((error): ForgeRefCardResult | typeof REF_SLOT_BUSY => (error === REF_SLOT_BUSY ? REF_SLOT_BUSY : fail("unavailable")))
       .then((result) => {
         const prev = cache.get(key);
         const prevShowable = prev?.ok === true && now() - prev.fetchedAt < REF_STALE_MAX_MS;
         // Too many lookups waiting: answer at once and keep nothing, so the next hover asks again.
-        if (result === QUEUE_FULL) return prevShowable ? prev! : fail("unavailable");
+        if (result === REF_SLOT_BUSY) return prevShowable ? prev! : fail("unavailable");
         prune();
         // A failure never replaces an answer still worth showing; it only holds off the next refresh.
         if (!result.ok && prevShowable) {
@@ -648,7 +733,7 @@ export function createRefCards(options: {
         rateLimitedHosts: rateLimitedUntil.size,
         avatars: avatars.size,
         avatarBytes,
-        waiting: waiting.length,
+        waiting: slots.waiting(),
       };
     },
   };

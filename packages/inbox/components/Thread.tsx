@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
@@ -6124,6 +6125,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
   const pullsOffered = !machine && !guest;
   const [addingPull, setAddingPull] = useState(false);
+  // Export decisions › Post on a pull request › Add a pull request…: the PR the person adds next gets the post.
+  const [postAfterAdd, setPostAfterAdd] = useState(false);
+  const decisionsPostable = pullsOffered && threadHasQuestionCards(thread);
+  const postOn = (ref: string) => void postDecisions(thread.thread_id, ref, onToast);
   const snoozeProps = snoozeBlocked && !resolved ? { snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: snoozeBlocked } : onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
   // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
@@ -6316,7 +6321,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
-              <ThreadPullsButton threadId={thread.thread_id} summary={row?.pulls} adding={addingPull} onAddingDone={() => setAddingPull(false)} />
+              <ThreadPullsButton
+                threadId={thread.thread_id}
+                summary={row?.pulls}
+                adding={addingPull}
+                onAddingDone={() => {
+                  setAddingPull(false);
+                  setPostAfterAdd(false);
+                }}
+                onPost={decisionsPostable ? postOn : undefined}
+                postOnAdd={postAfterAdd}
+              />
             )}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
@@ -6362,6 +6377,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               snooze={snoozeProps}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
               addPull={pullsOffered && !artifactsOn ? () => setAddingPull(true) : undefined}
+              postDecisions={
+                decisionsPostable && !artifactsOn
+                  ? {
+                      post: postOn,
+                      addPullThenPost: () => {
+                        setPostAfterAdd(true);
+                        setAddingPull(true);
+                      },
+                    }
+                  : undefined
+              }
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
