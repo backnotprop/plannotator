@@ -37,6 +37,8 @@ export function exportInboxDb(dbFile: string, outDir: string): { lines: number }
   const files = new Map<string, string[]>();
   let lines = 0;
   try {
+    // One read transaction: a running Inbox may write meanwhile, and the export is one moment of it.
+    db.run("BEGIN");
     const keyOf = new Map(db.query<{ id: string; key: string }, []>("SELECT id, key FROM projects WHERE deleted_at IS NULL ORDER BY first_seq").all().map((p) => [p.id, p.key]));
     const fallback = keyOf.values().next().value ?? UNPLACED;
     const rows = db.query<{ seq: number; at: string; v: number; kind: InboxLine["kind"]; subject_id: string; project_id: string | null; data: string }, []>(
@@ -55,6 +57,7 @@ export function exportInboxDb(dbFile: string, outDir: string): { lines: number }
       lines++;
     }
     const floor = Number(db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'seq_floor'").get()?.value ?? 0);
+    db.run("COMMIT");
     mkdirSync(join(outDir, INBOX_PROJECTS_DIR), { recursive: true, mode: 0o700 });
     for (const key of keyOf.values()) mkdirSync(join(outDir, INBOX_PROJECTS_DIR, key), { recursive: true, mode: 0o700 });
     for (const [path, text] of files) {

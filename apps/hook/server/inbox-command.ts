@@ -24,6 +24,7 @@
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
  *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
+ *   plannotator inbox export …      the Inbox as JSONL files (inbox-export-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -35,6 +36,7 @@
  */
 
 import { runInboxRowsCommand } from "./inbox-rows-command";
+import { runInboxExportCommand } from "./inbox-export-command";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
@@ -727,6 +729,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "projects") {
     process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "export") {
+    process.exit(await runInboxExportCommand(args.slice(1), { dataDir, cwd: process.env.PLANNOTATOR_CWD || process.cwd(), json: assets.json === true }));
   }
 
   if (args[0] === "rows") {
