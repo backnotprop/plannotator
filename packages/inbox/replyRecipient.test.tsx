@@ -179,11 +179,11 @@ function button(el: HTMLElement, text: string): HTMLButtonElement {
 }
 
 async function write(el: HTMLElement, words: string) {
-  if (!el.querySelector('textarea')) {
+  if (!el.querySelector('textarea:not([data-question-other])')) {
     act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
     await settle();
   }
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, words);
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -259,7 +259,7 @@ test.skipIf(!hasDom)('two agents: the pill names the last writer; a name picked,
   // The words are saved with the choice (the server keeps it, approval server item 1).
   await settle(1100);
   expect(drafts().at(-1)!.body).toMatchObject({ body: 'Use the old totals.', recipients: ['ses_claude'] });
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Reply to Claude Code');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Reply to Claude Code');
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
   expect(replies()[0]!.body).toMatchObject({ words: 'Use the old totals.' });
@@ -405,7 +405,7 @@ test.skipIf(!hasDom)('a restored draft led by an agent that can\'t take the repl
   savedDraft = { v: 1, thread_id: M1, body: 'Still on the migration?', created_at: '2026-11-01T10:46:00.000Z', updated_at: '2026-11-01T10:46:00.000Z', recipients: ['ses_unknown', 'ses_gone'] };
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
   // The draft's box is open, with its words.
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Still on the migration?');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Still on the migration?');
   expect(pillName(el)).toBe('Claude Code');
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);

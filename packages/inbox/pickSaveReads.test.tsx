@@ -192,7 +192,7 @@ async function open() {
       </Profiler>,
     );
   });
-  const field = () => host!.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
+  const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
   await until(() => frames.has('record'), 'the stream');
   await wait(200);
@@ -200,8 +200,8 @@ async function open() {
   return field()!;
 }
 
-function type(field: HTMLInputElement, words: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+function type(field: HTMLTextAreaElement, words: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(field, words);
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -216,7 +216,7 @@ async function closePane() {
     window.location.hash = '';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
-  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
+  await until(() => host!.querySelector('textarea[aria-label^="Other answer"]') === null, 'the pane closed');
 }
 
 test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {

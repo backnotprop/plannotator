@@ -159,6 +159,7 @@ import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachm
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./decision-data";
+import type { DecisionExportInput } from "./decision-export";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -6202,6 +6203,24 @@ export class InboxStore {
       closedByArchive: (message) => this.closedByArchive(message),
       reaskListedIds: (threadId) => this.reaskListedIds(threadId),
       questions: [...this.questions.values()],
+    };
+  }
+
+  /**
+   * What a thread's decision export reads (decision-export.ts), from memory: its messages and the newest record of
+   * each of their questions, with the rules Decision data reads them by. Null for no such thread.
+   */
+  decisionExportInput(threadId: string): DecisionExportInput | null {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return null;
+    const messages = this.threadMessages(threadId);
+    return {
+      thread: { id: threadId, subject: this.threadSubject(threadId), project: this.decisionProjectLabel(root.project_id) },
+      messages,
+      byId: this.messages,
+      headOf: (id) => (this.projectsById.has(id) ? this.canonicalProjectId(id) : id),
+      closedByArchive: (message) => this.closedByArchive(message),
+      questions: messages.flatMap((message) => this.questionRecords(message.id)),
     };
   }
 
