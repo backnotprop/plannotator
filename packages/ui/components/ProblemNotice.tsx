@@ -6,7 +6,7 @@
  * host that never passes a problem draws nothing new.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Problem } from '@plannotator/core/problem';
 import { copyTextToClipboard } from '../utils/clipboard';
 
@@ -40,15 +40,22 @@ export interface ProblemNoticeProps {
   touch?: boolean;
   /** A page the surface already links (its own "Open on GitHub"): not offered twice. */
   linked?: string;
+  /**
+   * A quieter second step the host adds after the problem's own (the Plannotator Inbox: "Ask your agent to look").
+   * Beside a Try again or an open link, under a command or alone. Default: none, nothing drawn.
+   */
+  extra?: ReactNode;
 }
 
-export function ProblemNotice({ problem, onRetry, retrying = false, touch = false, linked }: ProblemNoticeProps) {
+export function ProblemNotice({ problem, onRetry, retrying = false, touch = false, linked, extra }: ProblemNoticeProps) {
   const [copied, setCopied] = useState<'yes' | 'no' | null>(null);
   const timer = useRef<number | null>(null);
   useEffect(() => () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
   }, []);
   const action = problem.action;
+  const opens = action?.kind === 'open_url' && action.value !== linked;
+  const retries = action?.kind === 'retry' && !!onRetry;
   const btn = touch ? 'min-h-11 px-3' : 'h-7 px-2.5';
   const copy = async (text: string) => {
     const ok = await copyTextToClipboard(text);
@@ -82,22 +89,27 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
             </button>
           </div>
         )}
-        {action?.kind === 'open_url' && action.value !== linked && (
-          <a href={action.value} target="_blank" rel="noopener noreferrer" className={`${btn} mt-2 inline-flex items-center gap-1 rounded-md bg-primary/10 text-[11.5px] font-medium text-primary hover:bg-primary/15`} data-problem-open="">
-            {action.label} <span aria-hidden="true">↗</span>
-          </a>
-        )}
-        {action?.kind === 'retry' && onRetry && (
-          <button
-            type="button"
-            className={`${btn} mt-2 rounded-md border border-border bg-background text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-60`}
-            onClick={onRetry}
-            disabled={retrying}
-            aria-busy={retrying || undefined}
-            data-problem-retry=""
-          >
-            {retrying ? 'Trying again…' : 'Try again'}
-          </button>
+        {(opens || retries || extra) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {opens && (
+              <a href={action.value} target="_blank" rel="noopener noreferrer" className={`${btn} inline-flex items-center gap-1 rounded-md bg-primary/10 text-[11.5px] font-medium text-primary hover:bg-primary/15`} data-problem-open="">
+                {action.label} <span aria-hidden="true">↗</span>
+              </a>
+            )}
+            {retries && (
+              <button
+                type="button"
+                className={`${btn} rounded-md border border-border bg-background text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-60`}
+                onClick={onRetry}
+                disabled={retrying}
+                aria-busy={retrying || undefined}
+                data-problem-retry=""
+              >
+                {retrying ? 'Trying again…' : 'Try again'}
+              </button>
+            )}
+            {extra}
+          </div>
         )}
       </div>
     </div>

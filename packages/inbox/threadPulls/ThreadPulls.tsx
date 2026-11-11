@@ -302,7 +302,7 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
  * One PR: the full hover card when the forge answers (its loading state meanwhile); else (no gh or glab, signed
  * out, a phone) the list's row from what the Inbox knows, never a card that makes up a description or comments.
  */
-function OnePull({ pull, sheet, onClose, onRetry, retrying }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void; onRetry?: () => void; retrying?: boolean }) {
+function OnePull({ pull, sheet, onClose, onRetry, retrying, threadId }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void; onRetry?: () => void; retrying?: boolean; threadId: string }) {
   const target = parseForgeRefUrl(pull.url);
   const [result, setResult] = useState<ForgeRefCardResult | null | undefined>(undefined);
   const problemCode = pull.problem?.code ?? null;
@@ -329,7 +329,7 @@ function OnePull({ pull, sheet, onClose, onRetry, retrying }: { pull: InboxThrea
   return (
     <>
       <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />
-      <PullProblems problems={problem ? [problem] : []} onRetry={onRetry} retrying={retrying} touch={sheet} linked={pull.url} />
+      <PullProblems problems={problem ? [{ problem, pull }] : []} onRetry={onRetry} retrying={retrying} touch={sheet} linked={pull.url} threadId={threadId} onAsk={onClose} />
     </>
   );
 }
@@ -488,12 +488,12 @@ export function PullsCard({
     <div className="ib-prpop-body flex min-h-0 flex-1 flex-col" data-pr-card="">
       {pulls.length === 1 ? (
         <div className="ib-prpop-one min-h-0 overflow-y-auto" data-pr-one="">
-          <OnePull pull={pulls[0]!} sheet={false} onClose={onClose} onRetry={onRetry} retrying={retrying} />
+          <OnePull pull={pulls[0]!} sheet={false} onClose={onClose} onRetry={onRetry} retrying={retrying} threadId={threadId} />
         </div>
       ) : pulls.length > 1 ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <PullsList answer={answer!} onRemove={(pull) => void remove(pull)} onPost={onPost} />
-          <PullProblems problems={pullProblems(pulls)} onRetry={onRetry} retrying={retrying} touch={sheet} />
+          <PullProblems problems={pullProblems(pulls)} onRetry={onRetry} retrying={retrying} touch={sheet} threadId={threadId} onAsk={onClose} />
         </div>
       ) : answer ? (
         <div className="ib-prpop-empty">No pull requests on this thread.</div>

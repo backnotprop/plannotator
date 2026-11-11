@@ -9,6 +9,7 @@ import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { problemOf } from '@plannotator/core/problem';
+import type { ProblemFacts } from '@plannotator/core/problem-report';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -1028,6 +1029,12 @@ export function signalWithin(ms: number, outer?: AbortSignal): { signal: AbortSi
   };
 }
 
+/** "Ask your agent to look" waits at most this long for the Inbox's facts, then opens the message with what it has. */
+export const PROBLEM_FACTS_READ_MS = 4_000;
+
+/** The Inbox's answer for a problem's report (packages/server/inbox-problem-facts.ts). */
+export type InboxProblemFacts = ProblemFacts & { thread?: { session: string | null; link: string } };
+
 /** A thread's PRs: the Inbox answers at once from what it knows, so a read with no answer by then is a held connection. */
 export const THREAD_PULLS_READ_MS = 10_000;
 /** A hover card's data: the Inbox ends a forge CLI at 8 s, so a read with no answer by then is a held connection. */
@@ -1587,6 +1594,22 @@ export const inboxApi = {
    * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
    * threads answers 404: both read as none.
    */
+  /**
+   * "Ask your agent to look": what only the Inbox knows for the report (versions, the tool's recent failed runs,
+   * redacted there, and the thread's agent). Given up after PROBLEM_FACTS_READ_MS: the message then opens with less.
+   */
+  problemFacts: async (query: { clis: readonly string[]; host?: string | null; thread?: string | null }, signal?: AbortSignal): Promise<InboxProblemFacts> => {
+    const params = new URLSearchParams();
+    for (const cli of query.clis) params.append('cli', cli);
+    if (query.host) params.set('host', query.host);
+    if (query.thread && !machineOf(query.thread)) params.set('thread', query.thread);
+    const within = signalWithin(PROBLEM_FACTS_READ_MS, signal);
+    try {
+      return await get<InboxProblemFacts>(inboxUrl(`/problem-facts?${params}`), within.signal);
+    } finally {
+      within.done();
+    }
+  },
   threadPulls: async (threadId: string, signal?: AbortSignal, options?: { retry?: boolean }): Promise<InboxThreadPullsAnswer> => {
     if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
     // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered

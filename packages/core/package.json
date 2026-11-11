@@ -41,6 +41,7 @@
     "./forge-ref-card": "./forge-ref-card.ts",
     "./problem": "./problem.ts",
     "./problem-words": "./problem-words.ts",
+    "./problem-report": "./problem-report.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",

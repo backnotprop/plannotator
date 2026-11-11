@@ -235,6 +235,8 @@ import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
+import { AskAgentToLook } from './problems/AskAgentToLook';
+import { openRoute } from './debugLog';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
@@ -308,6 +310,15 @@ configurePlannotatorUI({
     const within = signalWithin(REF_CARD_READ_MS, signal);
     return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
   }),
+  // A failed card's problem offers "Ask your agent to look" after its own next step (problems/AskAgentToLook.tsx): To the
+  // agent of the thread open now, the report linking back to it.
+  refCardProblemExtra: (problem, ref, href) => (
+    <AskAgentToLook
+      problem={problem}
+      place={{ surface: 'link_card', clis: [ref.platform === 'gitlab' ? 'glab' : 'gh'], hosts: [ref.host], url: href }}
+      threadId={openRoute(window.location.hash).thread ?? null}
+    />
+  ),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it

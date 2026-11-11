@@ -39,7 +39,7 @@ import {
   type ForgeRefPerson,
 } from '@plannotator/core/forge-ref-card';
 import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
-import { loadRefCard, refCardTarget } from '../utils/refCard';
+import { getRefCardProblemExtra, loadRefCard, refCardTarget } from '../utils/refCard';
 import { ProblemNotice } from './ProblemNotice';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
@@ -411,7 +411,7 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
         </div>
         {problem ? (
           <div className="-mt-1" data-ref-card-error={error}>
-            <ProblemNotice problem={problem} touch={sheet} linked={href} />
+            <ProblemNotice problem={problem} touch={sheet} linked={href} extra={getRefCardProblemExtra()?.(problem, target, href)} />
           </div>
         ) : (
           <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>

@@ -14,7 +14,9 @@
  * this one only spares the round trip while a person moves between links.
  */
 
+import type { ReactNode } from 'react';
 import { forgeRefKey, parseForgeRefUrl, type ForgeRef, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import type { Problem } from '@plannotator/core/problem';
 
 export type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
@@ -30,6 +32,22 @@ export function setRefCardTransport(next: RefCardTransport | null): void {
 
 export function getRefCardTransport(): RefCardTransport | null {
   return transport;
+}
+
+/**
+ * A second, quieter step a host draws under a failed card's problem, after the problem's own (the Plannotator Inbox:
+ * "Ask your agent to look"). Default: none, so the card draws as before.
+ */
+export type RefCardProblemExtra = (problem: Problem, ref: ForgeRef, href: string) => ReactNode;
+
+let problemExtra: RefCardProblemExtra | null = null;
+
+export function setRefCardProblemExtra(next: RefCardProblemExtra | null): void {
+  problemExtra = next;
+}
+
+export function getRefCardProblemExtra(): RefCardProblemExtra | null {
+  return problemExtra;
 }
 
 /**

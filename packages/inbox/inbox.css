@@ -9879,6 +9879,10 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
 .ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
 .ib-pr-notice a:hover { text-decoration: underline; }
+/* "Ask your agent to look" inside a Pull requests line (problems/AskAgentToLook.tsx): quieter than the line's own link. */
+.ib-ask-look-inline { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+.ib-ask-look-inline:hover, .ib-ask-look-inline:focus-visible { color: var(--foreground); text-decoration-color: currentColor; }
+.ib-ask-look-inline:disabled { opacity: 0.6; cursor: default; }
 
 /* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
 .ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
