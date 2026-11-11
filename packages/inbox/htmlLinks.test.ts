@@ -27,7 +27,10 @@ const context = (overrides: Partial<InboxHtmlLinkContext> = {}): InboxHtmlLinkCo
 describe('resolveInboxHtmlLink', () => {
   test('a link to an attachment of the thread opens it, fragment kept', () => {
     expect(resolveInboxHtmlLink('frames/A-1440-light.png', context())).toEqual({ kind: 'attachment', id: 'att_frame', name: 'A-1440-light.png', hash: '' });
-    expect(resolveInboxHtmlLink('./SHEET.html?x=1#top', context())).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top' });
+    // An attached page's query rides along: the page opens with it, as a tab would.
+    expect(resolveInboxHtmlLink('./SHEET.html?x=1#top', context())).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top', search: '?x=1' });
+    // Another kind of file has no query to read.
+    expect(resolveInboxHtmlLink('frames/A-1440-light.png?x=1', context())).toEqual({ kind: 'attachment', id: 'att_frame', name: 'A-1440-light.png', hash: '' });
     expect(resolveInboxHtmlLink('NOTES.md', context())).toMatchObject({ kind: 'attachment', id: 'att_notes' });
   });
 

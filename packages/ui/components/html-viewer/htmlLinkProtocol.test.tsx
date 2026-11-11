@@ -158,6 +158,16 @@ describe.if(hasDom)('reloading a served frame with a query', () => {
     expect(htmlViewerUrl('about:blank', base, '?x=1')).toBeNull();
     expect(htmlViewerUrl('data:text/html,hi', base, '?x=1')).toBeNull();
   });
+
+  // `frameStart`: a page opened at `mock.html?variant=2` (a prototype's line, a link in a message) starts there.
+  test('the first address: the served page with the start query and fragment; anything else leaves it as served', () => {
+    const start = (value: string) => htmlViewerModule!.servedFrameStartUrl('/api/inbox/pages/abc', base, value);
+    expect(start('?variant=2')).toBe('http://localhost:4000/api/inbox/pages/abc?variant=2');
+    expect(start('#step-2')).toBe('http://localhost:4000/api/inbox/pages/abc#step-2');
+    expect(start('?variant=2&n=3#top')).toBe('http://localhost:4000/api/inbox/pages/abc?variant=2&n=3#top');
+    for (const value of ['variant=2', '/api/inbox/threads', '//evil.example/x', '?x\u0000']) expect(start(value)).toBe('/api/inbox/pages/abc');
+    expect(htmlViewerModule!.servedFrameStartUrl('about:blank', base, '?x=1')).toBe('about:blank');
+  });
 });
 
 describe('live app sessions keep their own navigation', () => {

@@ -11,7 +11,10 @@
  *   `replaceState(null, '', '#state=C4')` names another address and throws a
  *   SecurityError. A served page (the Inbox's "Pages only") takes it, but its
  *   address becomes the folder's. A bare fragment (or an empty URL) is applied
- *   to the page's own address, as in a tab; any other URL the frame refuses
+ *   to the page's own address, as in a tab, and so is a bare query
+ *   (`replaceState(null, '', '?variant=2')`): a served page's address keeps
+ *   its path and takes the query (srcdoc refuses a query, so there it keeps
+ *   only the fragment); any other URL the frame refuses
  *   keeps the page's address and takes only that URL's fragment. The state
  *   object is kept either way.
  * - `localStorage` / `sessionStorage`, whose getter throws in an opaque
@@ -38,6 +41,15 @@ export const SANDBOX_SHIM_SCRIPT = `(function() {
         var raw = String(url);
         var own = location.href.split('#')[0];
         if (raw === '' || raw.charAt(0) === '#') return original.call(this, state, unused, own + raw);
+        if (raw.charAt(0) === '?') {
+          try {
+            return original.call(this, state, unused, own.split('?')[0] + raw);
+          } catch (error) {
+            if (!error || error.name !== 'SecurityError') throw error;
+            var at = raw.indexOf('#');
+            return original.call(this, state, unused, own + (at < 0 ? '' : raw.slice(at)));
+          }
+        }
         try {
           return original.call(this, state, unused, url);
         } catch (error) {

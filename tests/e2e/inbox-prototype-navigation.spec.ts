@@ -22,6 +22,14 @@
  * viewer's full screen with the tools gathered, the page ends above the corner control,
  * so its bottom-right switcher stays clickable.
  *
+ * One attached file several options show at different queries
+ * (`Prototype: proto/mock.html?variant=1`, `…?variant=2`): each option opens
+ * with its own query, stepping switches the variant, an in-page link to
+ * another option's query steps there, one to no option's query reloads in
+ * place, Pick picks the option on screen; a message's link
+ * (`[…](proto/mock.html?variant=2#step-2)`) opens the file beside the thread
+ * with its query and hash.
+ *
  * Screenshots go to PLANNOTATOR_PROTOTYPE_NAV_SHOTS when it is set.
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
@@ -211,3 +219,86 @@ test("an attached page's ?query link, in the file viewer and in an html fence, l
     await removeInboxScratch(root);
   }
 });
+
+// The owner, 2026-11-11: "why don't those URLs work". Two options show ONE attached file at different queries
+// (`Prototype: proto/mock.html?variant=1`, `…?variant=2`): each opens with its own query, stepping switches the
+// variant, an in-page `?variant=3` link switches in place, and Pick picks the option on screen. A link in the message
+// (`[variant 2](proto/mock.html?variant=2)`) opens the file beside the thread with that query too.
+test('one attached file, two options at different queries: each shows its own variant; a message link keeps its query', async ({ browser }) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  const root = inboxScratch('plannotator-inbox-protoquery-e2e-');
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const url = started.stdout.trim();
+  const project = scratchProject(join(root, 'src'), 'team-roster');
+  mkdirSync(join(project, 'proto'), { recursive: true });
+  writeFileSync(join(project, 'proto', 'mock.html'), MOCK('Mock', 4));
+  const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
+  try {
+    const sent = await agent.send({
+      project_path: project,
+      subject: 'Two variants of one mock',
+      attachments: ['proto/mock.html'],
+      body: [
+        'One mock, two variants. Also [variant 2 on its own](proto/mock.html?variant=2#step-2).',
+        '',
+        ':::question',
+        'Which variant?',
+        '',
+        '- [ ] One · names',
+        '    Prototype: proto/mock.html?variant=1',
+        '- [ ] Two · faces',
+        '    Prototype: proto/mock.html?variant=2',
+        ':::',
+      ].join('\n'),
+    });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await page.goto(`${url}#thread=${sent.thread_id as string}`);
+    await page.locator('[data-try-prototype]').first().click();
+    const frame = page.frameLocator('[data-prototype-window] iframe');
+    const caption = page.locator('[data-prototype-caption]');
+    // No option is recommended: the window opens on the first, at its own query.
+    await expect(caption).toHaveAttribute('data-prototype-caption', 'A');
+    await expect(frame.locator('#title')).toHaveText('Mock: variant 1');
+    await expect(frame.locator('#search')).toHaveText('?variant=1');
+    await shot(page, '6-shared-file-option-A');
+
+    // The next option is the same file at ?variant=2: a page of its own.
+    await page.locator('[data-prototype-step="next"]').click();
+    await expect(caption).toHaveAttribute('data-prototype-caption', 'B');
+    await expect(frame.locator('#title')).toHaveText('Mock: variant 2');
+    await expect(frame.locator('#search')).toHaveText('?variant=2');
+    await shot(page, '7-shared-file-option-B');
+
+    // Its switcher's ?variant=1 is option A's page: the window steps there.
+    await frame.getByRole('link', { name: '1', exact: true }).click();
+    await expect(caption).toHaveAttribute('data-prototype-caption', 'A');
+    await expect(frame.locator('#search')).toHaveText('?variant=1');
+    // ?variant=3 is no option's: the page loads again with it, in place, on the same option.
+    await frame.getByRole('link', { name: '3', exact: true }).click();
+    await expect(frame.locator('#title')).toHaveText('Mock: variant 3');
+    await expect(caption).toHaveAttribute('data-prototype-caption', 'A');
+
+    // Pick picks the option on screen.
+    await page.locator('[data-prototype-step="next"]').click();
+    await expect(frame.locator('#search')).toHaveText('?variant=2');
+    await page.locator('[data-prototype-pick]').click();
+    await expect(page.locator('[data-prototype-window]')).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: /Two · faces/ })).toBeChecked();
+
+    // The message's link opens the file beside the thread at its query and fragment (the page routes on the hash).
+    await page.locator('a[data-local-link="open"]', { hasText: 'variant 2 on its own' }).click();
+    const viewer = page.frameLocator('.ib-htmlframe iframe');
+    await expect(viewer.locator('#title')).toHaveText('Mock: variant 2');
+    await expect(viewer.locator('#search')).toHaveText('?variant=2');
+    await expect(viewer.locator('#step')).toHaveText('2');
+    await shot(page, '8-message-link-variant-2');
+    await context.close();
+  } finally {
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+

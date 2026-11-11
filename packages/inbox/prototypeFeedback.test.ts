@@ -9,7 +9,7 @@
 import { expect, test } from 'bun:test';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback } from './attachments';
-import { prototypeNames, prototypePageCount, questionPrototypePages } from './prototypes';
+import { prototypeNames, prototypePageCount, prototypeStart, questionPrototypePages, samePrototypePage } from './prototypes';
 
 const ROOT = '/work/shop';
 const APP_B = { id: 'liv_0123456789abcdef', url: 'http://localhost:4000/checkout?v=b' };
@@ -69,7 +69,7 @@ function record(id: string, text: string, at: string, target: { live: true } | {
 test("each option's page: an attached HTML file by its link, an app by its checked address (fragment aside); C has none", () => {
   const { pages, shared } = questionPrototypePages(MESSAGE.questions[0]!, MESSAGE, ROOT);
   expect(shared).toBe(false);
-  expect(pages).toEqual([{ kind: 'file', attachmentId: FILE_A.id, name: 'a.html' }, { kind: 'app', siteId: APP_B.id, url: APP_B.url }, null]);
+  expect(pages).toEqual([{ kind: 'file', attachmentId: FILE_A.id, name: 'a.html', start: '' }, { kind: 'app', siteId: APP_B.id, url: APP_B.url }, null]);
 });
 
 test("Send files a prototype's comments under the option's name, then its address or file; an unnamed page keeps its plain heading", () => {
@@ -90,7 +90,7 @@ test("Send files a prototype's comments under the option's name, then its addres
 
 test("a question's shared page is named for the question", () => {
   const shared = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which invoice?', prototype: { target: 'a.html' }, choices: [{ label: 'Lean' }, { label: 'Full' }] }] };
-  expect(questionPrototypePages(shared.questions[0]!, shared, ROOT)).toEqual({ pages: [{ kind: 'file', attachmentId: FILE_A.id, name: 'a.html' }, { kind: 'file', attachmentId: FILE_A.id, name: 'a.html' }], shared: true });
+  expect(questionPrototypePages(shared.questions[0]!, shared, ROOT)).toEqual({ pages: [{ kind: 'file', attachmentId: FILE_A.id, name: 'a.html', start: '' }, { kind: 'file', attachmentId: FILE_A.id, name: 'a.html', start: '' }], shared: true });
   expect(prototypeNames([shared], ROOT).attachments.get(FILE_A.id)).toBe('Prototype for "Which invoice?"');
 });
 
@@ -102,4 +102,45 @@ test('the tab counts pages: several options\' pages are plural, one shared page 
   expect(prototypePageCount(one.questions[0]!, one, ROOT)).toBe(1);
   const none = { ...MESSAGE, questions: [{ kind: 'single', prompt: 'Which?', choices: [{ label: 'A' }, { label: 'B' }] }] };
   expect(prototypePageCount(none.questions[0]!, none, ROOT)).toBe(0);
+});
+
+// The owner, 2026-11-11: "why don't those URLs work". `Prototype: proto/a.html?variant=2` opens the page with that
+// query, as a tab opens that address, so several options can show one file at different variants.
+test("a file's query and fragment ride its page: options sharing one file at different queries are different pages", () => {
+  const variants = {
+    ...MESSAGE,
+    questions: [
+      {
+        kind: 'single',
+        prompt: 'Which variant?',
+        choices: [
+          { label: '1 · Names', prototype: { target: 'proto/a.html?variant=1' } },
+          { label: '2 · Faces', prototype: { target: 'proto/a.html?variant=2#top' } },
+          { label: '3 · Plain', prototype: { target: 'proto/a.html' } },
+        ],
+      },
+    ],
+  };
+  const { pages, shared } = questionPrototypePages(variants.questions[0]!, variants, ROOT);
+  expect(shared).toBe(false);
+  expect(pages.map((page) => page?.kind === 'file' && [page.attachmentId, page.start])).toEqual([
+    [FILE_A.id, '?variant=1'],
+    [FILE_A.id, '?variant=2#top'],
+    [FILE_A.id, ''],
+  ]);
+  expect(samePrototypePage(pages[0]!, pages[1]!)).toBe(false);
+  expect(samePrototypePage(pages[0]!, { kind: 'file', attachmentId: FILE_A.id, name: 'a.html', start: '?variant=1' })).toBe(true);
+  // Three options' pages: the tab is plural.
+  expect(prototypePageCount(variants.questions[0]!, variants, ROOT)).toBe(3);
+  // Their comments are the file's, not one option's: the question names them.
+  expect(prototypeNames([variants], ROOT).attachments.get(FILE_A.id)).toBe('Prototype for "Which variant?"');
+});
+
+test('prototypeStart: the query and fragment as written; an empty ? or # is none', () => {
+  expect(prototypeStart('proto/a.html?variant=2')).toBe('?variant=2');
+  expect(prototypeStart('a.html#step-2')).toBe('#step-2');
+  expect(prototypeStart(' a.html?v=1&n=3#top ')).toBe('?v=1&n=3#top');
+  expect(prototypeStart('a.html?')).toBe('');
+  expect(prototypeStart('a.html#')).toBe('');
+  expect(prototypeStart('a.html')).toBe('');
 });

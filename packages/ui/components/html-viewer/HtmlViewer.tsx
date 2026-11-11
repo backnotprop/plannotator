@@ -275,6 +275,17 @@ export interface HtmlViewerProps {
    * Absent → unchanged (a form does nothing; the hash stays).
    */
   pageNavigation?: boolean;
+  /**
+   * Opt-in, for a host that serves the frame (`frameUrl`): the query and
+   * fragment the page first loads with (`"?variant=2"`, `"#step-2"`,
+   * `"?variant=2#step-2"`), as a tab opened at `page.html?variant=2` would,
+   * so the page's scripts read them in `location.search` and `location.hash`.
+   * Only the served URL's query and fragment change (`servedFrameReloadUrl`);
+   * anything that is not a query and a fragment is ignored. A new value loads
+   * the page again with it. Srcdoc mode has no URL to carry it: ignored.
+   * Absent → unchanged.
+   */
+  frameStart?: string;
   /** Fragment to scroll to once this document's bridge is ready, for a
    *  linked document opened from a `#`-carrying link. Bare id, no `#`. */
   initialFragment?: string;
@@ -567,6 +578,18 @@ export function servedFrameReloadUrl(servedUrl: string | undefined, base: string
 }
 
 /**
+ * The served frame's first address (`frameStart`): its own URL with the query
+ * and fragment `start` names (`?variant=2`, `#step-2`, both), or the served URL
+ * unchanged when `start` is not a query and a fragment.
+ */
+export function servedFrameStartUrl(servedUrl: string, base: string, start: string): string {
+  const at = start.indexOf("#");
+  const search = at < 0 ? start : start.slice(0, at);
+  const hash = at < 0 ? "" : start.slice(at);
+  return servedFrameReloadUrl(servedUrl, base, search === "?" ? "" : search, hash === "#" ? "" : hash) ?? servedUrl;
+}
+
+/**
  * Render arbitrary HTML in a sandbox and adapt its validated bridge messages
  * to the same annotation controls used by the Markdown viewer.
  */
@@ -633,6 +656,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       allowCommentImages = true,
       frameUrl,
       pageNavigation = false,
+      frameStart,
     },
     ref,
   ) => {
@@ -769,6 +793,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }, [servesFrame, srcdoc, frameAsk]);
     const servesFrameRef = useRef(servesFrame);
     servesFrameRef.current = servesFrame;
+    // The frame's address: the served document, with the query and fragment it starts at (`frameStart`).
+    const frameSrc = useMemo(
+      () => (servedUrl && frameStart && typeof window !== "undefined" ? servedFrameStartUrl(servedUrl, window.location.href, frameStart) : servedUrl),
+      [servedUrl, frameStart],
+    );
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -1692,7 +1721,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               {...(src
                 ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
-                  ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
+                  ? { src: frameSrc, sandbox: srcdocSandbox(sandbox, hostNavigates) }
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",

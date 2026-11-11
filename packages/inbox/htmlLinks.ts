@@ -32,8 +32,11 @@ import { normalizeLinkPath, type LinkableAttachment } from './links';
 export type InboxHtmlLink =
   /** The page the link is in, again: `search` is `""` or `?…`, `hash` is `""` or `#…`. */
   | { kind: 'self'; search: string; hash: string }
-  /** An attachment of the thread: open it in the pane. `hash` is the fragment, without `#`. */
-  | { kind: 'attachment'; id: string; name: string; hash: string }
+  /**
+   * An attachment of the thread: open it in the pane. `hash` is the fragment, without `#`. `search`: an HTML
+   * page's query (`mock.html?variant=2` → `?variant=2`), which the page opens with; absent for none.
+   */
+  | { kind: 'attachment'; id: string; name: string; hash: string; search?: string }
   /** A page in the attached page's folder that is not attached: `relative` is its path in that folder. */
   | { kind: 'page'; path: string; relative: string; name: string; hash: string }
   /** A local image in the attached page's folder, not attached: `url` is the asset route. */
@@ -142,7 +145,10 @@ export function resolveInboxHtmlLink(href: string, context: InboxHtmlLinkContext
   }
   // An attachment of the thread opens as itself, whatever kind it is.
   const attached = attachmentAt(path, context.attachments);
-  if (attached) return { kind: 'attachment', id: attached.id, name: attached.name, hash: intent.kind === 'document' ? intent.hash : '' };
+  if (attached) {
+    const search = intent.kind === 'document' && attached.kind === 'html' ? queryAndHash(href).search : '';
+    return { kind: 'attachment', id: attached.id, name: attached.name, hash: intent.kind === 'document' ? intent.hash : '', ...(search.length > 1 ? { search } : {}) };
+  }
   const relative = inside(path, folder);
   if (relative === null) {
     return { kind: 'refused', name, note: `${name} is outside this page's folder and is not attached, so it does not open here.` };

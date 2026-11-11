@@ -13,9 +13,13 @@
  *   records, grouped by page in the export. A page that does not open (a
  *   guest login over the tailnet, say) is the server's words in one line.
  *
+ * A file's page opens with its `Prototype:` line's query and fragment
+ * (`proto/a.html?variant=2#step-2`), as a tab opens that address, so several
+ * options can show one file at different variants (each its own page).
  * A link in a file's page works as in a tab: one to the page itself with a
- * query (`?variant=2`, a GET form's fields) loads it again with that query;
- * one to another option's page steps to that option; one to another site
+ * query (`?variant=2`, a GET form's fields) loads it again with that query, or
+ * steps to the option that shows the page at that query; one to another
+ * option's page steps to that option; one to another site
  * opens a new tab; an in-page `#` link scrolls (the bridge). Anything else
  * stays put (the window shows no other file).
  *
@@ -72,8 +76,24 @@ function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
+/** One frame per page: a file at another query (`a.html?variant=2`) is another page, loaded fresh. */
 function pageKey(page: PrototypePage): string {
-  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}`;
+  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}${page.start}`;
+}
+
+/**
+ * The option a link in a page steps to, or undefined: the option showing that file at that query and fragment,
+ * else (a link with no query or fragment of its own, to another file) the first option showing that file.
+ */
+export function optionForLink(options: readonly PrototypeOption[], steps: readonly number[], attachmentId: string, start: string, from: number): number | undefined {
+  const shows = (i: number) => {
+    const page = options[i]!.page;
+    return page?.kind === 'file' && page.attachmentId === attachmentId ? page : null;
+  };
+  const exact = steps.find((i) => shows(i)?.start === start);
+  if (exact !== undefined) return exact;
+  if (start !== '' || shows(from)) return undefined;
+  return steps.find((i) => shows(i) !== null);
 }
 
 export function PrototypeWindow(props: {
@@ -193,8 +213,9 @@ export function PrototypeWindow(props: {
             key={pageKey(page)}
             attachment={attachment}
             attachments={props.attachments}
-            onOpenPage={(attachmentId) => {
-              const to = pages.find((i) => options[i]!.page?.kind === 'file' && (options[i]!.page as { attachmentId: string }).attachmentId === attachmentId);
+            start={page.start}
+            onOpenPage={(attachmentId, start) => {
+              const to = optionForLink(options, pages, attachmentId, start, at);
               if (to === undefined || to === at) return false;
               setAt(to);
               setJustPicked(false);
@@ -359,8 +380,8 @@ function AppPage(props: PageProps & { threadId: string; siteId: string; url: str
 export function followPrototypeLink(
   href: string,
   frame: HtmlViewerFrame | undefined,
-  page: { attachment: Pick<InboxAttachmentState, 'path'>; html: string | null; attachments: readonly InboxAttachmentState[] },
-  onOpenPage: (attachmentId: string) => boolean,
+  page: { attachment: Pick<InboxAttachmentState, 'id' | 'path'>; html: string | null; attachments: readonly InboxAttachmentState[] },
+  onOpenPage: (attachmentId: string, start: string) => boolean,
 ): void {
   const link = resolveInboxHtmlLink(href, {
     folder: folderOf(page.attachment.path),
@@ -370,13 +391,24 @@ export function followPrototypeLink(
     serverOrigin: window.location.origin,
     selfPath: page.attachment.path,
   });
-  if (link.kind === 'self') frame?.reload(link.search, link.hash);
-  else if (link.kind === 'external') window.open(link.url, '_blank', 'noopener,noreferrer');
-  else if (link.kind === 'attachment') onOpenPage(link.id);
+  // The page itself at another option's query (`?variant=2` where option B is `a.html?variant=2`) steps to that
+  // option; else it loads again with the query, in place.
+  if (link.kind === 'self') {
+    if (!onOpenPage(page.attachment.id, `${link.search === '?' ? '' : link.search}${link.hash}`)) frame?.reload(link.search, link.hash);
+  } else if (link.kind === 'external') window.open(link.url, '_blank', 'noopener,noreferrer');
+  else if (link.kind === 'attachment') onOpenPage(link.id, `${link.search ?? ''}${link.hash ? `#${link.hash}` : ''}`);
 }
 
 /** An HTML file the message attached, at the version that was sent, in the file viewer's own HTML frame. */
-function FilePage(props: PageProps & { attachment: InboxAttachmentState; attachments: readonly InboxAttachmentState[]; onOpenPage: (attachmentId: string) => boolean }) {
+function FilePage(
+  props: PageProps & {
+    attachment: InboxAttachmentState;
+    attachments: readonly InboxAttachmentState[];
+    /** The query and fragment the page opens with (its `Prototype:` line's), `""` for none. */
+    start: string;
+    onOpenPage: (attachmentId: string, start: string) => boolean;
+  },
+) {
   const { attachment } = props;
   const source = useInboxFileSource();
   const [view, setView] = useState<AttachmentView | null>(null);
@@ -436,6 +468,7 @@ function FilePage(props: PageProps & { attachment: InboxAttachmentState; attachm
       // Links and forms work as in a tab (followPrototypeLink).
       onOpenLink={(href, frame) => followPrototypeLink(href, frame, { attachment, html: view.html, attachments: props.attachments }, props.onOpenPage)}
       pageNavigation
+      frameStart={props.start || undefined}
       fullViewport
       hideControls
     />

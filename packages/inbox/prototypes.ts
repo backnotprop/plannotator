@@ -7,13 +7,15 @@
  * A page is one of two kinds:
  * - `file`: an HTML file the message attached (`Prototype: proto/a.html`),
  *   matched the way a link to an attachment is (links.ts), shown at the
- *   version that was sent;
+ *   version that was sent, opened with the line's own query and fragment
+ *   (`Prototype: proto/a.html?variant=2`), as a tab opens that address;
  * - `app`: an app running on this computer (`Prototype: http://localhost:…`),
  *   one of the message's `live_sites` (checked and probed at send), shown
  *   through the Inbox's live proxy.
  * A question's own `Prototype:` line is one page every option shows.
  */
 import type { InboxAttachment, InboxLiveSiteRef } from '@plannotator/core/inbox-types';
+import { queryAndHash } from './htmlLinks';
 import { attachmentForLink } from './links';
 
 /** Its frame may never navigate the Inbox window (no `allow-top-navigation`). */
@@ -21,7 +23,12 @@ export const LIVE_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms a
 
 export type PrototypePage =
   | { kind: 'app'; siteId: string; url: string }
-  | { kind: 'file'; attachmentId: string; name: string };
+  /**
+   * `start`: the query and fragment the line gave the file (`proto/a.html?variant=2#step-2` → `?variant=2#step-2`),
+   * `""` for none. The page opens with them, as a tab would, so several options can show one file at different
+   * variants.
+   */
+  | { kind: 'file'; attachmentId: string; name: string; start: string };
 
 /** What a question's prototypes need from the question: as stored, or as the card parsed it. */
 export interface PrototypeQuestion {
@@ -60,7 +67,20 @@ export function prototypePageOf(target: string | undefined, message: PrototypeMe
     return site ? { kind: 'app', siteId: site.id, url: site.url } : null;
   }
   const attachment = attachmentForLink(target, { attachments: message.attachments ?? [], root, base: message.base_path ?? null });
-  return attachment && attachment.kind === 'html' ? { kind: 'file', attachmentId: attachment.id, name: attachment.name } : null;
+  return attachment && attachment.kind === 'html' ? { kind: 'file', attachmentId: attachment.id, name: attachment.name, start: prototypeStart(target) } : null;
+}
+
+/** The query and fragment a file's `Prototype:` target carries (`?variant=2#top`), `""` for none; an empty `?` or `#` is none. */
+export function prototypeStart(target: string): string {
+  const { search, hash } = queryAndHash(target);
+  return `${search === '?' ? '' : search}${hash}`;
+}
+
+/** Two options show the same page: the same app, or the same file with the same query and fragment. */
+export function samePrototypePage(a: PrototypePage | null, b: PrototypePage | null): boolean {
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === 'app') return a.siteId === (b as typeof a).siteId;
+  return a.attachmentId === (b as typeof a).attachmentId && a.start === (b as typeof a).start;
 }
 
 /**
@@ -96,7 +116,8 @@ export interface PrototypeNames {
 /**
  * The names of the thread's prototypes, for Send's feedback: `Prototype of
  * "B · Total first"` for an option's own page, `Prototype for "Which
- * checkout?"` for a question's shared one. The first question and option to
+ * checkout?"` for a question's shared one, and for one file several of its
+ * options show (each at its own query). The first question and option to
  * name a page names it.
  */
 export function prototypeNames(
@@ -114,7 +135,12 @@ export function prototypeNames(
   for (const message of messages) {
     for (const question of message.questions ?? []) {
       if (question.kind === 'action') continue;
-      for (const choice of question.choices) name(prototypePageOf(choice.prototype?.target, message, root), `Prototype of "${choice.label}"`);
+      const pages = question.choices.map((choice) => prototypePageOf(choice.prototype?.target, message, root));
+      // One file several options show at different queries (`a.html?variant=1`, `a.html?variant=2`): its comments
+      // are the file's, not one option's, so the question names it.
+      const fileIds = pages.flatMap((page) => (page?.kind === 'file' ? [page.attachmentId] : []));
+      const sharedFile = (page: PrototypePage | null) => page?.kind === 'file' && fileIds.filter((id) => id === page.attachmentId).length > 1;
+      question.choices.forEach((choice, i) => name(pages[i]!, sharedFile(pages[i]!) ? `Prototype for "${question.prompt}"` : `Prototype of "${choice.label}"`));
       name(prototypePageOf(question.prototype?.target, message, root), `Prototype for "${question.prompt}"`);
     }
   }

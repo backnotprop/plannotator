@@ -275,6 +275,11 @@ export interface AttachmentPaneProps {
    */
   onOpenLinked?: (attachmentId: string) => void;
   /**
+   * The query and fragment an HTML page opens with, when a link named them (`[the mock](mock.html?variant=2)` in a
+   * message): `start` is `?…`, `#…` or both. Only for the attachment `id`; a new object applies again.
+   */
+  pageStart?: { id: string; start: string } | null;
+  /**
    * How a link to this Inbox opens in this window, or null when it does not (App.tsx's `inboxLink`). Absent (the
    * tour): every link is another site's.
    */
@@ -1280,6 +1285,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [linkImage, setLinkImage] = useState<{ src: string; alt: string } | null>(null);
   /** The fragment a link named on an attached page it opened (`SHEET.html#pr1`): cleared once used. */
   const [linkFragment, setLinkFragment] = useState<{ id: string; hash: string } | null>(null);
+  // The query and fragment the HTML page opens with (`mock.html?variant=2`, from a link in a message or in another
+  // page), as a tab opens that address: for that attachment only, until another file shows.
+  const [pageStart, setPageStart] = useState<{ id: string; start: string } | null>(props.pageStart ?? null);
+  useEffect(() => {
+    if (props.pageStart) setPageStart(props.pageStart);
+  }, [props.pageStart]);
+  useEffect(() => {
+    setPageStart((was) => (was && was.id !== attachment.id ? null : was));
+  }, [attachment.id]);
   useEffect(() => {
     setLinkNote(null);
     setLinkImage(null);
@@ -1452,6 +1466,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }
         leave(link.name, () => {
           if (link.hash) setLinkFragment({ id: link.id, hash: link.hash });
+          const page = linkables.find((a) => a.id === link.id)?.kind === 'html';
+          const start = page ? `${link.search ?? ''}${link.hash ? `#${link.hash}` : ''}` : '';
+          setPageStart(start ? { id: link.id, start } : null);
           pendingStep.current = 'key';
           if (props.onOpenLinked) props.onOpenLinked(link.id);
           else props.onStep?.(link.id, 'current');
@@ -2723,6 +2740,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
               // Forms and in-page links work as in a tab (a GET form loads the page again with its fields; `#` sets the hash).
               pageNavigation
+              frameStart={pageStart?.id === attachment.id ? pageStart.start : undefined}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
               onUnanchoredChange={(ids) => setUnanchored(new Set(ids))}
               fullViewport
