@@ -38,6 +38,7 @@
  * loaded on the first click or the first look at the picker) move as a whole; so does a host with no rig of its own.
  */
 import type { AgentFace, OurFace } from './faceChoices';
+import { ownIconSrc } from './ownIcons';
 import { AGENT_RIGS, CLAUDE_RAY_ANGLES, type AgentRigKind } from './rigs';
 
 export { AGENT_FACES, nextAgentFace, type AgentFace } from './faceChoices';
@@ -815,7 +816,11 @@ function screenWatch(): IntersectionObserver | null {
 
 // Reduced motion turned on or off while icons show: each takes its new kind of pose, and lets go of the pointer.
 reduceQuery?.addEventListener?.('change', () => {
-  for (const icon of icons.values()) icon.inst.get(icon.face)?.start();
+  for (const icon of icons.values()) {
+    // An uploaded picture that moves by itself: its still under reduced motion, itself again without.
+    for (const [face, f] of icon.faces) if (face.startsWith('own:')) f.querySelector<HTMLImageElement>('img[data-own]')?.setAttribute('src', ownIconSrc(face, reduceQuery.matches));
+    icon.inst.get(icon.face)?.start();
+  }
   watchPointer();
   wake();
 });
@@ -991,13 +996,47 @@ export function agentFaceArtReady(): boolean {
   return faceArt !== null;
 }
 
+/**
+ * An uploaded picture ("Your own…"), moved as a whole like our faces: built with the DOM, never as markup, and only ever
+ * an `<img>` of its address on this Inbox (an SVG in an image runs no script and loads nothing). It plays its own
+ * animation here, in the sidebar; under reduced motion it shows its still, which the Inbox makes (an animation inside
+ * an image does not hear the setting). A picture that does not load shows the agent's own mark.
+ */
+function ownFaceEl(icon: Icon, f: HTMLElement, face: AgentFace): void {
+  const body = document.createElement('span');
+  body.className = 'am-p am-fb';
+  body.dataset.p = 'body';
+  const x = document.createElement('span');
+  x.className = 'am-x am-fb am-own';
+  const img = document.createElement('img');
+  img.className = 'am-art';
+  img.alt = '';
+  img.draggable = false;
+  img.decoding = 'async';
+  img.dataset.own = face;
+  img.src = ownIconSrc(face, reduceQuery?.matches ?? false);
+  img.addEventListener('error', () => {
+    if (icons.get(icon.el) !== icon) return;
+    if (icon.face === face) showFace(icon, 'agent', false);
+    // Built again (and asked again) the next time this face shows.
+    if (icon.face !== face && icon.faces.get(face) === f) {
+      f.remove();
+      icon.faces.delete(face);
+    }
+  });
+  x.append(img);
+  body.append(x);
+  f.append(body);
+}
+
 function faceEl(icon: Icon, face: AgentFace): HTMLElement {
   const known = icon.faces.get(face);
   if (known) return known;
   const f = document.createElement('span');
-  f.className = `am-face am-f-${face}`;
+  f.className = face.startsWith('own:') ? 'am-face am-f-own' : `am-face am-f-${face}`;
+  if (face.startsWith('own:')) ownFaceEl(icon, f, face);
   // Our art is a picture moved as a whole; `faceArt` holds markup from our own assets only.
-  if (face !== 'agent') f.innerHTML = `<span class="am-p am-fb" data-p="body"><span class="am-x am-fb">${faceArt?.[face] ?? ''}</span></span>`;
+  else if (face !== 'agent') f.innerHTML = `<span class="am-p am-fb" data-p="body"><span class="am-x am-fb">${faceArt?.[face as OurFace] ?? ''}</span></span>`;
   f.hidden = true;
   icon.card.append(f);
   icon.faces.set(face, f);
@@ -1056,7 +1095,7 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
   screenWatch()?.observe(el);
   watchPointer();
   onMoved();
-  if (options.face !== 'agent' && faceArt) showFace(icon, options.face, false);
+  if (options.face !== 'agent' && (faceArt || options.face.startsWith('own:'))) showFace(icon, options.face, false);
   return plainOf(icon);
 }
 
@@ -1064,7 +1103,7 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
 export function showAgentFace(el: HTMLElement, face: AgentFace, withMotion = true): void {
   const icon = icons.get(el);
   if (!icon || icon.face === face) return;
-  if (face !== 'agent' && !faceArt) return;
+  if (face !== 'agent' && !face.startsWith('own:') && !faceArt) return;
   showFace(icon, face, withMotion);
 }
 

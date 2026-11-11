@@ -10,16 +10,36 @@
  */
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { useState } from 'react';
 import { useAgentFace } from './agents/agentFaces';
 import { useAgentFaceSources } from './agents/faceArtLoad';
-import type { OurFace } from './agents/faceChoices';
+import { isOwnFace, type OurFace, type OwnFace } from './agents/faceChoices';
+import { ownIconSrc } from './agents/ownIcons';
 
 export * from '@plannotator/ui/components/inbox-thread/icons';
 
 /** The mark for an agent host; with `agent`, that agent's chosen face when it has one. */
 export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
   const face = useAgentFace(agent);
-  return face === 'agent' ? <UiHostMark host={host} big={big} /> : <FaceMark face={face} big={big} />;
+  if (face === 'agent') return <UiHostMark host={host} big={big} />;
+  if (isOwnFace(face)) return <OwnMark key={face} face={face} host={host} big={big} />;
+  return <FaceMark face={face} big={big} />;
+}
+
+/**
+ * An uploaded picture ("Your own…") as a still, as uploaded: scaled to fit the mark's whole tile, its own shape and
+ * transparency kept (no crop, no tile colour behind it, no rounded mask), so a wide or tall one sits letterboxed in
+ * the same box and no row changes size. Only ever an `<img>` of its address on this Inbox: an SVG runs nothing.
+ * A picture that does not load (removed, kept on another machine, a guest's window) is the agent's own mark.
+ */
+function OwnMark({ face, host, big }: { face: OwnFace; host: string | null | undefined; big?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <UiHostMark host={host} big={big} />;
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-own`} data-agent-face={face}>
+      <img src={ownIconSrc(face, true)} alt="" draggable={false} decoding="async" onError={() => setFailed(true)} />
+    </span>
+  );
 }
 
 /** An author's mark: an agent's is its session's face when it has one. */

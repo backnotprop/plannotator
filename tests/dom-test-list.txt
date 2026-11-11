@@ -687,3 +687,4 @@ packages/inbox/agents/agentFacesEverywhere.test.tsx
 packages/inbox/starredPills.test.tsx
 packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx
+packages/inbox/agents/ownAgentIcons.test.tsx
