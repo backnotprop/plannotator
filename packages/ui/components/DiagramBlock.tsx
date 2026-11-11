@@ -17,7 +17,7 @@ import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramC
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
-import { LazyBlockBoundary } from './LazyBlockBoundary';
+import { LazyBlockBoundary, LazyLoadNotice } from './LazyBlockBoundary';
 
 /**
  * A diagram fence in the document: the fence's language picks the engine
@@ -312,6 +312,16 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
+      // A diagram-type chunk that did not load: the source, readable, under
+      // the same quiet Reload line as any other part that could not load.
+      if (state.error?.chunkFailed) {
+        return (
+          <>
+            <LazyLoadNotice error={state.error.message} />
+            <DiagramInlineSource block={block} kind={kind} />
+          </>
+        );
+      }
       if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
         return <DiagramInlineSource block={block} kind={kind} />;
       }

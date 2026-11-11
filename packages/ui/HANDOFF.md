@@ -2693,6 +2693,13 @@ Settings → General gains a **Hide the repository owner** switch, off by defaul
 - **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
 - **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
 
+## Ctrl+C / Cmd+C after the highlight (next ui release; behavior fix, additive export, no core change)
+
+Ctrl+C / Cmd+C copied the selected words only while the `Viewer`'s selection toolbar was up. Once the comment composer opened (its textarea takes the focus) it copied nothing, and the same held for the HTML composer, the plan diff's block composer, the code-file view's line composer, and every other host of `useAnnotationHighlighter`, which copied nothing even at the toolbar stage. Every host gets the fix; there is no prop. It is the browser's own copy (the `copy` event, written inside the key press), not a new shortcut.
+
+- **`utils/highlightCopy`** (new): **`useHighlightCopy(text)`** writes `text` into the page's `copy` event while it is non-empty; **`writeHighlightCopy(event, text)`**, **`copyHasOwnSelection(event)`** and **`copyFromOtherField(event)`** are the rule, and **`HIGHLIGHT_COMPOSER_ATTR`** (`data-highlight-composer`) marks a composer that is not a `CommentPopover`. The copy is plain text, as Ctrl+C at the toolbar stage always was (rich text is the Copy button's alone). Text the person selected in an input or textarea, or anywhere in the page, always copies natively; a field outside the highlight's composer (`CommentPopover`'s `data-comment-popover`, or `data-highlight-composer`) keeps the browser's copy even with only a caret, as every field did before; an event another handler took is left alone.
+- **`useAnnotationHighlighter`** copies the selection while its toolbar is up and while that selection's composer is open (with `onHostDraft`, the toolbar stage only: the host owns the composer). The `Viewer`'s own copy listener is gone and it gets the copy through the hook; a host that mounts the hook directly gets it too.
+- **`HtmlViewer`** copies the composer's selected text (or a pinned element's text) while the composer is shown. **`PlanCleanDiffView`** copies the words dragged over when a click opened a block composer. **`CodeFileView`** (`components/CodeFilePopout`) copies the chosen lines, line breaks kept, while its line composer is open.
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.
@@ -3024,6 +3031,13 @@ Pinned by `components/CommentPopover.card.test.tsx` ("/" lists the skills, and i
 - **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
+
+## A failed Mermaid render stays inside its block (unreleased; every host, no opt-in, no core change)
+
+- **Nothing is left on `document.body`.** Mermaid renders into a temporary `#d{id}` node on the body and, on a parse failure or a draw error, drew its "Syntax error in text" graphic there and threw without removing it, so every failed render left one at the bottom of the page (one more per re-render). `MERMAID_CONFIG` now carries `suppressErrorRendering: true` (an added key; every other value unchanged) and the render slot removes `#d{id}` / `#i{id}` after any failed render, so a host with its own `initialize` is covered too.
+- **A diagram-type chunk that does not load** (Mermaid 12 loads sequence, flowchart, ELK and the rest each on first use) is re-attempted once, then the block shows the source under `LazyLoadNotice` ("Couldn't load this view. Reload"), not the red panel. Not a Retry: WebKit keeps a failed module fetch that a modulepreload link started for the page, so only a reload fetches it again. `DiagramRenderError` gains an optional `chunkFailed`.
+
+Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid diagram-type chunk", "Mermaid failure leaves nothing outside the block") and `tests/e2e/inbox-mermaid-failure-webkit.spec.ts`.
 
 ## `useSkillReferenceAutocomplete` `commands` / `onCommand` (ui 0.63.0; additive, opt-in, no core change)
 
