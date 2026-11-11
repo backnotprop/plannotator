@@ -1,7 +1,7 @@
 import { piUpdateAdvert } from "./update-advert.ts";
 import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
-import { annotateDocumentRenderKind } from "../generated/annotatable.ts";
+import { annotateDocumentRenderKind, isSecretEnvPath } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import { createServer } from "node:http";
@@ -528,7 +528,9 @@ export async function startAnnotateServer(options: {
 	// when headings change. Diff content is the markdown, or the raw HTML source
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
-	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+	// A `.env` file the person named (isSecretEnvPath) keeps nothing in the data
+	// dir: no version copy, no submit record, no feedback archive entry.
+	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig()) && !((options.mode ?? "annotate") === "annotate" && isSecretEnvPath(options.filePath));
 	// Single local file sessions are the only ones this eager gate covers.
 	// URL, agent-message, and live-app sessions never write session content to
 	// the data dir. Folder sessions do participate in per-file version history,

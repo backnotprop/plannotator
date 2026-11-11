@@ -89,7 +89,7 @@ import {
 } from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
-import { annotateDocumentRenderKind } from "@plannotator/shared/annotatable";
+import { annotateDocumentRenderKind, isSecretEnvPath } from "@plannotator/shared/annotatable";
 import {
   annotateBundleDocumentCounts,
   annotateBundleRoot,
@@ -394,7 +394,9 @@ export async function startAnnotateServer(
   // when headings change. Diff content is the markdown, or the raw HTML source
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
-  const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+  // A `.env` file the person named (isSecretEnvPath) keeps nothing in the data
+  // dir: no version copy, no submit record, no feedback archive entry.
+  const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig()) && !(mode === "annotate" && isSecretEnvPath(filePath));
   // Single local file sessions are the only ones this eager gate covers.
   // URL, agent-message, and live-app sessions never write session content to
   // the data dir. Folder sessions do participate in per-file version history,
