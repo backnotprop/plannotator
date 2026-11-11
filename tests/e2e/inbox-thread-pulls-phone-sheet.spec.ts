@@ -93,20 +93,22 @@ async function openPulls(browser: Browser, viewport: { width: number; height: nu
   return page;
 }
 
-/** A sheet's gaps to the window's left, right and bottom edges, and its corners. */
-const placeOf = (selector: string) => (el: Element) => {
-  const target = el.matches(selector) ? el : el.querySelector(selector)!;
-  const r = target.getBoundingClientRect();
-  const cs = getComputedStyle(target);
+/**
+ * A sheet's gaps to the window's left, right and bottom edges, and its corners. It runs in the page
+ * (`locator.evaluate`), so it reads nothing from this file's scope: only the element it is given.
+ */
+function placeOf(el: Element) {
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
   return { left: Math.round(r.left), right: Math.round(innerWidth - r.right), bottom: Math.round(innerHeight - r.bottom), corners: [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius] };
-};
+}
 
 test("a phone: the thread's PRs open as a sheet that floats as the thread's ⋯ sheet does, at the bottom", async ({ browser }) => {
   for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 640 }]) {
     const page = await openPulls(browser, viewport);
     const sheet = page.locator('[data-pr-popover]');
     await expect(sheet).toHaveAttribute('data-sheet', '');
-    const pulls = await sheet.evaluate(placeOf('[data-pr-popover]'));
+    const pulls = await sheet.evaluate(placeOf);
     const field = (await page.locator('[data-pr-add-input]').boundingBox())!;
     // A tap on the scrim closes it.
     await page.locator('[data-pr-scrim]').tap({ position: { x: 20, y: 20 } });
@@ -116,7 +118,7 @@ test("a phone: the thread's PRs open as a sheet that floats as the thread's ⋯ 
     const menu = page.locator('.ib-pm-pos[data-phone] .ib-pm');
     await expect(menu).toBeVisible();
     await page.waitForTimeout(400);
-    const more = await menu.evaluate(placeOf('.ib-pm'));
+    const more = await menu.evaluate(placeOf);
     const seen = JSON.stringify({ viewport, pulls, more });
     // The same inset on each side and at the bottom, a small one (not flush, not the old 352 px card from the left).
     expect(pulls.left, seen).toBe(more.left);
