@@ -1,11 +1,3 @@
-/**
- * The tour's file source (fileSource.tsx's seam): the real viewers over the
- * tour's own files. URLs are the tour's assets (in memory when the tour
- * loaded them, else the read-only asset route); a text file's view is the
- * text the tour loaded; a drawing is kept in memory (`inbox-tour-markup:<n>`);
- * an annotation is handed to the tour's state. Nothing is written anywhere,
- * and `writes: false` hides Open in, Download and Copy path.
- */
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { readInboxAttachmentKind } from '@plannotator/core/inbox-types';
 import type { AttachmentView } from '../api';
@@ -13,11 +5,6 @@ import type { InboxFileSource } from '../fileSource';
 import { keepTourMarkup, tourAssetText, tourAssetUrl } from './assets';
 import { tourAssetOf, tourFileOf, tourRecord, tourSuggestionFor, type TourFixture } from './model';
 
-/**
- * The mock's own policy inside its srcdoc frame (the frame also inherits the
- * window's): its inline scripts and styles, pictures, video and audio from
- * data: and blob:, nothing fetched.
- */
 export const MOCK_FRAME_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'";
 
 export function mockSrcdoc(html: string): string {
@@ -26,10 +13,8 @@ export function mockSrcdoc(html: string): string {
 }
 
 export interface TourFileSourceOptions {
-  /** A comment saved in a viewer: the tour's state keeps it. */
   onSave: (record: InboxAnnotationRecord) => void;
   onRemove: (id: string) => void;
-  /** The thread a tour message is in. */
   threadOf: (messageId: string) => string;
 }
 

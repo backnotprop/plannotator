@@ -1,23 +1,4 @@
-/**
- * The tour's "Make it yours" card (step 10 of 11; the owner, 2026-11-02): the
- * theme, three colour sets and the text size, drawn over the tour's Inbox so
- * a pick shows at once on a full window. Every control writes through the
- * same hooks as Settings → General → Appearance (theme.ts, textSize.ts), so
- * nothing here has storage of its own: the `plannotator-theme` cookie and
- * config.json `theme`, and config.json `inboxTextSize` with its cookie.
- *
- * Skip puts back only what the card itself changed, each field to its value
- * just before the card first changed it (`restore`, through the card's
- * handle): never a snapshot from the card's first render, which can come
- * before the first settings read and would write the cookie's or the default
- * values over config.json. Before writing, Skip reads the settings again and
- * leaves a field another window changed since. The card's Next ("Connect
- * agents next") keeps what was picked. Under the colour sets, how many more
- * Settings offers (counted from the palette registry), with the link to
- * Settings → General. A colour set is picked for both halves at once (the three offered draw both); Settings still picks a
- * palette per half, and offers every palette. No keyboard shortcut: each
- * control is a native radio group, one tab stop, the arrows move the pick.
- */
+/** Skip restores only what the card changed, each field to its value just before the card first changed it: never a snapshot from the first render, which can precede the first settings read and would write the cookie's or default values over config.json. */
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { paletteSwatchColors } from '@plannotator/ui/components/ThemeTab';
@@ -29,13 +10,8 @@ import { Icon } from '../icons';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 
-/** The colour sets offered, in this order (the owner, 2026-11-02). Each draws both halves. */
 export const TOUR_COLOR_SETS = ['plannotator', 'plannotator-modern', 'catppuccin'] as const;
 
-/**
- * How many palettes Settings → General lists beyond the step's three, for the half on screen (its Colors row lists
- * one half at a time, the one shown): counted from the registry, never a fixed number.
- */
 export function tourMoreColorSets(half: ThemeHalf, themes: ThemeInfo[] = BUILT_IN_THEMES): number {
   return themesForHalf(themes, half).filter((theme) => !(TOUR_COLOR_SETS as readonly string[]).includes(theme.id)).length;
 }
@@ -46,14 +22,12 @@ const MODES: { id: Mode; label: string; icon: 'sun' | 'moon' | 'system' }[] = [
   { id: 'system', label: 'Match system', icon: 'system' },
 ];
 
-/** The tile's name: "Modern" for "Plannotator Modern"; the card already says it is Plannotator. */
 const shortName = (theme: ThemeInfo) => (theme.id === 'plannotator' ? theme.name : theme.name.replace(/^Plannotator /, ''));
 
 function colorsOf(id: string, half: ThemeHalf): ThemeColors {
   return (BUILT_IN_THEMES.find((theme) => theme.id === id) ?? BUILT_IN_THEMES[0]!).colors[half];
 }
 
-/** A window in small, in one half's colours: a sidebar with its selection, a few lines, a button. */
 function MiniWindow({ colors }: { colors: ThemeColors }) {
   const ink = (percent: number) => `color-mix(in oklch, ${colors.foreground} ${percent}%, transparent)`;
   return (
@@ -79,28 +53,20 @@ interface Fields {
 }
 type Field = keyof Fields;
 
-/** One field the card changed: its value just before the card's first change, and the card's latest pick. */
 interface Changed<K extends Field> {
   before: Fields[K];
   wrote: Fields[K];
 }
 type ChangedFields = { [K in Field]?: Changed<K> };
 
-/** config.json's value of each field, from a settings read (undefined: never saved, or the read failed). */
 function savedFields(settings: { theme?: { mode?: unknown; light?: unknown; dark?: unknown } | null; text_size?: unknown } | null): Partial<Record<Field, unknown>> {
   return { mode: settings?.theme?.mode, light: settings?.theme?.light, dark: settings?.theme?.dark, size: settings?.text_size };
 }
 
-/**
- * The fields Skip puts back: each one the card changed, unless config.json now holds a third value (another
- * window changed it since; the card's write may still be on its way, so its own pick or the value before it
- * both count as untouched).
- */
 export function tourSkipRestores(changed: ChangedFields, saved: Partial<Record<Field, unknown>>): Partial<Fields> {
   const out: Partial<Fields> = {};
   for (const field of Object.keys(changed) as Field[]) {
     const c = changed[field]!;
-    // Changed and changed back: nothing to put back.
     if (c.before === c.wrote) continue;
     const now = saved[field];
     if (now !== undefined && now !== c.before && now !== c.wrote) continue;
@@ -110,7 +76,6 @@ export function tourSkipRestores(changed: ChangedFields, saved: Partial<Record<F
 }
 
 export interface TourSettingsHandle {
-  /** Skip: put back what the card itself changed, each to its value just before (never a whole snapshot). */
   restore: () => Promise<void>;
 }
 
@@ -121,7 +86,6 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
   const changed = useRef<ChangedFields>({});
   const now = useRef({ theme, palettes, size });
   now.current = { theme, palettes, size };
-  /** The card changes `field` from `before` to `to`: the first change keeps `before`, every change keeps `to`. */
   // Until the first settings read is adopted the window holds the cookie's or the default look, not the person's: the
   // controls wait (a pick then would record a "before" that is not theirs, and Skip would write it over config.json).
   const note = <K extends Field>(field: K, before: Fields[K], to: Fields[K]) => {
@@ -208,7 +172,6 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
                   checked={on}
                   aria-label={set.name}
                   onChange={() => {
-                    // Both halves: one POST of { light, dark } (theme.ts batches the marks).
                     note('light', palettes.pair.light, set.id);
                     note('dark', palettes.pair.dark, set.id);
                     palettes.choose('light', set.id);

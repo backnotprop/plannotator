@@ -1,13 +1,3 @@
-/**
- * The Inbox's onboarding tour (approval "inbox-onboarding-tour", v2): the
- * window's own list, thread, question card, attachment tiles, viewers,
- * comments, reply box, Artifacts view and compose dialog, fed from the tour's
- * fixture instead of the person's store. The viewers read through the tour's
- * file source (tour/fileSource.ts) and compose through the tour's transport,
- * so picks, comments, drawings, Sends and the new thread change only the
- * tour's state (model.ts); nothing here calls a route that writes. The
- * person's own Inbox stays mounted in App, untouched, and comes back on exit.
- */
 import { inboxUrl } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -88,21 +78,12 @@ import {
   type TourUi,
 } from './model';
 
-// ─────────────────────────── Loading the fixture ───────────────────────────
-
 let fixtureLoad: Promise<TourFixture> | null = null;
 
-/** For tests: the next tour reads the fixture again (a page reads it once). */
 export function __forgetTourFixtureForTests(): void {
   fixtureLoad = null;
 }
 
-/**
- * The whole tour, loaded once per page before it shows (assets.ts): the
- * fixture (tried three times), then every picture and text file into memory.
- * Resolves null when the fixture cannot be had: the tour then never starts.
- * Never rejects.
- */
 export function loadTour(): Promise<TourFixture | null> {
   fixtureLoad ??= (async () => {
     for (const wait of [0, 400, 1200]) {
@@ -126,13 +107,11 @@ export function loadTour(): Promise<TourFixture | null> {
   );
 }
 
-/** The tour's content while it shows: `unavailable` once it cannot be had (the window then leaves the tour, quietly). */
 export function useTourFixture(active: boolean): { fixture: TourFixture | null; unavailable: boolean } {
   const [fixture, setFixture] = useState<TourFixture | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
     if (!active) setUnavailable(false);
-    // The tour ended: its drawings go (blob URLs held only for it).
     if (!active) forgetTourMarkups();
     if (!active || fixture) return;
     let gone = false;
@@ -148,14 +127,6 @@ export function useTourFixture(active: boolean): { fixture: TourFixture | null; 
   return { fixture, unavailable };
 }
 
-/**
- * The replays after each Send: thread A (delivered, then two messages),
- * the film (delivered, the reply) and the new thread (delivered, the reply),
- * on timers. A state reached directly (a reload of `#tour=N`) has everything
- * already, so nothing is scheduled; a replay a Fast-forward finished drops
- * its timers (each effect also follows its own "arrived" flag), so nothing
- * stale is said or dispatched afterwards.
- */
 export function useTourReplay(state: TourState, dispatch: (action: TourAction) => void, reduced: boolean, say: (text: string) => void): void {
   useEffect(() => {
     if (!state.warmSent || state.warmArrived) return;
@@ -229,8 +200,6 @@ export function useTourReplay(state: TourState, dispatch: (action: TourAction) =
   }, [sentNew, state.newArrived]);
 }
 
-// ─────────────────────────── The tour bar ───────────────────────────
-
 export function TourBar({
   step,
   phone,
@@ -244,7 +213,6 @@ export function TourBar({
   arrivals: number;
   onArrivals: () => void;
   onExit: () => void;
-  /** Drawn inside a modal dialog (compose), which makes the page under it inert: the same bar, Exit kept pressable. */
   over?: boolean;
 }) {
   const real = step === TOUR_STEPS;
@@ -292,8 +260,6 @@ export function TourBar({
   );
 }
 
-// ─────────────────────────── The coach card ───────────────────────────
-
 /**
  * Whether the person's last input was a key (not a pointer). The coach card's
  * title takes focus when a card changes, so screen readers read it; it shows a
@@ -308,7 +274,6 @@ function watchModality(): void {
   document.addEventListener('keydown', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     keyboardLast = true;
-    // A key on a quietly focused title (an arrow to scroll) brings its ring back.
     (document.activeElement as HTMLElement | null)?.removeAttribute?.('data-quiet-focus');
   }, true);
   document.addEventListener('pointerdown', () => {
@@ -316,7 +281,6 @@ function watchModality(): void {
   }, true);
 }
 
-/** Focus a coach card's title; without a key before it, no ring (`data-quiet-focus`, until it blurs). */
 function focusTitle(title: HTMLElement): void {
   if (keyboardLast) title.removeAttribute('data-quiet-focus');
   else {
@@ -358,7 +322,6 @@ const TARGET_SELECTORS: Record<TourTarget, string> = {
   arrival: '[data-tour-arrival-last]',
 };
 
-/** The element a coach card points at, when it is on screen (the visible one of several). */
 export function tourTargetElement(target: TourTarget | null, root: ParentNode = document): HTMLElement | null {
   if (!target) return null;
   const all = [...root.querySelectorAll<HTMLElement>(TARGET_SELECTORS[target])];
@@ -367,7 +330,6 @@ export function tourTargetElement(target: TourTarget | null, root: ParentNode = 
   return el;
 }
 
-/** What the card is placed against: the phrase's own words (a CSS highlight, not an element), else the target's box. */
 function targetRect(target: TourTarget | null): DOMRect | null {
   if (target === 'phrase' || target === 'eval-line') {
     const range = phraseRanges.get(target === 'phrase' ? 'message' : 'file');
@@ -381,13 +343,9 @@ function targetRect(target: TourTarget | null): DOMRect | null {
 
 type Side = 'right' | 'left' | 'below' | 'above' | 'corner';
 
-/** Targets whose controls are at the foot of a phone's screen: the sheet sits at the top for them. */
-/** Targets whose own controls sit at the top of what they point at (a question card's prompt, picture labels and magnifiers): the sheet goes to the foot, the card is scrolled above it. */
 const PHONE_SHEET_BOTTOM = new Set<TourTarget>(['choices', 'warm-choices']);
-// New message's To and Send are in its foot's row on a phone.
 const PHONE_SHEET_TOP = new Set<TourTarget>(['warm-send', 'film-rail', 'film-composer', 'film-send', 'image-foot', 'markup', 'reply', 'reply-box', 'composer', 'compose-to', 'compose-send']);
 
-/** Targets the card never scrolls to: a comment box, a drawing's row, the open file (a scroll would close or move them). */
 const NO_SCROLL = new Set<TourTarget>(['file', 'art-grid', 'composer', 'eval-line', 'markup', 'image-foot', 'film-rail', 'film-composer', 'compose-to', 'compose-send']);
 
 const SIDES: Partial<Record<TourTarget, Side[]>> = {
@@ -424,7 +382,6 @@ function overlaps(a: { left: number; top: number; right: number; bottom: number 
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
-/** The nearest ancestor that scrolls vertically. */
 function scrollerOf(el: HTMLElement): HTMLElement | null {
   for (let node = el.parentElement; node; node = node.parentElement) {
     const style = getComputedStyle(node);
@@ -433,7 +390,6 @@ function scrollerOf(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** A phone: scroll what the sheet points at into the room the sheet leaves, once per card. */
 function fitAroundSheet(target: HTMLElement, sheet: HTMLElement | null, reduced: boolean): void {
   requestAnimationFrame(() => {
     const scroller = scrollerOf(target);
@@ -450,19 +406,12 @@ function fitAroundSheet(target: HTMLElement, sheet: HTMLElement | null, reduced:
   });
 }
 
-/**
- * The "How it's organised" card's picture (step 1's opener): the tour's own
- * list and thread in miniature, drawn from the fixture: a project in the
- * sidebar, a row per thread (one subject each), a thread that reads like an
- * email, and its files as the familiar tiles.
- */
 export function OrientPicture({ fixture, onNext }: { fixture: TourFixture; onNext?: () => void }) {
   const a = fixture.threads.find((t) => t.id === TOUR_THREAD)!;
   const film = fixture.threads.find((t) => t.id === TOUR_FILM_THREAD);
   const ask = a.messages.find((m) => m.asks);
   const files = ask?.attachments ?? [];
   return (
-    // A click on the picture goes on (a card is never dead): the picture is the Inbox the next step opens.
     <div
       className="ib-tour-orient"
       role="img"
@@ -524,23 +473,17 @@ export function TourCoach({
   onSettings,
   settingsReady = true,
 }: {
-  /** "Make it yours": the first settings read has answered (the card's controls wait for it). */
   settingsReady?: boolean;
-  /** "Make it yours": Skip, after the card has put back what the step opened with. */
   onSkip?: () => void;
-  /** "Make it yours": the Settings link (Settings → General). */
   onSettings?: () => void;
   coach: TourCoachModel;
   step: number;
   canBack: boolean;
-  /** Fast-forward (the owner, 2026-10-25): skips to the end of this step. */
   canForward?: boolean;
   onForward?: () => void;
-  /** The tour's answer to a click it cannot use (a card is never dead): shown on the card for a few seconds. */
   nudge?: string | null;
   phone: boolean;
   reduced: boolean;
-  /** Raised when the person acted and the card changed: focus goes to its title. */
   focusTick: number;
   fixture: TourFixture | null;
   onBack: () => void;
@@ -565,12 +508,10 @@ export function TourCoach({
     const bar = document.querySelector('[data-tour-bar]')?.getBoundingClientRect().bottom ?? 0;
     const m = 12;
     const aim = targetRect(coach.target);
-    // Inside compose the card stands beside the dialog, never over the message being written.
     const dialog = coach.target === 'compose-to' || coach.target === 'compose-send' ? document.querySelector('dialog[data-compose], [data-compose]')?.closest('dialog')?.getBoundingClientRect() : undefined;
     const r = aim && dialog ? ({ left: dialog.left, right: dialog.right, width: dialog.width, top: aim.top, bottom: aim.bottom, height: aim.height } as DOMRect) : aim;
     if (phone) {
       if (sheetAt.current?.key !== coach.key) {
-        // A file's own controls sit at its foot on a phone (the comment row, "Comment at", Send): the sheet goes up.
         const low =
           coach.target !== null && PHONE_SHEET_BOTTOM.has(coach.target)
             ? false
@@ -582,7 +523,6 @@ export function TourCoach({
     }
     const sides = coach.target ? (SIDES[coach.target] ?? ['corner']) : ['corner'];
     if (!r || sides[0] === 'corner') {
-      // Beside the sidebar, never over it (its Settings row stays in reach).
       const side = document.querySelector('[data-tour] aside[aria-label="Inbox navigation"], .pn-inbox[data-tour] .ib-side')?.getBoundingClientRect();
       const left = side && side.width > 0 && side.right + m + w <= vw - m ? side.right + m : m;
       setPlace({ left, top: Math.max(bar + m, vh - h - 16), at: 'bottom' });
@@ -615,7 +555,6 @@ export function TourCoach({
     const scrolls = coach.target !== null && !NO_SCROLL.has(coach.target);
     const target = tourTargetElement(coach.target);
     if (target && scrolls) bring(target);
-    // A target that renders a moment after its card (an image in a message that just arrived) is brought into view once it is there.
     let late: ReturnType<typeof setInterval> | null = null;
     if (!target && scrolls) {
       let tries = 0;
@@ -654,7 +593,6 @@ export function TourCoach({
 
   const style = phone ? undefined : place ? { left: place.left, top: place.top } : { visibility: 'hidden' as const };
   const yourTurn = tourYourTurn(coach);
-  /** A click on the card itself (not a button) shows what it points at again: the ring pulses, the target scrolls into view. */
   const onCardClick = (event: React.MouseEvent) => {
     if ((event.target as Element).closest('button, a, [data-tour-orient]')) return;
     const target = tourTargetElement(coach.target);
@@ -732,7 +670,6 @@ export function TourCoach({
             type="button"
             className="ib-tc-back"
             onClick={() => {
-              // Puts back what the card changed (after one settings read), while the tour goes on.
               void settingsRef.current?.restore();
               onSkip();
             }}
@@ -760,13 +697,6 @@ export function TourCoach({
   );
 }
 
-// ─────────────────────────── The tour's words to point at ───────────────────────────
-
-/**
- * The phrase a coach card points at (step 4's words in the message, step 5's
- * line in EVALUATION.md): drawn with the CSS Custom Highlight API, so the
- * message's DOM never changes (the comment highlighter's own marks stay its).
- */
 const phraseRanges = new Map<'message' | 'file', Range>();
 const TOUR_PHRASE_HIGHLIGHT = 'ib-tour-phrase';
 
@@ -798,7 +728,6 @@ function rangeOfText(root: Element, phrase: string): Range | null {
   return null;
 }
 
-/** Keep the tour's phrase highlights drawn while their step shows: re-found as the page redraws. */
 function useTourPhrases(want: { message?: string | null; file?: string | null }) {
   useEffect(() => {
     const highlights = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights;
@@ -831,8 +760,6 @@ function useTourPhrases(want: { message?: string | null; file?: string | null })
   }, [want.message, want.file]);
 }
 
-// ─────────────────────────── The picture viewer (a choice's magnifier) ───────────────────────────
-
 export interface TourViewerPicture {
   asset: string;
   name: string;
@@ -841,7 +768,6 @@ export interface TourViewerPicture {
   pick?: string;
 }
 
-/** A choice's picture large, over the window: Close and Escape leave it, focus goes back where it was. */
 export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPicture; onPick: (label: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
@@ -907,13 +833,10 @@ export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPi
   );
 }
 
-// ─────────────────────────── The tour Inbox ───────────────────────────
-
 function tourFolder(fixture: TourFixture): ProjectFolder {
   return { id: TOUR_PROJECT_ID, key: 'tour', name: fixture.project, root: '', created_at: '', threads: 3, unread: 0, listed: 3, archived: 0 };
 }
 
-/** The tour Inbox's sidebar: the window's own, with the tour's one project; New message is live in step 9 only. */
 export function TourNavigation({
   fixture,
   state,
@@ -950,14 +873,12 @@ export function TourNavigation({
         onUpdate={() => {}}
         onWhatsNew={() => {}}
         connectPrompt={false}
-        // The tour draws Pinned and Projects open whatever this browser closed.
         rememberSections={false}
       />
     </RowMarksScope>
   );
 }
 
-/** The tour's compose: one live session (Claude Code in the tour's project), and a Send that only tells the tour. */
 export function tourComposeTransport(fixture: TourFixture, onSent: () => void): ComposeTransport {
   const project = { id: TOUR_PROJECT_ID, name: fixture.project, root: '' };
   const model: ComposeSessionsModel = {
@@ -992,21 +913,16 @@ export interface TourMainProps {
   reduced: boolean;
   say: (text: string) => void;
   onDegraded?: (change: TourDegraded) => void;
-  /** What is on screen that the state does not hold (TourUi): the coach follows it. */
   onUi?: (ui: TourUi) => void;
-  /** Step 9's compose: open it (the sidebar's, the list header's New message). */
   onCompose: (opener: HTMLElement) => void;
-  /** A click the tour cannot use: the coach says why (a card or button is never dead). */
   onNudge?: (text: string) => void;
 }
 
-/** The view on top, for `.pn-inbox[data-view]`. */
 export function tourView(state: TourState): 'list' | 'thread' | 'file' {
   if (state.file) return 'file';
   return state.route === 'list' ? 'list' : 'thread';
 }
 
-/** The ui the coach follows, read from the page every 300 ms while the tour shows. */
 function useTourUi(onUi: ((ui: TourUi) => void) | undefined) {
   const last = useRef('');
   useEffect(() => {
@@ -1058,8 +974,6 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // The real viewers over the tour's files: a comment saved there goes to the tour's state, never anywhere else.
-  // One source for the tour's life (a viewer reads its file again when the source changes); its callbacks read the latest props.
   const live = useRef({ dispatch, say });
   live.current = { dispatch, say };
   const source = useMemo(
@@ -1075,7 +989,6 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
     [fixture],
   );
 
-  // The phrases the coach points at, highlighted while their step shows.
   const ask = question?.message;
   const evalPhrase = ask?.attachments?.find((a) => a.name === 'EVALUATION.md')?.suggest?.phrase ?? null;
   useTourPhrases({
@@ -1089,7 +1002,6 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
     requestAnimationFrame(() => opener?.isConnected && opener.focus());
   }, [viewer]);
 
-  // A choice's magnifier opens the picture large; the viewer can pick it.
   const onImage = useCallback(
     (src: string, alt: string) => {
       const name = tourAssetNameOf(src);
@@ -1120,7 +1032,6 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
     [dispatch, phone, stacked.file, say],
   );
 
-  // No letter marks in the tour, whatever this browser's look draws (RowMarksScope with no look).
   const list = (
     <RowMarksScope look={null}>
       <InboxList
@@ -1135,7 +1046,6 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
         onOpen={(r) => dispatch({ type: 'open', thread: r.thread_id }, { focusCoach: true })}
         onCompose={state.step === 9 && state.compose !== 'sent' ? onCompose : undefined}
         phone={phone}
-        // The tour draws today's list whatever look this browser chose (as its sidebar ignores closed sections).
         rememberLook={false}
       />
     </RowMarksScope>
@@ -1284,7 +1194,6 @@ function MessageHead({ who, host, to, time, project, replay }: { who: string; ho
   );
 }
 
-/** "Claude Code's message, 12:03 PM": how a reply's list names the message it answers. */
 const messageName = (time: string) => `Claude Code’s message, ${tourTime(time)}`;
 
 function TourThreadPane({
@@ -1333,13 +1242,10 @@ function TourThreadPane({
   }, [state.comments]);
   const waiting = state.comments.filter((r) => r.thread_id === threadId && r.sent_reply_id === null);
 
-  // A replay follows the thread's end, the way the Inbox follows an arrival at the bottom.
   const arrivals = `${state.warmDelivered}${state.warmArrived}${state.delivered}${state.arrived}${state.filmDelivered}${state.filmArrived}${state.newDelivered}${state.newArrived}`;
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
-    // The warm-up's answer arrives as a long message (text, pictures, files): its top comes into view, as the Inbox follows an arrival's first lines.
-    // On a phone the coach's sheet places the card itself (fitAroundSheet), so the two never scroll against each other.
     if (isA && state.warmArrived && state.step === 3 && !state.picked) {
       if (phone) return;
       requestAnimationFrame(() => {
@@ -1347,7 +1253,6 @@ function TourThreadPane({
         if (!arrival) return;
         const view = body.getBoundingClientRect();
         const card = arrival.querySelector<HTMLElement>('.question-block')?.getBoundingClientRect();
-        // Its top, or less far when that would hide the bottom of the picture choices (the step's own control).
         let top = body.scrollTop + arrival.getBoundingClientRect().top - view.top - 8;
         if (card) top = Math.min(Math.max(top, body.scrollTop + card.bottom - view.bottom + 16), body.scrollTop + card.top - view.top - 8);
         body.scrollTo({ top, behavior: reduced ? 'auto' : 'smooth' });
@@ -1364,7 +1269,6 @@ function TourThreadPane({
       <span className="ib-pback-l">Inbox</span>
     </button>
   );
-  // The real header's icons (approval "inbox-thread-header"): each the person's own Inbox's, a nudge here.
   const offInTour = (label: string, icon: 'mailOpen' | 'clock' | 'archive') => (
     <Tip content={`${label}: not in the tour`}>
       <button type="button" className="ib-iconbtn" aria-disabled="true" aria-label={label} onClick={() => nudge(`${label} works in your own Inbox, after the tour.`)}>
@@ -1372,8 +1276,6 @@ function TourThreadPane({
       </button>
     </Tip>
   );
-  // The bar's title, as in the real header: the thread's name by the list's rule, its tooltip the whole subject. With no
-  // name the real bar shows the subject only once the body's heading scrolls away; the tour's bar keeps the room empty.
   const headName = threadChipName(tourThreadName(thread), subject);
   const headSubject = headName ? (
     <Tip content={subject}>
@@ -1402,7 +1304,6 @@ function TourThreadPane({
     </Tip>
   );
 
-  // ── the reply box: thread A until its Send, the film's once its comment waits ──
   const asking = views.find((v) => v.fixture?.asks);
   const question = asking?.wire.questions?.[0];
   const draftAnswers: DraftAnswer[] =
@@ -1461,7 +1362,6 @@ function TourThreadPane({
   const footStatus = isA && state.warmArrived && !state.sent && state.picked ? `${plural(1, 'pick')}${waiting.length > 0 ? `, ${plural(waiting.length, 'comment')}` : ''}` : null;
   let foot: ReactNode = null;
   if (warmOpen && state.warmPicked)
-    // The warm-up (step 2): one pick, sent from the foot as a real draft is.
     foot = (
       <div className="ib-acts ib-footrow" data-foot-row="">
         <div className="ib-footbtns" data-foot-buttons="">
@@ -1523,7 +1423,6 @@ function TourThreadPane({
         )}
       </div>
     );
-  // A reply on its way (a second click on Send lands here): said as it is, never "not part of the tour".
   const onItsWay =
     (isA && state.warmSent && !state.warmArrived) ||
     (isA && state.sent && state.arrived < 2) ||
@@ -1627,7 +1526,6 @@ function TourThreadPane({
             const isAgent = m.author.kind === 'agent';
             const asks = !!fx?.asks;
             const warm = !!fx?.warmup;
-            /** The card takes a pick now: the warm-up on step 2, the picture question until its Send. */
             const cardLive = warm ? isA && state.step === 2 && !state.warmSent : isAgent && isA && asks && !state.sent;
             const q = m.questions?.[0];
             const answers = new Map<string, QuestionAnswer>(q?.answer ? [[q.key, q.answer]] : []);
@@ -1667,7 +1565,6 @@ function TourThreadPane({
                   data-author={m.author.kind}
                   data-tour-message={asks ? 'ask' : warm ? 'warm' : view.reply ? 'reply' : undefined}
                   onClickCapture={
-                    // A card that takes no pick now still answers a click (a card is never dead).
                     (asks || warm) && !cardLive
                       ? (event) => {
                           const el = event.target as Element;
@@ -1791,13 +1688,11 @@ function TourThreadPane({
   );
 }
 
-/** A tour image's src back to the name the body wrote (`built-a1.webp`): its blob URL or its asset route. */
 function inlineRefOf(src: string): string | null {
   const name = tourAssetNameOf(src);
   return /^[a-z0-9][a-z0-9.-]*\.webp$/.test(name) ? name : null;
 }
 
-/** While the tour loads (its content, once per page): a quiet heading; Exit is in the bar above. */
 export function TourLoading() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -1831,14 +1726,12 @@ export function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** Thread A's question message: its suggested words (for tests and the e2e walk). */
 export function tourMessagePhrase(fixture: TourFixture): string | null {
   return tourQuestion(fixture)?.message.suggest?.phrase ?? null;
 }
 
 export { tourCanBack, tourFileOf };
 
-/** The compose request the tour opens: its suggested words. */
 export function tourComposeBody(fixture: TourFixture): string {
   return fixture.threads.find((t) => t.id === TOUR_NEW_THREAD)?.compose?.body ?? '';
 }

@@ -1,22 +1,3 @@
-/**
- * The Inbox's onboarding tour (approval "inbox-onboarding-tour", v2 "show the
- * good parts"): a replay of real threads from building Plannotator with its
- * own Inbox. Pure: the fixture's shape, the tour's state machine, the coach
- * card each state shows, and the rows, messages and files the window's own
- * components draw. Nothing here touches the person's store: picks, comments,
- * drawings, Sends and the new thread live only in this state.
- *
- * Steps (tour v2 brief §3, with the owner's crawl-walk-run of 2026-10-25):
- * 1 open the question, 2 a plain question first (pick, Send; the answer
- * arrives with pictures), 3 pick a picture, 4 comment on words, 5 comment on
- * a line of EVALUATION.md, 6 Send (a replay), 7 the replay arrives with
- * screenshots in the text, circle one, then Artifacts, 8 comment on the film
- * at a moment and Send, 9 start a thread yourself with New message, then the
- * "Also in your Inbox" card, 10 the person's own Inbox (real).
- *
- * Every step can be fast-forwarded to its end state (`tourForward`), and a
- * click the tour cannot use is answered (Tour.tsx's nudges), never ignored.
- */
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type {
   InboxAnnotationRecord,
@@ -34,62 +15,39 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { tourAssetLoaded, tourAssetUrl } from './assets';
 
 export const TOUR_STEPS = 11;
-/** Step 9: New message, the person starts a thread (then "That's the loop" and "Also in your Inbox"). */
 export const TOUR_COMPOSE_STEP = 9;
-/**
- * Step 10, "Make it yours" (the owner, 2026-11-02): the tour's last card, over
- * the tour's Inbox, with the theme, three colour sets and the text size. Unlike
- * the replay before it, what is picked here is the person's own and is kept.
- */
 export const TOUR_SETTINGS_STEP = 10;
 
-/**
- * Step 11's prompt to copy (v1 step 6, "Get your first question"): one real
- * question about the work at hand, with pictures when the choice is visual.
- */
 export const TOUR_FIRST_QUESTION_PROMPT =
   'Send me one real question in my Plannotator Inbox about what we’re working on now. If the choice is visual, show the options as pictures: screenshots you already have, or a small HTML mock you attach. Then end your turn, and act on my answer when it comes back.';
 export const TOUR_THREAD = 'tour-vscode';
-/** Thread B: the launch film, from the same real work. */
 export const TOUR_FILM_THREAD = 'tour-film';
-/** Thread C: the one the person starts in step 9. */
 export const TOUR_NEW_THREAD = 'tour-new';
 export const TOUR_PROJECT_ID = 'tour-project';
-/** The one live session the tour's compose offers (step 9). */
 export const TOUR_SESSION = 'tour-session';
 
-// ─────────────────────────── The fixture ───────────────────────────
-
-/** A comment box's suggestion: the developer's real comment, condensed. */
 export interface TourSuggestion {
   phrase?: string;
   comment: string;
-  /** A film: the moment, in seconds. */
   at?: number;
-  /** A hint only (the person draws): `circle`. */
   markup?: string;
 }
 
 export interface TourFileRef {
   name: string;
-  /** An attachment kind (`html`, `markdown`, `image`, `video`; read with readInboxAttachmentKind). */
   kind: string;
   size: number;
-  /** The tour asset the file is. */
   asset: string;
   media_type?: string;
   width?: number;
   height?: number;
   duration_ms?: number;
-  /** A film's still. */
   poster?: string;
-  /** A line under the tile ("12 seconds of the 50-second cut"). */
   note?: string;
   suggest?: TourSuggestion;
 }
 
 export interface TourInlineImageRef {
-  /** The src as the body writes it: a tour asset. */
   ref: string;
   name: string;
   size: number;
@@ -102,20 +60,14 @@ export interface TourInlineImageRef {
 export interface TourFixtureMessage {
   id: string;
   who: 'developer' | 'agent';
-  /** The real time, `HH:MM` on the 24-hour clock, in the developer's day. */
   time: string;
   body?: string;
-  /** The message carries the question the tour turns on (the picture choices). */
   asks?: boolean;
-  /** The message carries the plain question the tour starts with (step 2, crawl). */
   warmup?: boolean;
-  /** Shown once the warm-up's answer was sent and its replay arrived (the agent's next message). */
   after_warmup?: boolean;
-  /** 1 or 2: a message the tour replays after its thread's Send. */
   replay?: number;
   attachments?: TourFileRef[];
   inline_images?: TourInlineImageRef[];
-  /** A comment the message's words suggest (step 3). */
   suggest?: TourSuggestion;
 }
 
@@ -125,14 +77,11 @@ export interface TourFixtureThread {
   thread_name: string | null;
   slice?: string;
   real_answer?: string;
-  /** The warm-up question (added by the tour; the real thread asked nothing at 11:48): the answer the tour goes on with, and when the person's reply to it was sent. */
   warmup_answer?: string;
   warmup_reply_time?: string;
   picture_label?: string;
   picture_label_short?: string;
-  /** When the person's replayed reply was sent. */
   reply_time?: string;
-  /** The thread the person starts (step 9): compose's suggested words, and when. */
   person?: boolean;
   compose?: { body: string; time: string };
   messages: TourFixtureMessage[];
@@ -143,7 +92,6 @@ export interface TourFixture {
   date: string;
   project: string;
   developer: string;
-  /** A tile's thumbnail → the larger picture the viewer shows. */
   full: Record<string, string>;
   threads: TourFixtureThread[];
 }
@@ -151,7 +99,6 @@ export interface TourFixture {
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 export const TOUR_ASSET_RE = /^[a-z0-9][a-z0-9.-]*\.(webp|html|mp4|md)$/;
 
-/** The fixture as the server serves it, checked: anything else is refused (the tour is then not offered on this load). */
 export function parseTourFixture(input: unknown): TourFixture {
   const fail = (why: string): never => {
     throw new Error(`The tour's content is not readable: ${why}.`);
@@ -190,7 +137,6 @@ function ASSET_OK(name: unknown): name is string {
   return typeof name === 'string' && TOUR_ASSET_RE.test(name);
 }
 
-/** "12:03 PM" from the fixture's `12:03`: the real time as it was read then, whatever the reader's clock. */
 export function tourTime(time: string): string {
   const m = TIME_RE.exec(time);
   if (!m) return time;
@@ -198,66 +144,45 @@ export function tourTime(time: string): string {
   return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-/**
- * An ISO time on the reader's own day at the fixture's wall-clock time, so a
- * list row reads "12:03 PM" as the thread does.
- */
 export function tourIso(time: string, now: Date = new Date()): string {
   const m = TIME_RE.exec(time);
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), m ? Number(m[1]) : 12, m ? Number(m[2]) : 0);
   return d.toISOString();
 }
 
-// ─────────────────────────── The state machine ───────────────────────────
-
 export type TourRoute = 'list' | typeof TOUR_THREAD | typeof TOUR_FILM_THREAD | typeof TOUR_NEW_THREAD;
 
-/** The file open in the pane (the real AttachmentPane, over the tour's file source). */
 export interface TourOpenFile {
   id: string;
-  /** Full screen; else side by side. */
   full: boolean;
 }
 
 export interface TourState {
-  /** 1 to 10. */
   step: number;
   route: TourRoute;
-  // The warm-up (step 2): a plain question, its Send, and its replay (the picture question arrives).
   warmPicked: string | null;
   warmAnswer: QuestionAnswer | null;
   warmSent: boolean;
   warmDelivered: boolean;
   warmArrived: boolean;
-  /** What the tour question's draft answers: a choice's label, the person's own words (`“…”`), `Skipped`, or null. */
   picked: string | null;
   answer: QuestionAnswer | null;
-  /** Every comment the person made in the tour: on words, on a file, on an image, on the film (InboxAnnotationRecord shapes, never stored). */
   comments: InboxAnnotationRecord[];
   file: TourOpenFile | null;
-  /** The reply box is open (steps 4 to 6, and the film's reply). */
   replyOpen: boolean;
-  // Thread A's replay.
   sent: boolean;
   delivered: boolean;
   arrived: number;
-  // Thread B's replay.
   filmSent: boolean;
   filmDelivered: boolean;
   filmArrived: boolean;
-  // Thread C.
   compose: 'closed' | 'open' | 'sent';
   newDelivered: boolean;
   newArrived: boolean;
-  /** The step-9 card after its reply: false "That's the loop", true "Also in your Inbox". */
   also: boolean;
-  /** Step 1 opens on the "How it's organised" card (a Next), then the question's row. */
   orient: boolean;
-  /** The thread's Artifacts view is open (in place of the messages). */
   artifactsOpen: boolean;
-  /** Step 7's Artifacts part: 0 not yet, 1 the card, 2 a tile was opened from the grid. */
   artifactsTour: 0 | 1 | 2;
-  /** Threads opened since their last news. */
   looked: { a: boolean; film: boolean; new: boolean };
 }
 
@@ -290,7 +215,6 @@ export const TOUR_START: TourState = {
   looked: { a: false, film: false, new: false },
 };
 
-/** A step read from the address (`#tour=…`): a whole number from 1 to 10, anything else the nearest of them, 1 when none. */
 export function tourStepOf(raw: string | null | undefined): number {
   const n = Math.trunc(Number(raw));
   if (!Number.isFinite(n) || n < 1) return 1;
@@ -309,14 +233,12 @@ export function tourPickOf(answer: QuestionAnswer | null | undefined): string | 
   return null;
 }
 
-/** The replay's note starts with what the person did: "You picked B · …", "You answered “…”", "You skipped it". */
 export function tourPickWords(picked: string): string {
   if (picked === TOUR_SKIPPED) return 'You skipped it';
   if (picked.startsWith('“')) return `You answered ${picked}`;
   return `You picked ${picked}`;
 }
 
-/** Where a comment sits, by what it is on. */
 export type TourCommentTarget = 'message' | 'file' | 'image' | 'video';
 
 export function tourCommentTarget(record: InboxAnnotationRecord, attachments: readonly InboxAttachmentState[]): TourCommentTarget {
@@ -329,12 +251,10 @@ export type TourAction =
   | { type: 'open'; thread: string }
   | { type: 'list' }
   | { type: 'pick'; label: string | null; answer?: QuestionAnswer | null }
-  /** The warm-up question (step 2): a pick, its Send, its replay. */
   | { type: 'warmPick'; label: string | null; answer?: QuestionAnswer | null }
   | { type: 'warmSend' }
   | { type: 'warmDelivered' }
   | { type: 'warmArrive' }
-  /** A comment saved (new, or edited by id). */
   | { type: 'comment'; record: InboxAnnotationRecord }
   | { type: 'uncomment'; id: string }
   | { type: 'openFile'; id: string; full: boolean }
@@ -355,29 +275,23 @@ export type TourAction =
   | { type: 'next' }
   | { type: 'back' }
   | { type: 'goto'; step: number; realAnswer: string; fixture?: TourFixture }
-  /** Fast-forward: the end of the current step, as the walk would leave it (the person's own picks and comments kept). */
   | { type: 'forward'; realAnswer: string; fixture?: TourFixture };
-
-// ─── The ids and records the tour makes (never stored) ───
 
 export const TOUR_REPLY_ID = 'tour-vscode-reply';
 export const TOUR_WARM_REPLY_ID = 'tour-vscode-warm-reply';
 export const TOUR_FILM_REPLY_ID = 'tour-film-reply';
 export const TOUR_NEW_MESSAGE_ID = 'tour-new-0';
 
-/** A tour attachment's id: `tour-att-<message>-<n>` for a file, `tour-img-<asset stem>` for an image in a message's text. */
 export function tourAttachmentId(messageId: string, index: number): string {
   return `tour-att-${messageId}-${index}`;
 }
 export function tourInlineImageId(ref: string): string {
   return `tour-img-${ref.replace(/\.[^.]+$/, '')}`;
 }
-/** A tour file's path (only ever a key: annotation counts, records): never a real path. */
 export function tourPath(messageId: string, name: string): string {
   return `tour/${messageId}/${name}`;
 }
 
-/** A comment record as the tour keeps it (the store's shape, so the window's chips and panels read it). */
 export function tourRecord(input: {
   id: string;
   thread: string;
@@ -405,7 +319,6 @@ export function tourRecord(input: {
   };
 }
 
-/** The comment a suggestion makes on words of a message (as Plannotator's selection annotation). */
 function suggestedMessageComment(fixture: TourFixture, thread: string, messageId: string): InboxAnnotationRecord | null {
   const m = threadOf(fixture, thread)?.messages.find((x) => x.id === messageId);
   if (!m?.suggest?.phrase) return null;
@@ -418,7 +331,6 @@ function suggestedMessageComment(fixture: TourFixture, thread: string, messageId
   });
 }
 
-/** The comment a file's suggestion makes (step 5's line, step 7's image, step 8's film moment). */
 function suggestedFileComment(fixture: TourFixture, attachmentId: string): InboxAnnotationRecord | null {
   const found = tourAttachments(fixture, TOUR_ALL_SHOWN).find((a) => a.id === attachmentId);
   const suggest = found ? tourSuggestionFor(fixture, found) : null;
@@ -434,7 +346,6 @@ function suggestedFileComment(fixture: TourFixture, attachmentId: string): Inbox
   return tourRecord({ id: `tour-ann-${attachmentId}`, thread: threadId, message: found.message_id, attachment: found, annotation });
 }
 
-/** The fixture's attachment ids the walk comments on, by role. */
 function walkTargets(fixture: TourFixture) {
   const files = tourAttachments(fixture, TOUR_ALL_SHOWN);
   return {
@@ -445,16 +356,10 @@ function walkTargets(fixture: TourFixture) {
   };
 }
 
-/** The warm-up's answer the tour goes on with (step 2): the fixture's, or none without it. Not a real answer: the tour added this question. */
 export function tourWarmAnswer(fixture?: TourFixture): string | null {
   return fixture?.threads.find((t) => t.id === TOUR_THREAD)?.warmup_answer ?? null;
 }
 
-/**
- * The state the tour is in at a step reached directly (`#tour=N`, a reload):
- * as the walk would leave it, with the real answers picked and every
- * suggestion kept. Without the fixture, the comments are left out.
- */
 export function tourStateAt(step: number, realAnswer: string, fixture?: TourFixture): TourState {
   const s = Math.min(Math.max(Math.trunc(step) || 1, 1), TOUR_STEPS);
   const t = fixture ? walkTargets(fixture) : null;
@@ -483,23 +388,14 @@ export function tourStateAt(step: number, realAnswer: string, fixture?: TourFixt
   const filmed = { ...replayed, artifactsTour: 2 as const, route: 'list' as TourRoute, comments: [...sentFirst, ...shot, ...film], filmSent: true, filmDelivered: true, filmArrived: true, looked: { ...looked, film: true } };
   if (s === 9) return { ...filmed, step: 9 };
   const looped = { ...filmed, compose: 'sent' as const, newDelivered: true, newArrived: true, also: true };
-  // "Make it yours" draws over the thread with pictures, so a pick shows on a full window.
   if (s === TOUR_SETTINGS_STEP) return { ...looped, step: TOUR_SETTINGS_STEP, route: TOUR_THREAD };
   return { ...looped, step: TOUR_STEPS };
 }
 
-/** Same target: the same file (or the same message's words). */
 function sameTarget(a: InboxAnnotationRecord, b: InboxAnnotationRecord): boolean {
   return a.id === b.id || (a.attachment_id === b.attachment_id && a.message_id === b.message_id && !!a.message === !!b.message);
 }
 
-/**
- * Fast-forward (the owner, 2026-10-25): the end of the current step, as the
- * walk would leave it. The person's own picks and comments are kept where
- * they made them; only what is still missing is filled in, the same way
- * `#tour=N` does. Step 9 (New message) ends on "That's the loop", the new
- * thread open with its answer; a card with Next has nothing to skip.
- */
 export function tourForward(state: TourState, realAnswer: string, fixture?: TourFixture): TourState {
   const { step } = state;
   if (step >= TOUR_SETTINGS_STEP) return state;
@@ -527,14 +423,12 @@ export function tourForward(state: TourState, realAnswer: string, fixture?: Tour
   return { ...end, warmPicked, warmAnswer, picked, answer, comments: [...mine, ...filled] };
 }
 
-/** A Fast-forward is offered: every card that asks the person to do something, or waits on a replay (not one with Next). */
 export function tourCanForward(state: TourState, coach: Pick<TourCoach, 'next'> | null): boolean {
   return state.step < TOUR_STEPS && !!coach && !coach.next;
 }
 
 const isOpenThread = (state: TourState, id: string) => state.route === id;
 
-/** Every message of the fixture shown (what the walk's comments are on). */
 const TOUR_ALL_SHOWN: TourState = { ...TOUR_START, warmSent: true, warmDelivered: true, warmArrived: true, sent: true, delivered: true, arrived: 2, filmSent: true, filmDelivered: true, filmArrived: true, compose: 'sent', newDelivered: true, newArrived: true };
 
 export function tourReducer(state: TourState, action: TourAction): TourState {
@@ -568,7 +462,6 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
     case 'warmDelivered':
       return state.warmSent ? { ...state, warmDelivered: true } : state;
     case 'warmArrive':
-      // The agent's answer brings the picture question: step 3 starts on it.
       return state.warmDelivered && !state.warmArrived ? { ...state, warmArrived: true, step: state.step === 2 ? 3 : state.step, looked: { ...state.looked, a: state.route === TOUR_THREAD || state.looked.a } } : state;
     case 'pick': {
       if (state.sent || !state.warmArrived || state.route !== TOUR_THREAD || state.step > 6) return state;
@@ -586,11 +479,8 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
       const at = state.comments.findIndex((r) => r.id === action.record.id);
       const comments = at >= 0 ? state.comments.map((r, i) => (i === at ? { ...action.record, created_at: r.created_at } : r)) : [...state.comments, action.record];
       const next = { ...state, comments };
-      // The step's own action: words (4), a file's line (5).
       if (state.step === 4 && action.record.message && action.record.thread_id === TOUR_THREAD) return { ...next, step: 5 };
-      // Step 6 is the reply in the thread: the file closes, and the reply's Send is in view (a phone shows one screen).
       if (state.step === 5 && !action.record.message && action.record.thread_id === TOUR_THREAD) return { ...next, step: 6, file: null };
-      // The film's comment rides the film thread's reply: the film closes, and Send is in view.
       if (state.step === 8 && !state.filmSent && action.record.thread_id === TOUR_FILM_THREAD) return { ...next, file: null };
       return next;
     }
@@ -629,7 +519,6 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
       return { ...state, compose: action.open ? 'open' : 'closed' };
     case 'composeSend':
       if (state.step !== 9 || state.compose === 'sent') return state;
-      // The thread the person just started opens, as the toast's Open would: its delivery and the answer show there.
       return { ...state, compose: 'sent', route: TOUR_NEW_THREAD, file: null, replyOpen: false, artifactsOpen: false, looked: { ...state.looked, new: true } };
     case 'newDelivered':
       return state.compose === 'sent' ? { ...state, newDelivered: true } : state;
@@ -642,7 +531,6 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
       if (state.step === 8 && state.filmArrived) return { ...state, step: 9, route: 'list', file: null, replyOpen: false };
       if (state.step === 9 && state.newArrived && !state.also) return { ...state, also: true };
       if (state.step === TOUR_COMPOSE_STEP && state.also) return { ...state, step: TOUR_SETTINGS_STEP, file: null, route: TOUR_THREAD, replyOpen: false, artifactsOpen: false };
-      // "Connect agents next" and Skip on "Make it yours" (Skip's putting back runs in TourSettings, after one settings read, as the tour goes on).
       if (state.step === TOUR_SETTINGS_STEP) return { ...state, step: TOUR_STEPS, file: null, route: 'list', replyOpen: false, artifactsOpen: false };
       return state;
     case 'back':
@@ -654,27 +542,22 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
   }
 }
 
-/** Step 7's image comment (a1.png, with or without its drawing) was saved. */
 export function tourImageCommented(state: TourState): boolean {
   return state.comments.some((r) => r.thread_id === TOUR_THREAD && r.attachment_id.startsWith('tour-img-'));
 }
 
-/** The film's comment waits for its Send. */
 export function tourFilmCommented(state: TourState): boolean {
   return state.comments.some((r) => r.thread_id === TOUR_FILM_THREAD && r.sent_reply_id === null);
 }
 
-/** Back is offered on steps 2 (before its Send), 4, 5 and 8 (before its Send); 3, 6, 7 and 9 have none once sent; 1 has nothing before it. */
 export function tourCanBack(state: TourState): boolean {
   return (state.step === 2 && !state.warmSent) || state.step === 4 || state.step === 5 || (state.step === 8 && !state.filmSent);
 }
 
-/** The warm-up's replay after its Send (delivered, then the agent's answer with the pictures): about 60% under reduced motion. */
 export function warmTimings(reduced: boolean): { delivered: number; reply: number } {
   return reduced ? { delivered: 660, reply: 1560 } : { delivered: 1100, reply: 2600 };
 }
 
-/** The replays' timings in ms after Send: about 60% of each under reduced motion. */
 export function replayTimings(reduced: boolean): { delivered: number; first: number; second: number } {
   return reduced ? { delivered: 660, first: 1800, second: 3360 } : { delivered: 1100, first: 3000, second: 5600 };
 }
@@ -685,19 +568,14 @@ export function newThreadTimings(reduced: boolean): { delivered: number; reply: 
   return reduced ? { delivered: 660, reply: 1920 } : { delivered: 1100, reply: 3200 };
 }
 
-/** The person's pick is not the real thread's answer: the replay says so, as a fact. */
 export function pickDiffers(state: TourState, realAnswer: string): boolean {
   return state.picked !== null && state.picked !== realAnswer;
 }
 
-/** The warm-up's pick is not the one the tour goes on with (the tour says so plainly; it never claims a real answer). */
 export function warmDiffers(state: TourState, warmReal: string | null): boolean {
   return state.warmPicked !== null && warmReal !== null && state.warmPicked !== warmReal;
 }
 
-// ─────────────────────────── The coach ───────────────────────────
-
-/** What a coach card points at; the window resolves it to an element. */
 export type TourTarget =
   | 'row'
   | 'film-row'
@@ -728,22 +606,15 @@ export type TourTarget =
   | 'arrival';
 
 export interface TourCoach {
-  /** Stable per card: a change moves focus to the new title and says it in the live region. */
   key: string;
   title: string;
-  /** At most two sentences. */
   text: string;
   action?: string;
-  /** One-line items in place of the text (the "Also in your Inbox" card). */
   items?: { mark: string; title: string; text: string }[];
-  /** A small live picture under the text (the "How it's organised" card), or the settings of "Make it yours". */
   picture?: 'orient' | 'settings';
-  /** A Skip beside Next ("Make it yours": puts back what the step opened with). */
   skip?: boolean;
   next?: boolean;
-  /** The Next button's words (default "Next"). */
   nextLabel?: string;
-  /** A → (Heroicons arrow-right) after the Next button's words, drawn, not read. */
   nextArrow?: boolean;
   wait?: boolean;
   target: TourTarget | null;
@@ -753,10 +624,6 @@ export interface TourDegraded {
   pictures?: boolean;
 }
 
-/**
- * The things the "Also in your Inbox" card names (the approved mock): they exist, and each could be a step. Snooze
- * joined them (approval "inbox-snooze-announce", 2026-11-02): new users never get its one-time dialog, so the tour names it.
- */
 export const TOUR_ALSO_ITEMS: { mark: string; title: string; text: string }[] = [
   { mark: '⭐', title: 'Star a thread', text: 'to keep it at the top of the sidebar.' },
   { mark: '⏰', title: 'Snooze', text: 'puts a thread away until later, and brings it back on time.' },
@@ -765,33 +632,23 @@ export const TOUR_ALSO_ITEMS: { mark: string; title: string; text: string }[] = 
   { mark: '➤', title: 'Send now', text: 'puts your reply into a turn that’s running.' },
 ];
 
-/**
- * What is on screen that the state does not hold (read from the window as the
- * person works): a comment box open, a drawing made but not saved, a film's
- * moment pinned, the compose dialog's To chosen. The card follows it.
- */
 export interface TourUi {
   composing?: boolean;
-  /** The drawing surface (Mark up) is open over the picture. */
   annotating?: boolean;
   drawn?: boolean;
-  /** "0:07": the film's comment pinned at that moment. */
   pinnedAt?: string | null;
   toChosen?: boolean;
 }
 
-/** The card asks the person to do something now (not a Next, not a replay): it carries the "Your turn" cue. */
 export function tourYourTurn(coach: Pick<TourCoach, 'action' | 'next' | 'wait'>): boolean {
   return !!coach.action && !coach.next && !coach.wait;
 }
 
-/** The coach card a state shows (steps 1 to 10; step 11 is the person's own screen and has none). Copy: the approved mock, plus the owner's crawl step. */
 export function tourCoach(state: TourState, names: { developer: string; agent: string }, degraded: TourDegraded = {}, ui: TourUi = {}): TourCoach | null {
   const { developer, agent } = names;
   const { step } = state;
   if (step === TOUR_STEPS) return null;
   if (step === TOUR_SETTINGS_STEP)
-    // The owner (2026-11-02): the button says what comes next.
     return { key: '10-yours', title: 'Make it yours', text: 'Pick how the Inbox looks. It changes as you tap.', picture: 'settings', next: true, nextLabel: 'Connect agents next', nextArrow: true, skip: true, target: null };
   if (step === 1 && state.orient)
     return {
@@ -810,7 +667,6 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
       action: 'Open the question it came back with.',
       target: 'row',
     };
-  // Steps 2 to 7 happen in thread A; left mid-step, the card shows the way back.
   if (step <= 7 && state.route !== TOUR_THREAD)
     return { key: `back-${step}`, title: 'The question is in this thread', text: 'The tour goes on where you left it.', action: 'Open it again.', target: 'row' };
   if (step === 2) {
@@ -859,7 +715,6 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
         : { key: '7-art', title: 'Every file in one place', text: 'Artifacts gathers every file, picture and film in a thread, newest first.', action: 'Press Artifacts.', target: 'art-button' };
     if (tourImageCommented(state)) return { key: '7-drawn', title: 'Pictures take comments too', text: 'The drawing waits in your draft and goes with your next reply.', next: true, target: state.file ? 'image-foot' : 'arrival' };
     if (!state.file) return { key: '7', title: 'It keeps working, and shows you', text: `An hour later ${agent} was done, with screenshots right in the message.`, action: 'Open the first screenshot.', target: 'inline-img' };
-    // While Mark up's drawing surface is open, the card stands clear of its tools (it points at nothing).
     if (ui.annotating && !ui.drawn) return { key: '7-drawing', title: 'Circle what you like', text: 'Drag on the picture to draw; Save keeps the drawing.', action: 'Drag a circle.', target: null };
     return ui.drawn
       ? { key: '7-drawn-unsaved', title: 'Circle what you like', text: 'Your circle is on the picture; the suggestion is the developer’s real reaction.', action: 'Save it.', target: 'image-foot' }
@@ -877,7 +732,6 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
     if (ui.pinnedAt) return { key: '8-pinned', title, text: `Pinned at ${ui.pinnedAt}, with the frame beside your words.`, action: 'Press Comment.', target: 'film-composer' };
     return { key: '8-file', title, text: 'Pause anywhere; your comment keeps the time and the frame.', action: 'Play it and pause near the chapter text, or start typing.', target: 'film-rail' };
   }
-  // Step 9.
   if (state.also) return { key: '9-also', title: 'Also in your Inbox', text: '', items: TOUR_ALSO_ITEMS, next: true, target: null };
   if (state.newArrived) return { key: '9-loop', title: 'That’s the loop', text: 'Agents ask, you answer when you can, and they keep going.', next: true, target: state.route === TOUR_NEW_THREAD ? 'arrival' : 'new-row' };
   if (state.compose === 'sent')
@@ -889,14 +743,11 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
   return { key: '9', title: 'Start a thread yourself', text: 'New message writes to any agent session that is running, in any project.', action: 'Press New message.', target: 'compose-btn' };
 }
 
-/** The coach card as one sentence for the live region. */
 export function tourCoachSpeech(coach: TourCoach, step: number): string {
   const items = coach.items?.map((i) => `${i.title} ${i.text}`).join(' ') ?? '';
   const action = coach.action ? (tourYourTurn(coach) ? ` Your turn: ${coach.action}` : ` ${coach.action}`) : '';
   return `Step ${step} of ${TOUR_STEPS}. ${coach.title}.${coach.text ? ` ${coach.text}` : ''}${items ? ` ${items}` : ''}${action}`;
 }
-
-// ─────────────────────────── What the window draws ───────────────────────────
 
 const AGENT = { kind: 'agent' as const, host: 'claude-code', session: TOUR_SESSION, name: null };
 const PERSON = { kind: 'person' as const };
@@ -905,14 +756,12 @@ function threadOf(fixture: TourFixture, id: string): TourFixtureThread | undefin
   return fixture.threads.find((t) => t.id === id);
 }
 
-/** The tour thread's question (the picture choices), as core's parser reads it. */
 export function tourQuestion(fixture: TourFixture) {
   const asking = threadOf(fixture, TOUR_THREAD)?.messages.find((m) => m.asks);
   const [q] = parseInboxQuestionBlocks(asking?.body ?? '');
   return asking && q ? { message: asking, question: q } : null;
 }
 
-/** The warm-up question (step 2: plain text), as core's parser reads it. */
 export function tourWarmQuestion(fixture: TourFixture) {
   const asking = threadOf(fixture, TOUR_THREAD)?.messages.find((m) => m.warmup);
   const [q] = parseInboxQuestionBlocks(asking?.body ?? '');
@@ -945,12 +794,10 @@ function wireQuestion(message: TourFixtureMessage, parsed: ReturnType<typeof par
   };
 }
 
-/** The answer the card shows for a label picked in the tour. */
 export function tourAnswer(label: string, key: string, prompt: string): QuestionAnswer {
   return { v: 1, key, kind: 'single', prompt, selected: [label] };
 }
 
-/** The suggestion a tour file's comment box opens with. */
 export function tourSuggestionFor(fixture: TourFixture, attachment: Pick<InboxAttachmentState, 'id' | 'message_id' | 'ref' | 'name'>): TourSuggestion | null {
   for (const thread of fixture.threads)
     for (const m of thread.messages) {
@@ -961,7 +808,6 @@ export function tourSuggestionFor(fixture: TourFixture, attachment: Pick<InboxAt
   return null;
 }
 
-/** The fixture file a tour attachment is (its asset, poster, note). */
 export function tourFileOf(fixture: TourFixture, attachmentId: string): TourFileRef | TourInlineImageRef | null {
   for (const thread of fixture.threads)
     for (const m of thread.messages) {
@@ -973,7 +819,6 @@ export function tourFileOf(fixture: TourFixture, attachmentId: string): TourFile
   return null;
 }
 
-/** A tour file's asset: what its URL loads. */
 export function tourAssetOf(fixture: TourFixture, attachmentId: string): string | null {
   const ref = tourFileOf(fixture, attachmentId);
   if (!ref) return null;
@@ -998,18 +843,12 @@ function attachmentState(message: TourFixtureMessage, file: TourFileRef | TourIn
     ...('duration_ms' in file && file.duration_ms ? { duration_ms: file.duration_ms } : {}),
     message_id: message.id,
     ...(inline ? { ref: (file as TourInlineImageRef).ref } : {}),
-    // As it was sent: nothing in the tour changed since.
     current: { sha256: `tour-${id}`, size: file.size, mtime: sentAt },
     changed_since_sent: false,
     unavailable: null,
   };
 }
 
-/**
- * Every file of the tour (attachments, and the images messages show in their
- * text), as the window's attachments route answers them: current is what was
- * sent, nothing changed. Images in text come only once their message arrived.
- */
 export function tourAttachments(fixture: TourFixture, state: TourState, now: Date = new Date()): InboxAttachmentState[] {
   const out: InboxAttachmentState[] = [];
   for (const thread of fixture.threads)
@@ -1036,9 +875,7 @@ export interface TourMessageView {
   who: string;
   to: string;
   fixture: TourFixtureMessage | null;
-  /** Part of a replay after Send: drawn under the replay divider, tagged Replay. */
   replay: boolean;
-  /** The person's own replayed message (a reply, or the new thread's first). */
   reply: boolean;
 }
 
@@ -1081,19 +918,16 @@ function personReply(thread: TourFixtureThread, id: string, replyTo: string, bod
   } as InboxMessageWire;
 }
 
-/** A thread's subject: thread C's comes from its words, as compose names a thread the person starts. */
 export function tourSubject(thread: TourFixtureThread): string {
   if (thread.person && thread.compose) return derivePersonThreadSubject(thread.compose.body) ?? thread.compose.body;
   return thread.subject;
 }
 
-/** A thread's chip: thread C's is compose's own suggestion for its words. */
 export function tourThreadName(thread: TourFixtureThread): string | null {
   if (thread.person && thread.compose) return suggestPersonThreadName(thread.compose.body) || null;
   return thread.thread_name;
 }
 
-/** The messages a thread shows in this state, in order, each in the store's wire shape. */
 export function tourMessages(fixture: TourFixture, threadId: string, state: TourState, now: Date = new Date()): TourMessageView[] {
   const thread = threadOf(fixture, threadId);
   if (!thread) return [];
@@ -1122,12 +956,10 @@ export function tourMessages(fixture: TourFixture, threadId: string, state: Tour
     const replayed = !!m.replay || !!m.after_warmup;
     const to = m.who === 'agent' ? `to ${replayed || thread.id !== TOUR_THREAD ? 'you' : developer}` : 'to Claude Code';
     out.push({ wire: wireMessage(thread, m, now, questions, files), time: tourTime(m.time), who, to, fixture: m, replay: replayed, reply: false });
-    // The warm-up's reply follows its question.
     if (thread.id === TOUR_THREAD && m.warmup && state.warmSent && state.warmPicked) {
       const body = state.warmPicked === TOUR_SKIPPED ? 'Skipped 1 question.' : 'Answered 1 question.';
       out.push({ wire: personReply(thread, TOUR_WARM_REPLY_ID, m.id, body, thread.warmup_reply_time ?? '11:49', 0, now), time: tourTime(thread.warmup_reply_time ?? '11:49'), who: 'You', to: 'to Claude Code', fixture: null, replay: false, reply: true });
     }
-    // The person's replayed reply follows what it answers.
     if (thread.id === TOUR_THREAD && m.asks && state.sent && state.picked) {
       const n = state.comments.filter((r) => r.sent_reply_id === TOUR_REPLY_ID).length;
       const body = state.picked === TOUR_SKIPPED ? 'Skipped 1 question.' : 'Answered 1 question.';
@@ -1146,7 +978,6 @@ function row(fixture: TourFixture, thread: TourFixtureThread, state: TourState, 
   const first = views[0];
   const last = views[views.length - 1];
   const isA = thread.id === TOUR_THREAD;
-  // Thread A asks twice: the warm-up until its Send, then (once the answer arrived) the picture question until its Send.
   const warmAsks = isA && !state.warmSent;
   const asks = warmAsks || (isA && state.warmArrived && !state.sent);
   const opened = state.route === thread.id;
@@ -1181,7 +1012,6 @@ function row(fixture: TourFixture, thread: TourFixtureThread, state: TourState, 
   } as InboxListRow;
 }
 
-/** The tour Inbox's list in this state: A, B (the film) and, once the person sent it, C. */
 export function tourSections(fixture: TourFixture, state: TourState, now: Date = new Date()): InboxListSection[] {
   const placed: Partial<Record<InboxSectionId, InboxListRow[]>> = {};
   const add = (section: InboxSectionId, r: InboxListRow) => (placed[section] ??= []).push(r);
@@ -1200,17 +1030,12 @@ export function tourSections(fixture: TourFixture, state: TourState, now: Date =
   return INBOX_SECTIONS.map((s) => ({ id: s.id, label: s.label, threads: placed[s.id] ?? [] }));
 }
 
-/** The sidebar's count for the tour project: threads waiting on the person. */
 export function tourWaitingCount(state: TourState): number {
   return state.sent || (state.warmSent && !state.warmArrived) ? 0 : 1;
 }
 
 export { tourAssetUrl };
 
-/**
- * The larger picture the viewer shows for a tile's thumbnail (the fixture's `full` map), else the thumbnail
- * itself: also when the larger one is not in memory and the thumbnail is.
- */
 export function tourFullPicture(fixture: TourFixture, name: string): string {
   const full = fixture.full[name];
   if (!full) return name;

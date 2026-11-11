@@ -1,9 +1,3 @@
-/**
- * The first-run entry screen, "Two paths" (approval "inbox-onboarding-tour",
- * entry: Two paths): the tour and connecting as two equal cards. "Connect my
- * agents" is a first-class path, not a skip link: it opens the real
- * first-run screen (EmptyState, "One next step"), unchanged.
- */
 import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -12,14 +6,11 @@ import { tourAssetUrl } from './model';
 import { TourFitPicture, TourFitText } from './Fit';
 
 export interface TourEntryModel {
-  /** The agents' marks, each with whether it reaches the Inbox (null: unknown here, the tailnet page). */
   marks: { id: string; ready: boolean | null }[];
-  /** "2 of 4 ready", or null when the agents are not known. */
   count: string | null;
   line: string;
 }
 
-/** What the connect card says about the agents on this computer. */
 export function tourEntryModel(agents: InboxAgentsModel | null, unavailable: 'tailnet' | 'failed' | null, live: ReadonlySet<string> = new Set()): TourEntryModel {
   const plan = agents ? connectPlan(agents, [], live) : null;
   if (!plan || plan.found.length === 0) {
@@ -55,7 +46,6 @@ export function TourEntry({ model, onStart, onConnect }: { model: TourEntryModel
       <div className="ib-lbody">
         <div className="ib-empty ib-te-empty" data-tour-entry="">
           <h2 tabIndex={-1}>Two ways to start</h2>
-          {/* The bento: how the Inbox fits with your agents, wide on top, then the two paths. */}
           <section className="ib-te-card ib-te-fit" aria-labelledby="ib-te-fit-h" data-tour-fit="">
             <div className="ib-te-fit-pic">
               <TourFitPicture />
@@ -67,7 +57,6 @@ export function TourEntry({ model, onStart, onConnect }: { model: TourEntryModel
           <div className="ib-te-paths">
             <section className="ib-te-card ib-te-tour" aria-labelledby="ib-te-tour-h">
               <div className="ib-te-pic">
-                {/* Not here: the card keeps its calm ground, never a broken image. */}
                 <img src={tourAssetUrl('vs-a-thumb.webp')} alt="" onError={(event) => (event.currentTarget.style.visibility = 'hidden')} />
                 <span className="ib-te-time">
                   <Icon name="play" size={12} />2 min
